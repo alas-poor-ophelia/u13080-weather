@@ -309,4 +309,4 @@ There are two caveats:
 
 ## Licence
 
-MIT.
+MIT — see [`LICENSE`](LICENSE).
