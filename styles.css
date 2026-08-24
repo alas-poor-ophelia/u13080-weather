@@ -1,0 +1,87 @@
+.wadjet-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  background: var(--background-secondary);
+}
+.wadjet-card-head {
+  display: flex;
+  gap: 0.75em;
+  align-items: center;
+  margin-bottom: 0.5em;
+}
+.wadjet-icon {
+  font-size: 2em;
+  line-height: 1;
+}
+.wadjet-date {
+  font-weight: 600;
+}
+.wadjet-summary {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+.wadjet-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15em 1em;
+  font-size: 0.9em;
+}
+.wadjet-k {
+  color: var(--text-muted);
+}
+.wadjet-note {
+  margin-top: 0.5em;
+  font-size: 0.85em;
+  color: var(--text-accent);
+}
+.wadjet-error {
+  color: var(--text-error);
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+  white-space: pre-line;
+}
+.wadjet-json {
+  width: 100%;
+  font-family: var(--font-monospace);
+}
+.wadjet-grammar {
+  margin: 0.5em 0 1em;
+  font-size: var(--font-ui-small);
+}
+.wadjet-grammar summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.wadjet-grammar h5 {
+  margin: 0.8em 0 0.2em;
+}
+.wadjet-grammar pre {
+  margin: 0.2em 0;
+  padding: 0.4em 0.6em;
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wadjet-grammar p {
+  margin: 0.2em 0;
+  color: var(--text-muted);
+}
+.wadjet-example {
+  margin-top: 0.6em;
+}
+.wadjet-example .setting-item {
+  border: none;
+  padding-top: 0.2em;
+}
+.wadjet-table td,
+.wadjet-table th {
+  padding: 0.15em 0.6em;
+}
+.wadjet-overridden td:first-child::after {
+  content: " 📌";
+}
+.wadjet-prose {
+  font-style: italic;
+}

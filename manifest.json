@@ -1,0 +1,9 @@
+{
+  "id": "wadjet",
+  "name": "U+13080 Weather",
+  "version": "0.0.1",
+  "minAppVersion": "1.13.0",
+  "description": "Deterministic, data-driven weather for TTRPG worldbuilding. Stochastic generation, not simulation.",
+  "author": "alas, poor ophelia",
+  "isDesktopOnly": false
+}

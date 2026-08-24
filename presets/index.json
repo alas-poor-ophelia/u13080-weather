@@ -1,0 +1,236 @@
+[
+  {
+    "id": "fjord-coast",
+    "name": "Fjord Coast",
+    "file": "fjord-coast.json",
+    "koppen": "Cfb",
+    "koppenAssigned": "Cfb",
+    "alternate": false,
+    "contentHash": "sha256:8c1ba2e3ed029dd40a87f1031c9086938dcdf75fba431f387fb7e841d2625460"
+  },
+  {
+    "id": "rain-shadow-vale",
+    "name": "Rain-Shadow Vale",
+    "file": "rain-shadow-vale.json",
+    "koppen": "Dfc",
+    "koppenAssigned": "Dfc",
+    "alternate": false,
+    "contentHash": "sha256:d7c3e3533eaa76a154a078d5c07265adb50d715f5c79371278d503e40fa1a2bd"
+  },
+  {
+    "id": "equatorial-rainforest",
+    "name": "Equatorial Rainforest",
+    "file": "equatorial-rainforest.json",
+    "koppen": "Af",
+    "koppenAssigned": "Af",
+    "alternate": false,
+    "contentHash": "sha256:452dc7b548f73e844e4e29e3464534d85af75fcba9635a2bd877263d0faf7f42"
+  },
+  {
+    "id": "monsoon-coast",
+    "name": "Monsoon Coast",
+    "file": "monsoon-coast.json",
+    "koppen": "Af",
+    "koppenAssigned": "Af",
+    "alternate": false,
+    "contentHash": "sha256:7dbeaddbc2408e2eb26994997162311328759c0e83e62384834e1256594f1ca9"
+  },
+  {
+    "id": "savanna",
+    "name": "Savanna",
+    "file": "savanna.json",
+    "koppen": "Aw",
+    "koppenAssigned": "Aw",
+    "alternate": false,
+    "contentHash": "sha256:e158a6daa07d1056a9864e1d7aad7c47d0ccfb2d1a822c071ab4588cea0602c9"
+  },
+  {
+    "id": "red-desert",
+    "name": "Red Desert",
+    "file": "red-desert.json",
+    "koppen": "BWh",
+    "koppenAssigned": "BWh",
+    "alternate": false,
+    "contentHash": "sha256:e273b670946f76c14d7a08a85272084c33254cf59de80ec0719e9b349b974c79"
+  },
+  {
+    "id": "sertao",
+    "name": "Sertão",
+    "file": "sertao.json",
+    "koppen": "Aw",
+    "koppenAssigned": "BSh",
+    "alternate": false,
+    "contentHash": "sha256:1dbc87edebd6472e1c408e60ff0f519718e8507ac109b3a5cc4fb995f6468b62"
+  },
+  {
+    "id": "kulunda-steppe",
+    "name": "Kulunda Steppe",
+    "file": "kulunda-steppe.json",
+    "koppen": "Dfb",
+    "koppenAssigned": "BSk",
+    "alternate": false,
+    "contentHash": "sha256:c4acd7d63de7064c69abaf1957065144a88adec88e760f608bc741b26fa2af2f"
+  },
+  {
+    "id": "silk-road-basin",
+    "name": "Silk Road Basin",
+    "file": "silk-road-basin.json",
+    "koppen": "BSk",
+    "koppenAssigned": "BSk",
+    "alternate": false,
+    "contentHash": "sha256:223ebe3ce8ae043c30b6ac3b1062dc842e18c282af80dd6a4124fd3bcb341d5a"
+  },
+  {
+    "id": "pamir-plateau",
+    "name": "Pamir Plateau",
+    "file": "pamir-plateau.json",
+    "koppen": "ET",
+    "koppenAssigned": "BWk",
+    "alternate": false,
+    "contentHash": "sha256:43334dc8b1c437208d2b59a2f5e98bf29b1eacd755305188f876230d8fb3999f"
+  },
+  {
+    "id": "olive-coast",
+    "name": "Olive Coast",
+    "file": "olive-coast.json",
+    "koppen": "Csa",
+    "koppenAssigned": "Csa",
+    "alternate": false,
+    "contentHash": "sha256:45015925fa2560dde751dd1ee0ed6f8f7d840135b3f11ea4a3a40037f8f1624b"
+  },
+  {
+    "id": "atlantic-green",
+    "name": "Atlantic Green",
+    "file": "atlantic-green.json",
+    "koppen": "Csb",
+    "koppenAssigned": "Csb",
+    "alternate": false,
+    "contentHash": "sha256:fadac5f85c590d41a02f6c3a2a9a04df93ef8253fe840420ef25b5902b2649c4"
+  },
+  {
+    "id": "bayou",
+    "name": "Bayou",
+    "file": "bayou.json",
+    "koppen": "Cfa",
+    "koppenAssigned": "Cfa",
+    "alternate": false,
+    "contentHash": "sha256:cae356b5d47dca07a3780f87387f35649d88baf57d6bba91f6db6af29afb064a"
+  },
+  {
+    "id": "southern-oceanic",
+    "name": "Southern Oceanic",
+    "file": "southern-oceanic.json",
+    "koppen": "Cfb",
+    "koppenAssigned": "Cfb",
+    "alternate": false,
+    "contentHash": "sha256:900521417678235f686c7bf29f2f1de3949b297901c17604272435a9032a74a3"
+  },
+  {
+    "id": "storm-isle",
+    "name": "Storm Isle",
+    "file": "storm-isle.json",
+    "koppen": "ET",
+    "koppenAssigned": "ET",
+    "alternate": false,
+    "contentHash": "sha256:b18177b72692fcbdaf19430f389657a68d52cc72bf14bcb24ce079eee823e38d"
+  },
+  {
+    "id": "prairie",
+    "name": "Prairie",
+    "file": "prairie.json",
+    "koppen": "Dfa",
+    "koppenAssigned": "Dfa",
+    "alternate": false,
+    "contentHash": "sha256:32b28b268731b70c0b942f96c3a014a5507e2ecd0df3abfaddb7f5bfe450afb4"
+  },
+  {
+    "id": "birch-heartland",
+    "name": "Birch Heartland",
+    "file": "birch-heartland.json",
+    "koppen": "Dfb",
+    "koppenAssigned": "Dfb",
+    "alternate": false,
+    "contentHash": "sha256:fa6ed1e84b50952215e5810f0e76760b2669f63b5212d1457065940a2af4a6ea"
+  },
+  {
+    "id": "taiga",
+    "name": "Taiga",
+    "file": "taiga.json",
+    "koppen": "Dfc",
+    "koppenAssigned": "Dfc",
+    "alternate": false,
+    "contentHash": "sha256:860486304f3634732aefdafb03c5be610da044b708e0de29e8b7af29d1993c76"
+  },
+  {
+    "id": "frozen-heartland",
+    "name": "Frozen Heartland",
+    "file": "frozen-heartland.json",
+    "koppen": "Dfc",
+    "koppenAssigned": "Dfd",
+    "alternate": false,
+    "contentHash": "sha256:076df1cb16ceb1b74cfda88c94fded67b12cd6a3493c808385eb3adfe7bdfd36"
+  },
+  {
+    "id": "monsoon-taiga",
+    "name": "Monsoon Taiga",
+    "file": "monsoon-taiga.json",
+    "koppen": "Dwb",
+    "koppenAssigned": "Dwb",
+    "alternate": false,
+    "contentHash": "sha256:10f4f4e595037934ce20308382106a29424d98c2093081e99fb53f7c5ec7ff7a"
+  },
+  {
+    "id": "tundra",
+    "name": "Tundra",
+    "file": "tundra.json",
+    "koppen": "ET",
+    "koppenAssigned": "ET",
+    "alternate": false,
+    "contentHash": "sha256:ed14e52a65918a23706157c5ccdcbd5280d5d82560e51fd0a1f229dffe0c2f65"
+  },
+  {
+    "id": "hill-station",
+    "name": "Hill Station",
+    "file": "hill-station.json",
+    "koppen": "Cwa",
+    "koppenAssigned": "Cwb",
+    "alternate": false,
+    "contentHash": "sha256:46c0d7e8d2e4049a9f4bf2bbf6b6b2543537040b8d7b4a576e4fd0dcd7f35aea"
+  },
+  {
+    "id": "altiplano",
+    "name": "Altiplano",
+    "file": "altiplano.json",
+    "koppen": "Cwb",
+    "koppenAssigned": "Cwb",
+    "alternate": false,
+    "contentHash": "sha256:828413077e3cbe28b2ef70f744ef03f6bb6dcfb7a5771f684ae851ce87cc913c"
+  },
+  {
+    "id": "alpine-pass",
+    "name": "Alpine Pass",
+    "file": "alpine-pass.json",
+    "koppen": "Dfc",
+    "koppenAssigned": "Dfc",
+    "alternate": false,
+    "contentHash": "sha256:d5e91e67664a034d2c79fb9a81144e40e32a8c3267ee74a536a036e3d86f62c7"
+  },
+  {
+    "id": "wet-tropics-windward",
+    "name": "Wet Tropics (windward)",
+    "file": "wet-tropics-windward.json",
+    "koppen": "Am",
+    "koppenAssigned": "Af",
+    "alternate": true,
+    "contentHash": "sha256:fe7a828f3c17b8e186c0f2a89b202a69ce6659279bd47b03319eb2c7a1c71f94"
+  },
+  {
+    "id": "tableland-leeward",
+    "name": "Tableland (leeward)",
+    "file": "tableland-leeward.json",
+    "koppen": "Aw",
+    "koppenAssigned": "Aw",
+    "alternate": true,
+    "contentHash": "sha256:726ace7c8a42062ef6e0e8a10ab1701d310ac63e0a3a97a113d8f8146f33d613"
+  }
+]

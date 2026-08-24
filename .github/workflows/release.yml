@@ -1,0 +1,96 @@
+name: Release
+
+# Tag the release commit with the bare version (the Obsidian store requires the tag to equal
+# manifest.json's version exactly, no "v" prefix): `bun run bump 0.1.0 && git tag 0.1.0`.
+on:
+  push:
+    tags:
+      - "[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      - name: Read version from manifest
+        id: meta
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches manifest version
+        if: github.event_name == 'push'
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "${{ steps.meta.outputs.version }}" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match manifest.json version '${{ steps.meta.outputs.version }}'."
+            exit 1
+          fi
+
+      - name: Verify versions.json lists this version
+        run: node -e "const v=require('./versions.json'); if(!v['${{ steps.meta.outputs.version }}']) { console.error('versions.json has no entry for ${{ steps.meta.outputs.version }}'); process.exit(1) }"
+
+      # The same gates as CI; a release never ships from a red tree.
+      - run: bun run lint
+      - run: bun run lint:scanner
+      - run: bun test
+      - run: bun run golden:check
+
+      # The store's build verification rebuilds with the plain `build` script and compares
+      # against the released main.js — this must stay the production build from bun.lock.
+      - name: Build production
+        run: bun run build
+
+      - name: Verify artifacts exist
+        run: |
+          for f in main.js manifest.json styles.css; do test -f "$f" || { echo "$f not found"; exit 1; }; done
+          echo "main.js: $(wc -c < main.js) bytes"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Extract changelog section
+        run: |
+          awk -v ver="${{ steps.meta.outputs.version }}" '
+            $0 == "## " ver { flag = 1; next }
+            /^## / { if (flag) exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then echo "No changelog entry found for ${{ steps.meta.outputs.version }}." > release-notes.md; fi
+          printf '\n---\nInstall: copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/wadjet/` and enable *U+13080 Weather*, or add this repository in BRAT.\n' >> release-notes.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "U+13080 Weather ${{ steps.meta.outputs.version }}"
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
+          files: |
+            main.js
+            manifest.json
+            styles.css

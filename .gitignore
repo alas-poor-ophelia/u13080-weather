@@ -1,0 +1,19 @@
+node_modules/
+main.js
+*.map
+*.log
+.DS_Store
+
+# CLIGEN station archive + extracted .par files (34 MB; scripts/fetch-cligen.py restores it).
+# The 26 stations the presets are built from live in test/fixtures/par/.
+data/
+
+# Maintainer-facing notes stay local. docs/VALIDATION.md ships: the README points at it.
+docs/*
+!docs/VALIDATION.md
+ALPHA-TODO.md
+
+# e2e scratch: the fixture vault's plugin install and Obsidian's per-boot workspace state
+test/e2e/vault/.obsidian/plugins/
+test/e2e/vault/.obsidian/workspace*.json
+test-results.json

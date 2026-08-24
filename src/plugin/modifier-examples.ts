@@ -1,0 +1,84 @@
+/**
+ * The modifier grammar as shown inside the zone editor, and two copy-paste
+ * examples (DESIGN-v1.md §3). Pure: no Obsidian imports, unit-tested for
+ * validity against a real preset zone.
+ */
+import { CURVE_PATHS, SCALAR_PATHS } from "../core/curve-ops";
+import type { Modifier } from "../core/types";
+
+export interface ModifierExample {
+  title: string;
+  /** one sentence of what it does and what it needs */
+  blurb: string;
+  modifier: Modifier;
+}
+
+export const MODIFIER_EXAMPLES: readonly ModifierExample[] = [
+  {
+    title: "Stormtide under a full moon",
+    blurb: "Wetter and windier while the moon named Sable is near full. Needs a moon called Sable in Settings → Calendar.",
+    modifier: {
+      id: "sable-stormtide",
+      stage: "daily",
+      when: { moon: { name: "Sable", phase: [0.88, 1.0] } },
+      apply: [
+        { param: "precipitation.pwd", op: "scale", value: 1.5 },
+        { param: "wind.speed", op: "offset", value: 12 },
+      ],
+      tag: "stormtide",
+    },
+  },
+  {
+    title: "Ashfall spells",
+    blurb: "Dry, dark runs of days: about one spell a year in late summer, lasting a couple of weeks.",
+    modifier: {
+      id: "ashfall",
+      stage: "daily",
+      when: { yearPhase: [0.61, 0.72] },
+      spell: { meanStartsPerYear: 0.6, meanDurationDays: 18 },
+      apply: [
+        { param: "precipitation.pwd", op: "set", value: 0 },
+        { param: "precipitation.pww", op: "set", value: 0 },
+        { param: "cloud.dry", op: "set", value: 0.95 },
+      ],
+      tag: "ashfall",
+    },
+  },
+];
+
+/** Plain-text grammar card: one entry per line group. */
+export const MODIFIER_GRAMMAR: ReadonlyArray<{ heading: string; lines: string[] }> = [
+  {
+    heading: "Shape",
+    lines: [
+      '{ "id": "…", "stage": "daily", "when": <predicate>, "spell": { … }, "apply": [ <op>, … ], "tag": "…" }',
+      "stage: daily (default) applies per day when `when` holds; climate edits the curves once, unconditionally.",
+      "tag: added to the day's conditions while the modifier is active — useful on its own for flavour.",
+    ],
+  },
+  {
+    heading: "Predicates (when)",
+    lines: [
+      '{ "moon": { "name": "Sable", "phase": [0.88, 1.0] } }   phase 0 = new, 0.5 = full; ranges wrap',
+      '{ "yearPhase": [0.61, 0.72] }   0 = start of the year; ranges wrap',
+      '{ "dayOfYear": [150, 200] }',
+      '{ "tag": "stormtide" }   { "regime": "<regime id>" }   { "chance": 0.05 }',
+      '{ "all": [ … ] }   { "any": [ … ] }   { "not": <predicate> }',
+    ],
+  },
+  {
+    heading: "Ops (apply)",
+    lines: [
+      '{ "param": "wind.speed", "op": "offset", "value": 12 }',
+      'op: set · offset · scale · clamp (with "min" / "max"). Applied in list order.',
+    ],
+  },
+  {
+    heading: "Params",
+    lines: [`curves: ${CURVE_PATHS.join(", ")}`, `scalars: ${SCALAR_PATHS.join(", ")}`],
+  },
+  {
+    heading: "Which one?",
+    lines: ["A single freak day → chance. A run of days → spell (meanStartsPerYear, meanDurationDays). Always-on background → a regime."],
+  },
+];

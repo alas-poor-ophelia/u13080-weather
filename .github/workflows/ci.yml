@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      # Lint: our config, then the raw replica of the Obsidian store scan.
+      - run: bun run lint
+      - run: bun run lint:scanner
+
+      # Unit tests: goldens, 26-preset statistical validation, Köppen gate, parser fixtures.
+      - run: bun test
+
+      # The history guarantee. `golden:check` MUST fail the build if a single number moved;
+      # it is never optional and never auto-regenerated here.
+      - run: bun run golden:check
+
+      # tsc + esbuild → main.js
+      - run: bun run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: |
+            main.js
+            manifest.json
+            styles.css
+
+  # The e2e walk (test/e2e) drives a real Obsidian and needs a local install plus the
+  # downloaded app asar; it runs locally (`bun run test:e2e`) and is not part of CI.

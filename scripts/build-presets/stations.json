@@ -1,0 +1,40 @@
+{
+  "dataset": {
+    "name": "International Climate Benchmarks and Input Parameters for a Stochastic Weather Generator, CLIGEN (Fullhart, Nearing, Armendariz & Weltz, 2020; Ag Data Commons)",
+    "doi": "10.15482/USDA.ADC/1518706",
+    "license": "U.S. Public Domain (https://www.usa.gov/publicdomain/label/1.0/)"
+  },
+  "files": {
+    "30": { "id": 44528321, "name": "30-year revised 2.zip", "md5": "a4d70fe613a154b2bed37229394c0fb8" },
+    "20": { "id": 44528324, "name": "20-year revised 2.zip", "md5": "7a27328fd3cd8c70a4ea6db9e1429251" },
+    "10": { "id": 44528327, "name": "10-year revised 2.zip", "md5": null }
+  },
+  "stations": [
+    { "slug": "fjord-coast", "name": "Fjord Coast", "ghcnId": "NO000050540", "set": "30", "koppen": "Cfb", "continentality": 0.1, "orographic": "windward", "character": "mild, wet 230 days a year, grey" },
+    { "slug": "rain-shadow-vale", "name": "Rain-Shadow Vale", "ghcnId": "SWE00140002", "set": "30", "koppen": "Dfc", "continentality": 0.6, "orographic": "leeward", "character": "leeward of the Scandes: half the rain, real winters" },
+    { "slug": "equatorial-rainforest", "name": "Equatorial Rainforest", "ghcnId": "SNM00048698", "set": "10", "koppen": "Af", "continentality": 0.1, "orographic": "none", "character": "hot, humid, afternoon deluge, no seasons" },
+    { "slug": "monsoon-coast", "name": "Monsoon Coast", "ghcnId": "MY000048657", "set": "10", "koppen": "Af", "continentality": 0.1, "orographic": "windward", "character": "north-east monsoon floods, steamy otherwise" },
+    { "slug": "savanna", "name": "Savanna", "ghcnId": "ASN00014015", "set": "30", "koppen": "Aw", "continentality": 0.2, "orographic": "none", "character": "build-up, wet, dry: the three-season year" },
+    { "slug": "red-desert", "name": "Red Desert", "ghcnId": "ASN00015623", "set": "30", "koppen": "BWh", "continentality": 0.9, "orographic": "none", "character": "furnace days, cold nights, rain in violent rare bursts" },
+    { "slug": "sertao", "name": "Sertão", "ghcnId": "BR000638014", "set": "30", "koppen": "BSh", "continentality": 0.5, "orographic": "leeward", "character": "hot scrub, short unreliable rains, drought years" },
+    { "slug": "kulunda-steppe", "name": "Kulunda Steppe", "ghcnId": "RSM00029915", "set": "30", "koppen": "BSk", "continentality": 0.95, "orographic": "none", "character": "treeless plain, -40 to +35, wind" },
+    { "slug": "silk-road-basin", "name": "Silk Road Basin", "ghcnId": "CHM00052889", "set": "30", "koppen": "BSk", "continentality": 0.9, "orographic": "leeward", "character": "loess valley, dry cold winter, summer showers" },
+    { "slug": "pamir-plateau", "name": "Pamir Plateau", "ghcnId": "TI000038966", "set": "20", "koppen": "BWk", "continentality": 0.95, "orographic": "leeward", "character": "high cold desert, thin air, brutal wind" },
+    { "slug": "olive-coast", "name": "Olive Coast", "ghcnId": "SPE00119945", "set": "30", "koppen": "Csa", "continentality": 0.3, "orographic": "none", "character": "bone-dry hot summer, mild wet winter" },
+    { "slug": "atlantic-green", "name": "Atlantic Green", "ghcnId": "SPE00119711", "set": "30", "koppen": "Csb", "continentality": 0.1, "orographic": "windward", "character": "cool, damp, drizzle, never extreme" },
+    { "slug": "bayou", "name": "Bayou", "ghcnId": "USC00167425", "set": "20", "koppen": "Cfa", "continentality": 0.3, "orographic": "none", "character": "sultry, thunderstorms, sticky air" },
+    { "slug": "southern-oceanic", "name": "Southern Oceanic", "ghcnId": "ASN00094031", "set": "30", "koppen": "Cfb", "continentality": 0.15, "orographic": "windward", "character": "four seasons in a day, roaring-forties wind" },
+    { "slug": "storm-isle", "name": "Storm Isle", "ghcnId": "JNM00001001", "set": "30", "koppen": "ET", "continentality": 0.05, "orographic": "windward", "character": "fog, gales, 3 °C summers, never quite frozen" },
+    { "slug": "prairie", "name": "Prairie", "ghcnId": "USC00258795", "set": "20", "koppen": "Dfa", "continentality": 0.8, "orographic": "none", "character": "hot humid summer, blizzard winter, tornado spring" },
+    { "slug": "birch-heartland", "name": "Birch Heartland", "ghcnId": "RSM00027625", "set": "30", "koppen": "Dfb", "continentality": 0.8, "orographic": "none", "character": "long snow, brief warm summer, mud seasons" },
+    { "slug": "taiga", "name": "Taiga", "ghcnId": "FI000007501", "set": "20", "koppen": "Dfc", "continentality": 0.6, "orographic": "none", "character": "polar night, -30 snaps, midnight-sun summer" },
+    { "slug": "frozen-heartland", "name": "Frozen Heartland", "ghcnId": "RSM00024643", "set": "30", "koppen": "Dfd", "continentality": 1.0, "orographic": "none", "character": "the coldest inhabited climate: -50 winters, +30 summers" },
+    { "slug": "monsoon-taiga", "name": "Monsoon Taiga", "ghcnId": "RSM00031915", "set": "30", "koppen": "Dwb", "continentality": 0.7, "orographic": "none", "character": "bone-dry frozen winter, humid stormy summer" },
+    { "slug": "tundra", "name": "Tundra", "ghcnId": "NOE00134778", "set": "30", "koppen": "ET", "continentality": 0.2, "orographic": "windward", "character": "permafrost, polar night, never above 10 °C" },
+    { "slug": "hill-station", "name": "Hill Station", "ghcnId": "IN007101600", "set": "30", "koppen": "Cwb", "continentality": 0.5, "orographic": "windward", "character": "Himalayan foothills: monsoon summer, snowy winter" },
+    { "slug": "altiplano", "name": "Altiplano", "ghcnId": "MXN00015164", "set": "30", "koppen": "Cwb", "continentality": 0.6, "orographic": "none", "character": "tropical highland: cool year-round, summer rains, night frost" },
+    { "slug": "alpine-pass", "name": "Alpine Pass", "ghcnId": "USS0006K08S", "set": "30", "koppen": "Dfc", "continentality": 0.9, "orographic": "none", "character": "snow nine months, afternoon thunderstorms the other three" },
+    { "slug": "wet-tropics-windward", "name": "Wet Tropics (windward)", "ghcnId": "ASN00031036", "set": "30", "koppen": "Af", "continentality": 0.1, "orographic": "windward", "character": "rainforest escarpment, Kuranda", "alternate": true },
+    { "slug": "tableland-leeward", "name": "Tableland (leeward)", "ghcnId": "ASN00031124", "set": "30", "koppen": "Aw", "continentality": 0.3, "orographic": "leeward", "character": "dry tableland behind the range, Mareeba", "alternate": true }
+  ]
+}
