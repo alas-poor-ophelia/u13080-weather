@@ -1,0 +1,4 @@
+# One line ending everywhere: the store's build verification rebuilds main.js on Linux and
+# compares it byte-for-byte with the released file, so the working copy must not drift to CRLF.
+* text=auto eol=lf
+*.par text eol=lf
