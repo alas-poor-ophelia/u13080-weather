@@ -30,7 +30,7 @@ export class InternalCalendar implements TimeAdapter {
     const tags: string[] = [];
     const season = this.seasonAt(yearPhase);
     if (season) tags.push(`season:${season}`);
-    return { dayOrdinal, yearPhase, yearLength: y, dayOfYear, moons, tags, source: this.id };
+    return { dayOrdinal, yearPhase, yearLength: y, dayOfYear, year: yearIndex + this.cfg.epochYear, moons, tags, source: this.id };
   }
 
   seasonAt(yearPhase: number): string | null {
@@ -60,7 +60,7 @@ export class InternalCalendar implements TimeAdapter {
 
   format(dayOrdinal: number): string {
     const c = this.toContext(dayOrdinal);
-    const year = Math.floor(dayOrdinal / this.cfg.yearLength) + this.cfg.epochYear;
+    const year = c.year!;
     const season = this.seasonAt(c.yearPhase);
     return `Year ${year}, day ${(c.dayOfYear ?? 0) + 1}${season ? ` (${season})` : ""}`;
   }

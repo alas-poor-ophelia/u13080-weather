@@ -101,6 +101,11 @@ function validatePredicate(p: Predicate, path: string, issues: ValidationIssue[]
   }
 }
 
+/** Daily-stage ops outside a profile (the era timeline). */
+export function validateDailyOps(ops: ModifierOp[], path: string, issues: ValidationIssue[]): void {
+  validateOps(ops, "daily", path, issues);
+}
+
 function validateOps(ops: ModifierOp[], stage: "climate" | "daily", path: string, issues: ValidationIssue[]): void {
   if (!Array.isArray(ops)) {
     issues.push({ level: "error", path, message: "apply must be an array" });
@@ -183,6 +188,7 @@ export function validateProfile(z: ZoneProfile): ValidationIssue[] {
     const where = `modifiers[${i}]`;
     if (!m.id) issues.push({ level: "error", path: `${where}.id`, message: "required" });
     else if (mids.has(m.id)) issues.push({ level: "error", path: `${where}.id`, message: `duplicate modifier id "${m.id}"` });
+    else if (m.id.startsWith("era:")) issues.push({ level: "error", path: `${where}.id`, message: "ids starting with \"era:\" are reserved for the era timeline" });
     mids.add(m.id);
     const stage = m.stage ?? "daily";
     if (stage !== "climate" && stage !== "daily") issues.push({ level: "error", path: `${where}.stage`, message: "must be climate or daily" });
@@ -252,10 +258,11 @@ export function resolveProfile(z: ZoneProfile): ResolvedProfile {
   };
 }
 
-/** Build a running Generator for a zone: resolution + modifier engine wired into dailyModifiers. */
-export function createGenerator(z: ZoneProfile, seed: string, timeOf: (dayOrdinal: number) => DayTime): { generator: Generator; resolved: ResolvedProfile; engine: ModifierEngine } {
+/** Build a running Generator for a zone: resolution + modifier engine wired into dailyModifiers. `worldModifiers` are appended (not hashed into the profile — the caller keys on them). */
+export function createGenerator(z: ZoneProfile, seed: string, timeOf: (dayOrdinal: number) => DayTime, worldModifiers: readonly Modifier[] = []): { generator: Generator; resolved: ResolvedProfile; engine: ModifierEngine } {
   const resolved = resolveProfile(z);
-  const engine = new ModifierEngine({ seed, zoneId: z.id, modifiers: resolved.dailyModifiers, timeOf });
+  // world-level modifiers (the era timeline) run after the zone's own, so a zone can be overridden by its era
+  const engine = new ModifierEngine({ seed, zoneId: z.id, modifiers: [...resolved.dailyModifiers, ...worldModifiers], timeOf });
   const cfg: GeneratorConfig = {
     seed,
     zoneId: z.id,

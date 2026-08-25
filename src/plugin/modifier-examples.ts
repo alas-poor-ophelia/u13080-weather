@@ -1,5 +1,5 @@
 /**
- * The modifier grammar as shown inside the zone editor, and two copy-paste
+ * The modifier grammar as shown inside the zone editor, and the copy-paste
  * examples (DESIGN-v1.md §3). Pure: no Obsidian imports, unit-tested for
  * validity against a real preset zone.
  */
@@ -44,6 +44,46 @@ export const MODIFIER_EXAMPLES: readonly ModifierExample[] = [
       tag: "ashfall",
     },
   },
+  {
+    title: "Dark-moon calm",
+    blurb: "Clearer, stiller and drier around the new moon. Needs a moon called Sable in Settings → Calendar.",
+    modifier: {
+      id: "dark-calm",
+      stage: "daily",
+      when: { moon: { name: "Sable", phase: [0.94, 0.06] } },
+      apply: [
+        { param: "wind.speed", op: "scale", value: 0.5 },
+        { param: "cloud.dry", op: "scale", value: 0.5 },
+        { param: "precipitation.pwd", op: "scale", value: 0.6 },
+      ],
+      tag: "dark-calm",
+    },
+  },
+  {
+    title: "The valley where it never rains",
+    blurb: "A climate-stage curse: no rain, ever, and dry air. Rewrites the zone's curves once rather than acting per day.",
+    modifier: {
+      id: "never-rains",
+      stage: "climate",
+      apply: [
+        { param: "precipitation.pwd", op: "set", value: 0 },
+        { param: "precipitation.pww", op: "set", value: 0 },
+        { param: "humidity.dry", op: "clamp", max: 0.3 },
+      ],
+      tag: "cursed-dry",
+    },
+  },
+  {
+    title: "Sky-fire (flavour only)",
+    blurb: "About one day in fifty, outside wet spells, the card says sky-fire and nothing else changes. The shape for omens and auroras.",
+    modifier: {
+      id: "sky-fire",
+      stage: "daily",
+      when: { all: [{ chance: 0.02 }, { not: { regime: "wet-spell" } }] },
+      apply: [],
+      tag: "sky-fire",
+    },
+  },
 ];
 
 /** Plain-text grammar card: one entry per line group. */
@@ -63,7 +103,7 @@ export const MODIFIER_GRAMMAR: ReadonlyArray<{ heading: string; lines: string[] 
       '{ "moon": { "name": "Sable", "phase": [0.88, 1.0] } }   // phase 0 = new, 0.5 = full; ranges wrap',
       '{ "yearPhase": [0.61, 0.72] }   // 0 = start of the year; ranges wrap',
       '{ "dayOfYear": [150, 200] }   // inclusive',
-      '{ "tag": "season:Winter" }   // any calendar tag, or a tag set by another modifier',
+      '{ "tag": "season:Winter" }   // a calendar tag (season:…, era:…) or one set by another modifier',
       '{ "regime": "<regime id>" }   // the background pattern in force today',
       '{ "chance": 0.05 }   // seeded per day: a 5% freak day',
       '{ "all": [ … ] }   { "any": [ … ] }   { "not": <predicate> }   // combine',
@@ -82,6 +122,6 @@ export const MODIFIER_GRAMMAR: ReadonlyArray<{ heading: string; lines: string[] 
   },
   {
     heading: "Which one?",
-    lines: ["A single freak day → chance. A run of days → spell (meanStartsPerYear, meanDurationDays). Always-on background → a regime."],
+    lines: ["A single freak day → chance. A run of days → spell (meanStartsPerYear, meanDurationDays). Always-on background → a regime. A whole age of the world → an era (Settings → Calendar). More recipes: docs/EXAMPLES.md."],
   },
 ];

@@ -91,8 +91,10 @@ export class ModifierEngine {
     const ops: ModifierOp[] = [];
     const tags: string[] = [];
     const active: string[] = [];
-    const time = this.cfg.timeOf(dayOrdinal);
+    const base = this.cfg.timeOf(dayOrdinal);
     for (const m of this.daily) {
+      // tags set by earlier modifiers today are visible to later ones (spells replay past days and see only calendar tags)
+      const time = tags.length ? { ...base, tags: [...(base.tags ?? []), ...tags] } : base;
       const on = m.spell ? this.spellActive(m, dayOrdinal, regime) : this.matches(m, dayOrdinal, time, regime);
       if (!on) continue;
       ops.push(...m.apply);
@@ -115,7 +117,8 @@ export class ModifierEngine {
    * Window size for converting meanStartsPerYear into a per-day start
    * probability: the number of days in a reference year (days 0..364) on
    * which the static part of `when` holds. Regime predicates are treated as
-   * true for this estimate (the regime is unknown outside generation).
+   * true for this estimate (the regime is unknown outside generation), and
+   * tags from other modifiers are not visible to it.
    */
   private estimateWindowDays(m: Modifier): number {
     if (!m.when) return 365;
@@ -124,7 +127,9 @@ export class ModifierEngine {
     for (let d = 0; d < 365; d++) {
       if (evaluatePredicate(staticWhen, this.ctx(m, d, this.cfg.timeOf(d), ""))) n++;
     }
-    return Math.max(1, n);
+    // no day of the reference year qualifies (e.g. gated on an era that starts later): fall back to
+    // a whole year rather than collapsing to a per-day start probability of meanStartsPerYear
+    return n === 0 ? 365 : n;
   }
 
   private startsAt(m: Modifier, d: number, regime: string): boolean {

@@ -120,9 +120,25 @@ export interface Modifier {
 }
 
 /** What a time adapter provides per day; the generator and predicates read only this. */
+/**
+ * A span of the world's history (era timeline, world-level). Years are the
+ * calendar's own year numbers; `from` and `to` are both inclusive, `to`
+ * omitted means "until the end of time". Every day inside the span carries the
+ * tag `era:<name>`; `apply` (daily-stage ops) is applied to every zone on
+ * those days.
+ */
+export interface Era {
+  name: string;
+  from: number;
+  to?: number;
+  apply?: ModifierOp[];
+}
+
 export interface DayTime {
   yearPhase: number;
   dayOfYear?: number;
+  /** calendar year number, used by the era timeline; adapters that omit it get year = floor(dayOrdinal / yearLength) + 1 */
+  year?: number;
   moons?: Array<{ name: string; phase: number }>;
   tags?: string[];
 }

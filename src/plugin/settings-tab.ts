@@ -4,12 +4,13 @@
  * through modals that call `update()` on the tab when they save.
  */
 import { Modal, Notice, PluginSettingTab, Setting, type App, type DropdownComponent, type SettingDefinitionItem, type SettingGroupItem, type TextComponent } from "obsidian";
+import { validateEras } from "../core/eras";
 import { koppenOfClimate } from "../core/koppen";
 import { validateProfile } from "../core/profile";
 import type { Override, OverridePatch } from "../core/report";
 import { withMinus } from "../core/report";
 import type { PrecipType } from "../core/generator";
-import type { Geography, Orographic, ZoneProfile } from "../core/types";
+import type { Era, Geography, Orographic, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import type WadjetPlugin from "./main";
@@ -107,6 +108,11 @@ export class WadjetSettingTab extends PluginSettingTab {
             desc: "One per line: name, start (0–1 through the year). Each becomes a season tag that modifiers can match.",
             control: { type: "textarea", key: "seasons", rows: 3, placeholder: "Spring, 0.2", validate: (t) => badLine(t, 1) },
           },
+          {
+            name: "Eras",
+            desc: "The world's long history as JSON: a list of { name, from, to, apply }. Years are inclusive; leave out \"to\" for open-ended. Every day in an era carries the tag era:<name>, and \"apply\" (optional, the same ops as a modifier) bends every zone for the era's span. Comments are fine. Changing eras changes past weather.",
+            control: { type: "textarea", key: "eras", rows: 6, placeholder: ERAS_PLACEHOLDER, validate: badEras },
+          },
         ],
       },
       {
@@ -191,6 +197,8 @@ export class WadjetSettingTab extends PluginSettingTab {
         return s.calendar.moons.map((m) => `${m.name}, ${m.cycleDays}, ${m.phaseAtEpoch}`).join("\n");
       case "seasons":
         return s.calendar.seasons.map((x) => `${x.name}, ${x.from}`).join("\n");
+      case "eras":
+        return s.eras.length ? JSON.stringify(s.eras, null, 2) : "";
       default:
         return undefined;
     }
@@ -229,10 +237,31 @@ export class WadjetSettingTab extends PluginSettingTab {
           .filter((p) => p.length >= 2 && p[0])
           .map((p) => ({ name: p[0]!, from: Math.min(0.999, Math.max(0, Number(p[1]) || 0)) }));
         return this.plugin.saveAndRebuild();
+      case "eras": {
+        const text = String(value).trim();
+        if (badEras(text)) return; // the row shows the error; the stored timeline stands
+        s.eras = text ? parseJsonLenient<Era[]>(text) : [];
+        return this.plugin.saveAndRebuild();
+      }
       default:
         return;
     }
   }
+}
+
+const ERAS_PLACEHOLDER = '[ { "name": "Ice Age", "from": 1200, "to": 1900, "apply": [ { "param": "temperature.mean", "op": "offset", "value": -6 } ] } ]';
+
+/** Validation for the Eras JSON textarea: the first error, or nothing. Empty is fine. */
+function badEras(text: string): string | undefined {
+  if (!text.trim()) return undefined;
+  let eras: unknown;
+  try {
+    eras = parseJsonLenient(text);
+  } catch (e) {
+    return `Not valid JSON: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  const err = validateEras(eras).find((i) => i.level === "error");
+  return err ? `${err.path}: ${err.message}` : undefined;
 }
 
 function lines(text: string): string[][] {

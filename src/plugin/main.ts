@@ -77,7 +77,7 @@ export default class WadjetPlugin extends Plugin {
 
   private worldState() {
     const s = this.settings;
-    return { seed: s.worldSeed, zones: s.zones, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}) };
+    return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}) };
   }
 
   async saveSettings(): Promise<void> {

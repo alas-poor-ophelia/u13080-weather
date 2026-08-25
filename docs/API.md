@@ -244,6 +244,7 @@ interface TimeContext {
   yearLength: number;
   hour?: number;
   dayOfYear?: number;
+  year?: number;
   moons?: Array<{ name: string; phase: number }>;
   tags?: string[];
   source: string;
@@ -257,6 +258,7 @@ interface TimeContext {
 | `yearLength` | `number` | Days in the *current* year, as reported by the active adapter (adapters may vary this year to year). |
 | `hour` | `number`, `[0, 24)`, optional | Set only when requesting an hourly report; enables diurnal interpolation. |
 | `dayOfYear` | `number`, optional | Integer day-of-year, used by the `dayOfYear` predicate (inclusive range test, §7). The internal calendar always supplies it (0-based); a third-party adapter may omit it, in which case `dayOfYear` predicates always evaluate false. |
+| `year` | `number`, optional | The calendar's year number, used by the era timeline. The internal calendar always supplies it (`epochYear` at `dayOrdinal 0`). If an adapter omits it, the era timeline counts years from 1 at day 0 using `yearLength`. |
 | `moons` | `Array<{ name: string; phase: number }>`, optional | `phase` is `[0, 1)`, `0` = new, `0.5` = full. Read by the `moon` predicate. |
 | `tags` | `string[]`, optional | Calendar-provided labels (seasons, festivals, eras — whatever the adapter wants). Read by the `tag` predicate. **Not** copied into `WeatherReport.conditions**; conditions come only from active modifier tags and the fog heuristic (§4). |
 | `source` | `string` | The adapter's `id`. |
@@ -389,7 +391,7 @@ interface Provenance {
 | `generatorVersion` | `string` | The `GENERATOR_VERSION` of the running plugin code. Settings also hold the version the world was created with (it drives the upgrade notice and the *Upgrade* button); `provenance` reports the running version. |
 | `rngVersion` | `string` | The frozen RNG/hash substrate's version. |
 | `profileHash` | `string` | `wh1:<8 hex><8 hex>` — two 32-bit hashes over the canonical JSON of `{ climate, regimes, modifiers }` for the zone (i.e. Tier C plus regimes/modifiers; the copied preset and geography are already baked into `climate` and don't appear separately). Changes whenever the zone's profile changes. |
-| `calendarHash` | `string` | The active time adapter's `configHash()` (for the internal calendar: `ical:<8 hex>` over year length, epoch year, moons, seasons). |
+| `calendarHash` | `string` | The active time adapter's `configHash()` (for the internal calendar: `ical:<8 hex>` over year length, epoch year, moons, seasons), followed by `+eras:<8 hex>` over the era timeline when one is configured. |
 
 Consumers wanting to cache a report should key on the full tuple `(zoneId, dayOrdinal, hour,
 provenance.*)`, not just `(zoneId, dayOrdinal)` — any provenance field changing means the weather
@@ -650,7 +652,7 @@ multiple keys, and rejects any key not in this list.
 | `moon` | `{ name: string; phase: [lo, hi] }` | True iff a moon named `name` exists in the day's `TimeContext.moons` and its `phase` (`[0,1)`, `0` = new, `0.5` = full) falls in `[lo, hi)` **on the unit circle** — the range **wraps** if `lo > hi` (e.g. `[0.9, 0.1]` covers new-moon-adjacent phases on both sides of `0`). If `lo === hi` the predicate is always false. If no moon of that name exists in the context, false. |
 | `yearPhase` | `[lo, hi]`, values in `[0, 1]` | Same wrap-around-circle semantics as `moon.phase`, tested against `TimeContext.yearPhase`. |
 | `dayOfYear` | `[lo, hi]`, integers in `[0, 100000]` | **Inclusive** on both ends (`dayOfYear >= lo && dayOfYear <= hi`), **does not wrap**. False if the time context has no `dayOfYear`. |
-| `tag` | `string` | True iff the string is present in `TimeContext.tags` (calendar-provided — seasons, festivals, etc., not `WeatherReport.conditions`). |
+| `tag` | `string` | True iff the string is present in the day's tags: `TimeContext.tags` (calendar-provided — seasons, eras, festivals) plus tags set by modifiers **earlier in the list** the same day. Spells replay earlier days and see only calendar tags. Not `WeatherReport.conditions`. |
 | `regime` | `string` (a regime id) | True iff that regime is the one active on the day. Only known at generation time — see the `stripRegime` note below re: `spell` window estimation. |
 | `chance` | `number`, `[0, 1]` | A per-day Bernoulli draw seeded by `hash(seed, zoneId, dayOrdinal, "mod:<modifierId>:chance")` — independent per day, no memory. Use this for a single freak day; use `spell` for a run of days. |
 
@@ -746,6 +748,35 @@ present.
 | `modifiers[i].spell.meanDurationDays` | error | `< 1`. |
 | `modifiers[i].spell.meanDurationDays` | warning | `> 50` — "very long spells are looked back over at most 400 days". |
 | `modifiers[i].apply` | error | Not an array; any op not an object; op's `param` not a valid path for the modifier's stage; op's `op` not one of `set`/`offset`/`scale`/`clamp`; `clamp` with neither `min` nor `max`; non-`clamp` op with a non-finite `value`. |
+
+---
+
+## 7b. The era timeline
+
+World-level, set in *Settings → Calendar → Eras*; applies under any time adapter. Stored in
+`data.json` as `eras: Era[]`.
+
+```ts
+interface Era {
+  name: string;         // unique; the day tag is "era:" + name
+  from: number;         // first year, inclusive
+  to?: number;          // last year, inclusive; omitted = open-ended
+  apply?: ModifierOp[]; // daily-stage ops (CurvePaths only), applied to every zone
+}
+```
+
+| Rule | Detail |
+|---|---|
+| Year of a day | `TimeContext.year`, else `floor(dayOrdinal / yearLength) + 1`. |
+| Tags | Every era covering the year adds `era:<name>` to the day's `TimeContext.tags` (after the adapter's own tags, in list order). Readable by the `tag` predicate; not copied into `conditions`. |
+| Ops | An era with a non-empty `apply` becomes a synthetic daily modifier `{ id: "era:<name>", when: { tag: "era:<name>" }, apply }` appended **after** the zone's own modifiers, so ops run zone → era. Same op semantics and validation as a daily-stage modifier (no scalar paths). |
+| Overlap | Overlapping eras all apply, in list order. |
+| Provenance | `calendarHash` gains `+eras:<hash>`; the per-zone generator cache is keyed on it. Editing eras changes past weather. |
+| Reserved | Zone modifier ids may not start with `era:` (validation error). |
+| Validation | `name` required and unique; `from`/`to` whole years, `to ≥ from`; `apply` validated as daily ops; unknown fields warn. The settings row refuses to save while there is an error. |
+| Spells | A spell's start window is estimated over days 0–364 of the calendar. Gated on an era that starts later, no day qualifies and the window falls back to a whole year, so `meanStartsPerYear` is read as "per year inside the era". |
+
+Eras are steps on the absolute timeline — not cycles. See `NON-GOALS.md`.
 
 ---
 

@@ -6,7 +6,7 @@
  */
 import type { Override } from "../core/report";
 import type { DescriptorBands } from "../core/report";
-import type { ZoneProfile } from "../core/types";
+import type { Era, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 
 export interface MoonConfig {
@@ -35,6 +35,8 @@ export interface WadjetSettings {
   /** the internal calendar's current day */
   currentDayOrdinal: number;
   calendar: InternalCalendarConfig;
+  /** the era timeline (world-level; applies under any calendar) */
+  eras: Era[];
   zones: ZoneProfile[];
   overrides: Override[];
   bands?: DescriptorBands;
@@ -53,6 +55,7 @@ export const DEFAULT_SETTINGS: WadjetSettings = {
     moons: [{ name: "Moon", cycleDays: 29.53, phaseAtEpoch: 0 }],
     seasons: [],
   },
+  eras: [],
   zones: [],
   overrides: [],
   units: "metric",
@@ -72,6 +75,7 @@ export function migrateSettings(raw: unknown): WadjetSettings {
     ...DEFAULT_SETTINGS,
     ...r,
     calendar: { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) },
+    eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],
   };

@@ -8,7 +8,8 @@
 import type { Generator } from "../core/generator";
 import { createGenerator, profileHash, validateProfile, type ValidationIssue } from "../core/profile";
 import { buildReport, describe, overrideKey, type DescriptorBands, type Override, type OverridePatch, type WeatherReport } from "../core/report";
-import type { DayTime, ZoneProfile } from "../core/types";
+import { eraModifiers, erasHash, withEraTags } from "../core/eras";
+import type { DayTime, Era, ZoneProfile } from "../core/types";
 import type { TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
 
 export type ZoneLocator = { kind: "note"; path: string } | { kind: "hex"; mapId: string; q: number; r: number } | { kind: "point"; mapId: string; x: number; y: number } | { kind: "custom"; namespace: string; data: unknown };
@@ -24,6 +25,8 @@ export type WorldEvent = "ready" | "profiles-changed" | "time-changed";
 export interface WorldState {
   seed: string;
   zones: ZoneProfile[];
+  /** world-level era timeline; optional so pure callers can omit it */
+  eras?: Era[];
   overrides: Override[];
   bands?: DescriptorBands;
 }
@@ -69,16 +72,24 @@ export class World {
     return a;
   }
 
+  /** The adapter's config hash plus the era timeline: everything calendar-side that changes past weather. */
+  calendarHash(): string {
+    const h = this.adapterFor().configHash();
+    const eras = this.state.eras ?? [];
+    return eras.length ? `${h}+${erasHash(eras)}` : h;
+  }
+
   private generator(zoneId: string): { generator: Generator; hash: string } {
     const zone = this.getZone(zoneId);
     if (!zone) throw new RangeError(`Unknown zone "${zoneId}".`);
     const adapter = this.adapterFor();
+    const eras = this.state.eras ?? [];
     const hash = profileHash(zone);
-    const key = `${this.state.seed}|${hash}|${adapter.configHash()}`;
+    const key = `${this.state.seed}|${hash}|${this.calendarHash()}`;
     const cached = this.generators.get(zoneId);
     if (cached && cached.key === key) return cached;
-    const timeOf = (d: number): DayTime => adapter.toContext(d);
-    const { generator } = createGenerator(zone, this.state.seed, timeOf);
+    const timeOf = (d: number): DayTime => withEraTags(eras, adapter.toContext(d));
+    const { generator } = createGenerator(zone, this.state.seed, timeOf, eraModifiers(eras));
     const entry = { key, generator, hash };
     this.generators.set(zoneId, entry);
     return entry;
@@ -88,12 +99,12 @@ export class World {
   getReport(zoneId: string, time: TimeContext | { dayOrdinal: number; hour?: number }): WeatherReport {
     const { generator, hash } = this.generator(zoneId);
     const rec = generator.day(time.dayOrdinal);
-    return buildReport(rec, zoneId, { seed: this.state.seed, provenance: { profileHash: hash, calendarHash: this.adapterFor().configHash() }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }, time.hour);
+    return buildReport(rec, zoneId, { seed: this.state.seed, provenance: { profileHash: hash, calendarHash: this.calendarHash() }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }, time.hour);
   }
 
   getRange(zoneId: string, fromDay: number, toDay: number): WeatherReport[] {
     const { generator, hash } = this.generator(zoneId);
-    const cal = this.adapterFor().configHash();
+    const cal = this.calendarHash();
     return generator.range(fromDay, toDay).map((rec) => buildReport(rec, zoneId, { seed: this.state.seed, provenance: { profileHash: hash, calendarHash: cal }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }));
   }
 

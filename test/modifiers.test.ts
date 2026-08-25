@@ -119,3 +119,29 @@ describe("ModifierEngine", () => {
     expect(ra).toEqual(rb);
   });
 });
+
+describe("engine: tags between modifiers and spell windows", () => {
+  const timeOf = (d: number): DayTime => gregorianTime(d);
+
+  test("a tag set by an earlier modifier is visible to a later one the same day, not to an earlier one", () => {
+    const omen: Modifier = { id: "omen", when: { chance: 1 }, apply: [], tag: "omen" };
+    const react: Modifier = { id: "react", when: { tag: "omen" }, apply: [], tag: "storm" };
+    const forward = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [omen, react], timeOf }).forDay(10, "normal");
+    expect(forward.tags).toEqual(["omen", "storm"]);
+    const backward = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [react, omen], timeOf }).forDay(10, "normal");
+    expect(backward.tags).toEqual(["omen"]);
+  });
+
+  test("a spell gated on a tag no reference-year day carries uses a whole-year window, not 'always on'", () => {
+    // the tag appears only from day 3000 on — like an era that starts after year 1
+    const late = (d: number): DayTime => ({ ...gregorianTime(d), tags: d >= 3000 ? ["era:Late"] : [] });
+    const m: Modifier = { id: "s", when: { tag: "era:Late" }, spell: { meanStartsPerYear: 3, meanDurationDays: 10 }, apply: [], tag: "on" };
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf: late });
+    let on = 0;
+    for (let d = 3000; d < 3000 + 365 * 4; d++) if (e.forDay(d, "normal").tags.length) on++;
+    const share = on / (365 * 4);
+    expect(share).toBeGreaterThan(0.02);
+    expect(share).toBeLessThan(0.25); // ~8% expected; before the fix this was 100%
+    for (let d = 0; d < 3000; d += 50) expect(e.forDay(d, "normal").tags).toEqual([]);
+  });
+});

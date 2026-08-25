@@ -218,6 +218,34 @@ weather arrives in stretches the way real weather does.
 
 The complete grammar, with every parameter path and the exact rules for each predicate, is in [docs/API.md](docs/API.md#7-modifier-grammar).
 
+### Eras
+
+Seasons repeat; eras don't. *Settings → Calendar → Eras* is the world's long history as a list of
+year spans (JSON, comments allowed):
+
+```json
+[
+  { "name": "Ice Age", "from": 1200, "to": 1900,
+    "apply": [
+      { "param": "temperature.mean", "op": "offset", "value": -8 },
+      { "param": "precipitation.scale", "op": "scale", "value": 0.7 }
+    ] },
+  { "name": "Thaw", "from": 1901, "to": 1950 },
+  { "name": "Long Summer", "from": 1951 }
+]
+```
+
+- Years are the calendar's own year numbers, both ends inclusive; leave out `to` for "until the
+  end of time". Eras chain by listing them; overlapping eras all apply.
+- Every day inside an era carries the tag `era:<name>`, so a zone's modifiers can react to it
+  (`{ "tag": "era:Thaw" }`) — a valley that floods in the Thaw while the mountains merely drip.
+- `apply` (optional) bends **every zone** for the era's span with the same ops a modifier uses.
+  Era ops run after the zone's own modifiers.
+- Eras are steps, not cycles: you write the arc of history and the generator follows it. Nothing
+  drifts on its own. Changing eras changes past weather (they are part of the calendar hash).
+
+More recipes — seasons, moons, eras, curses — in [docs/EXAMPLES.md](docs/EXAMPLES.md).
+
 ## On Determinism
 
 A day's weather is a pure function of five things: the world seed, the generator version, the
@@ -227,7 +255,7 @@ zone profile, the calendar and the day number, and nothing else. Nothing runs in
 - **The generator is pinned per world.** When a plugin update changes the numbers, your world will keep using the version it was created with until you press *Upgrade* in settings. 
 - **Pinned days survive everything.**
 
-Changing the seed, the year length, a zone's climate or the calendar's moons does change past weather; I have tried to make it clear where this is the case.
+Changing the seed, the year length, a zone's climate, the calendar's moons or the eras does change past weather; I have tried to make it clear where this is the case.
 
 > **Q**: So will the generator just constantly be getting breaking changes? Can I not take advantage of new features without risking my weather changing?
 > **A**: During the alpha, honestly.... yeah, probably. I'll do my best, but there may be some flex out of necessity. After the alpha, I expect it to be very rare. Think of this as a safety lever you hopefully don't need

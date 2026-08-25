@@ -2,6 +2,21 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
+## Unreleased
+
+- Era timeline (*Settings → Calendar → Eras*): world-level spans of years that tag every day
+  (`era:<name>`) and can bend every zone with modifier ops. Eras join the calendar hash, so
+  they show in provenance. `TimeContext` gains an optional `year`.
+- The zone editor accepts `//` comments and trailing commas, so the annotated examples on its
+  grammar card paste as they are.
+- `docs/API.md`: full reference for the API, report, adapter and resolver contracts, zone schema
+  and modifier grammar. `docs/EXAMPLES.md`: a recipe book of modifiers and eras.
+- Fixed: a tag set by one modifier is now visible to later modifiers the same day, as the README
+  always said (spells still see only calendar tags when they replay earlier days). A spell whose
+  `when` matches no day of the reference year (for example one gated on a later era) no longer
+  fires every day.
+- Fixed: `api.ready` is set before the API-level `ready` event fires.
+
 ## 0.1.0
 
 First alpha.

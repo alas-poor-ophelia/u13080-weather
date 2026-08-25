@@ -32,7 +32,8 @@ describe("lenient JSON for the zone editor", () => {
   });
 
   test("every concrete JSON line on the grammar card parses as pasted (with its // gloss)", () => {
-    const lines = MODIFIER_GRAMMAR.flatMap((g) => g.lines).filter((l) => l.startsWith("{") && !l.includes("…") && !l.includes("<"));
+    // placeholders (… and <…>) are allowed in the JSON part of illustrative lines, not in the gloss
+    const lines = MODIFIER_GRAMMAR.flatMap((g) => g.lines).filter((l) => l.startsWith("{") && !/[…<]/.test(stripJsonComments(l)));
     expect(lines.length).toBeGreaterThanOrEqual(6);
     for (const l of lines) expect(() => parseJsonLenient(l)).not.toThrow();
   });
