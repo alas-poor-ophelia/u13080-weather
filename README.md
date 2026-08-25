@@ -216,7 +216,7 @@ Under the modifiers sits a **regime** layer you normally never touch: a few back
 patterns (settled, unsettled, stormy…) that persist for days at a time and nudge the odds, so
 weather arrives in stretches the way real weather does.
 
-There's more detail on all of this in the API section. 
+The complete grammar, with every parameter path and the exact rules for each predicate, is in [docs/API.md](docs/API.md#7-modifier-grammar).
 
 ## On Determinism
 
@@ -272,7 +272,7 @@ A **time adapter** gives the plugin a calendar (`now()`, `toContext(dayOrdinal)`
 `parse`/`format`); a **zone resolver** answers "which zone is this note / hex / point in" for
 locator kinds it declares. Both are unregistered by calling the function they return.
 
-I'll provide better docs for this as it becomes more defined.
+The full field-by-field reference — every API member, the `WeatherReport` schema, the adapter and resolver contracts, the zone profile schema and the complete modifier grammar — is in [docs/API.md](docs/API.md).
 
 > **Q**: Can I use this with Meta Bind/JS Engine/Templater/DataviewJS/etc, rather than writing or installing a whole other plugin?
 > **A**: Sure, so long as whatever solution you're using has the ability to import U+13080, it's all just JS.
@@ -304,7 +304,7 @@ There are two caveats:
 - No spatial correlation between zones; no accumulated ground state (snow depth, mud); no
   frontmatter writer; no sidebar.
 - `insert-today` and `pin-today` act on the first zone.
-- `hail` exists in the schema but is never generated.
+- No hail, thunder or fog as distinct precipitation types (fog is a condition derived from humidity and wind).
 - Regime-gated `spell` modifiers use the current regime for their lookback.
 
 ## Licence

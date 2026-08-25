@@ -8,9 +8,10 @@ main.js
 # The 26 stations the presets are built from live in test/fixtures/par/.
 data/
 
-# Maintainer-facing notes stay local. docs/VALIDATION.md ships: the README points at it.
+# Maintainer-facing notes stay local. docs/VALIDATION.md and docs/API.md ship: the README points at them.
 docs/*
 !docs/VALIDATION.md
+!docs/API.md
 ALPHA-TODO.md
 
 # e2e scratch: the fixture vault's plugin install and Obsidian's per-boot workspace state

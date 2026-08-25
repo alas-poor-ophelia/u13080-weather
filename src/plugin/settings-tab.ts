@@ -13,6 +13,7 @@ import type { Geography, Orographic, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import type WadjetPlugin from "./main";
+import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
@@ -536,7 +537,7 @@ class ZoneJsonModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     this.setTitle(this.zone.name);
-    contentEl.createEl("p", { cls: "setting-item-description", text: "The zone's full profile as JSON. Errors block saving; warnings are reported." });
+    contentEl.createEl("p", { cls: "setting-item-description", text: "The zone's full profile as JSON (// comments and trailing commas are fine). Errors block saving; warnings are reported." });
     const ta = contentEl.createEl("textarea", { cls: "wadjet-json" });
     ta.rows = 24;
     ta.value = JSON.stringify(this.zone, null, 2);
@@ -548,7 +549,7 @@ class ZoneJsonModal extends Modal {
         .setCta()
         .onClick(async () => {
           try {
-            const parsed = JSON.parse(ta.value) as ZoneProfile;
+            const parsed = parseJsonLenient<ZoneProfile>(ta.value);
             parsed.id = this.zone.id; // id is immutable (pins key on it)
             const issues = validateProfile(parsed);
             const errs = issues.filter((i) => i.level === "error");
@@ -584,7 +585,7 @@ class ZoneJsonModal extends Modal {
         .addButton((b) =>
           b.setButtonText("Add to this zone").onClick(() => {
             try {
-              const z = JSON.parse(ta.value) as ZoneProfile;
+              const z = parseJsonLenient<ZoneProfile>(ta.value);
               const mods = Array.isArray(z.modifiers) ? z.modifiers : [];
               const taken = new Set(mods.map((m) => m.id));
               const id = uniqueId(ex.modifier.id, taken);

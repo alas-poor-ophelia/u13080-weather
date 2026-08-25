@@ -66,8 +66,8 @@ export default class WadjetPlugin extends Plugin {
     }
 
     await this.saveData(this.settings); // persist a freshly generated seed
-    this.world.emit("ready");
     this.api.ready = true;
+    this.world.emit("ready");
     this.app.workspace.trigger("wadjet:ready");
   }
 

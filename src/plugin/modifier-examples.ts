@@ -53,17 +53,20 @@ export const MODIFIER_GRAMMAR: ReadonlyArray<{ heading: string; lines: string[] 
     lines: [
       '{ "id": "…", "stage": "daily", "when": <predicate>, "spell": { … }, "apply": [ <op>, … ], "tag": "…" }',
       "stage: daily (default) applies per day when `when` holds; climate edits the curves once, unconditionally.",
+      "Lines below are annotated with // comments; the editor accepts them, so paste freely.",
       "tag: added to the day's conditions while the modifier is active — useful on its own for flavour.",
     ],
   },
   {
     heading: "Predicates (when)",
     lines: [
-      '{ "moon": { "name": "Sable", "phase": [0.88, 1.0] } }   phase 0 = new, 0.5 = full; ranges wrap',
-      '{ "yearPhase": [0.61, 0.72] }   0 = start of the year; ranges wrap',
-      '{ "dayOfYear": [150, 200] }',
-      '{ "tag": "stormtide" }   { "regime": "<regime id>" }   { "chance": 0.05 }',
-      '{ "all": [ … ] }   { "any": [ … ] }   { "not": <predicate> }',
+      '{ "moon": { "name": "Sable", "phase": [0.88, 1.0] } }   // phase 0 = new, 0.5 = full; ranges wrap',
+      '{ "yearPhase": [0.61, 0.72] }   // 0 = start of the year; ranges wrap',
+      '{ "dayOfYear": [150, 200] }   // inclusive',
+      '{ "tag": "season:Winter" }   // any calendar tag, or a tag set by another modifier',
+      '{ "regime": "<regime id>" }   // the background pattern in force today',
+      '{ "chance": 0.05 }   // seeded per day: a 5% freak day',
+      '{ "all": [ … ] }   { "any": [ … ] }   { "not": <predicate> }   // combine',
     ],
   },
   {
