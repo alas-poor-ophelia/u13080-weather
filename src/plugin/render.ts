@@ -3,20 +3,26 @@
  * (createEl / createDiv / empty), so this file is not unit-tested.
  */
 import { compassPoint, describe, withMinus, type WeatherReport } from "../core/report";
+import { UNIT_LABELS, cToF, fieldText, kmToMi, kphToMph, mmToIn, type Units } from "../core/units";
 
-export type Units = "metric" | "imperial";
+export type { Units } from "../core/units";
 
 export function fmtTemp(c: number, u: Units): string {
-  return u === "imperial" ? `${withMinus(Math.round((c * 9) / 5 + 32))} °F` : `${withMinus(c.toFixed(1))} °C`;
+  return u === "imperial" ? `${withMinus(Math.round(cToF(c)))} ${UNIT_LABELS.imperial.temperature}` : `${withMinus(c.toFixed(1))} ${UNIT_LABELS.metric.temperature}`;
 }
 export function fmtMm(mm: number, u: Units): string {
-  return u === "imperial" ? `${(mm / 25.4).toFixed(2)} in` : `${mm.toFixed(1)} mm`;
+  return u === "imperial" ? `${mmToIn(mm).toFixed(2)} in` : `${mm.toFixed(1)} mm`;
 }
 export function fmtSpeed(kph: number, u: Units): string {
-  return u === "imperial" ? `${Math.round(kph / 1.609)} mph` : `${kph} km/h`;
+  return u === "imperial" ? `${Math.round(kphToMph(kph))} mph` : `${kph} km/h`;
 }
 export function fmtKm(km: number, u: Units): string {
-  return u === "imperial" ? `${(km / 1.609).toFixed(1)} mi` : `${km.toFixed(1)} km`;
+  return u === "imperial" ? `${kmToMi(km).toFixed(1)} mi` : `${km.toFixed(1)} km`;
+}
+
+/** `style: value` — one field, bare, for notes that want a number. */
+export function renderValue(el: HTMLElement, value: unknown): void {
+  el.createSpan({ cls: "wadjet-value", text: fieldText(value) });
 }
 
 const ICON: Record<string, string> = { none: "☀", drizzle: "🌦", rain: "🌧", sleet: "🌨", snow: "❄" };

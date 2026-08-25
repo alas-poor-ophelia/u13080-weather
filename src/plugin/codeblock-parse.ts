@@ -4,19 +4,25 @@
  *   zone: greywold-highlands      (required unless a default zone exists)
  *   date: today | +3 | -1 | <dayOrdinal> | <adapter date string>
  *   hour: 14                      (optional)
- *   style: card | line | prose | table
+ *   style: card | line | prose | table | value
  *   range: 7                      (table only; days from `date`)
+ *   field: precipitation.amount   (value only; a ConvertedReport leaf)
+ *   units: metric | imperial      (optional; default is the setting)
  */
+import { isReportField, type ReportField, type Units } from "../core/units";
+
 export interface CodeblockSpec {
   zone?: string;
   date: string;
   hour?: number;
-  style: "card" | "line" | "prose" | "table";
+  style: "card" | "line" | "prose" | "table" | "value";
   range: number;
+  field?: ReportField;
+  units?: Units;
   errors: string[];
 }
 
-const STYLES = new Set(["card", "line", "prose", "table"]);
+const STYLES = new Set(["card", "line", "prose", "table", "value"]);
 
 export function parseCodeblock(source: string): CodeblockSpec {
   const spec: CodeblockSpec = { date: "today", style: "card", range: 7, errors: [] };
@@ -45,7 +51,15 @@ export function parseCodeblock(source: string): CodeblockSpec {
       }
       case "style":
         if (STYLES.has(val)) spec.style = val as CodeblockSpec["style"];
-        else spec.errors.push(`style must be card, line, prose or table (got "${val}")`);
+        else spec.errors.push(`style must be card, line, prose, table or value (got "${val}")`);
+        break;
+      case "field":
+        if (isReportField(val)) spec.field = val;
+        else spec.errors.push(`unknown field "${val}" (see docs/API.md for the list)`);
+        break;
+      case "units":
+        if (val === "metric" || val === "imperial") spec.units = val;
+        else spec.errors.push(`units must be metric or imperial (got "${val}")`);
         break;
       case "range": {
         const n = Number(val);
@@ -57,6 +71,7 @@ export function parseCodeblock(source: string): CodeblockSpec {
         spec.errors.push(`unknown key "${key}"`);
     }
   }
+  if (spec.style === "value" && !spec.field) spec.errors.push("style: value needs a field, e.g. field: precipitation.amount");
   return spec;
 }
 

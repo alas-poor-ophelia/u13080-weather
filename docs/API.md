@@ -206,6 +206,35 @@ describe(report: WeatherReport, style?: "short" | "prose"): string
 temperature range, e.g. `Cold, steady rain, breezy from the WSW, overcast. −1.1 to 7.8 °C.`;
 `"prose"` is a short paragraph. Both are marked "extremely rough for the alpha" in the README.
 
+### `units()`
+
+```ts
+units(): "metric" | "imperial"
+```
+
+The user's display-units setting. Reports themselves are always metric.
+
+### `convert(report, units?)`
+
+```ts
+convert(report: WeatherReport, units?: "metric" | "imperial"): ConvertedReport
+```
+
+The same report in the given units (default: `units()`), with unit suffixes dropped from the
+key names so consumers read one shape regardless of system. Pure; the renderer uses the same
+table, so a number from `convert` matches what the card shows.
+
+```ts
+interface ConvertedReport {                    // everything not listed is as in WeatherReport
+  units: "metric" | "imperial";
+  labels: { temperature: string; amount: string; speed: string; distance: string }; // "°C"/"°F", "mm"/"in", ...
+  temperature: { high: number; low: number; mean: number; current?: number };       // °C or °F, 0.1
+  precipitation: { type: PrecipType; amount: number; intensity: number; active?: boolean }; // mm (0.1) or in (0.01)
+  wind: { speed: number; directionDeg: number };                                      // km/h or mph (0.1)
+  visibility: number;                                                                 // km or mi (0.1)
+}
+```
+
 ### `on(event, cb)`
 
 ```ts
@@ -801,8 +830,10 @@ at once — it does not stop at the first one).
 | `zone` | a zone id | first configured zone | Errors at render time if the id doesn't match a configured zone. |
 | `date` | `today` \| `+N` \| `-N` \| an integer `dayOrdinal` \| an adapter-native date string | `today` | `+N`/`-N` are relative to the active adapter's current day (`now()`); `today`/`+N`/`-N` all error if there is no current day set. A bare integer (optionally negative) is taken as a literal `dayOrdinal`. Anything else is handed to the active adapter's optional `parse()`; errors if it returns `null` or the adapter has none. |
 | `hour` | a number in `[0, 24)` | none (whole-day report) | Adds `temperature.current` and `precipitation.active`; error if outside range. |
-| `style` | `card` \| `line` \| `prose` \| `table` | `card` | See below. |
+| `style` | `card` \| `line` \| `prose` \| `table` \| `value` | `card` | See below. |
 | `range` | integer `1`–`366` | `7` | Only meaningful for `style: table` — the number of consecutive days starting at `date`. |
+| `field` | a `ConvertedReport` leaf: `temperature.high` `temperature.low` `temperature.mean` `temperature.current` `precipitation.type` `precipitation.amount` `precipitation.intensity` `precipitation.active` `humidity` `cloudCover` `wind.speed` `wind.directionDeg` `visibility` `regime` `conditions` `descriptors.temperature` `descriptors.precipitation` `descriptors.wind` `descriptors.sky` `overridden` `units` | none | Required for `style: value`; an error otherwise. |
+| `units` | `metric` \| `imperial` | the setting | Applies to every style. |
 
 ### Styles
 
@@ -812,6 +843,7 @@ at once — it does not stop at the first one).
 | `line` | One line, e.g. `🌧 Year 3, day 14: Cold, steady rain, breezy from the WSW, overcast. 1.1 to 7.8 °C.` |
 | `prose` | A short paragraph from `describe(report, "prose")` — flagged in the README as "extremely rough for the alpha". |
 | `table` | One row per day for `range` days starting at `date`, pinned (overridden) days marked with 📌. |
+| `value` | The one `field`, bare, in a `<span class="wadjet-value">`: numbers as digits (no unit), lists comma-joined, booleans `yes`/`no`, a missing field (e.g. `temperature.current` without `hour`) as empty. |
 
 Day numbers count from the first day of year 1, which is `dayOrdinal 0`. `Y-D` date strings
 (e.g. `3-14`) are the internal calendar's own year-day notation, parsed by

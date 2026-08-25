@@ -2,7 +2,8 @@ import { MarkdownView, Notice, Plugin, type MarkdownPostProcessorContext } from 
 import type { WeatherReport } from "../core/report";
 import { GENERATOR_VERSION, RNG_VERSION, SCHEMA_VERSION } from "../core/version";
 import { parseCodeblock, resolveDate } from "./codeblock-parse";
-import { renderCard, renderError, renderLine, renderProse, renderTable } from "./render";
+import { renderCard, renderError, renderLine, renderProse, renderTable, renderValue } from "./render";
+import { convertReport, reportField, type ConvertedReport, type Units } from "../core/units";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettings } from "./settings";
 import { WadjetSettingTab } from "./settings-tab";
 import { TimeRegistry, type TimeAdapter, type TimeContext } from "./time/adapter";
@@ -33,6 +34,10 @@ export interface WadjetAPI {
   resolveZone(locator: ZoneLocator): string | null;
 
   describe(report: WeatherReport, style?: "short" | "prose"): string;
+  /** the user's display units setting */
+  units(): Units;
+  /** the same report in metric or imperial, unit suffixes dropped from key names (amountMm -> amount ...) */
+  convert(report: WeatherReport, units?: Units): ConvertedReport;
   on(event: WorldEvent, cb: () => void): () => void;
 }
 
@@ -118,6 +123,8 @@ export default class WadjetPlugin extends Plugin {
       registerZoneResolver: (r) => w.registerZoneResolver(r),
       resolveZone: (l) => w.resolveZone(l),
       describe: (r, style) => w.describe(r, style),
+      units: () => this.settings.units,
+      convert: (r, units) => convertReport(r, units ?? this.settings.units),
       on: (event, cb) => w.on(event, cb),
     };
   }
@@ -136,7 +143,7 @@ export default class WadjetPlugin extends Plugin {
     if (day === null) return renderError(el, error ?? "bad date");
     const label = (d: number) => adapter?.format?.(d) ?? `day ${d}`;
     try {
-      const u = this.settings.units;
+      const u = spec.units ?? this.settings.units;
       if (spec.style === "table") {
         const reports = this.world.getRange(zoneId, day, day + spec.range - 1);
         return renderTable(
@@ -146,6 +153,7 @@ export default class WadjetPlugin extends Plugin {
         );
       }
       const r = this.world.getReport(zoneId, spec.hour !== undefined ? { dayOrdinal: day, hour: spec.hour } : { dayOrdinal: day });
+      if (spec.style === "value") return renderValue(el, reportField(convertReport(r, u), spec.field!));
       if (spec.style === "line") return renderLine(el, r, label(day));
       if (spec.style === "prose") return renderProse(el, r, label(day));
       return renderCard(el, r, label(day), u);

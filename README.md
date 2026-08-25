@@ -60,8 +60,10 @@ If it’s not:
 zone: greywold-highlands   # the zone id; omit to use the first zone
 date: today                # today | +3 | -1 | 412 (a day number) | 3-14 (year-day)
 hour: 14                   # optional; adds the temperature at that hour and whether rain is falling
-style: card                # card | line | prose | table
+style: card                # card | line | prose | table | value
 range: 7                   # table only: days from `date`
+field: precipitation.amount   # value only: which number (or word) to show
+units: imperial            # optional; otherwise the setting
 ```
 ````
 
@@ -70,6 +72,10 @@ range: 7                   # table only: days from `date`
 - **line** — one line: `🌧 Year 3, day 14: Cold, steady rain, breezy from the WSW, overcast. 1.1 to 7.8 °C.`
 - **prose** — a short paragraph for reading aloud (**extremely rough for the alpha**)
 - **table** — one row per day for `range` days; pinned days are marked with a 📌.
+- **value** — just one field, bare, in the chosen units: `field: precipitation.amount` gives
+  `4.2` (mm) or `0.17` (in). Fields: `temperature.high/low/mean/current`,
+  `precipitation.type/amount/intensity/active`, `humidity`, `cloudCover`, `wind.speed/directionDeg`,
+  `visibility`, `regime`, `conditions`, `descriptors.temperature/precipitation/wind/sky`.
 
 Day numbers count from the first day of year 1 (which is day 0). Dates like `3-14` are
 *year-day* in the internal calendar: year 3, the 14th day. Units (metric or imperial) are a
@@ -286,6 +292,8 @@ interface WadjetAPI {
   listZones(): Array<{ id: string; name: string }>;
   
   describe(report: WeatherReport, style?: "short" | "prose"): string;
+  units(): "metric" | "imperial";                            // the display setting
+  convert(report: WeatherReport, units?): ConvertedReport;   // °F / in / mph / mi, or metric, keys without unit suffixes
 
   registerTimeAdapter(adapter: TimeAdapter): () => void;     // your calendar supplies "now"
   registerZoneResolver(resolver: ZoneResolver): () => void;  // your map says which zone a hex is in
@@ -294,7 +302,7 @@ interface WadjetAPI {
 }
 ```
 
-`WeatherReport` is a plain object: temperature (low/high/mean, `current` when an hour is given), precipitation (type, mm, intensity, `active`), wind (km/h, degrees from), cloud cover, humidity, visibility, descriptor words, conditions, `overridden`, and provenance (seed, versions, zone hash). Everything is rounded (0.1 °C, 0.1 mm) so that results match across JavaScript engines.
+`WeatherReport` is a plain object and always metric: temperature (low/high/mean, `current` when an hour is given), precipitation (type, mm, intensity, `active`), wind (km/h, degrees from), cloud cover, humidity, visibility, descriptor words, conditions, `overridden`, and provenance (seed, versions, zone hash). Everything is rounded (0.1 °C, 0.1 mm) so that results match across JavaScript engines. `convert(report)` gives the same thing in the user's units with plain key names (`precipitation.amount`, `wind.speed`, `visibility`) and a `labels` object for display.
 
 A **time adapter** gives the plugin a calendar (`now()`, `toContext(dayOrdinal)`, optionally
 `parse`/`format`); a **zone resolver** answers "which zone is this note / hex / point in" for

@@ -4,6 +4,10 @@ Release notes are taken from the matching `## <version>` section by the release 
 
 ## Unreleased
 
+- Code block `style: value` with `field:` renders one bare field (a number for notes and
+  scripts); `units:` on any block overrides the setting. API gains `units()` and
+  `convert(report, units?)`; the renderer and the API share one conversion table.
+
 - Era timeline (*Settings → Calendar → Eras*): world-level spans of years that tag every day
   (`era:<name>`) and can bend every zone with modifier ops. Eras join the calendar hash, so
   they show in provenance. `TimeContext` gains an optional `year`.
