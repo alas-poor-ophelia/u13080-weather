@@ -2,11 +2,7 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
-## Unreleased
-
-- Code block `style: value` with `field:` renders one bare field (a number for notes and
-  scripts); `units:` on any block overrides the setting. API gains `units()` and
-  `convert(report, units?)`; the renderer and the API share one conversion table.
+## 0.2.0
 
 - Era timeline (*Settings → Calendar → Eras*): world-level spans of years that tag every day
   (`era:<name>`) and can bend every zone with modifier ops. Eras join the calendar hash, so
@@ -20,6 +16,9 @@ Release notes are taken from the matching `## <version>` section by the release 
   `when` matches no day of the reference year (for example one gated on a later era) no longer
   fires every day.
 - Fixed: `api.ready` is set before the API-level `ready` event fires.
+- Code block `style: value` with `field:` renders one bare field (a number for notes and
+  scripts); `units:` on any block overrides the setting. API gains `units()` and
+  `convert(report, units?)`; the renderer and the API share one conversion table.
 
 ## 0.1.0
 

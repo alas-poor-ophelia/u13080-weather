@@ -1,6 +1,6 @@
 {
   "name": "wadjet",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deterministic, data-driven weather for TTRPG worldbuilding in Obsidian",
   "private": true,
   "type": "module",
