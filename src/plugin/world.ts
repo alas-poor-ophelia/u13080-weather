@@ -11,6 +11,7 @@ import { buildReport, describe, overrideKey, type DescriptorBands, type Override
 import { eraModifiers, erasHash, withEraTags } from "../core/eras";
 import type { DayTime, Era, ZoneProfile } from "../core/types";
 import type { TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
+import { flipSeasonTags } from "./time/seasons";
 
 export type ZoneLocator = { kind: "note"; path: string } | { kind: "hex"; mapId: string; q: number; r: number } | { kind: "point"; mapId: string; x: number; y: number } | { kind: "custom"; namespace: string; data: unknown };
 
@@ -20,7 +21,7 @@ export interface ZoneResolver {
   resolve(locator: ZoneLocator): string | null;
 }
 
-export type WorldEvent = "ready" | "profiles-changed" | "time-changed";
+export type WorldEvent = "ready" | "profiles-changed" | "time-changed" | "adapters-changed";
 
 export interface WorldState {
   seed: string;
@@ -85,10 +86,14 @@ export class World {
     const adapter = this.adapterFor();
     const eras = this.state.eras ?? [];
     const hash = profileHash(zone);
-    const key = `${this.state.seed}|${hash}|${this.calendarHash()}`;
+    // flipSeasons is calendar-side, not part of profileHash (D5/D9) — the cache key carries it instead.
+    const flip = zone.flipSeasons === true;
+    const key = `${this.state.seed}|${hash}|${this.calendarHash()}${flip ? "|flip" : ""}`;
     const cached = this.generators.get(zoneId);
     if (cached && cached.key === key) return cached;
-    const timeOf = (d: number): DayTime => withEraTags(eras, adapter.toContext(d));
+    // An adapter with no describe() (opaque calendar) or no seasons cannot be flipped; tags pass through untouched.
+    const seasons = flip ? (adapter.describe?.()?.seasons ?? []) : [];
+    const timeOf = seasons.length ? (d: number): DayTime => flipSeasonTags(withEraTags(eras, adapter.toContext(d)), seasons) : (d: number): DayTime => withEraTags(eras, adapter.toContext(d));
     const { generator } = createGenerator(zone, this.state.seed, timeOf, eraModifiers(eras));
     const entry = { key, generator, hash };
     this.generators.set(zoneId, entry);

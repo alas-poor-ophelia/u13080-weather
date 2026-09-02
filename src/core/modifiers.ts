@@ -10,6 +10,80 @@
 import { DrawStream, bernoulli, drawKey, geometricDuration } from "./rng";
 import type { DayTime, Modifier, ModifierOp, Predicate } from "./types";
 
+/**
+ * Sample an onset envelope at phase `t` (PLAN §0 D8). Points are sorted by
+ * phase and interpolated linearly; the segment from the last point to the
+ * first wraps across 1→0. A single point is a constant; an empty envelope is 1.
+ * Pure: no RNG, no state.
+ */
+export function sampleEnvelope(env: readonly (readonly [number, number])[], t: number): number {
+  if (env.length === 0) return 1;
+  const pts = [...env].sort((a, b) => a[0] - b[0]);
+  const first = pts[0]!;
+  const last = pts[pts.length - 1]!;
+  if (pts.length === 1) return first[1];
+  const x = ((t % 1) + 1) % 1;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    if (x >= a[0] && x <= b[0]) return b[0] === a[0] ? a[1] : a[1] + (b[1] - a[1]) * ((x - a[0]) / (b[0] - a[0]));
+  }
+  // outside [first, last]: the wrapping segment last → first + 1
+  const span = first[0] + 1 - last[0];
+  const d = x >= last[0] ? x - last[0] : x + 1 - last[0];
+  return span === 0 ? last[1] : last[1] + (first[1] - last[1]) * (d / span);
+}
+
+/**
+ * Product of the `amount`s of the gates whose `source` tag is on the day
+ * (PLAN §2.4: a gate source is a TAG, never a moon). Inactive gates contribute
+ * ×1; no gates = 1. `time.tags` is the day's context as the modifier's own
+ * predicate saw it, so tags pushed by EARLIER modifiers today do gate later ones.
+ */
+function gateFactor(m: Modifier, time: DayTime): number {
+  if (!m.mods?.length) return 1;
+  const tags = time.tags ?? [];
+  let f = 1;
+  for (const g of m.mods) if (tags.includes(g.source)) f *= g.amount;
+  return f;
+}
+
+/**
+ * The carrier moon's phase: the moon named in a bare `{ moon }` predicate,
+ * else the first moon of the day, else undefined (no carrier → factor 1).
+ */
+function carrierPhase(m: Modifier, time: DayTime): number | undefined {
+  const w = m.when;
+  if (w && "moon" in w) return time.moons?.find((x) => x.name === w.moon.name)?.phase;
+  return time.moons?.[0]?.phase;
+}
+
+function envelopeFactor(m: Modifier, op: ModifierOp, time: DayTime): number {
+  if (!op.envelope?.length) return 1;
+  const phase = carrierPhase(m, time);
+  return phase === undefined ? 1 : sampleEnvelope(op.envelope, phase);
+}
+
+/**
+ * Rewrite an op's magnitude by factor `f` and drop the envelope (downstream
+ * `applyDayOps` must never see it): `offset v → v·f`, `scale v → 1 + (v−1)·f`,
+ * `set`/`clamp` pass through. f = 1 with no envelope returns the op unchanged.
+ *
+ * `f` is always in [0, 1]: gate amounts and envelope strengths are dimmers, and
+ * `validateGates` / `validateEnvelope` reject anything outside that range. With
+ * a non-negative `scale` value that pins `1 + (v−1)·f` between `v` and 1, so a
+ * dimmer can never flip the sign of a scale. The invariant is the validator's;
+ * the engine deliberately does no clamping of its own.
+ */
+function scaleOpMagnitude(op: ModifierOp, f: number): ModifierOp {
+  if (f === 1 && op.envelope === undefined) return op;
+  const out = { ...op };
+  delete out.envelope;
+  if (out.op === "offset") return { ...out, value: out.value * f };
+  if (out.op === "scale") return { ...out, value: 1 + (out.value - 1) * f };
+  return out;
+}
+
 export interface PredicateContext extends DayTime {
   dayOrdinal: number;
   regime: string;
@@ -80,7 +154,8 @@ export class ModifierEngine {
   private readonly windowDays = new Map<string, number>();
 
   constructor(readonly cfg: ModifierEngineConfig) {
-    this.daily = cfg.modifiers.filter((m) => (m.stage ?? "daily") === "daily");
+    // a disabled modifier never reaches a day: no ops, no tag, not in `active`, and no spell window
+    this.daily = cfg.modifiers.filter((m) => (m.stage ?? "daily") === "daily" && m.enabled !== false);
     for (const m of this.daily) {
       if (m.spell) this.windowDays.set(m.id, this.estimateWindowDays(m));
     }
@@ -97,7 +172,11 @@ export class ModifierEngine {
       const time = tags.length ? { ...base, tags: [...(base.tags ?? []), ...tags] } : base;
       const on = m.spell ? this.spellActive(m, dayOrdinal, regime) : this.matches(m, dayOrdinal, time, regime);
       if (!on) continue;
-      ops.push(...m.apply);
+      // gates and envelopes only rewrite MAGNITUDE: the modifier stays active and still sets its
+      // tag even at factor 0, and `time` here is the same object the predicate saw (so a gate can
+      // read a tag pushed by an earlier modifier today).
+      const gate = gateFactor(m, time);
+      ops.push(...m.apply.filter((o) => o.enabled !== false).map((o) => scaleOpMagnitude(o, gate * envelopeFactor(m, o, time))));
       if (m.tag) tags.push(m.tag);
       active.push(m.id);
     }

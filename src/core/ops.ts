@@ -74,6 +74,8 @@ export function applyDayOps(params: DayParams, ops: readonly ModifierOp[]): DayP
     const cur = out[op.param];
     switch (op.op) {
       case "set":
+        // a Curve-valued set is climate-stage only; the validator rejects it upstream, so skip it here rather than write a non-number
+        if (typeof op.value !== "number") break;
         out[op.param] = op.value;
         break;
       case "offset":

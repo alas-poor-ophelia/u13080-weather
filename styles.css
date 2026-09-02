@@ -85,3 +85,2904 @@
 .wadjet-prose {
   font-style: italic;
 }
+
+
+/* ── Climate Studio ── */
+/* Palette and component rules for the closed component bin (SPEC §0 law 3, §9).
+   Every colour the studio uses is one of these variables; every piece of dynamic
+   geometry arrives as a custom property set with setCssProps, never inline style.
+
+   Obsidian-variable mapping (wadjet-9f9.43): decided per token, not blanket.
+     - Text/data colour: NOT mapped to --text-normal/--text-muted. The studio is
+       a fixed dark instrument by design (SPEC §9); Obsidian's text variables
+       flip with the active theme, which would wash the graphite chrome out
+       under a light theme. The SPEC greys stay literal.
+     - Font: mapped. .wadjet-studio sets font-family: var(--font-interface) so
+       the studio matches the user's chosen UI font instead of hard-coding one;
+       --wadjet-studio-mono stays the studio's own stack for the "mono for
+       readouts" rule (SPEC §9), a deliberate contrast with the surrounding UI.
+     - Borders: NOT mapped to --background-modifier-border. That variable also
+       flips with the active theme (light under a light theme), which would
+       break the graphite chrome the same way text would; --wadjet-studio-border*
+       stays literal so the studio reads the same regardless of Obsidian's theme.
+     - color-scheme: dark is set on .wadjet-studio explicitly, so form controls
+       and OS-level UI (e.g. the knob's typed-entry input) render dark even
+       when Obsidian itself is on a light theme.
+     - Contrast fixes (SPEC §9 floor: nothing dimmer than #878d95 for readable
+       text): --wadjet-studio-text-mute moved #878d95 → #9298a1 (still one of
+       the SPEC §9 greys, lighter, so "not dimmer than the floor" holds) — the
+       old value was 4.13:1 against --wadjet-studio-panel, short of 4.5:1.
+       --wadjet-studio-error stays #e0605c (an e2e test asserts this exact
+       value); a new --wadjet-studio-error-text (#e57a76) carries the same
+       hue for actual error TEXT, since #e0605c is only 3.95:1 against
+       --wadjet-studio-panel — background/border/LED uses of
+       --wadjet-studio-error are unaffected (those aren't text, so 4.5:1
+       doesn't apply, and they already clear 3:1 non-text contrast). */
+
+:root {
+  --wadjet-studio-bg: #141517;
+  --wadjet-studio-bg-alt: #202225;
+  --wadjet-studio-panel: #2a2d31;
+  --wadjet-studio-border: #35383d;
+  --wadjet-studio-border-bright: #3d4147;
+  --wadjet-studio-text: #f2f3f5;
+  --wadjet-studio-text-dim: #aab0b9;
+  --wadjet-studio-text-mute: #9298a1;
+  --wadjet-studio-accent: #e9ebee;
+  --wadjet-studio-temp: #f0885c;
+  --wadjet-studio-precip: #5cb8f0;
+  --wadjet-studio-wind: #7fd6a8;
+  --wadjet-studio-sky: #b9c2cf;
+  --wadjet-studio-gold: #e8c15a;
+  --wadjet-studio-moon: #cdd9ee;
+  --wadjet-studio-error: #e0605c;
+  --wadjet-studio-error-text: #e57a76;
+  --wadjet-studio-warn: #e8c15a;
+  --wadjet-studio-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Any element a gesture starts on: the browser must not pan or zoom instead. */
+.wadjet-studio-drag-target {
+  touch-action: none;
+}
+
+/* Studio · units audit (wadjet-9f9.41): a reusable tabular-numerals class for
+   any readout not already covered by a specific value class. Chip labels get
+   the same treatment via .wadjet-studio-chip-label directly, since every chip
+   is a candidate numeric readout — which covers the regimes "N states"/"N d"
+   line and the Forcings/MASTER warmth & wetness readouts. What is left, and
+   what carries this class (wadjet-9f9.45), is the two numeric lines with no
+   value class of their own: every window's Writes footer body and the day
+   card's `Y 1962 · d 145` date. */
+.wadjet-studio-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.wadjet-studio-chip-icon.is-hidden,
+.wadjet-studio-chip.is-hidden,
+.wadjet-studio-led.is-hidden,
+.wadjet-studio-rack-grip.is-hidden,
+.wadjet-studio-rack-link.is-hidden,
+.wadjet-studio-rack-world.is-hidden,
+.wadjet-studio-window-badge.is-hidden,
+.wadjet-studio-window-issues.is-hidden {
+  display: none;
+}
+
+
+/* ── Studio layout (the leaf's shell skeleton) ── */
+/* ── Studio shell (the leaf's layout) ── */
+/* The leaf is a fixed-geometry instrument, not a document: header, hint bar,
+   playlist + mixer, audition strip, JSON drawer, and an absolute overlay the
+   floating windows clamp inside. Fluid above 1100 px; below it the leaf
+   scrolls rather than reflowing — the playlist needs the width (SPEC §3.2). */
+.workspace-leaf-content[data-type="wadjet-studio"] .view-content {
+  padding: 0;
+  overflow: auto;
+}
+
+.wadjet-studio {
+  /* Dark by design (SPEC §9), independent of Obsidian's active theme: see the
+     token-mapping note at the top of this block. */
+  color-scheme: dark;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 1100px;
+  container-type: inline-size;
+  overflow: hidden;
+  font-family: var(--font-interface);
+  font-size: 12px;
+  color: var(--wadjet-studio-text);
+  background: var(--wadjet-studio-bg);
+  --wadjet-studio-label-w: 136px;
+}
+
+/* Header (44 px) */
+.wadjet-studio-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--wadjet-studio-bg-alt);
+  border-bottom: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-header-zone {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wadjet-studio-text);
+  white-space: nowrap;
+}
+.wadjet-studio-header-spacer {
+  flex: 1 1 auto;
+}
+.wadjet-studio-header-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Header controls (SPEC §3.1): zone dropdown, badges, readout, transport,
+   JSON, undo/redo and Save. Chrome only — no channel colour lives up here. */
+.wadjet-studio-header-zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wadjet-studio-header-zonebtn {
+  padding: 3px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.wadjet-studio-header-zonebtn:hover,
+.wadjet-studio-header-zonebtn:focus-visible {
+  border-color: var(--wadjet-studio-border-bright);
+  background: var(--wadjet-studio-panel);
+}
+.wadjet-studio-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  /* Belt and braces for the rule below: even a chip that somehow refuses to
+     shrink can never paint outside the badge row and under the transport. */
+  overflow: hidden;
+}
+
+/* Header overflow (bead wadjet-9f9.44).
+   `.wadjet-studio-header-zone` has `min-width: 0`, so it shrinks when the
+   header runs out of room — but a flex item's automatic minimum size is its
+   CONTENT, and a chip had no `min-width` of its own. The chips therefore kept
+   their full width and spilled OUT of the badge row to the right, where the
+   transport buttons (later in DOM order) painted on top of them: at 1400 px,
+   with a station name in the SRC chip and "seasons not flipped" in the ⇅ chip,
+   the Pan-back button covered the ⇅ chip's hit box and swallowed its clicks.
+   Chips shrink and ellipsize instead; the full text stays in title/aria-label
+   (see `ui/header.ts`) and in the chip's hint. */
+.wadjet-studio-header-badges > .wadjet-studio-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.wadjet-studio-header-badges > .wadjet-studio-led,
+.wadjet-studio-header-badges .wadjet-studio-chip-icon {
+  flex: 0 0 auto;
+}
+.wadjet-studio-header-badges [data-part="src"] .wadjet-studio-chip-label {
+  /* `SRC <station> · 30 yr`: the station name is the part that runs long, and
+     a ceiling on it stops one long name pushing every other badge off. Set
+     above the usual reading so the wide layout is unchanged — the shrinking
+     that fixes the overlap is the flex rule above, not this. */
+  max-width: 30ch;
+}
+.wadjet-studio-header-badges [data-part="flip"] .wadjet-studio-chip-label {
+  max-width: 20ch;
+}
+@container (max-width: 1300px) {
+  /* Narrow leaf: the ⇅ chip keeps its glyph and drops its words. The chip is
+     still a real button with the full text in `title`/`aria-label`. */
+  .wadjet-studio-header-badges [data-part="flip"] .wadjet-studio-chip-label {
+    display: none;
+  }
+}
+.wadjet-studio-header-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+.wadjet-studio-header-readout-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-header-readout-range {
+  font-family: var(--wadjet-studio-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-header-transport {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.wadjet-studio-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-header-btn:hover,
+.wadjet-studio-header-btn:focus-visible {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-header-btn.is-on {
+  color: var(--wadjet-studio-accent);
+  border-color: var(--wadjet-studio-accent);
+}
+.wadjet-studio-header-btn.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.wadjet-studio-header-save {
+  min-width: 66px;
+  font-weight: 600;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-header-save[data-state="saved"] {
+  color: var(--wadjet-studio-text-mute);
+  font-weight: 400;
+}
+/* In flight (wadjet-9f9.45): disabled and dimmed, like `saved`, but it is the
+   write that is happening rather than the write that is done. */
+.wadjet-studio-header-save[data-state="saving"] {
+  color: var(--wadjet-studio-text-mute);
+  font-weight: 400;
+}
+.wadjet-studio-header-save[data-state="dirty"] {
+  color: var(--wadjet-studio-accent);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-header-save[data-state="warn"] {
+  color: var(--wadjet-studio-warn);
+  border-color: var(--wadjet-studio-warn);
+}
+.wadjet-studio-header-save[data-state="blocked"] {
+  color: var(--wadjet-studio-error-text);
+  border-color: var(--wadjet-studio-error);
+  opacity: 1;
+}
+
+/* Hint bar (22 px, full width) */
+.wadjet-studio-hintbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--wadjet-studio-text-mute);
+  background: var(--wadjet-studio-bg);
+  border-bottom: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-hintbar-name {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-hintbar-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Main: playlist + mixer rail, each with its own scroll */
+.wadjet-studio-main {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+.wadjet-studio-playlist {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+}
+.wadjet-studio-mixer {
+  flex: 0 0 auto;
+  width: clamp(260px, 26cqi, 320px);
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--wadjet-studio-bg-alt);
+  border-left: 1px solid var(--wadjet-studio-border);
+}
+/* Below a 1300 px container the rail gives up its fluid width and settles at
+   a fixed ~240 px so the playlist keeps the room it needs (SPEC §3.2); the
+   rack's chip row switches from wrapping to one ellipsized line per chip. */
+@container (max-width: 1300px) {
+  .wadjet-studio-mixer {
+    width: 240px;
+  }
+  .wadjet-studio-mixer .wadjet-studio-rack-chips {
+    flex-wrap: nowrap;
+  }
+  .wadjet-studio-mixer .wadjet-studio-chip {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+}
+.wadjet-studio-mixer-chain {
+  margin-bottom: 10px;
+}
+.wadjet-studio-mixer-empty {
+  padding: 6px 8px;
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-mute);
+  border: 1px dashed var(--wadjet-studio-border);
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+}
+
+
+/* ── Studio components (the closed component bin) ── */
+/* Knob */
+.wadjet-studio-knob {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.wadjet-studio-knob-label {
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-knob-dial {
+  width: 36px;
+  height: 36px;
+  cursor: ns-resize;
+  outline: none;
+  border-radius: 50%;
+  transition: transform 100ms ease-out;
+}
+.wadjet-studio-knob-dial:hover,
+.wadjet-studio-knob-dial:focus-visible {
+  transform: scale(1.05);
+}
+.wadjet-studio-knob-dial svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.wadjet-studio-knob-dial:focus-visible .wadjet-studio-knob-body {
+  stroke: var(--wadjet-studio-accent);
+  stroke-width: 2;
+}
+.wadjet-studio-knob-body {
+  fill: var(--wadjet-studio-bg-alt);
+  stroke: #17181a;
+  stroke-width: 1;
+}
+.wadjet-studio-knob-track {
+  fill: none;
+  stroke: #1b1d20;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+.wadjet-studio-knob-arc {
+  fill: none;
+  stroke: var(--wadjet-studio-knob-color, var(--wadjet-studio-accent));
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.wadjet-studio-knob-indicator {
+  stroke: var(--wadjet-studio-knob-color, var(--wadjet-studio-accent));
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.wadjet-studio-knob-value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-knob-input {
+  position: absolute;
+  bottom: 0;
+  width: 56px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--wadjet-studio-text);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+}
+.wadjet-studio-knob.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* LED */
+.wadjet-studio-led {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid #17181a;
+  background: #24262a;
+}
+.wadjet-studio-led[role="button"] {
+  cursor: pointer;
+}
+.wadjet-studio-led[data-scope="chain"] {
+  width: 12px;
+  height: 12px;
+}
+.wadjet-studio-led[data-scope="op"] {
+  width: 8px;
+  height: 8px;
+}
+.wadjet-studio-led.is-on[data-level="ok"] {
+  background: var(--wadjet-studio-wind);
+  box-shadow: 0 0 6px rgba(127, 214, 168, 0.55);
+}
+.wadjet-studio-led.is-on[data-level="warn"] {
+  background: var(--wadjet-studio-warn);
+  box-shadow: 0 0 6px rgba(232, 193, 90, 0.55);
+}
+.wadjet-studio-led.is-on[data-level="error"] {
+  background: var(--wadjet-studio-error);
+  box-shadow: 0 0 6px rgba(224, 96, 92, 0.55);
+}
+
+/* Chip */
+.wadjet-studio-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text-dim));
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-chip.is-clickable {
+  cursor: pointer;
+}
+.wadjet-studio-chip.is-clickable:hover,
+.wadjet-studio-chip.is-clickable:focus-visible {
+  border-color: var(--wadjet-studio-chip-color, var(--wadjet-studio-border-bright));
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-chip-label {
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Lane */
+.wadjet-studio-lane {
+  position: relative;
+  height: var(--wadjet-studio-lane-height, 28px);
+  background: var(--wadjet-studio-bg);
+  border-bottom: 1px solid var(--wadjet-studio-border);
+  overflow: hidden;
+}
+.wadjet-studio-lane-spans {
+  position: absolute;
+  inset: 0;
+}
+.wadjet-studio-span {
+  position: absolute;
+  left: var(--wadjet-studio-span-left, 0);
+  width: var(--wadjet-studio-span-width, 0);
+  top: calc(var(--wadjet-studio-span-row, 0) * (100% / var(--wadjet-studio-lane-rows, 1)));
+  height: calc(100% / var(--wadjet-studio-lane-rows, 1));
+  box-sizing: border-box;
+  border-radius: 2px;
+  background: var(--wadjet-studio-span-color, var(--wadjet-studio-gold));
+  font-size: 10px;
+  color: var(--wadjet-studio-bg);
+  overflow: hidden;
+}
+.wadjet-studio-span[data-kind="pulse"] {
+  width: 2px;
+  border-radius: 0;
+}
+.wadjet-studio-span[data-kind="band"] {
+  opacity: 0.35;
+}
+.wadjet-studio-span[data-kind="bar"] {
+  top: 0;
+  height: 100%;
+  opacity: 0.5;
+  border-radius: 0;
+}
+.wadjet-studio-span[data-kind="window"] {
+  background: none;
+  border: 1px dashed var(--wadjet-studio-span-color, var(--wadjet-studio-gold));
+}
+.wadjet-studio-span[data-kind="run"] {
+  background: none;
+  border: 1px solid var(--wadjet-studio-span-color, var(--wadjet-studio-gold));
+  box-shadow: inset 0 0 0 2px var(--wadjet-studio-span-color, var(--wadjet-studio-gold));
+}
+.wadjet-studio-span.is-dim {
+  opacity: 0.45;
+}
+.wadjet-studio-span.is-editable {
+  cursor: grab;
+  /* The keyboard ring lives in the states section below, not here. */
+  outline: none;
+  transition: box-shadow 100ms ease-out;
+}
+.wadjet-studio-span.is-ghost {
+  background: var(--wadjet-studio-accent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.wadjet-studio-span-label {
+  padding: 0 4px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.wadjet-studio-span-edge {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--wadjet-studio-text);
+  opacity: 0;
+  cursor: ew-resize;
+}
+.wadjet-studio-span:hover .wadjet-studio-span-edge {
+  opacity: 0.85;
+}
+/* Finger-sized handles, matching the 10 px edge the hit test uses on touch (SPEC §3.8). */
+@media (pointer: coarse) {
+  .wadjet-studio-span-edge {
+    width: 10px;
+  }
+}
+.wadjet-studio-span-edge.is-start {
+  left: 0;
+}
+.wadjet-studio-span-edge.is-end {
+  right: 0;
+}
+
+/* Chart */
+.wadjet-studio-chart {
+  display: block;
+  line-height: 0;
+}
+.wadjet-studio-chart-line {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+.wadjet-studio-chart-fill,
+.wadjet-studio-chart-band {
+  opacity: 0.22;
+  stroke: none;
+}
+.wadjet-studio-chart-sector {
+  opacity: 0.6;
+  stroke: var(--wadjet-studio-bg);
+  stroke-width: 0.5;
+}
+.wadjet-studio-chart-disc {
+  fill: none;
+  stroke: var(--wadjet-studio-border-bright);
+  stroke-width: 1;
+}
+.wadjet-studio-chart-boundary {
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.wadjet-studio-chart-point {
+  cursor: ns-resize;
+  stroke: var(--wadjet-studio-bg-alt);
+  stroke-width: 1.5;
+}
+.wadjet-studio-chart-marker {
+  stroke: var(--wadjet-studio-text-mute);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.wadjet-studio-chart-marker-label {
+  fill: var(--wadjet-studio-text-mute);
+  font-size: 9px;
+}
+
+/* Rack unit */
+.wadjet-studio-rack-unit {
+  padding: 6px 8px;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border);
+  border-left: 2px solid var(--wadjet-studio-unit-color, var(--wadjet-studio-accent));
+  border-radius: 3px;
+}
+.wadjet-studio-rack-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-rack-grip {
+  cursor: grab;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-rack-slot {
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-rack-name {
+  flex: 1 1 auto;
+  cursor: pointer;
+  color: var(--wadjet-studio-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wadjet-studio-rack-name:hover,
+.wadjet-studio-rack-name:focus-visible {
+  color: var(--wadjet-studio-unit-color, var(--wadjet-studio-accent));
+}
+.wadjet-studio-rack-kind {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-rack-link,
+.wadjet-studio-rack-world {
+  font-size: 9.5px;
+  color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-rack-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+/* Window */
+.wadjet-studio-window {
+  position: absolute;
+  left: var(--wadjet-studio-win-x, 0);
+  top: var(--wadjet-studio-win-y, 0);
+  z-index: var(--wadjet-studio-win-z, 1);
+  min-width: 260px;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid #565b61;
+  border-radius: 3px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.7);
+  outline: none;
+}
+.wadjet-studio-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: move;
+  background: var(--wadjet-studio-bg-alt);
+  border-bottom: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-window-title {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-window-badge {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-window-preset {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wadjet-studio-window-preset-pick {
+  max-width: 120px;
+  font-size: 10.5px;
+}
+.wadjet-studio-window-preset-save,
+.wadjet-studio-window-close {
+  padding: 0 3px;
+  cursor: pointer;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-window-close:hover {
+  color: var(--wadjet-studio-error-text);
+}
+.wadjet-studio-window-body {
+  padding: 10px;
+}
+.wadjet-studio-window-foot {
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-window-issue {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-window-issue[data-level="error"] {
+  color: var(--wadjet-studio-error-text);
+}
+.wadjet-studio-window-issue[data-level="warn"] {
+  color: var(--wadjet-studio-warn);
+}
+
+/* Writes footer */
+.wadjet-studio-writes {
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-family: var(--wadjet-studio-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--wadjet-studio-text-mute);
+  background: var(--wadjet-studio-bg);
+  overflow-wrap: anywhere;
+}
+.wadjet-studio-writes-label {
+  flex-shrink: 0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-gold);
+}
+
+/* Segmented */
+.wadjet-studio-segmented {
+  display: inline-flex;
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.wadjet-studio-segment {
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-bg-alt);
+  border-right: 1px solid var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-segment:last-child {
+  border-right: none;
+}
+.wadjet-studio-segment.is-selected {
+  color: var(--wadjet-studio-bg);
+  background: var(--wadjet-studio-accent);
+}
+
+
+/* ── Studio surfaces (playlist, mixer rail, audition strip, JSON drawer) ── */
+/* Calendar ruler: sticky at the top of the playlist's scroll */
+.wadjet-studio-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: stretch;
+  height: 26px;
+  background: var(--wadjet-studio-bg-alt);
+  border-bottom: 1px solid var(--wadjet-studio-border);
+}
+
+/* Rows share the ruler's 136 px label column, so every lane lines up with it */
+.wadjet-studio-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-row-label,
+.wadjet-studio-ruler-label {
+  flex: 0 0 var(--wadjet-studio-label-w);
+  width: var(--wadjet-studio-label-w);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-bg-alt);
+  border-right: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-row-body,
+.wadjet-studio-ruler-ticks {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Audition strip (84 px, pinned to the bottom) */
+.wadjet-studio-audition {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  /* 116 px, not the shell placeholder's 84: the real strip carries the season
+     bar, the moon ticks and the controls row under the cells (SPEC §3.5). */
+  gap: 3px;
+  height: 116px;
+  padding: 6px 10px;
+  background: var(--wadjet-studio-bg-alt);
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-audition-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.wadjet-studio-audition-foot {
+  flex: 0 0 auto;
+}
+
+/* JSON drawer */
+.wadjet-studio-json {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 14px;
+  max-height: 40%;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: var(--wadjet-studio-mono);
+  font-size: 11px;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-bg);
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-json.is-hidden {
+  display: none;
+}
+
+/* Floating-window overlay: real dimensions so createWindow can clamp to it,
+   transparent to the pointer so the surfaces underneath stay live. */
+.wadjet-studio-windows {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+.wadjet-studio-windows > * {
+  pointer-events: auto;
+}
+
+/* Zone picker (the command's modal) */
+.wadjet-studio-pick-id {
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-mute);
+}
+
+/* JSON drawer columns (SPEC §3.7, bead wadjet-9f9.37) */
+.wadjet-studio-json-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wadjet-studio-json-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  padding-bottom: 2px;
+  background: var(--wadjet-studio-bg);
+}
+.wadjet-studio-json-title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-json-copy {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  cursor: pointer;
+  font-size: 10.5px;
+  border-radius: 3px;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-json-copy:hover,
+.wadjet-studio-json-copy:focus-visible {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-json-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wadjet-studio-json-section {
+  padding: 2px 6px;
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-json-section summary {
+  cursor: pointer;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-json-section[open] summary {
+  margin-bottom: 2px;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-json-section pre {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--wadjet-studio-text-dim);
+}
+
+/* Mixer rail (SPEC 3.3): chain header, fixed strip, unit rack, MASTER.
+   Chrome is graphite; the chain's own colour arrives as --wadjet-studio-chain-color
+   and is only ever used for the header's bar, so the rail reads as one instrument. */
+.wadjet-studio-mixer-chain.is-master {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-mixer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 5px;
+}
+.wadjet-studio-mixer-bar {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--wadjet-studio-chain-color, var(--wadjet-studio-accent));
+}
+.wadjet-studio-mixer-title {
+  flex: 1 1 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-mixer-add {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--wadjet-studio-text-mute);
+  border-radius: 3px;
+}
+.wadjet-studio-mixer-add:hover,
+.wadjet-studio-mixer-add:focus-visible {
+  color: var(--wadjet-studio-text);
+  background: var(--wadjet-studio-panel);
+}
+.wadjet-studio-mixer-rack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wadjet-studio-mixer-rack.is-hidden,
+.wadjet-studio-mixer-empty.is-hidden {
+  display: none;
+}
+
+/* Fixed strip: collapsed it is one line of LEDs and names; expanded it hands
+   the same two units to the rack-unit component. */
+.wadjet-studio-strip {
+  margin-bottom: 4px;
+}
+.wadjet-studio-strip.is-hidden,
+.wadjet-studio-strip-open.is-hidden,
+.wadjet-studio-strip-name.is-hidden,
+.wadjet-studio-strip-dot.is-hidden {
+  display: none;
+}
+.wadjet-studio-strip-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-strip-row.is-open {
+  justify-content: flex-end;
+  background: none;
+  border-color: transparent;
+  padding: 0 2px 3px;
+}
+.wadjet-studio-strip-name {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wadjet-studio-strip-name:hover,
+.wadjet-studio-strip-name:focus-visible {
+  color: var(--wadjet-studio-chain-color, var(--wadjet-studio-accent));
+}
+.wadjet-studio-strip-dot {
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-strip-toggle {
+  margin-left: auto;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-strip-toggle:hover,
+.wadjet-studio-strip-toggle:focus-visible {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-strip-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+
+/* ── Audition strip · the real rows (SPEC §3.5) ──────────────────────────────
+   One seeded year: a column per day (or per bucket), a season bar under it,
+   moon-full ticks, gold ▼ pins, a legend, the PINS chips and Re-roll. Data
+   colours only in the cells and the bands; every control is graphite. */
+.wadjet-studio-audition-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wadjet-studio-audition-strip {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 26px;
+  overflow: hidden;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 2px;
+}
+.wadjet-studio-audition-strip.is-empty {
+  background: var(--wadjet-studio-bg-alt);
+}
+.wadjet-studio-audition-cells {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+.wadjet-studio-audition-cell {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  background: var(--wadjet-studio-audition-tint, var(--wadjet-studio-panel));
+}
+.wadjet-studio-audition-cell:hover {
+  outline: 1px solid var(--wadjet-studio-accent);
+  outline-offset: -1px;
+}
+.wadjet-studio-audition-wet {
+  position: absolute;
+  inset: 0;
+  background: var(--wadjet-studio-audition-wet-c, var(--wadjet-studio-precip));
+  opacity: var(--wadjet-studio-audition-wet-a, 0);
+}
+.wadjet-studio-audition-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.wadjet-studio-audition-moon {
+  position: absolute;
+  top: 0;
+  left: var(--wadjet-studio-audition-x, 0);
+  width: 1px;
+  height: 5px;
+  background: var(--wadjet-studio-moon);
+}
+.wadjet-studio-audition-pin {
+  position: absolute;
+  bottom: 0;
+  left: var(--wadjet-studio-audition-x, 0);
+  margin-left: -3px;
+  font-size: 9px;
+  line-height: 9px;
+  color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-audition-seasons {
+  position: relative;
+  flex: 0 0 auto;
+  height: 5px;
+}
+.wadjet-studio-audition-season {
+  position: absolute;
+  top: 0;
+  left: var(--wadjet-studio-audition-x, 0);
+  width: var(--wadjet-studio-audition-w, 0);
+  height: 100%;
+  background: var(--wadjet-studio-audition-c, var(--wadjet-studio-border));
+  opacity: 0.55;
+}
+.wadjet-studio-audition-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 20px;
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-audition-legend {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  align-items: center;
+}
+.wadjet-studio-audition-legend-item {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.wadjet-studio-audition-legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+}
+.wadjet-studio-audition-legend-swatch.is-dry {
+  background: color-mix(in srgb, var(--wadjet-studio-temp) 55%, var(--wadjet-studio-moon));
+}
+.wadjet-studio-audition-legend-swatch.is-rain {
+  background: var(--wadjet-studio-precip);
+}
+.wadjet-studio-audition-legend-swatch.is-snow {
+  background: var(--wadjet-studio-moon);
+}
+.wadjet-studio-audition-legend-swatch.is-pin {
+  background: var(--wadjet-studio-gold);
+}
+.wadjet-studio-audition-pins {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+}
+.wadjet-studio-audition-pins-label {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text-mute);
+  letter-spacing: 0.08em;
+}
+.wadjet-studio-audition-pins.is-empty .wadjet-studio-audition-pins-label {
+  opacity: 0.5;
+}
+.wadjet-studio-audition-pin-x {
+  margin-left: 4px;
+  color: var(--wadjet-studio-text-mute);
+  cursor: pointer;
+}
+.wadjet-studio-audition-pin-x:hover {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-audition-btn {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  color: var(--wadjet-studio-text-dim);
+  cursor: pointer;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+}
+.wadjet-studio-audition-btn:hover {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-accent);
+}
+
+
+/* ── Playlist: the calendar ruler, the row stack and the day card (SPEC §3.2) ──
+   The ruler's tick strip and every row body are the SAME box: one flex column,
+   one measured width, so a tick at year Y sits over the pixel a lane draws Y at.
+   Everything positioned here arrives as a custom property set with setCssProps. */
+
+/* Nothing inside a lane or the ruler may widen the column: an absolutely
+   positioned span at the window's edge must clip, never scroll the playlist. */
+.wadjet-studio-row-body,
+.wadjet-studio-ruler-ticks {
+  overflow: hidden;
+}
+
+/* Day view (≤ 7.5 days): the rows give way to the day card. */
+.wadjet-studio-row.is-hidden {
+  display: none;
+}
+
+/* `Calendar ⚑` — the ruler's label column opens the Seasons window. */
+.wadjet-studio-ruler-label-btn {
+  cursor: pointer;
+  color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-ruler-label-btn:hover,
+.wadjet-studio-ruler-label-btn:focus-visible {
+  color: var(--wadjet-studio-text);
+  outline: none;
+}
+
+/* Dragging the strip pans the window. */
+.wadjet-studio-ruler-ticks {
+  cursor: ew-resize;
+}
+
+/* Season bands (Year and tighter) ⇄ era tint (Era): behind the ticks, 8 % of a
+   palette hue, never a fill — the ruler tints, the lanes carry the data. */
+.wadjet-studio-ruler-bands,
+.wadjet-studio-ruler-strip {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.wadjet-studio-ruler-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wadjet-studio-ruler-band-left, 0px);
+  width: var(--wadjet-studio-ruler-band-width, 0px);
+  overflow: hidden;
+  background: var(--wadjet-studio-ruler-band-color, transparent);
+  border-left: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-ruler-band-label {
+  position: absolute;
+  left: 4px;
+  bottom: 1px;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--wadjet-studio-text-mute);
+}
+
+/* Ticks: `model/zoom.ts`'s plan, days → 5-day → 15-day → years → decades →
+   centuries. Minor ticks are a hairline; major ticks carry the label. */
+.wadjet-studio-ruler-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wadjet-studio-ruler-tick-left, 0px);
+  border-left: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-ruler-tick.is-major {
+  border-left-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-ruler-tick-label {
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--wadjet-studio-text-mute);
+}
+
+/* The day card placeholder; bead wadjet-9f9.20 fills it with the generated day. */
+.wadjet-studio-playlist-daycard {
+  margin: 10px 10px 10px calc(var(--wadjet-studio-label-w) + 10px);
+  padding: 14px;
+  font-size: 11px;
+  color: var(--wadjet-studio-text-mute);
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px dashed var(--wadjet-studio-border-bright);
+  border-radius: 4px;
+}
+.wadjet-studio-playlist-daycard.is-hidden {
+  display: none;
+}
+
+
+/* Eras row (SPEC §3.2 "Eras · world") */
+.wadjet-studio-eras-row .wadjet-studio-span-label {
+  line-height: 1.3;
+  font-weight: 500;
+}
+/* An era clip is a solid palette block; its label reads against it. */
+.wadjet-studio-eras-row .wadjet-studio-span[data-kind="clip"] {
+  border: 1px solid color-mix(in srgb, var(--wadjet-studio-bg) 45%, var(--wadjet-studio-span-color, var(--wadjet-studio-gold)));
+}
+/* Year zoom and tighter: a full-width tint, not a fill — the label is the data. */
+.wadjet-studio-eras-row .wadjet-studio-span[data-kind="bar"] {
+  opacity: 1;
+  background: color-mix(in srgb, var(--wadjet-studio-span-color, var(--wadjet-studio-gold)) 22%, transparent);
+  color: var(--wadjet-studio-text);
+}
+/* Re-assert the shared dim over the bar rule above (a disabled era tags nothing). */
+.wadjet-studio-eras-row .wadjet-studio-span[data-kind="bar"].is-dim {
+  opacity: 0.45;
+}
+
+/* Regimes lane (SPEC §3.2, §6) — the rolled state sequence, read-only. Every
+   block carries its own `--wadjet-studio-span-color` (the Lane paints one
+   colour per lane; this row is one colour per state), so the rules here only
+   have to say "contiguous, clickable, not draggable". */
+.wadjet-studio-regimes-lane .wadjet-studio-span {
+  border-radius: 0;
+  cursor: pointer;
+}
+/* The runs abut, so a hairline of the studio's own background is the only
+   thing separating two states of a similar tint. */
+.wadjet-studio-regimes-lane[data-mode="blocks"] .wadjet-studio-span {
+  box-shadow: inset -1px 0 0 var(--wadjet-studio-bg);
+}
+/* The Era-zoom collapse reads as one bar, not as five clips: the shared `bar`
+   kind's 0.5 opacity is too faint once the segments are the only thing in the
+   row, and the outer edges square off against the window. */
+.wadjet-studio-regimes-lane[data-mode="share"] .wadjet-studio-span[data-kind="bar"] {
+  opacity: 0.8;
+  box-shadow: inset -1px 0 0 var(--wadjet-studio-bg);
+}
+.wadjet-studio-regimes-lane .wadjet-studio-span:hover {
+  filter: brightness(1.15);
+}
+/* An empty lane is the honest answer to a draft the validator rejects; the row
+   label says so, so the lane itself must not read as "no states". */
+.wadjet-studio-regimes-lane[data-mode="empty"] {
+  opacity: 0.5;
+}
+
+/* Mixer rack-unit drag-reorder (bead wadjet-9f9.22): the dragged card is its
+   own ghost, translated by the pointer's own delta; --wadjet-studio-drag-y is
+   0px at rest so a card that never drags never carries a transform. */
+.wadjet-studio-rack-unit {
+  transform: translateY(var(--wadjet-studio-drag-y, 0px));
+}
+.wadjet-studio-rack-unit.is-dragging {
+  position: relative;
+  z-index: 5;
+  cursor: grabbing;
+  opacity: 0.85;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+.wadjet-studio-rack-unit.is-dragging .wadjet-studio-rack-grip {
+  cursor: grabbing;
+}
+
+/* Channel rows (SPEC §3.2): the composed curve, 48 px of row body. */
+.wadjet-studio-channel {
+  /* Must equal `CHANNEL_ROW_HEIGHT` in `ui/rows/channel-row.ts`. */
+  --wadjet-studio-channel-h: 48px;
+  position: relative;
+  height: var(--wadjet-studio-channel-h);
+  overflow: hidden;
+  cursor: pointer;
+}
+.wadjet-studio-channel-layer {
+  position: absolute;
+  inset: 0;
+}
+.wadjet-studio-channel-layer.is-hidden {
+  display: none;
+}
+.wadjet-studio-channel::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 1px;
+  background: var(--wadjet-studio-channel-color, var(--wadjet-studio-border));
+  opacity: 0.2;
+}
+.wadjet-studio-row-label.is-clickable {
+  cursor: pointer;
+}
+.wadjet-studio-row-label.is-clickable:hover,
+.wadjet-studio-row-label.is-clickable:focus-visible {
+  color: var(--wadjet-studio-text);
+  outline: none;
+}
+
+/* Day card (SPEC §3.2 "Day view"): the generated day under the centre. */
+.wadjet-studio-daycard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--wadjet-studio-text-dim);
+  border-style: solid;
+}
+.wadjet-studio-daycard-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wadjet-studio-daycard-date {
+  font-family: var(--wadjet-studio-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-daycard-pin {
+  color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-daycard-headline {
+  font-size: 13px;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-daycard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+}
+.wadjet-studio-daycard-cell-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-daycard-cell-value {
+  font-family: var(--wadjet-studio-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-daycard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wadjet-studio-daycard-note {
+  font-size: 11px;
+  color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-daycard-empty {
+  font-size: 11px;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-daycard-cell.is-hidden,
+.wadjet-studio-daycard-empty.is-hidden,
+.wadjet-studio-daycard-headline.is-hidden,
+.wadjet-studio-daycard-note.is-hidden,
+.wadjet-studio-daycard-pin.is-hidden {
+  display: none;
+}
+
+
+/* ── Device lanes (SPEC §4): one row per zone device with a time predicate ── */
+
+/* The manager registers and retires the per-device rows; it draws nothing. */
+.wadjet-studio-device-rows-manager {
+  display: none;
+}
+
+/* The label column opens the device window (SPEC law 2) */
+.wadjet-studio-device-row-label {
+  cursor: pointer;
+}
+.wadjet-studio-device-row-label:hover,
+.wadjet-studio-device-row-label:focus-visible {
+  color: var(--wadjet-studio-text);
+}
+
+/* A read-only lane says so with the cursor rather than with chrome */
+.wadjet-studio-device-lane[data-editable="false"] {
+  cursor: default;
+}
+
+/* A device's moon pulses are the row's whole signal, so they read a touch
+   wider than the 2 px the shared span rule gives a pulse */
+.wadjet-studio-device-lane .wadjet-studio-span[data-kind="pulse"] {
+  width: 3px;
+}
+
+/* A rolled run sits INSIDE its dashed spell window, so it draws over it */
+.wadjet-studio-device-lane .wadjet-studio-span[data-kind="run"] {
+  z-index: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Atlas window (SPEC §3.4 "Atlas · STATION") — bead wadjet-9f9.30
+   Two panes behind one Segmented: the station list and record, and the
+   geography map. Only the active pane is in the layout.
+   --------------------------------------------------------------------------- */
+.wadjet-studio-atlas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 320px;
+  max-width: 340px;
+}
+.wadjet-studio-atlas-moderow {
+  display: flex;
+  justify-content: center;
+}
+.wadjet-studio-atlas-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wadjet-studio-atlas-pane.is-hidden {
+  display: none;
+}
+
+/* Station mode */
+.wadjet-studio-atlas-search {
+  width: 100%;
+  padding: 3px 6px;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+  color: var(--wadjet-studio-text);
+  font-size: 11.5px;
+}
+.wadjet-studio-atlas-search:focus-visible {
+  border-color: var(--wadjet-studio-border-bright);
+  outline: none;
+}
+.wadjet-studio-atlas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-atlas-station {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.wadjet-studio-atlas-station:hover,
+.wadjet-studio-atlas-station:focus-visible {
+  border-color: var(--wadjet-studio-border-bright);
+  outline: none;
+}
+.wadjet-studio-atlas-station.is-selected {
+  background: var(--wadjet-studio-panel);
+}
+.wadjet-studio-atlas-stationname {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text);
+  font-size: 11.5px;
+}
+.wadjet-studio-atlas-stationkoppen {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-gold);
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+}
+.wadjet-studio-atlas-stationcharacter {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wadjet-studio-text-dim);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wadjet-studio-atlas-empty {
+  padding: 6px;
+  color: var(--wadjet-studio-text-dim);
+  font-size: 11.5px;
+}
+
+/* The record card: the source behind the numbers (SPEC law 4) */
+.wadjet-studio-atlas-card,
+.wadjet-studio-atlas-match {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-atlas-cardname,
+.wadjet-studio-atlas-matchname {
+  color: var(--wadjet-studio-text);
+  font-size: 12px;
+}
+.wadjet-studio-atlas-cardcharacter,
+.wadjet-studio-atlas-matchtext {
+  color: var(--wadjet-studio-text-dim);
+  font-size: 10.5px;
+}
+.wadjet-studio-atlas-matchdistance {
+  color: var(--wadjet-studio-text-dim);
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.wadjet-studio-atlas-cardrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.wadjet-studio-atlas-cardlabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--wadjet-studio-text-dim);
+  font-size: 10.5px;
+}
+.wadjet-studio-atlas-cardvalue {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text);
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.wadjet-studio-atlas-spark,
+.wadjet-studio-atlas-map {
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+/* The zone dot is dragged in both axes: ↕ latitude, ↔ terrain */
+.wadjet-studio-atlas-map .wadjet-studio-chart-point {
+  cursor: move;
+}
+
+/* Geography mode */
+.wadjet-studio-atlas-knobs {
+  display: flex;
+  justify-content: space-around;
+  gap: 8px;
+}
+.wadjet-studio-atlas-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wadjet-studio-atlas-rowlabel {
+  color: var(--wadjet-studio-text-dim);
+  font-size: 11.5px;
+}
+
+/* `Re-base zone → X` and `Match by geography → X` */
+.wadjet-studio-atlas-action {
+  padding: 4px 8px;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+  color: var(--wadjet-studio-text);
+  font-size: 11.5px;
+  text-align: center;
+  cursor: pointer;
+}
+.wadjet-studio-atlas-action:hover,
+.wadjet-studio-atlas-action:focus-visible {
+  border-color: var(--wadjet-studio-accent);
+  outline: none;
+}
+.wadjet-studio-atlas-action.is-disabled {
+  color: var(--wadjet-studio-text-dim);
+  cursor: default;
+  opacity: 0.5;
+}
+
+
+/* ── Studio windows (floating panels, SPEC §3.4, and their popovers) ── */
+/* Moon CYCLE window (SPEC 3.4 "Sable · CYCLE") */
+.wadjet-studio-cycle {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 420px;
+}
+.wadjet-studio-cycle-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.wadjet-studio-cycle-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.wadjet-studio-cycle-disc {
+  flex: 0 0 auto;
+  width: 240px;
+  height: 240px;
+}
+.wadjet-studio-cycle-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.wadjet-studio-cycle-face {
+  fill: var(--wadjet-studio-bg);
+  stroke: var(--wadjet-studio-border-bright);
+  stroke-width: 1;
+}
+.wadjet-studio-cycle-arc {
+  stroke: none;
+}
+.wadjet-studio-cycle-arc:hover {
+  fill-opacity: 0.62;
+}
+.wadjet-studio-cycle-spoke {
+  stroke: var(--wadjet-studio-border-bright);
+  stroke-width: 1;
+}
+.wadjet-studio-cycle-handle {
+  fill: var(--wadjet-studio-moon);
+  stroke: var(--wadjet-studio-bg);
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.wadjet-studio-cycle-handle:hover {
+  fill: var(--wadjet-studio-accent);
+}
+.wadjet-studio-cycle-label {
+  font-size: 10.5px;
+  fill: var(--wadjet-studio-text-dim);
+  cursor: text;
+  user-select: none;
+}
+.wadjet-studio-cycle-label:hover {
+  fill: var(--wadjet-studio-text);
+}
+.wadjet-studio-cycle-side {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.wadjet-studio-cycle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.wadjet-studio-cycle-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.wadjet-studio-cycle-row:hover {
+  background: var(--wadjet-studio-panel);
+}
+.wadjet-studio-cycle-rowname {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--wadjet-studio-text);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wadjet-studio-cycle-rowat {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text-mute);
+  font-family: var(--wadjet-studio-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.wadjet-studio-cycle-rename {
+  width: 100%;
+  height: 18px;
+  padding: 0 3px;
+  color: var(--wadjet-studio-text);
+  font-size: 11.5px;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+}
+.wadjet-studio-cycle-x {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  color: var(--wadjet-studio-text-mute);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wadjet-studio-cycle-x:hover {
+  color: var(--wadjet-studio-error-text);
+}
+.wadjet-studio-cycle-x.is-disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.wadjet-studio-cycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wadjet-studio-cycle-btn {
+  padding: 3px 7px;
+  color: var(--wadjet-studio-text-dim);
+  font-size: 11px;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.wadjet-studio-cycle-btn:hover {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-cycle-btn.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.wadjet-studio-cycle-btn.is-hidden {
+  display: none;
+}
+.wadjet-studio-cycle-knobs {
+  display: flex;
+  gap: 10px;
+}
+.wadjet-studio-cycle-editin {
+  color: var(--wadjet-studio-text-mute);
+  font-size: 11px;
+}
+.wadjet-studio-cycle-editin.is-hidden {
+  display: none;
+}
+
+/* The one world-edit confirm (ui/world-confirm-modal.ts) — eras, seasons, moons. */
+.wadjet-studio-world-confirm {
+  margin: 0 0 12px;
+}
+
+
+/* Seasons · CALENDAR window (SPEC §3.4 "Seasons · CALENDAR") */
+.wadjet-studio-seasons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 420px;
+}
+.wadjet-studio-seasons-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wadjet-studio-seasons-bar {
+  position: relative;
+  height: 40px;
+  margin-top: 14px;
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 4px;
+  overflow: hidden;
+  touch-action: none;
+}
+.wadjet-studio-seasons-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-seasons-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wadjet-studio-seasons-left);
+  width: var(--wadjet-studio-seasons-width);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 4px;
+  background: var(--wadjet-studio-seasons-tint);
+  border-right: 1px solid var(--wadjet-studio-border);
+  font-size: 11px;
+  color: var(--wadjet-studio-text);
+  overflow: hidden;
+}
+.wadjet-studio-seasons-segment-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.wadjet-studio-seasons-segment-label.is-hidden {
+  display: none;
+}
+.wadjet-studio-seasons-segment-remove {
+  flex: 0 0 auto;
+  cursor: pointer;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-seasons-segment-remove.is-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.wadjet-studio-seasons-segment-input {
+  width: 70%;
+  background: var(--wadjet-studio-bg);
+  color: var(--wadjet-studio-text);
+  border: 1px solid var(--wadjet-studio-accent);
+  border-radius: 2px;
+  font-size: 11px;
+  padding: 1px 3px;
+}
+.wadjet-studio-seasons-flag {
+  position: absolute;
+  top: -14px;
+  left: var(--wadjet-studio-seasons-left);
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--wadjet-studio-gold);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.wadjet-studio-seasons-flag.is-disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.wadjet-studio-seasons-days {
+  position: relative;
+  height: 14px;
+}
+.wadjet-studio-seasons-day {
+  position: absolute;
+  left: var(--wadjet-studio-seasons-left);
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--wadjet-studio-text-mute);
+  white-space: nowrap;
+}
+.wadjet-studio-seasons-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.wadjet-studio-seasons-split {
+  padding: 3px 8px;
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--wadjet-studio-text-dim);
+  cursor: pointer;
+}
+.wadjet-studio-seasons-split:hover,
+.wadjet-studio-seasons-split:focus-visible {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-seasons-split.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.wadjet-studio-seasons-split.is-hidden {
+  display: none;
+}
+.wadjet-studio-seasons-editlink {
+  font-size: 11px;
+  color: var(--wadjet-studio-accent);
+  text-decoration: underline;
+}
+.wadjet-studio-seasons-editlink.is-hidden {
+  display: none;
+}
+
+
+/* Regimes · STATES window (SPEC §3.4, §6) */
+.wadjet-studio-regimes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 360px;
+  max-width: 460px;
+}
+.wadjet-studio-regimes-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wadjet-studio-regimes-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.wadjet-studio-regimes-row.is-selected {
+  background: var(--wadjet-studio-bg-alt);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-regimes-swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--wadjet-studio-regimes-colour, var(--wadjet-studio-text-mute));
+}
+.wadjet-studio-regimes-name {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 80px;
+  padding: 2px 3px;
+  font-size: 11.5px;
+  color: var(--wadjet-studio-text);
+  cursor: text;
+  border-radius: 2px;
+}
+.wadjet-studio-regimes-name:hover {
+  background: var(--wadjet-studio-bg);
+}
+.wadjet-studio-regimes-name.is-editing .wadjet-studio-regimes-name-text {
+  visibility: hidden;
+}
+.wadjet-studio-regimes-name-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0 3px;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--wadjet-studio-text);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-accent);
+  border-radius: 2px;
+}
+.wadjet-studio-regimes-knobs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  align-items: flex-start;
+}
+.wadjet-studio-regimes-remove,
+.wadjet-studio-regimes-op-remove {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--wadjet-studio-text-dim);
+  cursor: pointer;
+}
+.wadjet-studio-regimes-remove:hover,
+.wadjet-studio-regimes-op-remove:hover {
+  color: var(--wadjet-studio-error-text);
+}
+.wadjet-studio-regimes-addrow {
+  display: flex;
+}
+.wadjet-studio-regimes-add,
+.wadjet-studio-regimes-op-add {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--wadjet-studio-text-dim);
+  cursor: pointer;
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-regimes-add:hover,
+.wadjet-studio-regimes-op-add:hover {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-regimes-label {
+  padding-top: 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-regimes-label-who {
+  color: var(--wadjet-studio-text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.wadjet-studio-regimes-share {
+  display: flex;
+  gap: 1px;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 2px;
+}
+.wadjet-studio-regimes-share-seg {
+  flex: 0 0 var(--wadjet-studio-regimes-share, 0%);
+  width: var(--wadjet-studio-regimes-share, 0%);
+  background: var(--wadjet-studio-regimes-colour, var(--wadjet-studio-text-mute));
+}
+.wadjet-studio-regimes-ops {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wadjet-studio-regimes-op {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wadjet-studio-regimes-op-static {
+  flex: 1 1 auto;
+  font-family: var(--wadjet-studio-mono);
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-regimes-empty {
+  font-size: 11px;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-regimes-rows.is-hidden,
+.wadjet-studio-regimes-addrow.is-hidden,
+.wadjet-studio-regimes-empty.is-hidden {
+  display: none;
+}
+.wadjet-studio-regimes-add.is-disabled,
+.wadjet-studio-regimes-op-add.is-disabled,
+.wadjet-studio-regimes-remove.is-disabled,
+.wadjet-studio-regimes-op-remove.is-disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+
+/* Era window (SPEC §3.4 "Era") */
+.wadjet-studio-era {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 380px;
+}
+.wadjet-studio-era-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.wadjet-studio-era-name {
+  flex: 1 1 auto;
+  min-width: 80px;
+  height: 22px;
+  padding: 0 5px;
+  color: var(--wadjet-studio-text);
+  font-size: 12.5px;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+}
+.wadjet-studio-era-btn {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  color: var(--wadjet-studio-text-dim);
+  font-size: 11px;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.wadjet-studio-era-btn:hover {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-era-btn.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.wadjet-studio-era-span {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.wadjet-studio-era-span-label {
+  color: var(--wadjet-studio-text-mute);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+.wadjet-studio-era-span-dash {
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-era-span-from,
+.wadjet-studio-era-span-to {
+  width: 72px;
+  height: 22px;
+  padding: 0 5px;
+  color: var(--wadjet-studio-text);
+  font-variant-numeric: tabular-nums;
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+}
+.wadjet-studio-era-apply-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.wadjet-studio-era-apply-label {
+  color: var(--wadjet-studio-text-mute);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+.wadjet-studio-era-ops {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wadjet-studio-era-op {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px;
+  background: var(--wadjet-studio-panel);
+  border-radius: 3px;
+}
+.wadjet-studio-era-op-x {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  margin-left: auto;
+  color: var(--wadjet-studio-text-mute);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.wadjet-studio-era-op-x:hover {
+  color: var(--wadjet-studio-error-text);
+}
+.wadjet-studio-era-note {
+  color: var(--wadjet-studio-text-mute);
+  font-size: 11px;
+  font-style: italic;
+}
+.wadjet-studio-era-note.is-hidden {
+  display: none;
+}
+
+
+/* Device window (SPEC 3.4) */
+.wadjet-studio-device {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 268px;
+  max-width: 340px;
+}
+.wadjet-studio-device-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.wadjet-studio-device-name {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 20px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--wadjet-studio-text);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.wadjet-studio-device-name:hover {
+  border-color: var(--wadjet-studio-border);
+}
+.wadjet-studio-device-name:focus {
+  border-color: var(--wadjet-studio-border-bright);
+  outline: none;
+}
+.wadjet-studio-device-kind {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-device-preset {
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--wadjet-studio-text-dim);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-device-preset:hover,
+.wadjet-studio-device-preset:focus-visible {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-device-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-device-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.wadjet-studio-device-head-label {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-device-head-summary {
+  flex: 1 1 auto;
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wadjet-studio-device-body,
+.wadjet-studio-device-when {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wadjet-studio-device-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wadjet-studio-device-chips .wadjet-studio-chip.is-selected {
+  border-color: var(--wadjet-studio-chip-color);
+}
+.wadjet-studio-device-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+.wadjet-studio-device-op,
+.wadjet-studio-device-gate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wadjet-studio-device-op-raw,
+.wadjet-studio-device-raw {
+  font-family: var(--wadjet-studio-mono);
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wadjet-studio-device-add,
+.wadjet-studio-device-add-mod,
+.wadjet-studio-device-remove,
+.wadjet-studio-device-drop {
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--wadjet-studio-text-mute);
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.wadjet-studio-device-add:hover,
+.wadjet-studio-device-add:focus-visible,
+.wadjet-studio-device-add-mod:hover,
+.wadjet-studio-device-add-mod:focus-visible,
+.wadjet-studio-device-remove:hover,
+.wadjet-studio-device-remove:focus-visible {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-device-add-mod {
+  align-self: flex-start;
+  border-color: var(--wadjet-studio-border);
+}
+.wadjet-studio-device-lane {
+  width: 100%;
+  height: 18px;
+}
+.wadjet-studio-device-lane-svg {
+  display: block;
+  width: 100%;
+  height: 18px;
+}
+.wadjet-studio-device-band[data-band="0"] {
+  fill: var(--wadjet-studio-bg);
+}
+.wadjet-studio-device-band[data-band="1"] {
+  fill: var(--wadjet-studio-bg-alt);
+}
+.wadjet-studio-device-clip {
+  fill: var(--wadjet-studio-gold);
+  fill-opacity: 0.45;
+  stroke: var(--wadjet-studio-gold);
+  stroke-width: 1;
+}
+.wadjet-studio-device-envelope {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wadjet-studio-device-envelope-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wadjet-studio-device-envelope-label {
+  flex: 1 1 auto;
+  font-family: var(--wadjet-studio-mono);
+  font-size: 10.5px;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-device-tag-input {
+  height: 20px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--wadjet-studio-text);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-device-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-device-drop {
+  border-color: var(--wadjet-studio-border);
+}
+.wadjet-studio-device-drop:hover,
+.wadjet-studio-device-drop:focus-visible {
+  color: var(--wadjet-studio-error-text);
+  border-color: var(--wadjet-studio-error);
+}
+.wadjet-studio-device-gone {
+  font-size: 11px;
+  color: var(--wadjet-studio-text-mute);
+}
+
+
+/* ── Forcings · ZONE window and the FRC · warmth row (SPEC §3.2, §3.4) ────── */
+
+/* The panel: two stacks, TEMPERATURE (lane · trim · total) then PRECIPITATION */
+.wadjet-studio-forcings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 300px;
+}
+.wadjet-studio-forcings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wadjet-studio-forcings-head {
+  color: var(--wadjet-studio-text-mute);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wadjet-studio-forcings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wadjet-studio-forcings-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  background: var(--wadjet-studio-panel);
+  border-radius: 3px;
+}
+.wadjet-studio-forcings-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--wadjet-studio-text-dim);
+  font-size: 11.5px;
+}
+.wadjet-studio-forcings-value {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text);
+  font-family: var(--font-monospace);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* The knob rows centre their dial rather than stretching it across the panel */
+.wadjet-studio-forcings-knobrow {
+  justify-content: center;
+  background: none;
+}
+/* `∿ lane · FRC · warmth` is a link to the playlist row, not an editor */
+.wadjet-studio-forcings-lane {
+  cursor: pointer;
+}
+.wadjet-studio-forcings-lane:hover,
+.wadjet-studio-forcings-lane:focus-visible {
+  border: none;
+  outline: 1px solid var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-forcings-lane:hover .wadjet-studio-forcings-label,
+.wadjet-studio-forcings-lane:focus-visible .wadjet-studio-forcings-label {
+  color: var(--wadjet-studio-text);
+}
+/* `= total into TEMP` is derived: it reads warmer than the rows above it */
+.wadjet-studio-forcings-total {
+  background: none;
+  border-top: 1px solid var(--wadjet-studio-border);
+  border-radius: 0;
+}
+.wadjet-studio-forcings-total .wadjet-studio-forcings-value {
+  color: var(--wadjet-studio-temp);
+}
+
+/* The playlist row: its label opens the window, its lane is drawn on */
+.wadjet-studio-automation-row .wadjet-studio-row-label {
+  cursor: pointer;
+}
+.wadjet-studio-automation-row .wadjet-studio-row-label:hover,
+.wadjet-studio-automation-row .wadjet-studio-row-label:focus-visible {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-automation-lane {
+  --wadjet-studio-automation-h: 44px;
+  height: var(--wadjet-studio-automation-h);
+  background: var(--wadjet-studio-bg);
+  cursor: crosshair;
+}
+/* A point is dragged in both axes here, unlike the curve editors' keyframes */
+.wadjet-studio-automation-lane .wadjet-studio-chart-point {
+  cursor: move;
+}
+
+
+/* ── Channel editor window (SPEC §3.4; bead wadjet-9f9.31) ─────────────── */
+.wadjet-studio-channel-win {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 380px;
+  max-width: 420px;
+}
+.wadjet-studio-channel-win-chart {
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 3px;
+}
+.wadjet-studio-channel-win-scopes {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wadjet-studio-channel-win-stage {
+  color: var(--wadjet-studio-text-mute);
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+}
+.wadjet-studio-channel-win-knobs {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 64px;
+}
+.wadjet-studio-channel-win-writers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--wadjet-studio-border);
+  padding-top: 6px;
+}
+.wadjet-studio-channel-win-writers-head {
+  color: var(--wadjet-studio-text-mute);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wadjet-studio-channel-win-writer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+/* One row per source, in signal order — the whole row is the click target */
+.wadjet-studio-channel-win-writer {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 6px;
+  background: var(--wadjet-studio-panel);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.wadjet-studio-channel-win-writer:hover,
+.wadjet-studio-channel-win-writer:focus-visible {
+  outline: 1px solid var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-channel-win-writer-kind {
+  flex: 0 0 auto;
+  min-width: 58px;
+  color: var(--wadjet-studio-text-mute);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.wadjet-studio-channel-win-writer-label {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text);
+  font-size: 11.5px;
+}
+.wadjet-studio-channel-win-writer-ops {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--wadjet-studio-text-dim);
+  font-family: var(--font-monospace);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+/* Insert picker (wadjet-9f9.23 §3.6): the popover a chain's ＋ opens. Not a
+   floating window (windows.ts) — a transient popover appended straight to
+   shell.root, positioned under its anchor button. */
+.wadjet-studio-insert {
+  position: absolute;
+  left: var(--wadjet-studio-insert-x, 0);
+  top: var(--wadjet-studio-insert-y, 0);
+  z-index: 900;
+  min-width: 220px;
+  max-width: 300px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--wadjet-studio-panel);
+  border: 1px solid #565b61;
+  border-radius: 3px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  outline: none;
+}
+.wadjet-studio-insert-title {
+  padding: 3px 5px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-insert-section {
+  padding: 6px 5px 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-insert-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.wadjet-studio-insert-row:hover,
+.wadjet-studio-insert-row:focus-visible {
+  background: var(--wadjet-studio-bg-alt);
+  outline: none;
+}
+.wadjet-studio-insert-row-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-insert-row-hint {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 10px;
+  color: var(--wadjet-studio-text-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wadjet-studio-insert-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--wadjet-studio-gold);
+}
+
+
+/* Channel parity (wadjet-9f9.32): the series picker, the wind rose and the
+   bearing reset. PRECIP and SKY draw a pair of lines and edit one of them;
+   WIND carries a second, read-only plot under the speed curve. */
+.wadjet-studio-channel-win-series {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wadjet-studio-channel-win-series.is-hidden {
+  display: none;
+}
+.wadjet-studio-channel-win-rose {
+  display: flex;
+  justify-content: center;
+}
+.wadjet-studio-channel-win-rose.is-hidden {
+  display: none;
+}
+.wadjet-studio-channel-win-rose .wadjet-studio-chart-sector {
+  fill-opacity: 0.55;
+  stroke: var(--wadjet-studio-border-bright);
+  stroke-width: 0.5;
+}
+/* Empty unless a control needs to sit below the knobs — the bearing reset does */
+.wadjet-studio-channel-win-extras {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+.wadjet-studio-channel-win-extras:empty {
+  display: none;
+}
+
+/* ── Studio states (focus, touch, motion, forced-colors) ── */
+/* Keyboard focus rings (wadjet-9f9.40 §3.8): editable lane spans get no
+   default browser outline, but a keyboard focus draws one in the palette
+   accent so ←/→/Delete/Enter always have something to land on. */
+.wadjet-studio-span.is-editable:focus-visible {
+  outline: 2px solid var(--wadjet-studio-accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--wadjet-studio-bg);
+}
+
+
+/* Touch and tablet hit sizes (bead wadjet-9f9.42, SPEC §8): once a finger or
+   pen pointer has been seen anywhere in the studio, `ui/pointer.ts`'s
+   `noteTouchPointer` adds `.is-touch` to the studio root, and every fine
+   pointer target below grows to a forgiving size. The lane edge's OWN hit
+   test already reads the pointer type at pointerdown (`edgePxFor`, 4 → 10 px)
+   independently of this class — `@media (pointer: coarse)` above draws that
+   wider edge for a real touchscreen; `.is-touch` repeats it so a pointer type
+   the media query misses (e.g. a stylus reporting "fine") still gets it. */
+.wadjet-studio.is-touch .wadjet-studio-span-edge {
+  width: 10px;
+}
+.wadjet-studio.is-touch .wadjet-studio-knob-dial {
+  width: 44px;
+  height: 44px;
+}
+.wadjet-studio.is-touch .wadjet-studio-chart-point {
+  r: 12px;
+}
+
+
+/* Focus rings (wadjet-9f9.43): several controls swap a border or text colour
+   on :focus-visible but never draw a replacement ring, and a few components
+   (the LED power switch, the segmented radio, the knob dial) had none at
+   all. One ring, uniformly, in the accent at 2 px — added last so it always
+   wins the cascade over an earlier `outline: none`, without touching any of
+   the colour/border swaps those rules already make. */
+.wadjet-studio-header-zonebtn:focus-visible,
+.wadjet-studio-header-btn:focus-visible,
+.wadjet-studio-knob-dial:focus-visible,
+.wadjet-studio-led[role="button"]:focus-visible,
+.wadjet-studio-chip.is-clickable:focus-visible,
+.wadjet-studio-segment:focus-visible,
+.wadjet-studio-rack-name:focus-visible,
+.wadjet-studio-json-copy:focus-visible,
+.wadjet-studio-mixer-add:focus-visible,
+.wadjet-studio-strip-name:focus-visible,
+.wadjet-studio-strip-toggle:focus-visible,
+.wadjet-studio-ruler-label-btn:focus-visible,
+.wadjet-studio-row-label.is-clickable:focus-visible,
+.wadjet-studio-device-row-label:focus-visible,
+.wadjet-studio-device-name:focus-visible,
+.wadjet-studio-atlas-search:focus-visible,
+.wadjet-studio-atlas-station:focus-visible,
+.wadjet-studio-atlas-action:focus-visible,
+.wadjet-studio-seasons-split:focus-visible,
+.wadjet-studio-device-preset:focus-visible,
+.wadjet-studio-device-add:focus-visible,
+.wadjet-studio-device-add-mod:focus-visible,
+.wadjet-studio-device-remove:focus-visible,
+.wadjet-studio-device-drop:focus-visible,
+.wadjet-studio-forcings-lane:focus-visible,
+.wadjet-studio-automation-row .wadjet-studio-row-label:focus-visible,
+.wadjet-studio-channel-win-writer:focus-visible,
+.wadjet-studio-insert-row:focus-visible {
+  outline: 2px solid var(--wadjet-studio-accent);
+  outline-offset: 2px;
+}
+
+/* High-contrast / forced-colors mode: the accent outline above is the only
+   thing standing in for every custom border and box-shadow the studio draws
+   with its own palette, so it must not disappear. `outline` already survives
+   forced-colors unless something zeroes it out for a hover/leave state —
+   nothing here does, but pin it so a later crew can't regress it silently. */
+@media (forced-colors: active) {
+  .wadjet-studio-header-zonebtn:focus-visible,
+  .wadjet-studio-header-btn:focus-visible,
+  .wadjet-studio-knob-dial:focus-visible,
+  .wadjet-studio-led[role="button"]:focus-visible,
+  .wadjet-studio-chip.is-clickable:focus-visible,
+  .wadjet-studio-segment:focus-visible,
+  .wadjet-studio-rack-name:focus-visible,
+  .wadjet-studio-json-copy:focus-visible,
+  .wadjet-studio-mixer-add:focus-visible,
+  .wadjet-studio-strip-name:focus-visible,
+  .wadjet-studio-strip-toggle:focus-visible,
+  .wadjet-studio-ruler-label-btn:focus-visible,
+  .wadjet-studio-row-label.is-clickable:focus-visible,
+  .wadjet-studio-device-row-label:focus-visible,
+  .wadjet-studio-device-name:focus-visible,
+  .wadjet-studio-atlas-search:focus-visible,
+  .wadjet-studio-atlas-station:focus-visible,
+  .wadjet-studio-atlas-action:focus-visible,
+  .wadjet-studio-seasons-split:focus-visible,
+  .wadjet-studio-device-preset:focus-visible,
+  .wadjet-studio-device-add:focus-visible,
+  .wadjet-studio-device-add-mod:focus-visible,
+  .wadjet-studio-device-remove:focus-visible,
+  .wadjet-studio-device-drop:focus-visible,
+  .wadjet-studio-forcings-lane:focus-visible,
+  .wadjet-studio-automation-row .wadjet-studio-row-label:focus-visible,
+  .wadjet-studio-channel-win-writer:focus-visible,
+  .wadjet-studio-insert-row:focus-visible,
+  .wadjet-studio-span.is-editable:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}
+
+/* Reduced motion (wadjet-9f9.43): the only transitions the studio draws are
+   the knob dial's hover/focus lift and a lane span's focus box-shadow —
+   never the per-drag-frame indicator rotation, arc redraw or span geometry,
+   which are attribute/custom-property driven and repainted every pointermove
+   regardless, so there is nothing there to animate. Both are cut to instant
+   here, satisfied by removing the `transition` outright. */
+@media (prefers-reduced-motion: reduce) {
+  .wadjet-studio-knob-dial,
+  .wadjet-studio-span.is-editable {
+    transition: none;
+  }
+}

@@ -6,7 +6,7 @@
  */
 import type { Override } from "../core/report";
 import type { DescriptorBands } from "../core/report";
-import type { Era, ZoneProfile } from "../core/types";
+import type { Era, ModifierOp, Predicate, SpellSpec, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 
 export interface MoonConfig {
@@ -14,6 +14,19 @@ export interface MoonConfig {
   cycleDays: number;
   /** phase at day 0 of the world, [0,1) */
   phaseAtEpoch: number;
+  /** named phase boundaries for display/UI (PLAN §2.2): ascending `at`, unique names, at ∈ [0,1). Not part of configHash — display metadata only. */
+  phases?: Array<{ name: string; at: number }>;
+}
+
+/** A studio device preset: a modifier shape a rack row can be seeded from. */
+export interface DevicePreset {
+  name: string;
+  kind: "trim" | "moon" | "spell" | "tag" | "chance";
+  when?: Predicate;
+  spell?: SpellSpec;
+  apply: ModifierOp[];
+  /** mirrors core ModGate (bead wadjet-9f9.2) */
+  mods?: Array<{ source: string; amount: number }>;
 }
 
 export interface InternalCalendarConfig {
@@ -41,6 +54,8 @@ export interface WadjetSettings {
   overrides: Override[];
   bands?: DescriptorBands;
   units: "metric" | "imperial";
+  /** studio device presets (rack row seeds), PLAN §2 */
+  devicePresets?: DevicePreset[];
 }
 
 export const DEFAULT_SETTINGS: WadjetSettings = {
@@ -59,6 +74,7 @@ export const DEFAULT_SETTINGS: WadjetSettings = {
   zones: [],
   overrides: [],
   units: "metric",
+  devicePresets: [],
 };
 
 /** A seed that is random once and then fixed forever for this world. */
@@ -78,6 +94,7 @@ export function migrateSettings(raw: unknown): WadjetSettings {
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],
+    devicePresets: Array.isArray(r.devicePresets) ? r.devicePresets : [],
   };
   if (!s.worldSeed) s.worldSeed = freshSeed();
   if (!s.generatorVersion) s.generatorVersion = GENERATOR_VERSION;

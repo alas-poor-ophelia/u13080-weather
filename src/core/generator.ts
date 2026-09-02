@@ -199,7 +199,8 @@ export class Generator {
 
     // --- parameters for the day ---
     let params = evaluateDayParams(cfg.climate, t);
-    const ops: ModifierOp[] = [...(regime.apply ?? [])];
+    // regime ops bypass the modifier engine, so their per-op power switch is honoured here
+    const ops: ModifierOp[] = (regime.apply ?? []).filter((o) => o.enabled !== false);
     let tags: string[] = [];
     if (cfg.dailyModifiers) {
       const dm = cfg.dailyModifiers(d, regime.id);

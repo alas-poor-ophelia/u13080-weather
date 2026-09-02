@@ -113,6 +113,36 @@ describe("resolveProfile / profileHash", () => {
     expect(profileHash(zone({ climate: { ...fjord.climate, precipitation: { ...fjord.climate.precipitation, freezingPoint: 1 } } }))).not.toBe(a);
     expect(a).toMatch(/^wh1:[0-9a-f]{16}$/);
   });
+
+  test("hash of a fixture without optional fields is pinned (schema additions must not move it)", () => {
+    // the preset-derived zone carries no `enabled` anywhere, so its canonical JSON — and this hash — is frozen
+    expect(profileHash(zone())).toBe("wh1:5806b0fe11328ba9");
+  });
+
+  test("enabled: false switches a climate-stage modifier, and an op inside one, off", () => {
+    const colder = { param: "temperature.mean", op: "offset" as const, value: -5 };
+    const base = evalCurve(fjord.climate.temperature.mean, 0.5);
+    const off = resolveProfile(zone({ modifiers: [{ id: "colder", stage: "climate", enabled: false, apply: [colder] }] }));
+    expect(evalCurve(off.climate.temperature.mean, 0.5)).toBe(base);
+    expect(off.climate).toBe(fjord.climate); // no ops at all: the stored curves are passed through untouched
+    const partial = resolveProfile(
+      zone({ modifiers: [{ id: "colder", stage: "climate", apply: [{ ...colder, enabled: false }, { param: "wind.speed", op: "offset", value: 3 }] }] }),
+    );
+    expect(evalCurve(partial.climate.temperature.mean, 0.5)).toBe(base);
+    expect(evalCurve(partial.climate.wind.speed, 0.5)).toBeCloseTo(evalCurve(fjord.climate.wind.speed, 0.5) + 3, 9);
+    // absent is enabled, and an explicit true is the same thing
+    const on = resolveProfile(zone({ modifiers: [{ id: "colder", stage: "climate", enabled: true, apply: [colder] }] }));
+    expect(evalCurve(on.climate.temperature.mean, 0.5)).toBeCloseTo(base - 5, 9);
+  });
+
+  test("enabled must be a boolean on a modifier and on an op", () => {
+    const errs = (z: ZoneProfile) => validateProfile(z).filter((i) => i.level === "error").map((i) => `${i.path}: ${i.message}`);
+    expect(errs(zone({ modifiers: [{ id: "m", enabled: "yes" as unknown as boolean, apply: [] }] }))).toEqual(["modifiers[0].enabled: enabled must be true or false"]);
+    expect(errs(zone({ modifiers: [{ id: "m", apply: [{ param: "wind.speed", op: "offset", value: 1, enabled: "yes" as unknown as boolean }] }] }))).toEqual([
+      "modifiers[0].apply[0].enabled: enabled must be true or false",
+    ]);
+    expect(errs(zone({ modifiers: [{ id: "m", enabled: false, apply: [{ param: "wind.speed", op: "offset", value: 1, enabled: true }] }] }))).toEqual([]);
+  });
 });
 
 describe("createGenerator (end to end)", () => {
@@ -162,5 +192,174 @@ describe("createGenerator (end to end)", () => {
     const meanA = chilled.reduce((s, r) => s + r.tempMean, 0) / chilled.length;
     const meanB = chilled.reduce((s, r) => s + b[r.dayOrdinal]!.tempMean, 0) / chilled.length;
     expect(meanA - meanB).toBeCloseTo(-15, 0);
+  });
+});
+
+describe("validateProfile: mod-matrix gates and onset envelopes", () => {
+  const errs = (z: ZoneProfile) =>
+    validateProfile(z)
+      .filter((i) => i.level === "error")
+      .map((i) => `${i.path}: ${i.message}`);
+  const warns = (z: ZoneProfile) =>
+    validateProfile(z)
+      .filter((i) => i.level === "warning")
+      .map((i) => `${i.path}: ${i.message}`);
+
+  test("well-formed gates and envelopes validate clean", () => {
+    const z = zone({
+      modifiers: [
+        {
+          id: "stormtide",
+          when: { moon: { name: "Sable", phase: [0.88, 1] } },
+          mods: [{ source: "season:Harvest", amount: 0.5 }],
+          apply: [{ param: "precipitation.pwd", op: "scale", value: 1.5, envelope: [[0, 0], [0.5, 1]] }],
+        },
+        { id: "empty-gates", mods: [], apply: [] },
+      ],
+    });
+    expect(validateProfile(z)).toEqual([]);
+  });
+
+  test("gates: climate stage, non-array, bad source and bad amount each report once", () => {
+    expect(errs(zone({ modifiers: [{ id: "m", stage: "climate", mods: [{ source: "season:Harvest", amount: 1 }], apply: [] }] }))).toEqual([
+      "modifiers[0].mods: gates (mods) are daily-stage only; a climate-stage modifier is unconditional",
+    ]);
+    expect(errs(zone({ modifiers: [{ id: "m", mods: { source: "x", amount: 1 } as never, apply: [] }] }))).toEqual(["modifiers[0].mods: mods must be an array"]);
+    expect(
+      errs(
+        zone({
+          modifiers: [
+            {
+              id: "m",
+              mods: [
+                { source: "", amount: 1 },
+                { source: "season:Harvest", amount: -1 },
+                { source: 3 as never, amount: Number.POSITIVE_INFINITY },
+                null as never,
+              ],
+              apply: [],
+            },
+          ],
+        }),
+      ),
+    ).toEqual([
+      "modifiers[0].mods[0].source: must be a non-empty string (a tag, never a moon)",
+      "modifiers[0].mods[1].amount: amount must be between 0 and 1 (a gate dims, it never amplifies)",
+      "modifiers[0].mods[2].source: must be a non-empty string (a tag, never a moon)",
+      "modifiers[0].mods[2].amount: amount must be between 0 and 1 (a gate dims, it never amplifies)",
+      "modifiers[0].mods[3]: gate must be an object",
+    ]);
+  });
+
+  test("a gate is a dimmer: amount above 1 is an error, and both ends of [0, 1] are legal", () => {
+    const gates = (mods: Array<Record<string, unknown>>) => zone({ modifiers: [{ id: "m", mods: mods as never, apply: [{ param: "wind.speed", op: "offset", value: 1 }] }] });
+    expect(errs(gates([{ source: "season:Harvest", amount: 1.5 }]))).toEqual(["modifiers[0].mods[0].amount: amount must be between 0 and 1 (a gate dims, it never amplifies)"]);
+    // exactly 0 and exactly 1 are the two ends of the dimmer, not off-by-one rejections
+    expect(validateProfile(gates([{ source: "a", amount: 0 }, { source: "b", amount: 1 }]))).toEqual([]);
+  });
+
+  test("a moon: gate source is an error — a moon is a carrier, not a gate", () => {
+    const z = zone({ modifiers: [{ id: "m", mods: [{ source: "moon:Sable", amount: 0.5 }], apply: [] }] });
+    expect(errs(z)).toEqual(["modifiers[0].mods[0].source: a gate is a tag; a moon is the carrier (use when.moon)"]);
+    // the non-empty check still fires first, and only once
+    expect(errs(zone({ modifiers: [{ id: "m", mods: [{ source: "", amount: 0.5 }], apply: [] }] }))).toEqual(["modifiers[0].mods[0].source: must be a non-empty string (a tag, never a moon)"]);
+  });
+
+  test("an unknown field on a gate warns and is ignored, as on an era", () => {
+    const z = zone({ modifiers: [{ id: "m", mods: [{ source: "season:Harvest", amount: 0.5, amont: 0.25 } as never], apply: [] }] });
+    expect(errs(z)).toEqual([]);
+    expect(warns(z)).toEqual(["modifiers[0].mods[0].amont: unknown field (ignored)"]);
+  });
+
+  test("envelopes: empty, malformed points and climate stage are errors; set/clamp is a warning", async () => {
+    const withEnvelope = (op: Record<string, unknown>, over: Partial<ZoneProfile> = {}) => zone({ modifiers: [{ id: "m", apply: [op as never] }], ...over });
+    expect(errs(withEnvelope({ param: "precipitation.pwd", op: "offset", value: 1, envelope: [] }))).toEqual([
+      "modifiers[0].apply[0].envelope: envelope must be a non-empty array of [phase, strength] points",
+    ]);
+    expect(errs(withEnvelope({ param: "precipitation.pwd", op: "offset", value: 1, envelope: [[1, 1], [-0.1, 1], [0.5, -1], [0.5, Number.NaN], [0.5] as never, "x" as never] }))).toEqual([
+      "modifiers[0].apply[0].envelope[0]: envelope point must be [phase in [0,1), strength in [0,1]]",
+      "modifiers[0].apply[0].envelope[1]: envelope point must be [phase in [0,1), strength in [0,1]]",
+      "modifiers[0].apply[0].envelope[2]: envelope point must be [phase in [0,1), strength in [0,1]]",
+      "modifiers[0].apply[0].envelope[3]: envelope point must be [phase in [0,1), strength in [0,1]]",
+      "modifiers[0].apply[0].envelope[4]: envelope point must be [phase in [0,1), strength in [0,1]]",
+      "modifiers[0].apply[0].envelope[5]: envelope point must be [phase in [0,1), strength in [0,1]]",
+    ]);
+    // a climate-stage op cannot carry one at all
+    expect(errs(zone({ modifiers: [{ id: "m", stage: "climate", apply: [{ param: "temperature.mean", op: "offset", value: 1, envelope: [[0, 1]] }] }] }))).toEqual([
+      "modifiers[0].apply[0].envelope: envelope is a daily-stage onset shape; climate-stage ops cannot carry one",
+    ]);
+    // set/clamp: warning only, and the profile still generates
+    const setZone = withEnvelope({ param: "cloud.dry", op: "set", value: 0.9, envelope: [[0, 1]] });
+    expect(errs(setZone)).toEqual([]);
+    expect(warns(setZone)).toEqual(["modifiers[0].apply[0].envelope: envelope has no effect on set/clamp"]);
+    expect(warns(withEnvelope({ param: "wind.speed", op: "clamp", min: 0, envelope: [[0, 1]] }))).toEqual(["modifiers[0].apply[0].envelope: envelope has no effect on set/clamp"]);
+    // era-timeline ops go through the same daily-stage rules
+    const { validateDailyOps } = await import("../src/core/profile");
+    const issues: Parameters<typeof validateDailyOps>[2] = [];
+    validateDailyOps([{ param: "wind.speed", op: "offset", value: 1, envelope: [[2, 1]] }], "eras[0].apply", issues);
+    expect(issues.map((i) => `${i.path}: ${i.message}`)).toEqual(["eras[0].apply[0].envelope[0]: envelope point must be [phase in [0,1), strength in [0,1]]"]);
+  });
+
+  test("an envelope is a dimmer too: strength above 1 is an error, and both ends of [0, 1] are legal", () => {
+    const withEnvelope = (envelope: Array<[number, number]>) => zone({ modifiers: [{ id: "m", apply: [{ param: "wind.speed", op: "offset", value: 1, envelope }] }] });
+    expect(errs(withEnvelope([[0.5, 2]]))).toEqual(["modifiers[0].apply[0].envelope[0]: envelope point must be [phase in [0,1), strength in [0,1]]"]);
+    expect(validateProfile(withEnvelope([[0, 0], [0.5, 1]]))).toEqual([]);
+  });
+});
+
+describe("gates and envelopes (end to end)", () => {
+  test("a gate at amount 0 gives a day byte-equal to switching the modifier off", () => {
+    const timeOf = (d: number) => ({ ...gregorianTime(d), tags: ["season:Harvest"] });
+    // the anchor guarantees a non-empty op list on both sides, so day-param normalisation runs identically
+    const anchor = { id: "anchor", apply: [{ param: "wind.speed", op: "offset" as const, value: 0 }] };
+    const gated = {
+      id: "gated",
+      mods: [{ source: "season:Harvest", amount: 0 }],
+      apply: [
+        { param: "temperature.mean", op: "offset" as const, value: -8 },
+        { param: "precipitation.pwd", op: "scale" as const, value: 2 },
+      ],
+    };
+    const days = (mods: ZoneProfile["modifiers"]) => createGenerator(zone({ modifiers: mods }), "world", timeOf).generator.range(0, 800);
+    const muted = days([anchor, gated]);
+    const off = days([anchor, { ...gated, enabled: true, mods: [], apply: [] }]);
+    expect(JSON.stringify(muted)).toBe(JSON.stringify(days([anchor, { ...gated, enabled: false }])));
+    expect(JSON.stringify(muted)).toBe(JSON.stringify(off));
+    // sanity: at full strength the same modifier does change the world
+    expect(JSON.stringify(days([anchor, { ...gated, mods: [{ source: "season:Harvest", amount: 1 }] }]))).not.toBe(JSON.stringify(off));
+  });
+
+  test("an envelope shapes a moon-carried modifier over the lunar cycle", () => {
+    const period = 29.5;
+    const timeOf = (d: number) => ({ ...gregorianTime(d), moons: [{ name: "Sable", phase: (((d % period) + period) % period) / period }] });
+    const z = (envelope?: Array<[number, number]>) =>
+      zone({
+        modifiers: [{ id: "moontide", when: { moon: { name: "Sable", phase: [0.5, 1] } }, apply: [{ param: "temperature.mean", op: "offset", value: -10, ...(envelope ? { envelope } : {}) }], tag: "moontide" }],
+      });
+    const flat = createGenerator(z(), "world", timeOf).generator.range(0, 365 * 2);
+    // a ramp that is 0 at phase 0.5 and 1 at phase 0.99: the onset is gradual, the peak is the full -10
+    const shaped = createGenerator(z([[0.5, 0], [0.99, 1]]), "world", timeOf).generator.range(0, 365 * 2);
+    const tagged = flat.filter((r) => r.tags.includes("moontide")).map((r) => r.dayOrdinal);
+    expect(tagged.length).toBeGreaterThan(300);
+    expect(shaped.filter((r) => r.tags.includes("moontide")).map((r) => r.dayOrdinal)).toEqual(tagged); // shaping never changes WHO is active
+    const phaseOf = (d: number) => timeOf(d).moons[0]!.phase;
+    const onset = tagged.find((d) => Math.abs(phaseOf(d) - 0.5) < 0.02)!;
+    const peak = tagged.find((d) => phaseOf(d) > 0.97)!;
+    expect(shaped[onset]!.tempMean).toBeGreaterThan(flat[onset]!.tempMean + 8); // barely cooled at the onset
+    expect(Math.abs(shaped[peak]!.tempMean - flat[peak]!.tempMean)).toBeLessThan(1); // effectively full strength at the peak
+    // an untagged day is untouched by either run
+    const quiet = flat.find((r) => !r.tags.length)!.dayOrdinal;
+    expect(shaped[quiet]!.tempMean).toBe(flat[quiet]!.tempMean);
+  });
+});
+
+describe("validateProfile: whitespace ids", () => {
+  test("a whitespace-only modifier or regime id is required, not accepted", () => {
+    const z = zone();
+    z.modifiers = [{ id: "   ", apply: [{ param: "temperature.mean", op: "offset", value: 1 }] }];
+    z.regimes = [{ id: " ", weight: 1, meanDurationDays: 5 }];
+    const paths = validateProfile(z).filter((i) => i.message === "required").map((i) => i.path);
+    expect(paths).toContain("modifiers[0].id");
+    expect(paths).toContain("regimes[0].id");
   });
 });

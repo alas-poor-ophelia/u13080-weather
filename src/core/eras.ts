@@ -16,6 +16,7 @@ export function yearOf(t: DayTime & { dayOrdinal: number; yearLength: number }):
 }
 
 export function eraActive(e: Era, year: number): boolean {
+  if (e.enabled === false) return false;
   return year >= e.from && (e.to === undefined || year <= e.to);
 }
 
@@ -37,7 +38,7 @@ export function withEraTags<T extends DayTime & { dayOrdinal: number; yearLength
  * modifiers. Ids are `era:<name>`; a zone modifier may not reuse the prefix.
  */
 export function eraModifiers(eras: readonly Era[]): Modifier[] {
-  return eras.filter((e) => e.apply && e.apply.length > 0).map((e) => ({ id: ERA_TAG_PREFIX + e.name, stage: "daily", when: { tag: ERA_TAG_PREFIX + e.name }, apply: e.apply! }));
+  return eras.filter((e) => e.enabled !== false && e.apply && e.apply.length > 0).map((e) => ({ id: ERA_TAG_PREFIX + e.name, stage: "daily", when: { tag: ERA_TAG_PREFIX + e.name }, apply: e.apply! }));
 }
 
 export function validateEras(eras: unknown): ValidationIssue[] {
@@ -59,7 +60,8 @@ export function validateEras(eras: unknown): ValidationIssue[] {
       else if (Number.isInteger(e.from) && e.to < e.from!) issues.push({ level: "error", path: `${where}.to`, message: "to must not be before from" });
     }
     if (e.apply !== undefined) validateDailyOps(e.apply, `${where}.apply`, issues);
-    for (const k of Object.keys(e)) if (!["name", "from", "to", "apply"].includes(k)) issues.push({ level: "warning", path: `${where}.${k}`, message: "unknown field (ignored)" });
+    if (e.enabled !== undefined && typeof e.enabled !== "boolean") issues.push({ level: "error", path: `${where}.enabled`, message: "enabled must be true or false" });
+    for (const k of Object.keys(e)) if (!["name", "from", "to", "apply", "enabled"].includes(k)) issues.push({ level: "warning", path: `${where}.${k}`, message: "unknown field (ignored)" });
   });
   return issues;
 }

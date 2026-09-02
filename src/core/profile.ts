@@ -9,11 +9,12 @@
  * profile hash for provenance / cache keys. The hash uses the frozen RNG
  * hash (no crypto dependency; Obsidian mobile has no Bun.CryptoHasher).
  */
+import { automationOps, FALLBACK_YEAR_LENGTH, validateAutomation } from "./automation";
 import { isCurvePath, isScalarPath, applyClimateOps } from "./curve-ops";
 import { Generator, MAX_PERSISTENCE, type GeneratorConfig } from "./generator";
-import { ModifierEngine } from "./modifiers";
+import { type DailyModifierResult, ModifierEngine } from "./modifiers";
 import { hash32 } from "./rng";
-import type { ClimateParams, Curve, DayTime, Modifier, ModifierOp, Predicate, ZoneProfile } from "./types";
+import type { AutomationLane, ClimateParams, Curve, DayTime, ModGate, Modifier, ModifierOp, Predicate, ZoneProfile } from "./types";
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -122,7 +123,58 @@ function validateOps(ops: ModifierOp[], stage: "climate" | "daily", path: string
     if (!["set", "offset", "scale", "clamp"].includes(op.op)) issues.push({ level: "error", path: `${where}.op`, message: `unknown op "${(op as { op: string }).op}" — ops are set, offset, scale, clamp` });
     else if (op.op === "clamp") {
       if (op.min === undefined && op.max === undefined) issues.push({ level: "error", path: where, message: "clamp needs min and/or max" });
+    } else if (op.op === "set" && typeof op.value !== "number") {
+      // A Curve-valued `set` installs a whole annual shape. Only the climate stage still has
+      // curves; by the daily stage the parameter is already an evaluated scalar.
+      if (stage === "daily") issues.push({ level: "error", path: `${where}.value`, message: "set with a curve is climate stage only" });
+      else if (isScalarPath(op.param)) issues.push({ level: "error", path: `${where}.value`, message: `"${op.param}" is a scalar parameter, not a curve — set it to a number` });
+      else validateCurve(op.value, `${where}.value`, issues);
     } else if (typeof op.value !== "number" || !Number.isFinite(op.value)) issues.push({ level: "error", path: `${where}.value`, message: "value must be a finite number" });
+    if (op.enabled !== undefined && typeof op.enabled !== "boolean") issues.push({ level: "error", path: `${where}.enabled`, message: "enabled must be true or false" });
+    if (op.envelope !== undefined) validateEnvelope(op.envelope, op.op, stage, `${where}.envelope`, issues);
+  });
+}
+
+/**
+ * Onset envelope: a non-empty list of [phase in [0,1), strength in [0,1]],
+ * daily stage only. Strength is a dimmer — an envelope shapes a device's onset,
+ * it never amplifies it past the magnitude the author wrote.
+ */
+function validateEnvelope(env: Array<[number, number]>, op: string, stage: "climate" | "daily", path: string, issues: ValidationIssue[]): void {
+  if (stage === "climate") issues.push({ level: "error", path, message: "envelope is a daily-stage onset shape; climate-stage ops cannot carry one" });
+  if (!Array.isArray(env) || env.length === 0) {
+    issues.push({ level: "error", path, message: "envelope must be a non-empty array of [phase, strength] points" });
+    return;
+  }
+  env.forEach((pt, i) => {
+    const ok = Array.isArray(pt) && pt.length === 2 && typeof pt[0] === "number" && typeof pt[1] === "number" && pt[0] >= 0 && pt[0] < 1 && pt[1] >= 0 && pt[1] <= 1;
+    if (!ok) issues.push({ level: "error", path: `${path}[${i}]`, message: "envelope point must be [phase in [0,1), strength in [0,1]]" });
+  });
+  if (op === "set" || op === "clamp") issues.push({ level: "warning", path, message: "envelope has no effect on set/clamp" });
+}
+
+const GATE_FIELDS = ["source", "amount"];
+
+/**
+ * Mod-matrix gates: daily stage only, source is a non-empty tag (never a moon —
+ * a moon is a carrier, not a gate), amount a dimmer in [0, 1].
+ */
+function validateGates(mods: ModGate[], stage: "climate" | "daily", path: string, issues: ValidationIssue[]): void {
+  if (stage === "climate") issues.push({ level: "error", path, message: "gates (mods) are daily-stage only; a climate-stage modifier is unconditional" });
+  if (!Array.isArray(mods)) {
+    issues.push({ level: "error", path, message: "mods must be an array" });
+    return;
+  }
+  mods.forEach((g, i) => {
+    const where = `${path}[${i}]`;
+    if (typeof g !== "object" || g === null) {
+      issues.push({ level: "error", path: where, message: "gate must be an object" });
+      return;
+    }
+    if (typeof g.source !== "string" || !g.source) issues.push({ level: "error", path: `${where}.source`, message: "must be a non-empty string (a tag, never a moon)" });
+    else if (g.source.startsWith("moon:")) issues.push({ level: "error", path: `${where}.source`, message: "a gate is a tag; a moon is the carrier (use when.moon)" });
+    if (typeof g.amount !== "number" || !(g.amount >= 0 && g.amount <= 1)) issues.push({ level: "error", path: `${where}.amount`, message: "amount must be between 0 and 1 (a gate dims, it never amplifies)" });
+    for (const k of Object.keys(g)) if (!GATE_FIELDS.includes(k)) issues.push({ level: "warning", path: `${where}.${k}`, message: "unknown field (ignored)" });
   });
 }
 
@@ -171,9 +223,9 @@ export function validateProfile(z: ZoneProfile): ValidationIssue[] {
   else {
     const ids = new Set<string>();
     z.regimes.forEach((r, i) => {
-      if (!r.id) issues.push({ level: "error", path: `regimes[${i}].id`, message: "required" });
+      if (!r.id || !r.id.trim()) issues.push({ level: "error", path: `regimes[${i}].id`, message: "required" });
       else if (ids.has(r.id)) issues.push({ level: "error", path: `regimes[${i}].id`, message: `duplicate regime id "${r.id}"` });
-      ids.add(r.id);
+      if (r.id) ids.add(r.id);
       if (!(r.weight >= 0)) issues.push({ level: "error", path: `regimes[${i}].weight`, message: "must be >= 0" });
       if (!(r.meanDurationDays >= 1)) issues.push({ level: "error", path: `regimes[${i}].meanDurationDays`, message: "must be >= 1" });
       else if (r.meanDurationDays > RECOMMENDED_REGIME_DURATION) issues.push({ level: "warning", path: `regimes[${i}].meanDurationDays`, message: `above ${RECOMMENDED_REGIME_DURATION}: long-lived states belong in a spell modifier, not a regime` });
@@ -186,13 +238,15 @@ export function validateProfile(z: ZoneProfile): ValidationIssue[] {
   const mids = new Set<string>();
   mods.forEach((m, i) => {
     const where = `modifiers[${i}]`;
-    if (!m.id) issues.push({ level: "error", path: `${where}.id`, message: "required" });
+    if (!m.id || !m.id.trim()) issues.push({ level: "error", path: `${where}.id`, message: "required" });
     else if (mids.has(m.id)) issues.push({ level: "error", path: `${where}.id`, message: `duplicate modifier id "${m.id}"` });
     else if (m.id.startsWith("era:")) issues.push({ level: "error", path: `${where}.id`, message: "ids starting with \"era:\" are reserved for the era timeline" });
-    mids.add(m.id);
+    if (m.id) mids.add(m.id);
     const stage = m.stage ?? "daily";
     if (stage !== "climate" && stage !== "daily") issues.push({ level: "error", path: `${where}.stage`, message: "must be climate or daily" });
+    if (m.enabled !== undefined && typeof m.enabled !== "boolean") issues.push({ level: "error", path: `${where}.enabled`, message: "enabled must be true or false" });
     if (stage === "climate" && (m.when || m.spell)) issues.push({ level: "error", path: where, message: "climate-stage modifiers are unconditional (no when/spell); use stage: daily" });
+    if (m.mods !== undefined) validateGates(m.mods, stage, `${where}.mods`, issues);
     if (m.when) validatePredicate(m.when, `${where}.when`, issues);
     if (m.spell) {
       if (!(m.spell.meanStartsPerYear > 0)) issues.push({ level: "error", path: `${where}.spell.meanStartsPerYear`, message: "must be > 0" });
@@ -201,6 +255,8 @@ export function validateProfile(z: ZoneProfile): ValidationIssue[] {
     }
     validateOps(m.apply, stage, `${where}.apply`, issues);
   });
+  if (z.flipSeasons !== undefined && typeof z.flipSeasons !== "boolean") issues.push({ level: "error", path: "flipSeasons", message: "flipSeasons must be true or false" });
+  validateAutomation(z.automation, issues);
   return issues;
 }
 
@@ -222,7 +278,9 @@ export function canonicalJson(v: unknown): string {
 }
 
 export function profileHash(z: ZoneProfile): string {
-  const s = canonicalJson({ climate: z.climate, regimes: z.regimes, modifiers: z.modifiers ?? [] });
+  // `automation` enters the canonical input ONLY when non-empty, so every hash
+  // written before automation existed still reproduces (history protection, D5).
+  const s = canonicalJson({ climate: z.climate, regimes: z.regimes, modifiers: z.modifiers ?? [], ...(z.automation?.length ? { automation: z.automation } : {}) });
   const a = hash32(s, 0x57414a45).toString(16).padStart(8, "0");
   const b = hash32(s, 0x54454a49).toString(16).padStart(8, "0");
   return `wh1:${a}${b}`;
@@ -233,7 +291,14 @@ export interface ResolvedProfile {
   /** climate after climate-stage modifiers */
   climate: ClimateParams;
   regimes: ZoneProfile["regimes"];
+  /**
+   * Every `daily`-stage modifier, NOT filtered by `enabled`: the engine is what
+   * skips a disabled device, so a UI reading this list still sees it (and can
+   * show it greyed) rather than having it vanish from the rack.
+   */
   dailyModifiers: Modifier[];
+  /** the zone's automation lanes (empty when it has none) */
+  automation: AutomationLane[];
   profileHash: string;
   issues: ValidationIssue[];
 }
@@ -246,13 +311,15 @@ export function resolveProfile(z: ZoneProfile): ResolvedProfile {
     throw new RangeError(`profile "${z.id}" is invalid:\n` + errors.map((e) => `  ${e.path}: ${e.message}`).join("\n"));
   }
   const mods = z.modifiers ?? [];
-  const climateOps = mods.filter((m) => m.stage === "climate").flatMap((m) => m.apply);
+  // enabled: absent = on, at both the modifier and the op level
+  const climateOps = mods.filter((m) => m.stage === "climate" && m.enabled !== false).flatMap((m) => m.apply.filter((o) => o.enabled !== false));
   const climate = climateOps.length ? applyClimateOps(z.climate, climateOps) : z.climate;
   return {
     zoneId: z.id,
     climate,
     regimes: z.regimes,
     dailyModifiers: mods.filter((m) => (m.stage ?? "daily") === "daily"),
+    automation: z.automation ?? [],
     profileHash: profileHash(z),
     issues,
   };
@@ -269,7 +336,19 @@ export function createGenerator(z: ZoneProfile, seed: string, timeOf: (dayOrdina
     climate: resolved.climate,
     regimes: resolved.regimes,
     timeOf,
-    dailyModifiers: (d, regime) => engine.forDay(d, regime),
+    // automation ops run BEFORE the zone's daily modifiers (climate-stage semantics, D6).
+    // With no lanes the callback is byte-for-byte the old one — absent automation changes nothing.
+    dailyModifiers: (d, regime) => {
+      const m = engine.forDay(d, regime);
+      if (!resolved.automation.length) return m;
+      // `timeOf` is typed DayTime; the plugin's adapters return a TimeContext that carries
+      // dayOrdinal/yearLength, but bare callers (e.g. gregorianTime) supply neither — fall
+      // back to the requested ordinal and a FALLBACK_YEAR_LENGTH-day year.
+      const t = timeOf(d) as DayTime & { dayOrdinal?: number; yearLength?: number };
+      const time = { ...t, dayOrdinal: t.dayOrdinal ?? d, yearLength: t.yearLength ?? FALLBACK_YEAR_LENGTH };
+      const out: DailyModifierResult = { ops: [...automationOps(resolved.automation, time), ...m.ops], tags: m.tags, active: m.active };
+      return out;
+    },
   };
   return { generator: new Generator(cfg), resolved, engine };
 }

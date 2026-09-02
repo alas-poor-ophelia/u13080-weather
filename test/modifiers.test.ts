@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { gregorianTime } from "../src/core/generator";
-import { ModifierEngine, evaluatePredicate, inPhaseRange, type PredicateContext } from "../src/core/modifiers";
+import { ModifierEngine, evaluatePredicate, inPhaseRange, sampleEnvelope, type PredicateContext } from "../src/core/modifiers";
 import type { DayTime, Modifier } from "../src/core/types";
 
 const base: PredicateContext = { dayOrdinal: 100, yearPhase: 0.3, dayOfYear: 109, regime: "normal", seed: "s", zoneId: "z", modifierId: "m", moons: [{ name: "Sable", phase: 0.95 }], tags: ["witch-month"] };
@@ -143,5 +143,225 @@ describe("engine: tags between modifiers and spell windows", () => {
     expect(share).toBeGreaterThan(0.02);
     expect(share).toBeLessThan(0.25); // ~8% expected; before the fix this was 100%
     for (let d = 0; d < 3000; d += 50) expect(e.forDay(d, "normal").tags).toEqual([]);
+  });
+});
+
+describe("engine: enabled flags", () => {
+  const timeOf = (d: number): DayTime => gregorianTime(d);
+  const always: Modifier = { id: "always", when: { chance: 1 }, apply: [{ param: "wind.speed", op: "scale", value: 2 }], tag: "always" };
+
+  test("a disabled modifier is absent from active, sets no tag and contributes no ops", () => {
+    const on = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [always], timeOf }).forDay(10, "normal");
+    expect(on).toEqual({ ops: always.apply, tags: ["always"], active: ["always"] });
+    const off = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...always, enabled: false }], timeOf }).forDay(10, "normal");
+    expect(off).toEqual({ ops: [], tags: [], active: [] });
+    // and it is invisible to a modifier that reacts to its tag
+    const react: Modifier = { id: "react", when: { tag: "always" }, apply: [], tag: "storm" };
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...always, enabled: false }, react], timeOf });
+    expect(e.forDay(10, "normal").active).toEqual([]);
+  });
+
+  test("a disabled spell modifier never starts (its window estimate is skipped too)", () => {
+    const fog: Modifier = { id: "fog", spell: { meanStartsPerYear: 30, meanDurationDays: 4 }, apply: [], tag: "fog" };
+    const e = new ModifierEngine({ seed: "p", zoneId: "z", modifiers: [{ ...fog, enabled: false }], timeOf });
+    for (let d = 0; d < 365; d++) expect(e.forDay(d, "normal").active).toEqual([]);
+  });
+
+  test("a disabled op is dropped while its siblings in the same modifier still apply", () => {
+    const m: Modifier = {
+      id: "mixed",
+      when: { chance: 1 },
+      apply: [
+        { param: "precipitation.pwd", op: "set", value: 0, enabled: false },
+        { param: "wind.speed", op: "scale", value: 2 },
+        { param: "cloud.dry", op: "set", value: 0.9, enabled: true },
+      ],
+      tag: "mixed",
+    };
+    const r = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf }).forDay(10, "normal");
+    expect(r.active).toEqual(["mixed"]);
+    expect(r.ops.map((o) => o.param)).toEqual(["wind.speed", "cloud.dry"]);
+  });
+});
+
+describe("envelope sampling", () => {
+  test("sorts, interpolates linearly and wraps across 1→0", () => {
+    const ramp: Array<[number, number]> = [[0, 0], [0.5, 1]];
+    expect(sampleEnvelope(ramp, 0)).toBe(0); // exactly on a point
+    expect(sampleEnvelope(ramp, 0.5)).toBe(1);
+    expect(sampleEnvelope(ramp, 0.25)).toBeCloseTo(0.5, 12); // mid-segment
+    expect(sampleEnvelope(ramp, 0.75)).toBeCloseTo(0.5, 12); // wrapping segment 0.5 → 1.0
+    expect(sampleEnvelope([[0.5, 1], [0, 0]], 0.25)).toBeCloseTo(0.5, 12); // input order does not matter
+    // a wrap that spans the seam: last point 0.9, first point 0.1
+    const seam: Array<[number, number]> = [[0.1, 0], [0.9, 2]];
+    expect(sampleEnvelope(seam, 0.95)).toBeCloseTo(1.5, 12);
+    expect(sampleEnvelope(seam, 0.05)).toBeCloseTo(0.5, 12);
+    expect(sampleEnvelope(seam, 0.5)).toBeCloseTo(1, 12);
+    // phases outside [0,1) fold in; a single point is a constant; empty is 1
+    expect(sampleEnvelope(ramp, 1.25)).toBeCloseTo(0.5, 12);
+    expect(sampleEnvelope(ramp, -0.75)).toBeCloseTo(0.5, 12);
+    expect(sampleEnvelope([[0.3, 0.25]], 0.9)).toBe(0.25);
+    expect(sampleEnvelope([], 0.9)).toBe(1);
+  });
+});
+
+describe("engine: mod-matrix gates", () => {
+  const harvest = (d: number): DayTime => ({ ...gregorianTime(d), tags: d % 2 === 0 ? ["season:Harvest"] : [] });
+  const gated: Modifier = {
+    id: "gated",
+    apply: [
+      { param: "precipitation.pwd", op: "offset", value: 10 },
+      { param: "wind.speed", op: "scale", value: 2 },
+      { param: "cloud.dry", op: "set", value: 0.9 },
+      { param: "humidity.wet", op: "clamp", min: 0.2 },
+    ],
+    mods: [{ source: "season:Harvest", amount: 0.5 }],
+  };
+
+  test("an active gate scales magnitudes (offset ×f, scale toward 1); an inactive one is ×1", () => {
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [gated], timeOf: harvest });
+    expect(e.forDay(0, "normal").ops).toEqual([
+      { param: "precipitation.pwd", op: "offset", value: 5 },
+      { param: "wind.speed", op: "scale", value: 1.5 },
+      { param: "cloud.dry", op: "set", value: 0.9 },
+      { param: "humidity.wet", op: "clamp", min: 0.2 },
+    ]);
+    // gate inactive: the ops come through as the very same objects, so an absent gate cannot perturb history
+    const off = e.forDay(1, "normal");
+    expect(off.ops).toEqual(gated.apply);
+    expect(off.ops[0]).toBe(gated.apply[0]);
+  });
+
+  test("two gates multiply and inactive gates contribute ×1", () => {
+    const timeOf = (d: number): DayTime => ({ ...gregorianTime(d), tags: ["season:Harvest", "era:Long Winter"] });
+    const m: Modifier = {
+      id: "two",
+      apply: [{ param: "precipitation.pwd", op: "offset", value: 8 }],
+      mods: [
+        { source: "season:Harvest", amount: 0.5 },
+        { source: "era:Long Winter", amount: 0.25 },
+        { source: "never", amount: 0 },
+      ],
+    };
+    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf }).forDay(3, "normal").ops).toEqual([{ param: "precipitation.pwd", op: "offset", value: 1 }]);
+  });
+
+  test("a dimmed `scale` below 1 stays non-negative: 1 + (v − 1)·f for every legal f", () => {
+    // f ∈ [0, 1] is what the validator guarantees, and it is what keeps 1 + (v − 1)·f
+    // from crossing zero for a shrinking scale — the sign cannot flip, so no op can
+    // silently invert the parameter it scales.
+    const shrink: Modifier = { id: "shrink", apply: [{ param: "wind.speed", op: "scale", value: 0.5 }] };
+    const at = (amount: number) => new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...shrink, mods: [{ source: "season:Harvest", amount }] }], timeOf: harvest }).forDay(0, "normal").ops[0]!;
+    for (const f of [1, 0.25]) {
+      const op = at(f);
+      expect(op).toEqual({ param: "wind.speed", op: "scale", value: 1 + (0.5 - 1) * f });
+      expect((op as { value: number }).value).toBeGreaterThanOrEqual(0);
+    }
+    expect(at(1)).toEqual({ param: "wind.speed", op: "scale", value: 0.5 });
+    expect(at(0.25)).toEqual({ param: "wind.speed", op: "scale", value: 0.875 });
+  });
+
+  test("a gate sees a tag set by an EARLIER modifier the same day", () => {
+    const timeOf = (d: number): DayTime => gregorianTime(d);
+    const storm: Modifier = { id: "storm", when: { chance: 1 }, apply: [], tag: "storm" };
+    const react: Modifier = { id: "react", apply: [{ param: "wind.speed", op: "offset", value: 10 }], mods: [{ source: "storm", amount: 0.25 }] };
+    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [storm, react], timeOf }).forDay(5, "normal").ops).toEqual([{ param: "wind.speed", op: "offset", value: 2.5 }]);
+    // order matters: a gate listed before its source sees nothing
+    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [react, storm], timeOf }).forDay(5, "normal").ops).toEqual([{ param: "wind.speed", op: "offset", value: 10 }]);
+  });
+
+  test("amount 0 mutes but keeps the modifier active and its tag", () => {
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...gated, tag: "gated", mods: [{ source: "season:Harvest", amount: 0 }] }], timeOf: harvest });
+    const r = e.forDay(0, "normal");
+    expect(r.active).toEqual(["gated"]);
+    expect(r.tags).toEqual(["gated"]);
+    expect(r.ops.slice(0, 2)).toEqual([
+      { param: "precipitation.pwd", op: "offset", value: 0 },
+      { param: "wind.speed", op: "scale", value: 1 },
+    ]);
+  });
+
+  test("a spell honours its gates", () => {
+    const fog: Modifier = {
+      id: "fog",
+      spell: { meanStartsPerYear: 60, meanDurationDays: 4 },
+      apply: [{ param: "wind.speed", op: "offset", value: 10 }],
+      mods: [{ source: "season:Harvest", amount: 0.5 }],
+    };
+    const e = new ModifierEngine({ seed: "p", zoneId: "z", modifiers: [fog], timeOf: harvest });
+    let gatedDays = 0;
+    let ungatedDays = 0;
+    for (let d = 0; d < 365; d++) {
+      const r = e.forDay(d, "normal");
+      if (!r.active.length) continue;
+      const value = (r.ops[0] as { value: number }).value;
+      if (d % 2 === 0) {
+        expect(value).toBe(5);
+        gatedDays++;
+      } else {
+        expect(value).toBe(10);
+        ungatedDays++;
+      }
+    }
+    expect(gatedDays).toBeGreaterThan(0);
+    expect(ungatedDays).toBeGreaterThan(0);
+  });
+});
+
+describe("engine: onset envelopes", () => {
+  const twoMoons = (d: number): DayTime => ({ ...gregorianTime(d), moons: [{ name: "Alpha", phase: 0.25 }, { name: "Sable", phase: 0.75 }] });
+  const env: Array<[number, number]> = [[0.25, 1], [0.75, 0]];
+
+  test("the carrier is the moon named in a bare when.moon, else the first moon of the day", () => {
+    const named: Modifier = { id: "named", when: { moon: { name: "Sable", phase: [0, 1] } }, apply: [{ param: "wind.speed", op: "offset", value: 10, envelope: env }] };
+    const other: Modifier = { id: "other", when: { yearPhase: [0, 1] }, apply: [{ param: "wind.speed", op: "offset", value: 10, envelope: env }] };
+    const at = (m: Modifier, timeOf: (d: number) => DayTime = twoMoons) => (new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf }).forDay(4, "normal").ops[0] as { value: number }).value;
+    expect(at(named)).toBe(0); // Sable sits at phase 0.75 → strength 0
+    expect(at(other)).toBe(10); // first moon Alpha at 0.25 → strength 1
+    // a compound predicate is not a bare moon: the first moon carries it
+    expect(at({ ...other, when: { all: [{ moon: { name: "Sable", phase: [0, 1] } }, { yearPhase: [0, 1] }] } })).toBe(10);
+    // no moons on the day at all → factor 1
+    expect(at(other, gregorianTime)).toBe(10);
+  });
+
+  test("magnitude is scaled at a point, mid-segment and across the wrap; set/clamp ignore it", () => {
+    const phase =
+      (p: number) =>
+      (d: number): DayTime => ({ ...gregorianTime(d), moons: [{ name: "Sable", phase: p }] });
+    const ramp: Array<[number, number]> = [[0, 0], [0.5, 1]];
+    const m: Modifier = {
+      id: "onset",
+      apply: [
+        { param: "precipitation.pwd", op: "offset", value: 10, envelope: ramp },
+        { param: "wind.speed", op: "scale", value: 3, envelope: ramp },
+        { param: "cloud.dry", op: "set", value: 0.9, envelope: ramp },
+      ],
+    };
+    const at = (p: number) => new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf: phase(p) }).forDay(1, "normal").ops;
+    expect(at(0.5)).toEqual([
+      { param: "precipitation.pwd", op: "offset", value: 10 },
+      { param: "wind.speed", op: "scale", value: 3 },
+      { param: "cloud.dry", op: "set", value: 0.9 },
+    ]);
+    expect((at(0.25)[0] as { value: number }).value).toBeCloseTo(5, 12); // mid-segment
+    expect((at(0.25)[1] as { value: number }).value).toBeCloseTo(2, 12); // scale: 1 + (3-1)·0.5
+    expect((at(0.75)[0] as { value: number }).value).toBeCloseTo(5, 12); // the wrapping segment
+    expect((at(0)[0] as { value: number }).value).toBe(0);
+    expect((at(0)[1] as { value: number }).value).toBe(1);
+    // set is untouched at every phase, and the envelope field never reaches the ops
+    for (const p of [0, 0.25, 0.5, 0.75]) {
+      expect((at(p)[2] as { value: number }).value).toBe(0.9);
+      for (const op of at(p)) expect("envelope" in op).toBe(false);
+    }
+  });
+
+  test("gate and envelope multiply", () => {
+    const timeOf = (d: number): DayTime => ({ ...gregorianTime(d), moons: [{ name: "Sable", phase: 0.25 }], tags: ["season:Harvest"] });
+    const m: Modifier = {
+      id: "both",
+      apply: [{ param: "precipitation.pwd", op: "offset", value: 10, envelope: [[0, 0], [0.5, 1]] }],
+      mods: [{ source: "season:Harvest", amount: 0.5 }],
+    };
+    expect((new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf }).forDay(1, "normal").ops[0] as { value: number }).value).toBeCloseTo(2.5, 12);
   });
 });

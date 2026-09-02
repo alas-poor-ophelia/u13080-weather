@@ -14,6 +14,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { MODIFIER_EXAMPLES } from "../../src/plugin/modifier-examples";
 import { installPlugin, launchObsidian, PLUGIN_DIR, VAULT, withApp, type Obsidian } from "./obsidian";
 
 const NOTE = "Wadjet Smoke.md";
@@ -178,6 +179,65 @@ describe("smoke walk", () => {
     expect(title).toContain("U+13080 Weather");
   });
 
+  test("read-only calendar mirror: a describing adapter hides Moons/Seasons and shows a summary row (bead wadjet-9f9.11)", async () => {
+    await openWadjetSettings();
+    expect(await row("Calendar source").isVisible()).toBe(false); // only the internal calendar is registered yet
+    expect(await row("Moons").isVisible()).toBe(true);
+    expect(await row("Seasons").isVisible()).toBe(true);
+
+    // Register a fake calendar adapter with describe(), the same way a third-party plugin would.
+    await withApp(ob.page, () => {
+      const w = window as unknown as { Wadjet: { registerTimeAdapter: (a: unknown) => () => void } };
+      const unregister = w.Wadjet.registerTimeAdapter({
+        id: "fake-cal",
+        now: () => null,
+        toContext: (d: number) => ({ dayOrdinal: d, yearLength: 400, yearPhase: (d % 400) / 400, source: "fake-cal" }),
+        configHash: () => "fake:1",
+        describe: () => ({
+          label: "Fake calendar",
+          readOnly: true,
+          yearLength: 400,
+          seasons: [
+            { name: "Wet", from: 0 },
+            { name: "Dry", from: 0.5 },
+          ],
+          moons: [],
+          editHint: "edit in Fake calendar",
+        }),
+      });
+      (window as unknown as { __wadjetFakeUnregister?: () => void }).__wadjetFakeUnregister = unregister;
+    });
+
+    await openWadjetSettings();
+    expect(await row("Calendar source").isVisible()).toBe(true);
+    await row("Calendar source").locator("select:not(.is-measuring)").selectOption("fake-cal");
+    await ob.page.waitForTimeout(500);
+
+    await openWadjetSettings();
+    const readOnlyRow = row("Fake calendar · read-only");
+    await readOnlyRow.waitFor({ state: "visible", timeout: 5_000 });
+    const name = await readOnlyRow.locator(".setting-item-name").textContent();
+    const desc = await readOnlyRow.locator(".setting-item-description").textContent();
+    note(`read-only calendar row: "${name}" — "${desc}"`);
+    expect(name).toContain("Fake calendar · read-only");
+    expect(desc).toContain("2 seasons");
+    expect(await row("Moons").isVisible()).toBe(false);
+    expect(await row("Seasons").isVisible()).toBe(false);
+
+    // Unregister (as a plugin would on its own unload) and confirm the settings tab self-heals.
+    await withApp(ob.page, () => {
+      (window as unknown as { __wadjetFakeUnregister?: () => void }).__wadjetFakeUnregister?.();
+    });
+    await ob.page.waitForTimeout(500);
+
+    await openWadjetSettings();
+    expect(await row("Moons").isVisible()).toBe(true);
+    expect(await row("Seasons").isVisible()).toBe(true);
+    expect(await row("Calendar source").isVisible()).toBe(false); // back to a single registered adapter
+    expect(await row("Fake calendar · read-only").count()).toBe(0);
+    note("unregister restored Moons/Seasons and the Calendar source row fell back to hidden");
+  });
+
   test("add a zone from a preset (modal)", async () => {
     await openWadjetSettings();
     await addButton("Add zone").click();
@@ -264,7 +324,7 @@ describe("smoke walk", () => {
     await grammar.locator("summary").click();
     const examples = await grammar.locator(".wadjet-example .setting-item-name").allTextContents();
     note(`grammar card examples: ${examples.join(" | ")}`);
-    expect(examples.length).toBe(2);
+    expect(examples.length).toBe(MODIFIER_EXAMPLES.length); // the recipe book grew the card in 0.2.0
     await grammar.locator(".wadjet-example button:has-text('Add to this zone')").nth(1).click(); // ashfall spells
     expect(await ta.inputValue()).toContain('"id": "ashfall"');
     await modal().locator("button:has-text('Save')").click();

@@ -13,7 +13,11 @@ import type { PrecipType } from "../core/generator";
 import type { Era, Geography, Orographic, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
+import { openStudio } from "../studio/ui/open";
+import { calendarSummary } from "./calendar-summary";
+import { badMoonsLine, parseMoonsText, serialiseMoonsText } from "./calendar-text";
 import type WadjetPlugin from "./main";
+import { generatedPatch } from "./pins";
 import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
@@ -44,6 +48,12 @@ export class WadjetSettingTab extends PluginSettingTab {
     const s = this.plugin.settings;
     const cal = this.plugin.internalCalendar;
     const adapters = this.plugin.time.list();
+    // The resolved active adapter (not the raw `activeTimeAdapter` setting): TimeRegistry.active
+    // falls back to "internal" once the setting names an adapter that has since unregistered, so
+    // this is the source of truth for "is the internal calendar in charge right now".
+    const activeAdapter = this.plugin.time.active;
+    const activeIsInternal = activeAdapter === undefined || activeAdapter.id === "internal";
+    const activeDescription = activeIsInternal ? undefined : activeAdapter?.describe?.();
 
     return [
       {
@@ -100,13 +110,25 @@ export class WadjetSettingTab extends PluginSettingTab {
           },
           {
             name: "Moons",
-            desc: "One per line: name, cycle in days, phase at day 0 (0–1). Only modifiers that mention a moon use them.",
-            control: { type: "textarea", key: "moons", rows: 3, placeholder: "Moon, 29.53, 0", validate: (t) => badLine(t, 2) },
+            desc: "One per line: name, cycle in days, phase at day 0 (0–1), then optionally named phases as name@fraction (e.g. Full@0.5), ascending and unique. Only modifiers that mention a moon use them.",
+            visible: () => this.plugin.time.active?.id === "internal",
+            control: { type: "textarea", key: "moons", rows: 3, placeholder: "Moon, 29.53, 0, New@0, Full@0.5", validate: badMoonsLine },
           },
           {
             name: "Seasons",
             desc: "One per line: name, start (0–1 through the year). Each becomes a season tag that modifiers can match.",
+            visible: () => this.plugin.time.active?.id === "internal",
             control: { type: "textarea", key: "seasons", rows: 3, placeholder: "Spring, 0.2", validate: (t) => badLine(t, 1) },
+          },
+          {
+            name: `${activeDescription?.label ?? activeAdapter?.id ?? ""} · read-only`,
+            desc: activeDescription ? calendarSummary(activeDescription) : "",
+            visible: () => !!this.plugin.time.active && this.plugin.time.active.id !== "internal" && !!this.plugin.time.active.describe,
+          },
+          {
+            name: `Calendar from ${activeAdapter?.id ?? ""}`,
+            desc: "This calendar does not describe its seasons or moons.",
+            visible: () => !!this.plugin.time.active && this.plugin.time.active.id !== "internal" && !this.plugin.time.active.describe,
           },
           {
             name: "Eras",
@@ -156,6 +178,9 @@ export class WadjetSettingTab extends PluginSettingTab {
       name: z.name,
       desc: parts.join(" · "),
       render: (setting) => {
+        // The row is rebuilt on every update(), so nothing here may be cached
+        // across renders — `z` is the profile this render was handed.
+        setting.addButton((b) => b.setButtonText("Open in studio").onClick(() => void openStudio(this.plugin, z.id)));
         setting.addButton((b) =>
           b.setButtonText("Edit").onClick(() => {
             new ZoneJsonModal(this.app, z, async (updated) => {
@@ -194,7 +219,7 @@ export class WadjetSettingTab extends PluginSettingTab {
       case "calendar.yearLength":
         return s.calendar.yearLength;
       case "moons":
-        return s.calendar.moons.map((m) => `${m.name}, ${m.cycleDays}, ${m.phaseAtEpoch}`).join("\n");
+        return serialiseMoonsText(s.calendar.moons);
       case "seasons":
         return s.calendar.seasons.map((x) => `${x.name}, ${x.from}`).join("\n");
       case "eras":
@@ -218,7 +243,9 @@ export class WadjetSettingTab extends PluginSettingTab {
       case "activeTimeAdapter":
         s.activeTimeAdapter = String(value);
         this.plugin.time.setActive(s.activeTimeAdapter);
-        return this.plugin.saveAndRebuild();
+        await this.plugin.saveAndRebuild();
+        this.update(); // Moons/Seasons visibility and the read-only calendar row depend on the active adapter
+        return;
       case "currentDayOrdinal":
         s.currentDayOrdinal = Number(value);
         await this.plugin.saveSettings();
@@ -228,9 +255,7 @@ export class WadjetSettingTab extends PluginSettingTab {
         s.calendar.yearLength = Number(value);
         return this.plugin.saveAndRebuild();
       case "moons":
-        s.calendar.moons = lines(String(value))
-          .filter((p) => p.length >= 2 && p[0])
-          .map((p) => ({ name: p[0]!, cycleDays: Number(p[1]) || 29.53, phaseAtEpoch: Number(p[2]) || 0 }));
+        s.calendar.moons = parseMoonsText(String(value));
         return this.plugin.saveAndRebuild();
       case "seasons":
         s.calendar.seasons = lines(String(value))
@@ -310,7 +335,7 @@ function summarisePatch(p: OverridePatch, u: Units): string {
 // Modals
 // ---------------------------------------------------------------------------
 
-class AddZoneModal extends Modal {
+export class AddZoneModal extends Modal {
   constructor(
     app: App,
     private plugin: WadjetPlugin,
@@ -421,7 +446,7 @@ class PinModal extends Modal {
 
     // Start from the generated weather so the user edits real values rather than blanks.
     // For a new pin the fields follow the chosen zone/day until the user edits them.
-    let seed: OverridePatch = this.existing?.patch ?? generatedPatch(this.plugin, zoneId, dayOrdinal);
+    let seed: OverridePatch = this.existing?.patch ?? generatedPatchFor(this.plugin, zoneId, dayOrdinal);
     // `v` holds the fields in the chosen display units; the stored patch is always metric.
     const u = s.units;
     const L = UNIT_LABEL[u];
@@ -445,7 +470,7 @@ class PinModal extends Modal {
     let precip: DropdownComponent | undefined;
     let dayRow: Setting | undefined;
     const reseed = () => {
-      seed = generatedPatch(this.plugin, zoneId, dayOrdinal);
+      seed = generatedPatchFor(this.plugin, zoneId, dayOrdinal);
       loadFromSeed();
     };
 
@@ -541,15 +566,10 @@ class PinModal extends Modal {
   }
 }
 
-/** The generated report for a day, reduced to the fields the pin editor exposes. */
-function generatedPatch(plugin: WadjetPlugin, zoneId: string, dayOrdinal: number): OverridePatch {
+/** `generatedPatch` for a day this world can roll; `{}` when it cannot (unknown zone, invalid profile). */
+function generatedPatchFor(plugin: WadjetPlugin, zoneId: string, dayOrdinal: number): OverridePatch {
   try {
-    const r = plugin.world.getReport(zoneId, { dayOrdinal });
-    return {
-      temperature: { ...r.temperature },
-      precipitation: { type: r.precipitation.type, amountMm: r.precipitation.amountMm },
-      wind: { ...r.wind },
-    };
+    return generatedPatch(plugin.world.getReport(zoneId, { dayOrdinal }));
   } catch {
     return {};
   }

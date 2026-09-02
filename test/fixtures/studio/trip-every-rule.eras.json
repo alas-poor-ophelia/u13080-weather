@@ -1,0 +1,8 @@
+[
+  "nope",
+  { "name": "", "from": 1.5 },
+  { "name": "Ice Age", "from": 10, "to": "x" },
+  { "name": "Ice Age", "from": 10, "to": 5 },
+  { "name": "Thaw", "from": 20, "enabled": "yes", "apply": "nope" },
+  { "name": "Long Summer", "from": 30, "apply": [{ "param": "temperature.phase", "op": "offset", "value": 1 }], "colour": "amber" }
+]

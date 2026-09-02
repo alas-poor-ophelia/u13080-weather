@@ -229,6 +229,15 @@ describe("generator: regime layer", () => {
     expect(frac("wet-spell")).toBeGreaterThan(frac("normal"));
   });
 
+  test("a regime op with enabled: false is dropped; the regime itself still runs", () => {
+    const muted: Regime[] = fjord.regimes.map((r) => (r.apply ? { ...r, apply: r.apply.map((o) => ({ ...o, enabled: false })) } : r));
+    const bare: Regime[] = fjord.regimes.map((r) => ({ id: r.id, weight: r.weight, meanDurationDays: r.meanDurationDays }));
+    const a = new Generator(cfgFor(fjord, { seed: "regime-mute", regimes: muted })).range(0, 365 * 3);
+    const b = new Generator(cfgFor(fjord, { seed: "regime-mute", regimes: bare })).range(0, 365 * 3);
+    expect(a).toEqual(b);
+    expect(new Set(a.map((r) => r.regime)).size).toBe(fjord.regimes.length);
+  });
+
   test("dailyModifiers hook is applied, sees the regime, and its tags land on the record", () => {
     const seen = new Set<string>();
     const g = new Generator(

@@ -1,0 +1,115 @@
+{
+  "//": "A deliberately broken zone: every validateProfile / validateAutomation rule that can be expressed in JSON and can co-exist in one document is tripped here at least once. Paired with trip-every-rule.eras.json and the mini-fixtures in test/validator-paths.test.ts. DO NOT 'fix' anything in this file.",
+  "id": "",
+  "name": "Trip Every Rule",
+  "schemaVersion": 1,
+  "flipSeasons": "yes",
+  "climate": {
+    "temperature": {
+      "mean": [],
+      "diurnalRange": [{ "at": 0.5 }],
+      "wetDayOffset": [{ "at": 1.5, "value": 0 }],
+      "phase": 1.2,
+      "persistence": 1.5,
+      "sd": { "mean": 1, "amplitude": "two", "phase": 0.2 },
+      "sdHigh": null,
+      "sdLow": { "mean": 1, "amplitude": 1 },
+      "wetDayRangeOffset": { "mean": 0, "amplitude": 1, "phase": 1.4 }
+    },
+    "precipitation": {
+      "pww": { "mean": 0.5, "amplitude": 0.1 },
+      "pwd": { "mean": 0.3, "amplitude": 0.1, "phase": 1.4 },
+      "shape": null,
+      "scale": 6,
+      "freezingPoint": 0
+    },
+    "humidity": { "dry": 0.6, "wet": 0.9, "sd": 0.05 },
+    "cloud": { "dry": 0.3, "wet": 0.8, "sd": 0.1 },
+    "wind": { "speed": 12, "speedSd": 4, "direction": 240, "directionSpread": 40, "wetDayScale": 1.2, "calmFraction": 0.1 }
+  },
+  "regimes": [
+    { "id": "", "weight": -1, "meanDurationDays": 0 },
+    {
+      "id": "settled",
+      "weight": 0,
+      "meanDurationDays": 40,
+      "apply": [{ "param": "temperature.mean", "op": "set", "value": { "mean": 1, "amplitude": 1, "phase": 0 } }]
+    },
+    { "id": "settled", "weight": 0, "meanDurationDays": 5, "apply": "nope" }
+  ],
+  "modifiers": [
+    {
+      "id": "",
+      "stage": "climate",
+      "when": { "tag": "season:Winter" },
+      "mods": ["nope", { "source": "", "amount": -1 }],
+      "apply": [
+        { "param": "temperature.mean", "op": "offset", "value": 1, "envelope": [[0, 1]] },
+        { "param": "temperature.phase", "op": "set", "value": { "mean": 1, "amplitude": 1, "phase": 0 } },
+        { "param": "temperature.mean", "op": "set", "value": [{ "at": 1.5, "value": 0 }] },
+        { "param": "temperature.sd", "op": "set", "value": { "mean": 1, "amplitude": 1 } }
+      ]
+    },
+    { "id": "era:ice", "apply": [] },
+    { "id": "era:ice", "apply": [] },
+    { "id": "bad-stage", "stage": "hourly", "enabled": "yes", "apply": [] },
+    { "id": "spell-bad", "spell": { "meanStartsPerYear": 0, "meanDurationDays": 0 }, "apply": [] },
+    { "id": "spell-long", "spell": { "meanStartsPerYear": 1, "meanDurationDays": 90 }, "apply": [] },
+    {
+      "id": "predicates",
+      "when": {
+        "all": [
+          {},
+          { "tag": "a", "regime": "b" },
+          "nope",
+          { "all": "not-an-array" },
+          { "any": "not-an-array" },
+          { "not": { "chance": 5 } },
+          { "moon": { "phase": [0, 0.5] } },
+          { "moon": { "name": "Sable", "phase": "x" } },
+          { "moon": { "name": "Sable", "phase": [-1, 2] } },
+          { "yearPhase": [0, 5] },
+          { "dayOfYear": [0] },
+          { "tag": "" },
+          { "regime": 5 },
+          { "chance": "x" },
+          { "weather": 1 }
+        ]
+      },
+      "apply": []
+    },
+    { "id": "when-not-an-object", "when": "always", "apply": [] },
+    {
+      "id": "ops",
+      "mods": "nope",
+      "apply": [
+        "not-an-object",
+        { "param": "nope", "op": "offset", "value": 1 },
+        { "param": "temperature.mean", "op": "warp", "value": 1 },
+        { "param": "temperature.mean", "op": "clamp" },
+        { "param": "temperature.mean", "op": "set", "value": { "mean": 1, "amplitude": 1, "phase": 0 } },
+        { "param": "temperature.mean", "op": "offset", "value": "x" },
+        { "param": "temperature.mean", "op": "offset", "value": 1, "enabled": "yes" },
+        { "param": "temperature.mean", "op": "offset", "value": 1, "envelope": [] },
+        { "param": "temperature.mean", "op": "offset", "value": 1, "envelope": [[1.5, -1], [0.2, 0.5], [0.3, 2]] },
+        { "param": "temperature.mean", "op": "set", "value": 5, "envelope": [[0, 1]] }
+      ]
+    },
+    {
+      "id": "gates",
+      "mods": [
+        { "source": "moon:Sable", "amount": 0.5 },
+        { "source": "season:Winter", "amount": 1.5 },
+        { "source": "season:Winter", "amount": 0.5, "amont": 0.25 }
+      ],
+      "apply": []
+    },
+    { "id": "apply-not-an-array", "apply": "nope" }
+  ],
+  "automation": [
+    "nope",
+    { "id": "", "param": "nope", "op": "warp", "enabled": "yes", "points": [] },
+    { "id": "warmth", "param": "temperature.mean", "op": "offset", "points": ["x", [1, 0], [0, 5]] },
+    { "id": "warmth", "param": "temperature.mean", "op": "offset", "points": [[1, 0]], "colour": "blue" }
+  ]
+}

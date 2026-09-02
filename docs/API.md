@@ -45,8 +45,13 @@ interface WadjetAPI {
   registerZoneResolver(resolver: ZoneResolver): () => void;
   resolveZone(locator: ZoneLocator): string | null;
 
+  calendar(): CalendarDescription | null;
+  listTimeAdapters(): Array<{ id: string; label: string; active: boolean }>;
+
   describe(report: WeatherReport, style?: "short" | "prose"): string;
-  on(event: "ready" | "profiles-changed" | "time-changed", cb: () => void): () => void;
+  units(): "metric" | "imperial";
+  convert(report: WeatherReport, units?: "metric" | "imperial"): ConvertedReport;
+  on(event: "ready" | "profiles-changed" | "time-changed" | "adapters-changed", cb: () => void): () => void;
 }
 ```
 
@@ -157,14 +162,23 @@ registerTimeAdapter(adapter: TimeAdapter): () => void
 ```
 
 Registers a `TimeAdapter` (see §5) under `adapter.id`. If an adapter with the same `id` is
-already registered, it is replaced. If `adapter.id` matches the currently *active* adapter id in
-settings, a `time-changed` event fires immediately (the active calendar effectively just
-changed). Also refreshes the settings tab if it's open (the "Calendar source" dropdown lists
-registered adapters).
+already registered, it is replaced. Every register **and** unregister fires `"adapters-changed"`
+(§2); if `adapter.id` matches the currently *active* adapter id in settings, it additionally fires
+`"time-changed"` (the active calendar's effective `now()`/`toContext()` just changed). Also
+refreshes the settings tab if it's open (the "Calendar source" dropdown lists registered
+adapters).
+
+**Which adapter is active is the user's choice in settings — registering an adapter never claims
+the active slot.** A calendar plugin makes itself available; the user picks it from the
+"Calendar source" dropdown.
 
 **Returns:** an unregister function. Calling it removes the adapter *only if it is still the one
 registered under that id* (a later registration under the same id is not clobbered by an earlier
-plugin's cleanup).
+plugin's cleanup). **Unregistering the active adapter is symmetric with registering it:** the
+registry falls back to the internal calendar (`TimeRegistry.active` always resolves to
+`adapters.get("internal")` when the configured id isn't registered), and that fallback fires both
+`"time-changed"` and `"adapters-changed"` — exactly as if the internal calendar had just become
+active.
 
 ### `registerZoneResolver(resolver)`
 
@@ -189,6 +203,29 @@ Walks the registered resolvers **in registration order**; for each whose `kinds`
 currently-configured zone. A resolver that throws is caught and skipped (a misbehaving
 third-party resolver can't break the others or the caller). Returns `null` if no resolver
 produces a valid zone id.
+
+### `calendar()`
+
+```ts
+calendar(): CalendarDescription | null
+```
+
+**Returns:** the active time adapter's `CalendarDescription` (see §5), or `null` if the active
+adapter has no `describe()` — an "opaque calendar" (below). This is what Wadjet's own Seasons and
+CYCLE-window editors read to decide whether to show live edit controls or a read-only summary.
+
+### `listTimeAdapters()`
+
+```ts
+listTimeAdapters(): Array<{ id: string; label: string; active: boolean }>
+```
+
+**Returns:** every currently-registered `TimeAdapter`, in registration order, with `label` taken
+from `describe().label` (or the bare `id` if the adapter doesn't describe itself) and `active`
+true for exactly one entry. **`active` reflects the registry's fallback-resolved adapter** — the
+one `TimeRegistry.active` actually returns — **not** the raw `activeTimeAdapter` setting: if the
+setting names an id that isn't currently registered, `"internal"` is what's marked active here,
+because that's what every other API call (`getReport`, `now`, `calendar`) is really using.
 
 ### `describe(report, style?)`
 
@@ -238,7 +275,7 @@ interface ConvertedReport {                    // everything not listed is as in
 ### `on(event, cb)`
 
 ```ts
-on(event: "ready" | "profiles-changed" | "time-changed", cb: () => void): () => void
+on(event: "ready" | "profiles-changed" | "time-changed" | "adapters-changed", cb: () => void): () => void
 ```
 
 Subscribes to a `WorldEvent` (see §2). **Returns** an unregister function. A listener that
@@ -254,7 +291,8 @@ throws is caught and does not stop other listeners or the emitter.
 |---|---|
 | `"ready"` | Once, from inside `onload()`, immediately after `api.ready` is set to `true` and just before the `wadjet:ready` workspace event. Only useful if you obtained the API object before the plugin finished loading; otherwise wait on the workspace event below. |
 | `"profiles-changed"` | Whenever the World's state is rebuilt: zones, overrides, or the world seed changed and saved (`plugin.saveAndRebuild()` — e.g. after an edit in the zone/preset/override settings UI). Generators are invalidated and rebuilt lazily on next use. |
-| `"time-changed"` | Whenever the active calendar's notion of "now" (or the set of adapters) changes: the *Advance/Rewind the calendar one day* commands, editing *Current day* or *Calendar source* in settings, editing the calendar's year length, or a newly-registered `TimeAdapter` whose id matches the currently active adapter. |
+| `"time-changed"` | Whenever the active calendar's notion of "now" changes: the *Advance/Rewind the calendar one day* commands, editing *Current day* or *Calendar source* in settings, editing the calendar's year length, a newly-registered `TimeAdapter` whose id matches the currently active adapter, or unregistering the currently-active adapter (the registry falls back to the internal calendar). |
+| `"adapters-changed"` | Whenever the set of registered time adapters changes — every `registerTimeAdapter` call and every call to the unregister function it returns, active or not. Fired in addition to (not instead of) `"time-changed"` when the change also affects the active adapter. Use this to refresh a UI that lists all adapters (e.g. `listTimeAdapters()`); use `"time-changed"` for one that only cares about the active calendar. |
 
 ### Workspace event
 
@@ -442,6 +480,7 @@ interface TimeAdapter {
   configHash(): string;
   parse?(text: string): number | null;
   format?(dayOrdinal: number): string;
+  describe?(): CalendarDescription;
 }
 ```
 
@@ -453,6 +492,158 @@ interface TimeAdapter {
 | `configHash()` | yes | A string identifying the adapter's *configuration* (not its current date) — folded into `provenance.calendarHash`. Should change whenever a setting that affects `toContext`'s output changes. |
 | `parse(text)` | optional | Parse a calendar-native date string (e.g. from a `wadjet` code block's `date:` field) to a `dayOrdinal`, or `null` if unparseable. |
 | `format(dayOrdinal)` | optional | Human-readable rendering of a day, used by the codeblock renderer and commands. |
+| `describe()` | optional | A static summary of the calendar's shape, for UIs — see `CalendarDescription` below. **Absent means "opaque calendar":** Wadjet's own editors (Seasons, CYCLE windows) can't show season/moon names or a badge for it, so they hide those affordances entirely rather than guess. `api.calendar()` returns `null` for an adapter with no `describe()`. |
+
+**Which adapter is active is the user's choice in settings, not the registering plugin's** — see
+`registerTimeAdapter` above. A calendar plugin should implement `describe()` regardless of whether
+it expects to be the active one; `listTimeAdapters()` reads it for every registered adapter to
+build the settings dropdown's labels.
+
+### `CalendarDescription`
+
+```ts
+interface CalendarDescription {
+  label: string;
+  readOnly: boolean;
+  yearLength: number;
+  epochYear?: number;
+  seasons: Array<{ name: string; from: number }>;
+  moons: Array<{ name: string; cycleDays: number; phaseAtEpoch?: number; phases?: Array<{ name: string; at: number }> }>;
+  editHint?: string;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `label` | `string` | Display name for the calendar badge: `"internal calendar"` for Wadjet's own, or the plugin's chosen name (e.g. `"Almanac of Foo"`). |
+| `readOnly` | `boolean` | `true` for every adapter except the internal one, unless it explicitly opts into editing. When `true`, **Wadjet's own UIs never write to this calendar** — the Seasons and CYCLE-window editors in the Studio show a `"<label> · read-only"` badge, hide the season/moon editing controls, and surface `editHint` (below) as the place to actually change it. |
+| `yearLength` | `number` | A representative year length for display (e.g. in the settings summary row). Adapters whose real year length varies (leap years, irregular calendars) still report **the actual length for the day in question** in every `TimeContext.yearLength` — this field is a label, not a promise that every year is this long. |
+| `epochYear` | `number`, optional | The year number at `dayOrdinal 0`, if the calendar has one. |
+| `seasons` | `Array<{ name, from }>` | `from` is a **yearPhase fraction, `[0, 1)`** — the same unit as `TimeContext.yearPhase` — marking where each season begins. Mirrors the internal calendar's own season table shape. |
+| `moons` | `Array<{ name, cycleDays, phaseAtEpoch?, phases? }>` | One entry per moon the calendar tracks. `cycleDays` is the synodic period in days; `phaseAtEpoch` (optional) is a **cycle-phase fraction, `[0, 1)`**, `0` = new, at `dayOrdinal 0`. `phases` (optional) names points on the cycle — e.g. `{ name: "full", at: 0.5 }` — where `at` is again a `[0, 1)` cycle-phase fraction, for UIs that want to label phases rather than just show a number. |
+| `editHint` | `string`, optional | Where the user actually edits this calendar, shown as `"edit in <label>"` (or similar) next to the read-only badge. Omit if there's nowhere to point them (e.g. a purely computed calendar). |
+
+### Worked example: a third-party calendar plugin
+
+A complete `TimeAdapter` for a fictional "Almanac of Foo" — a 400-day calendar where every 4th
+year runs a day long (`yearLength` varies by context, not by adapter), two seasons, two moons (one
+with named phases), `parse`/`format`, `configHash`, and `describe()`. This is exactly the code in
+`test/fixtures/api/third-party-calendar.ts`, exercised by `test/api-doc.test.ts` — if the two ever
+drift, that test fails.
+
+```ts
+// mirrors test/fixtures/api/third-party-calendar.ts
+import type { CalendarDescription, TimeAdapter, TimeContext } from "wadjet/time/adapter"; // illustrative import path
+
+export function makeAdapter(): TimeAdapter {
+  const YEAR_DAYS = 400;
+  const LEAP_EVERY = 4; // every 4th year (index 3, 7, 11, ...) runs 401 days
+  const CYCLE_DAYS = YEAR_DAYS * (LEAP_EVERY - 1) + (YEAR_DAYS + 1); // 1601
+  const EPOCH_YEAR = 1;
+
+  const SEASONS = [
+    { name: "Wet", from: 0 },
+    { name: "Dry", from: 0.5 },
+  ];
+
+  const MOONS = [
+    {
+      name: "Ember",
+      cycleDays: 33,
+      phaseAtEpoch: 0,
+      phases: [
+        { name: "new", at: 0 },
+        { name: "waxing", at: 0.25 },
+        { name: "full", at: 0.5 },
+        { name: "waning", at: 0.75 },
+      ],
+    },
+    { name: "Cinder", cycleDays: 91, phaseAtEpoch: 0.1 },
+  ];
+
+  /** Pure arithmetic — O(1) and safe for any finite `dayOrdinal`, including negative and huge ones. */
+  function yearInfo(dayOrdinal: number): { year: number; yearStart: number; yearLength: number } {
+    const cycleIndex = Math.floor(dayOrdinal / CYCLE_DAYS);
+    const dayInCycle = dayOrdinal - cycleIndex * CYCLE_DAYS;
+    const isLeapYear = dayInCycle >= YEAR_DAYS * (LEAP_EVERY - 1);
+    const yearIndexInCycle = isLeapYear ? LEAP_EVERY - 1 : Math.floor(dayInCycle / YEAR_DAYS);
+    const yearStart = cycleIndex * CYCLE_DAYS + yearIndexInCycle * YEAR_DAYS;
+    const yearLength = isLeapYear ? YEAR_DAYS + 1 : YEAR_DAYS;
+    const year = cycleIndex * LEAP_EVERY + yearIndexInCycle + EPOCH_YEAR;
+    return { year, yearStart, yearLength };
+  }
+
+  function seasonAt(yearPhase: number): string {
+    let cur = SEASONS[SEASONS.length - 1]!;
+    for (const s of SEASONS) if (yearPhase >= s.from) cur = s;
+    return cur.name;
+  }
+
+  function wrap(x: number): number {
+    const r = x - Math.floor(x);
+    return r === 1 ? 0 : r;
+  }
+
+  function toContext(dayOrdinal: number): TimeContext {
+    const { year, yearStart, yearLength } = yearInfo(dayOrdinal);
+    const dayOfYear = dayOrdinal - yearStart;
+    const yearPhase = dayOfYear / yearLength;
+    const moons = MOONS.map((m) => ({ name: m.name, phase: wrap(dayOrdinal / m.cycleDays + m.phaseAtEpoch) }));
+    return { dayOrdinal, yearPhase, yearLength, dayOfYear, year, moons, tags: [`season:${seasonAt(yearPhase)}`], source: "almanac-of-foo" };
+  }
+
+  return {
+    id: "almanac-of-foo",
+    // This almanac doesn't track a real-world "today" — it only converts ordinals Wadjet gives it.
+    now: () => null,
+    toContext,
+    configHash: () => `almanac:${YEAR_DAYS}:${LEAP_EVERY}`,
+    parse(text: string): number | null {
+      const t = text.trim();
+      return /^-?\d+$/.test(t) ? Number(t) : null;
+    },
+    format(dayOrdinal: number): string {
+      const c = toContext(dayOrdinal);
+      return `Year ${c.year}, day ${(c.dayOfYear ?? 0) + 1} of ${c.yearLength}`;
+    },
+    describe(): CalendarDescription {
+      return {
+        label: "Almanac of Foo",
+        readOnly: true,
+        yearLength: YEAR_DAYS,
+        epochYear: EPOCH_YEAR,
+        seasons: SEASONS.map((s) => ({ ...s })),
+        moons: MOONS.map((m) => ({ name: m.name, cycleDays: m.cycleDays, phaseAtEpoch: m.phaseAtEpoch, ...(m.phases ? { phases: m.phases.map((p) => ({ ...p })) } : {}) })),
+        editHint: "Almanac of Foo settings",
+      };
+    },
+  };
+}
+```
+
+And the plugin side — waiting for `wadjet:ready`, registering, and cleaning up on unload:
+
+```ts
+export default class AlmanacOfFooPlugin extends Plugin {
+  private unregisterAdapter?: () => void;
+
+  override onload(): void {
+    const wadjet = () => (this.app as any).plugins.plugins.wadjet?.api;
+    const register = () => {
+      this.unregisterAdapter = wadjet().registerTimeAdapter(makeAdapter());
+    };
+    if (wadjet()?.ready) register();
+    else this.registerEvent(this.app.workspace.on("wadjet:ready", register));
+  }
+
+  override onunload(): void {
+    this.unregisterAdapter?.(); // falls back to Wadjet's internal calendar if this was the active adapter
+  }
+}
+```
+
+This plugin never sets itself active — it registers and waits. The user picks "Almanac of
+Foo" from the *Calendar source* dropdown in Wadjet's settings if and when they want it.
 
 ### `ZoneResolver` / `ZoneLocator`
 
@@ -500,6 +691,8 @@ interface ZoneProfile {
   regimes: Regime[];
   modifiers: Modifier[];
   coordinate?: { x: number; y: number };
+  automation?: AutomationLane[];
+  flipSeasons?: boolean;
 }
 ```
 
@@ -514,6 +707,8 @@ interface ZoneProfile {
 | `regimes` | `Regime[]` | The synoptic regime layer (§6). At least one entry with `weight > 0` is required. |
 | `modifiers` | `Modifier[]` | The modifier list (§7). |
 | `coordinate` | `{ x: number; y: number }`, optional | Reserved for a future spatial-correlation feature; unused by generation today. |
+| `automation` | `AutomationLane[]`, optional | Values that move over the world's *years* (see `AutomationLane` below). Absent or empty is exactly the behaviour before lanes existed, and only a non-empty list enters the profile hash. |
+| `flipSeasons` | `boolean`, optional | Southern-hemisphere view of the active calendar: `season:*` tags are recomputed half a year away (see `flipSeasons` below). Tags only — no climate value changes, and it is not part of the profile hash. |
 
 ### `Geography`
 
@@ -614,6 +809,51 @@ interface Regime {
 | `meanDurationDays` | `number ≥ 1` | Geometric mean duration before the regime is re-rolled. Validated `≤ 30` (warning, not error, above that — "long-lived states belong in a spell modifier, not a regime"). |
 | `apply` | `ModifierOp[]`, optional | Daily-stage ops (§7) applied to that day's evaluated parameters whenever this regime is active — the same op vocabulary and per-path rules as a `daily`-stage modifier. |
 
+### `AutomationLane` — a value that moves over years
+
+Where a `Curve` moves a parameter over the *year*, a lane moves it over the world's *years*: a
+warming trend, a century of drought, an age that slowly stills the wind.
+
+```ts
+interface AutomationLane {
+  id: string;
+  param: string;                      // a CurvePath
+  op: "offset" | "scale";
+  points: Array<[number, number]>;    // [[year, value], …]
+  enabled?: boolean;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique within the zone. Names the lane in the UI; generation never reads it. |
+| `param` | `CurvePath` | The parameter the lane moves. Scalar paths are rejected — a lane is a daily-stage op, and the daily stage has no scalars to touch. |
+| `op` | `"offset" \| "scale"` | How the lane's value is applied. `set` and `clamp` are not lane ops: a lane is a continuous value, not a replacement or a bound. |
+| `points` | `Array<[year, value]>` | At least one point; years strictly ascending; every number finite. Years are the calendar's own year numbers, as `Era.from`/`to` are. |
+| `enabled` | `boolean`, optional | Absent = on. A disabled lane emits nothing — but it is still hashed, so muting a lane is a change of provenance. |
+
+| Rule | Detail |
+|---|---|
+| Interpolation | `value(y)` is linear between points and **clamped** to the first/last value outside the authored span. A single point is that constant everywhere. |
+| The year of a day | `y = year + yearPhase`, so a point at year *N* lands on the first instant of year *N*. `year` is `TimeContext.year`, else `floor(dayOrdinal / yearLength) + 1`; a caller supplying neither (e.g. the bare `gregorianTime` helper) gets a 365-day year. |
+| Where it applies | Each enabled lane becomes one daily-stage op on `param`, pushed **before** the zone's own daily modifiers and after the regime's `apply` — so a modifier can still override the lane on a given day. For `offset`/`scale` on a curve this is observably identical to a climate-stage op. |
+| Hashing | `automation` enters `profileHash` only when non-empty, so a zone that has never had a lane hashes exactly as it did before lanes existed. |
+
+### `flipSeasons` — a southern-hemisphere view of the calendar
+
+`flipSeasons: true` gives one zone the opposite half of the year: every `season:*` tag on the day
+is replaced by the season at `(yearPhase + 0.5) mod 1`, read from the active adapter's
+`describe().seasons` (§5).
+
+| Rule | Detail |
+|---|---|
+| Tags only | Nothing else about the day changes — not `temperature.phase`, not the curves, not the report. A flipped zone whose *climate* still peaks in the calendar's summer is a `temperature.phase` that wants moving, not a flip that failed. |
+| Opaque calendars | An adapter with no `describe()`, or one describing no seasons, is unaffected: the day's tags come back untouched. The zone cannot flip what it cannot see. |
+| Days with no season tag | The flipped tag is still added. `describe()` is the adapter's statement of its season layout, and a flipped zone is a view of that layout rather than of the tags the adapter happened to emit. |
+| Tag order | The flipped tag takes the position of the first `season:*` tag it replaced, so tag order stays stable. |
+| Who notices | Only things that read tags: `tag` predicates, `ModGate.source`, and `WeatherReport` consumers reading `TimeContext.tags`. |
+| Hashing | Not part of `profileHash` — it is calendar-side. The per-zone generator cache key carries it instead. |
+
 ---
 
 ## 7. Modifier grammar
@@ -626,6 +866,8 @@ interface Modifier {
   spell?: SpellSpec;
   apply: ModifierOp[];
   tag?: string;
+  enabled?: boolean;             // absent = enabled
+  mods?: ModGate[];              // daily stage only
 }
 ```
 
@@ -637,6 +879,60 @@ interface Modifier {
 | `spell` | `SpellSpec`, optional | Turns `when` into a multi-day event (see below). Also not allowed on `climate` stage. |
 | `apply` | `ModifierOp[]` | The ops to run when active, in list order. |
 | `tag` | `string`, optional | Added to `WeatherReport.conditions` while the modifier is active; a modifier with a `tag` and no meaningful `apply` (e.g. `apply: []`) is pure flavour text. |
+| `enabled` | `boolean`, optional | Power switch, absent = enabled. `enabled: false` skips the modifier at **both** stages: no ops, no `tag`, and its climate-stage ops are not folded into the resolved climate. Distinct from a muted gate (below), which still runs and still tags the day. |
+| `mods` | `ModGate[]`, optional | Mod-matrix gates. Absent or empty is a factor of 1. `daily` stage only — `mods` on a `climate`-stage modifier is a validation error, since a climate-stage modifier is unconditional by construction. |
+
+### Id conventions
+
+`Modifier.id` is free text, unique within the zone — with one reservation and two conventions the
+Climate Studio reads back.
+
+| Id | Status | Meaning |
+|---|---|---|
+| `era:…` | **Reserved — validation error on a zone modifier** | Belongs to the era timeline: an era with ops becomes the synthetic modifier `era:<name>` (§7b). |
+| `layer:<param>` | Convention | The channel editor's all-year `offset` on `<param>`, at the `climate` stage. |
+| `layer:<param>:scale` | Convention | The same channel's all-year `scale`. |
+| `layer:<param>:curve` | Convention | The same channel's drawn keyframes — a `set` carrying a whole `Curve`. |
+| `layer:<param>:swing` | Convention | The same channel's swing — a `set` carrying the amplitude-rescaled base, re-derived whenever the offset, scale or curve under it changes. |
+| `layer:<param>:season:<X>` | Convention | The trim scoped to a season tag: `offset`, `when: { tag: "season:<X>" }`, at the `daily` stage. |
+| `layer:<param>:season:<X>:set` | Convention | The same season scope on an *absolute* path (wind direction): `set` rather than `offset`. |
+| `layer:<param>:moon:<X>` | Convention | The trim carried on a moon: `offset` plus an `envelope`, `when: { moon: … }`, at the `daily` stage. |
+| `forcings:temperature.mean` | Convention | The Forcings window's temperature trim — a climate-stage `offset`. |
+| `forcings:precipitation` | Convention | The Forcings window's wetness — one climate-stage `scale` on **both** `precipitation.pwd` and `precipitation.pww`. |
+
+`<param>` is a `CurvePath`; `<X>` is a season or moon name, verbatim. The table is the same one
+[§7c](#7c-the-climate-studio) gives with the control that writes each id — that section is the
+source of truth, and this one is here because `Modifier.id` is where a reader meets the
+conventions first.
+
+The conventions are exactly that — the engine reads no id but an `era:`-prefixed one and a regime
+id in a `regime` predicate, so a hand-written zone can ignore them entirely. An id that carries a
+convention prefix but does not decompile cleanly is shown as an ordinary device with a "custom"
+chip, never dropped. On save the studio orders `modifiers[]` as `layer:*`, then devices in rack
+order, then `forcings:*`; the order is meaningful (ops stack in list order) but not enforced.
+
+### `ModGate` — mod-matrix gates
+
+```ts
+interface ModGate {
+  source: string;   // a TAG, never a moon
+  amount: number;   // a dimmer in [0, 1]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `source` | `string` | **A tag** — `season:Harvest`, `era:Ice Age`, or a tag set by a modifier earlier in the list the same day. The engine tests tag membership and nothing else. There is no `moon:` gate: a moon shapes a modifier as its *carrier* instead, through `when.moon` plus an `envelope` (see Ops below). A `source` **starting with `moon:` is a validation error**, not a tag that happens never to match. |
+| `amount` | `number` in `[0, 1]` | Magnitude multiplier applied while `source` is on the day. **A gate is a dimmer: it never amplifies.** `1` is full strength, `0` mutes; anything outside `[0, 1]` is a validation error. Author the device at the magnitude you want at its strongest and let the gate take it down. |
+
+| Rule | Detail |
+|---|---|
+| Factor | The day's gate factor is the **product** of `amount` over the gates whose `source` is on the day. A gate whose source is absent contributes ×1; a modifier with no gates has factor 1. Every factor is in `[0, 1]`, so the product is too. |
+| Sign is safe | Because the factor `f` is in `[0, 1]` and a `scale` value is non-negative, `1 + (v − 1)·f` sits between `v` and `1` — dimming can never flip the sign of a scaled parameter. The bound is enforced by validation, not clamped by the engine. |
+| What it scales | The *magnitude* of each op, not the day's value: `offset v → v · f`, `scale v → 1 + (v − 1) · f`. `set` and `clamp` pass through untouched — there is no continuous "half a `set`". |
+| `amount: 0` **mutes**, it does not disable | The ops still run (as `offset 0` / `scale 1`), so the modifier stays active and still contributes its `tag` and its visibility to later `tag` predicates. Only `enabled: false` removes a modifier. |
+| Chaining | Gates read the day's tags as the modifier's own predicate saw them, so a modifier earlier in the list can gate a later one. |
+| With an envelope | Gate factor and envelope strength multiply. |
 
 ### Stage semantics
 
@@ -718,11 +1014,15 @@ Turns a `when` condition into a run of consecutive active days rather than a per
 ### Ops (closed grammar)
 
 ```ts
-type ModifierOp =
-  | { param: string; op: "set"; value: number }
+type ModifierOp = (
+  | { param: string; op: "set"; value: number | Curve }   // a Curve value is climate-stage only
   | { param: string; op: "offset"; value: number }
   | { param: string; op: "scale"; value: number }
-  | { param: string; op: "clamp"; min?: number; max?: number };
+  | { param: string; op: "clamp"; min?: number; max?: number }
+) & {
+  enabled?: boolean;                    // absent = enabled
+  envelope?: Array<[number, number]>;   // [[phase, strength], …]; daily stage only
+};
 ```
 
 Applied in `apply` list order, then declaration order across stacked modifiers/regime.
@@ -737,18 +1037,68 @@ target a `CurvePath` (the corresponding evaluated `DayParams` key) — `temperat
 
 | op | on a constant | on a harmonic | on keyframes |
 |---|---|---|---|
-| `set` | replaced by `value` | replaced by `value` **(see note)** | replaced by `value` **(see note)** |
+| `set` | replaced by `value` **(see note)** | replaced by `value` **(see note)** | replaced by `value` **(see note)** |
 | `offset` | `curve + value` | `mean += value` (amplitude/phase untouched) | every keyframe's `value += value` |
 | `scale` | `curve × value` | `mean ×= value`, `amplitude ×= value` (phase untouched) | every keyframe's `value ×= value` |
 | `clamp` | clamped in place | **materialised to 24 evenly-spaced keyframes, each clamped point-wise** (a stated deviation from the design doc, which describes a runtime bound instead — same observable effect, one fewer Curve variant to carry around) | every keyframe's `value` clamped |
 
-> **Note on `set`:** `ModifierOp.value` is a `number`, so `set` always replaces the target with a
-> plain constant — a modifier op cannot install a harmonic or keyframe curve. (The design doc's op
-> table says "replace with a full Curve"; the shipped type does not support that.)
+> **Note on `set`:** `value` is `number | Curve`, so a **climate**-stage `set` can replace the
+> target with a whole annual shape (a constant, a `Harmonic`, or a `Keyframe[]`) regardless of what
+> the target was before — this is how the Climate Studio writes a curve without mutating the zone's
+> stored `climate`. A *Curve* value is climate-stage only and only on a `CurvePath`: a daily-stage
+> op gets `apply[i].value: "set with a curve is climate stage only"`, and a climate-stage `set` of a
+> curve on a `ScalarPath` is likewise an error. A numeric `value` behaves as it always has at both
+> stages.
 
 `clamp` requires at least one of `min`/`max`; the other ops require a finite numeric `value`.
 On a *daily*-stage/`ScalarPath`-excluded op, `clamp` is a plain numeric clamp with no keyframe
 materialisation (there's no Curve at that stage — it's already a scalar).
+
+#### `enabled` — the per-op power switch
+
+Absent = enabled. `enabled: false` drops the op before it reaches the curves, at both stages and
+in every list that carries ops: a modifier's `apply`, a `Regime.apply`, and an `Era.apply`. It is
+independent of the modifier's own `enabled`: a disabled op inside an enabled modifier leaves the
+modifier active, so the modifier still contributes its `tag`. Disabling every op of a modifier is
+therefore *not* the same as disabling the modifier.
+
+#### `envelope` — an onset shape carried on a moon
+
+```ts
+envelope?: Array<[number, number]>;   // [[phase, strength], …]
+```
+
+A device that fires "on the full moon" rarely wants a square edge. An envelope shapes the op's
+magnitude across the carrier moon's cycle, so the effect swells and fades instead of switching.
+
+| Rule | Detail |
+|---|---|
+| Carrier | The moon named in a bare `when: { moon: … }` predicate; otherwise the **first** moon of the day. If the day has no moons at all the envelope does nothing (factor 1). A `moon` nested inside `all`/`any`/`not` is not a bare `when.moon` and does not name the carrier. |
+| Sampling | Points are sorted by `phase` and interpolated linearly, and the segment from the last point back to the first **wraps** across `1 → 0`, so the shape is continuous around the cycle. A single point is a constant strength. |
+| Effect | Strength `s` scales the op's magnitude exactly as a gate does: `offset v → v · s`, `scale v → 1 + (v − 1) · s`. Gate factor and envelope strength multiply. |
+| `set` / `clamp` | Ignore it. Validation raises a **warning** (`"envelope has no effect on set/clamp"`), not an error. |
+| Stage | `daily` only — an envelope on a `climate`-stage op is an error. The engine strips `envelope` from the op before it reaches the curves. |
+| Shape rules | The array must be non-empty; each point is `[phase ∈ [0,1), strength ∈ [0,1]]`. **Strength is a dimmer, exactly like a gate's `amount`**: a strength above 1 is a validation error, so an envelope shapes a device's onset but never amplifies it past the magnitude the author wrote. |
+
+### Named moon phases (`MoonConfig.phases`)
+
+```ts
+interface MoonConfig {
+  name: string;
+  cycleDays: number;
+  phaseAtEpoch: number;
+  phases?: Array<{ name: string; at: number }>;   // display metadata
+}
+```
+
+Set in *Settings → Calendar → Moons*, and mirrored on `CalendarDescription.moons[]` (§5) so a
+third-party calendar can name its own phases. **Display metadata only.**
+
+| Rule | Detail |
+|---|---|
+| `at` | A boundary on the moon's own cycle, in `[0,1)` (`0` = new, `0.5` = full). Names unique, `at` ascending. A named phase runs from its own `at` to the next boundary, wrapping past `1 → 0`. |
+| The engine never sees a name | A UI compiles a selection of named phases down to the single `moon.phase` range `[a, b)` running from the first selected phase's `at` to the boundary after the last. Round-trip: a range whose ends coincide with boundaries decompiles back to a phase selection; anything else is shown as a custom range. |
+| Not hashed | `phases` is outside the config hash — renaming or re-cutting phases cannot change generated weather. |
 
 ### Validation (errors block generation; warnings don't)
 
@@ -769,7 +1119,7 @@ present.
 | `regimes[i].meanDurationDays` | error | `< 1`. |
 | `regimes[i].meanDurationDays` | warning | `> 30`. |
 | `regimes[i].apply` | error | Same op validation as below, `stage: "daily"`. |
-| `modifiers[i].id` | error | Missing, or duplicate within the zone. |
+| `modifiers[i].id` | error | Missing, duplicate within the zone, or starting with the reserved `era:` prefix. |
 | `modifiers[i].stage` | error | Present but not `"climate"`/`"daily"`. |
 | `modifiers[i]` | error | `stage: "climate"` combined with `when` and/or `spell`. |
 | `modifiers[i].when` | error | Predicate shape violations (wrong key count, unknown predicate key, out-of-range values — see the Predicates table's ranges: `moon.phase`/`yearPhase` must be within `[0,1]`, `dayOfYear` within `[0, 100000]`, `chance` within `[0,1]`, `tag`/`regime` non-empty strings). |
@@ -777,6 +1127,30 @@ present.
 | `modifiers[i].spell.meanDurationDays` | error | `< 1`. |
 | `modifiers[i].spell.meanDurationDays` | warning | `> 50` — "very long spells are looked back over at most 400 days". |
 | `modifiers[i].apply` | error | Not an array; any op not an object; op's `param` not a valid path for the modifier's stage; op's `op` not one of `set`/`offset`/`scale`/`clamp`; `clamp` with neither `min` nor `max`; non-`clamp` op with a non-finite `value`. |
+| `modifiers[i].enabled`, `modifiers[i].apply[j].enabled` | error | Present but not `true`/`false`. |
+| `modifiers[i].mods` | error | Not an array, or present on a `climate`-stage modifier. |
+| `modifiers[i].mods[j].source` | error | Not a non-empty string, **or starting with `moon:`** — "a gate is a tag; a moon is the carrier (use `when.moon`)". |
+| `modifiers[i].mods[j].amount` | error | Not a number in `[0, 1]` — "a gate dims, it never amplifies". |
+| `modifiers[i].mods[j].<field>` | warning | Unknown field on a gate — ignored. |
+| `modifiers[i].apply[j].envelope` | error | Present on a `climate`-stage op, or not a non-empty array. |
+| `modifiers[i].apply[j].envelope[k]` | error | Not `[phase ∈ [0,1), strength ∈ [0,1]]`. |
+| `modifiers[i].apply[j].envelope` | warning | On a `set`/`clamp` op — those ops ignore it. |
+| `flipSeasons` | error | Present but not `true`/`false`. |
+| `automation` | error | Present but not an array. |
+| `automation[i].id` | error | Missing/blank, or duplicate within the zone. |
+| `automation[i].param` | error | Not a `CurvePath` (a lane cannot target a scalar path). |
+| `automation[i].op` | error | Not `offset`/`scale`. |
+| `automation[i].enabled` | error | Present but not `true`/`false`. |
+| `automation[i].points` | error | Missing or empty — a lane needs at least one `[year, value]` point. |
+| `automation[i].points[j]` | error | Not a two-number `[year, value]` pair. |
+| `automation[i].points[j][0]` | error | Year not finite, or not strictly greater than the previous point's year. |
+| `automation[i].points[j][1]` | error | Value not finite. |
+| `automation[i].<field>` | warning | Unknown field on a lane — ignored (the same rule eras carry). |
+
+The complete list of paths this table can produce is checked in as
+`test/fixtures/studio/validator-paths.json`, generated from
+`test/fixtures/studio/trip-every-rule.json` by `test/validator-paths.test.ts` — a rule with no
+path there is a rule the UI has nowhere to show.
 
 ---
 
@@ -791,6 +1165,7 @@ interface Era {
   from: number;         // first year, inclusive
   to?: number;          // last year, inclusive; omitted = open-ended
   apply?: ModifierOp[]; // daily-stage ops (CurvePaths only), applied to every zone
+  enabled?: boolean;    // absent = enabled
 }
 ```
 
@@ -800,12 +1175,52 @@ interface Era {
 | Tags | Every era covering the year adds `era:<name>` to the day's `TimeContext.tags` (after the adapter's own tags, in list order). Readable by the `tag` predicate; not copied into `conditions`. |
 | Ops | An era with a non-empty `apply` becomes a synthetic daily modifier `{ id: "era:<name>", when: { tag: "era:<name>" }, apply }` appended **after** the zone's own modifiers, so ops run zone → era. Same op semantics and validation as a daily-stage modifier (no scalar paths). |
 | Overlap | Overlapping eras all apply, in list order. |
+| `enabled` | Absent = on. `enabled: false` makes the era invisible for the whole timeline: no `era:<name>` tag, no synthetic modifier, no ops. It is still hashed, so muting an era changes provenance. Individual ops inside `apply` carry their own `enabled` (§7). |
 | Provenance | `calendarHash` gains `+eras:<hash>`; the per-zone generator cache is keyed on it. Editing eras changes past weather. |
 | Reserved | Zone modifier ids may not start with `era:` (validation error). |
-| Validation | `name` required and unique; `from`/`to` whole years, `to ≥ from`; `apply` validated as daily ops; unknown fields warn. The settings row refuses to save while there is an error. |
+| Validation | `name` required and unique; `from`/`to` whole years, `to ≥ from`; `apply` validated as daily ops; `enabled` boolean if present; unknown fields warn. The settings row refuses to save while there is an error. |
 | Spells | A spell's start window is estimated over days 0–364 of the calendar. Gated on an era that starts later, no day qualifies and the window falls back to a whole year, so `meanStartsPerYear` is read as "per year inside the era". |
 
 Eras are steps on the absolute timeline — not cycles. See `NON-GOALS.md`.
+
+---
+
+## 7c. The Climate Studio
+
+The studio (*Zones → Open in studio*, or the *Open climate studio* command) is an editor over the
+schema above — it adds no grammar of its own. Everything it produces is a `Modifier` (§7), an
+[`AutomationLane`](#automationlane--a-value-that-moves-over-years), a
+[`Regime`](#regime), [`flipSeasons`](#flipseasons--a-southern-hemisphere-view-of-the-calendar), an
+[`Era`](#7b-the-era-timeline), or an `Override`. What it *does* add is a set of id conventions, so
+that a knob's value can be found again the next time the zone is opened.
+
+**Ids the studio writes.** `<param>` is a `CurvePath`; `<X>` is a season or moon name, verbatim.
+
+| Id | Stage | Op | Written by |
+|---|---|---|---|
+| `layer:<param>` | `climate` | `offset` | Channel editor, all-year offset knob |
+| `layer:<param>:scale` | `climate` | `scale` | Channel editor, all-year scale knob |
+| `layer:<param>:curve` | `climate` | `set` with a whole `Curve` | Channel editor, drawn keyframes |
+| `layer:<param>:swing` | `climate` | `set` with the amplitude-rescaled base | Channel editor, swing knob |
+| `layer:<param>:season:<X>` | `daily` | `offset`, `when: { tag: "season:<X>" }` | Channel editor, season scope |
+| `layer:<param>:season:<X>:set` | `daily` | `set`, `when: { tag: "season:<X>" }` | Channel editor, season scope on an absolute path (wind direction) |
+| `layer:<param>:moon:<X>` | `daily` | `offset` + `envelope`, `when: { moon: { name: "<X>", phase: [0, 1] } }` | Channel editor, ☾ cycle scope |
+| `forcings:temperature.mean` | `climate` | `offset` | Forcings window, temperature trim |
+| `forcings:precipitation` | `climate` | `scale` on **both** `precipitation.pwd` and `precipitation.pww` | Forcings window, wetness |
+| `automation` lane `frc.warmth` | — | `offset` on `temperature.mean` | The `FRC · warmth` lane in the playlist |
+
+| Rule | Detail |
+|---|---|
+| The engine reads none of it | Ids are a UI convention (see [Id conventions](#id-conventions) for the one id prefix that *is* reserved, `era:`). A hand-written zone may use any unique ids it likes and the generator behaves identically. |
+| Order is meaningful | On save the studio partitions `modifiers[]` as `layer:*` → devices in rack order → `forcings:*`. Ops stack in list order, so the partition is what makes "the trim sits on top of the layers" true. Nothing enforces it: a hand-ordered file is left as it is. |
+| Strays are kept, never rewritten | An id that carries a `layer:`/`forcings:` prefix but does not match the shape its id promises is shown as an ordinary device with a "custom" chip. The studio will not silently rewrite or drop it. |
+| Anything else is a device | A modifier whose id is neither `layer:*` nor `forcings:*` is a device: it gets a mixer card, an editor window, and — if its `when` has a time shape — a lane. |
+| Swing is derived | `layer:<param>:swing` is re-derived from the current effective base whenever the offset, scale or curve under it changes, so the three knobs stay independent. |
+| Pins | The audition strip's right-click pin writes an ordinary `Override` (§4 `overridden`, *Settings → Pinned days*), not a modifier. |
+| Colours | The colour indices on seasons, eras and regimes are view state on the studio leaf, never schema. |
+
+Seasons and moons are the active adapter's, not the zone's: under a calendar plugin that
+implements [`describe()`](#calendardescription) the Seasons and cycle windows mirror it read-only.
 
 ---
 

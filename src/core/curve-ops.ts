@@ -2,7 +2,7 @@
  * Climate-stage ops: structural edits to Curves (DESIGN-v1.md §2 "Ops on a Curve").
  *
  * | op     | constant | harmonic                     | keyframes            |
- * | set    | replace  | replace (with a constant)    | replace              |
+ * | set    | replace (constant or Curve) | replace (constant or Curve) | replace (constant or Curve) |
  * | offset | +v       | mean += v                    | every value += v     |
  * | scale  | ×v       | mean ×= v, amplitude ×= v    | every value ×= v     |
  * | clamp  | clamp    | sampled to keyframes, clamped| every value clamped  |
@@ -90,7 +90,8 @@ export function applyCurveOp(curve: Curve, op: ModifierOp): Curve {
 function applyScalarOp(v: number, op: ModifierOp): number {
   switch (op.op) {
     case "set":
-      return op.value;
+      // a Curve-valued set on a ScalarPath is rejected by the validator upstream
+      return typeof op.value === "number" ? op.value : v;
     case "offset":
       return v + op.value;
     case "scale":

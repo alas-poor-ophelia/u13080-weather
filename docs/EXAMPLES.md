@@ -8,6 +8,11 @@ U+13080 is flexible and powerful even in its alpha state, but the visibility of 
   says what, `spell` gives it duration, `tag` names it on the day's card.
 - An **era** lives in *Settings → Calendar → Eras* and applies to the whole world.
 - Comments (`// …`) are fine in both editors.
+- Everything here can also be built in the **climate studio** (*Zones → Open in studio*) without
+  typing JSON. Each group below opens with the route through the studio; the recipe under it is
+  what the studio would have written. The two are interchangeable — paste a recipe and the studio
+  will show it as a device on save, or build it in the studio and read the JSON back out of the
+  `{ } JSON` drawer.
 
 Parameter cheat-sheet, for reading the `apply` lists:
 
@@ -32,6 +37,12 @@ Parameter cheat-sheet, for reading the `apply` lists:
 The internal calendar's seasons (*Settings → Calendar*) become tags: `season:Spring`, and so on. You do not have to define seasons; if you'd rather not, `yearPhase` ranges do the same job without names: `0` is the first day of the year, `0.5` is midsummer in a northern-hemisphere preset.
 
 Integrating with an external calendar from another plugin, once such integrations exist, may modify this. That will be up to that plugin+the data you enter into it.
+
+**In the studio:** `＋` on a chain → *Tag-gated* for a named season, or *Spell* for a season-shaped
+run of days; set the window with the year-window mini-lane and the `apply` knobs. To edit the
+seasons themselves, click `Calendar ⚑` at the top of the playlist and drag the boundary flags. For
+a permanent seasonal shape rather than a device — a wetter summer, a milder winter — use the
+channel editor's season scope instead: click a channel row, pick the season chip, turn the knob.
 
 ### Monsoon burst
 
@@ -95,6 +106,13 @@ season that starts early and ends late (*Settings → Calendar*).
 Moons are declared in *Settings → Calendar* (name, cycle in days, phase at day 0). Phase runs 0 (new) →
 0.5 (full) → 1 (new again); ranges wrap, so `[0.9, 0.1]` is "around new". The moon's *name* in
 the modifier must match the calendar exactly.
+
+**In the studio:** `＋` on a chain → *Moon-bound*, or the shipped **Spring-tide** preset, then pick
+the moon and the phases it fires on. The device gets its own lane of pulses in the playlist; click
+one to open the moon's cycle disc and drag the phase boundaries. In the device's MOD section you
+can gate it on a season (a dimmer, not a switch) and draw an onset envelope so it swells and fades
+across the phase rather than snapping on — that is the `mods` and `envelope` in the "Spring tide"
+recipe below.
 
 ### Stormtide (single moon near full)
 
@@ -174,12 +192,58 @@ ignores it. This example results in about three spells a year.
 }
 ```
 
+### Spring tide (a moon device, gated by season, with an onset envelope)
+
+Everything above switches on and off at the edge of a range. This one swells and fades instead,
+and one season damps it to half.
+
+Two new pieces — and both of them are **dimmers**, in `[0, 1]`. You author a device at the
+magnitude you want at its strongest, and an envelope or a gate only ever takes it *down* from
+there; neither can amplify past what you wrote.
+
+- `envelope` is a list of `[phase, strength]` points sampled at the **carrier moon** — the moon
+  named in `when.moon` — and interpolated between them, wrapping around the cycle. Strength is in
+  `[0, 1]` and multiplies the op's *magnitude*: `[[0.4, 0], [0.5, 1], [0.6, 0]]` means the wind
+  offset is 0 at the edges of the window, full at exactly full moon, and a straight ramp in
+  between. `set` and `clamp` ignore envelopes (there is no half of a `set`); `offset` and `scale`
+  honour them.
+- `mods` is a list of **gates**. A gate's `source` is a *tag* — never a moon; a `moon:` source is
+  a validation error, because a moon is the device's carrier (`when.moon`), not a gate. While that
+  tag is on the day, every op's magnitude in this modifier is multiplied by `amount`, itself in
+  `[0, 1]`. Gates multiply, a gate whose tag is absent counts as `1`, and `amount: 0` mutes the
+  device without silencing it (it keeps its `tag`, so other rules can still react to it).
+
+```json
+{
+  "id": "spring-tide",
+  "when": { "moon": { "name": "Sable", "phase": [0.4, 0.6] } },
+  "mods": [{ "source": "season:Summer", "amount": 0.5 }],
+  "apply": [
+    { "param": "wind.speed", "op": "offset", "value": 14, "envelope": [[0.4, 0], [0.5, 1], [0.6, 0]] },
+    { "param": "cloud.dry", "op": "offset", "value": 0.2, "envelope": [[0.4, 0], [0.5, 1], [0.6, 0]] }
+  ],
+  "tag": "spring-tide"
+}
+```
+
+What you should see: through most of the month, nothing. Over the six or seven days around each
+full Sable the wind climbs and falls again, peaking at +14 km/h on the night of the full moon —
+and in Summer that peak is only +7, because the `season:Summer` gate halves it. Autumn full moons
+are the ordinary +14: the gate is not on the day, so it contributes nothing.
+
 ---
 
 ## Eras
 
 Eras are world-wide and keyed on the calendar's year numbers (note: again, this may vary with non-internal calendars). Each one tags its days with `era:<name>`, and `apply` affects every zone. Zones can then add their own reaction with an ordinary
 modifier on the tag. Eras are steps, not cycles.
+
+**In the studio:** switch the zoom to *Era* and the eras become clips on their own lane — drag an
+empty stretch to create one, drag its body to move it, its edges to resize, right-click to delete,
+click to open its editor and give it `apply` ops. Eras are world-level, so the lane and the mixer
+card both carry a `world · N zones` badge and the first world edit of a session asks you to
+confirm. A century of warming (the last recipe in this group) is not an era but an **automation
+lane**: the `FRC · warmth` row lower down the playlist, where you drag points across the years.
 
 ### Ice age, thaw, long summer (a chained timeline)
 
@@ -259,11 +323,52 @@ scalar paths (`temperature.phase`, `precipitation.freezingPoint`, …).
 }
 ```
 
+### A century of warming (an automation lane)
+
+An era is a step: inside it the world is one way, outside it another. A **lane** is the other
+shape — a value that slides over the years. Lanes live on the zone rather than the world, in an
+`automation` array beside `modifiers` (*Zones → Edit*), and each one is a `[year, value]` list:
+
+```json
+{
+  "automation": [
+    {
+      "id": "frc.warmth",
+      "param": "temperature.mean",
+      "op": "offset",
+      "points": [[1, 0], [101, 3]]
+    }
+  ]
+}
+```
+
+The value is linear between the points and **held flat outside them**, so this reads as: nothing
+in year 1, +3 °C by year 101, and +3 °C for ever after. Years are the calendar's own year
+numbers, the same ones an era's `from`/`to` use, and the value moves smoothly *within* a year as
+well — the lane is sampled at `year + yearPhase`.
+
+What you should see: roll a year around year 1 and a year around year 101 for the same zone and
+compare their mean temperatures — the later year comes out very nearly 3 °C warmer, day for day,
+with the same seed and the same weather patterns underneath. Everything else is untouched: a lane
+is applied as an ordinary daily `offset`/`scale` on one curve parameter (`op` must be one of
+those two), just ahead of the zone's own modifiers, so a storm device can still overrule it on a
+given day.
+
+Lanes take `enabled: false` like anything else, and a zone with no lanes at all generates exactly
+what it always did.
+
 ---
 
 ## Oddities
 
 A few more oddball examples just to attempt to show some more of the flexibility for worldbuilding.
+
+**In the studio:** the odd ones are mostly *Trim* (always on — the valley that never rains, the
+wind from the Waste), *Spell* (ashfall, volcanic winter) and *Chance* (a rare freak day) from the
+`＋` insert picker; **Volcanic**, **Drought curse**, **Monsoon burst** and **Föhn days** ship as
+presets you can insert and then edit. A pure-flavour device is one with a tag and no ops: add the
+tag in its window and remove the `apply` rows. Whatever you build, the `Writes →` footer shows the
+modifier it produces, and the audition strip at the bottom shows a year of it immediately.
 
 ### The valley where it never rains
 
@@ -357,6 +462,11 @@ Another example of an 'unnatural' constant weather effect. Force the prevailing 
 
 Not a modifier: how to get a value from the weather into a note or a script.
 
+**In the studio:** nothing to build here, but the same numbers are on screen. Zoom in past a week
+and the playlist becomes a card for that day — temperature, precipitation, wind, sky and the day's
+tags — and hovering a cell in the audition strip gives the same in a tip. Both follow the units
+setting.
+
 A code block that renders one bare field, in your units (or `units: imperial` to force it):
 
 ````markdown
@@ -391,6 +501,12 @@ ash are not carried over (see `NON-GOALS.md`); a range query gives you the days 
 
 Rules stack in list order, and a tag set by an earlier rule is visible to later rules the same
 day (but not to `spell` rules, which replay past days and are only aware of calendar tags). That is: one rule *decides* (tag only), later rules *react* (`when: { "tag": … }`). Regimes (the background settled / wet-spell / dry-spell patterns every weather data preset inherently has) are visible the same way through `{ "regime": "dry-spell" }`.
+
+**In the studio:** list order is rack order in the mixer, top to bottom — drag a card's grip to
+move it and the `modifiers[]` array follows. So "decide, then react" is just the deciding device
+sitting above the reacting one in the chain. The regimes themselves are the fixed slot `00` at the
+top of every chain: click it to set how often each state comes up, how long it lasts, and what it
+changes.
 
 ```json
 [

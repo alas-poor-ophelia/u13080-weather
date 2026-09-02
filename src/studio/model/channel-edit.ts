@@ -1,0 +1,779 @@
+/**
+ * The channel editor's pure half (SPEC §3.4 "Channel editors", PLAN §5.2).
+ *
+ * The window is a chart, a row of scope chips, a knob set that follows the
+ * scope, and the Writers → channel stack. Everything in that sentence that is
+ * *derivation* lives here; `src/studio/ui/windows/channel.ts` only draws it
+ * (PLAN D3 — no Obsidian, no DOM in `src/studio/model`).
+ *
+ * Every write goes through `compile.ts`. Nothing here builds a `Modifier`
+ * itself, so the id grammar, the rank sort and the swing re-derivation stay in
+ * one place (PLAN §0.1 "Compiler").
+ *
+ * ## Scopes
+ *
+ * A scope is a string id, because it is also a Segmented value and a chip id:
+ *
+ * | id | stage | temperature's knobs |
+ * |---|---|---|
+ * | `all`          | climate — applied once to the curves | offset · swing · jitter |
+ * | `season:<X>`   | daily, `when.tag = season:<X>`       | offset |
+ * | `moon:<X>`     | daily, `when.moon = { <X>, [0,1] }`  | depth (+ the drawn envelope) |
+ *
+ * The knobs themselves are per channel, not per scope alone: `CHANNEL_KNOBS`
+ * maps `(channel, scope) → [KnobId, KnobBinding][]`, and every binding names
+ * the parameter(s) and the `compile.ts` setter it reaches (SPEC §8 "Channel
+ * parity"). `CHANNEL_CHART` says the same for the drawn lines.
+ *
+ * SPEC §3.4 lists the ☾ scope as "offset · depth". The compiled moon layer
+ * (`compile.ts` `CycleLayer`) carries exactly one scalar — the `offset` op's
+ * `value` — so those two names are one control here, labelled *depth*, with
+ * the second half of the pair being the drawn envelope rather than a knob.
+ * `read()` reports it under both names so a caller can ask either way.
+ *
+ * ## What the chart draws
+ *
+ * `effectiveBase` (base climate + drawn curve + all-year offset + all-year
+ * scale, PLAN §0.1) at 12 calendar-month centres — or, once the drawn curve
+ * has its own keyframes, at *those* phases, so a keyframe added by a
+ * double-click survives the next repaint. Swing is deliberately not in it:
+ * swing is *derived from* the effective base, so drawing it would make the
+ * curve chase its own tail as the knob turns. `swungPoints` gives the window
+ * the resulting curve as a second, read-only line.
+ *
+ * Editing a keyframe therefore writes the drawn value back through the
+ * all-year ops it was drawn through (`v → v / scale − offset`), so the curve
+ * the user placed is the curve `effectiveBase` reports — an offset layer is
+ * never counted twice.
+ */
+import { evalCurve, monthCentrePhase, wrapPhase } from "../../core/curve";
+import { getPath, isCurvePath } from "../../core/curve-ops";
+import type { Curve, Era, Keyframe, ModifierOp, ZoneProfile } from "../../core/types";
+import {
+  channelOf,
+  channelOrNull,
+  effectiveBase,
+  getAllYear,
+  getCurveLayer,
+  getCycle,
+  getSeasonOffset,
+  getSeasonSet,
+  getSwing,
+  LAYER,
+  parseLayerId,
+  setAllYear,
+  setCurveLayer,
+  setCycle,
+  setSeasonOffset,
+  setSeasonSet,
+  setSwing,
+  writersFor,
+  type Channel,
+  type Writer,
+} from "./compile";
+import type { WindowRef } from "./validation";
+
+// ---------------------------------------------------------------------------
+// Scopes
+// ---------------------------------------------------------------------------
+
+/** The all-year scope's id — the one scope every channel always has. */
+export const ALL_SCOPE = "all";
+export const SEASON_SCOPE_PREFIX = "season:";
+export const MOON_SCOPE_PREFIX = "moon:";
+
+/** The ☾ glyph the moon chips wear (SPEC §3.4 `All year · <seasons> · ☾ Sable`). */
+export const MOON_GLYPH = "☾";
+
+export type Scope = { kind: "all" } | { kind: "season"; name: string } | { kind: "cycle"; moon: string };
+
+/** Decode a scope id. An unknown id is the all-year scope, so a stale chip can never strand the window. */
+export function parseScope(scope: string): Scope {
+  if (scope.startsWith(SEASON_SCOPE_PREFIX)) {
+    const name = scope.slice(SEASON_SCOPE_PREFIX.length);
+    return name ? { kind: "season", name } : { kind: "all" };
+  }
+  if (scope.startsWith(MOON_SCOPE_PREFIX)) {
+    const moon = scope.slice(MOON_SCOPE_PREFIX.length);
+    return moon ? { kind: "cycle", moon } : { kind: "all" };
+  }
+  return { kind: "all" };
+}
+
+export const seasonScope = (name: string): string => `${SEASON_SCOPE_PREFIX}${name}`;
+export const moonScope = (name: string): string => `${MOON_SCOPE_PREFIX}${name}`;
+
+export interface ScopeChip {
+  id: string;
+  label: string;
+}
+
+/** The world calendar the chips are built from — the shape both `CalendarDescription` and the world draft satisfy. */
+export interface ScopeCalendar {
+  seasons: ReadonlyArray<{ name: string }>;
+  moons: ReadonlyArray<{ name: string }>;
+}
+
+/**
+ * `All year · <seasons> · ☾ <moons>` (SPEC §3.4).
+ *
+ * The calendar's own seasons and moons lead, in calendar order. A scope the
+ * *zone* already carries a layer for but the calendar no longer describes (a
+ * renamed season, a deleted moon) is appended after them, so an orphaned layer
+ * still has a chip to be reached and cleared from — SPEC law 2: nothing the
+ * file contains may be unreachable.
+ */
+export function scopeChips(z: ZoneProfile, calendar: ScopeCalendar): ScopeChip[] {
+  const chips: ScopeChip[] = [{ id: ALL_SCOPE, label: "All year" }];
+  const seen = new Set<string>([ALL_SCOPE]);
+
+  const push = (id: string, label: string): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    chips.push({ id, label });
+  };
+
+  for (const s of calendar.seasons) if (s.name) push(seasonScope(s.name), s.name);
+  for (const m of calendar.moons) if (m.name) push(moonScope(m.name), `${MOON_GLYPH} ${m.name}`);
+
+  for (const m of z.modifiers) {
+    const p = parseLayerId(m.id);
+    if (!p?.scope) continue;
+    if (p.kind === "season" || p.kind === "seasonSet") push(seasonScope(p.scope), p.scope);
+    else if (p.kind === "moon") push(moonScope(p.scope), `${MOON_GLYPH} ${p.scope}`);
+  }
+
+  return chips;
+}
+
+/** The stage line under the knob set (SPEC §3.4 "Caption states the stage"). */
+export function stageCaption(scope: string): string {
+  const s = parseScope(scope);
+  if (s.kind === "season") return `daily stage · when.tag season:${s.name}`;
+  if (s.kind === "cycle") return `daily stage · when.moon ${s.moon} · envelope`;
+  return "climate stage · applied once to the curves";
+}
+
+// ---------------------------------------------------------------------------
+// Knobs
+// ---------------------------------------------------------------------------
+
+/**
+ * Every knob any channel offers (SPEC §8 "Channel parity", PLAN §5.2).
+ *
+ * An id names a *role*, not a parameter. Two channels may share one — `depth`
+ * is the ☾ knob everywhere — and one channel may show the same id in two
+ * scopes with two different writes: temperature's `offset` is an all-year
+ * climate-stage layer at the top of the chain and a `when.tag` layer inside a
+ * season. Where the *range* differs between scopes the id differs too, because
+ * `windows/channel.ts` holds one `KnobSpec` per id: precipitation's all-year
+ * `chance` is a ×scale on `pwd`, and its season knob is the additive
+ * `wetShift`, so the two cannot share a spec.
+ */
+export type KnobId = "offset" | "swing" | "jitter" | "depth" | "stick" | "chance" | "amount" | "wetShift" | "wind" | "gust" | "calm" | "direction" | "cloud" | "humidity";
+
+/** Every id, in the order `read` fills its record. Not a draw order — that is the per-scope list's. */
+const KNOB_IDS: readonly KnobId[] = ["offset", "swing", "jitter", "depth", "stick", "chance", "amount", "wetShift", "wind", "gust", "calm", "direction", "cloud", "humidity"];
+
+/**
+ * How one knob reaches `compile.ts`. `params` is a list because SKY's pair
+ * knobs write the dry *and* wet halves of one section as two layers with the
+ * same value (SPEC §3.4 "knobs offset per pair"); the first is the one `read`
+ * reports back.
+ */
+type KnobBinding =
+  | { write: "allYear"; params: readonly string[]; op: "offset" | "scale" }
+  | { write: "swing"; param: string }
+  | { write: "jitter"; param: string }
+  | { write: "season"; params: readonly string[] }
+  | { write: "seasonSet"; param: string }
+  | { write: "cycle" };
+
+/** One scope's knobs, in the order they are drawn. */
+type ScopeKnobs = ReadonlyArray<readonly [KnobId, KnobBinding]>;
+
+interface ChannelKnobTable {
+  all: ScopeKnobs;
+  season: ScopeKnobs;
+  cycle: ScopeKnobs;
+}
+
+const TEMP_MEAN = "temperature.mean";
+const WIND_SPEED = "wind.speed";
+const WIND_DIRECTION = "wind.direction";
+const PRECIP_PWD = "precipitation.pwd";
+
+/**
+ * The per-channel knob table (PLAN §5.2's last bullet, spelled out).
+ *
+ * | channel | all year | season | ☾ |
+ * |---|---|---|---|
+ * | temperature | offset · swing · jitter | offset | depth |
+ * | precipitation | stick (×`pww`) · chance (×`pwd`) · amount (×`scale`) | chance (± `pwd`) | depth (± `pwd`) |
+ * | wind | wind (± `speed`) · gust (×`speedSd`) · calm (± `calmFraction`) | wind · direction | depth (± `speed`) |
+ * | sky | cloud (± `cloud.dry`+`cloud.wet`) · humidity (± `humidity.*`) | the same two | depth (± `cloud.dry`) |
+ *
+ * **Deviation, stated.** PLAN §5.2 asks for precipitation's season scope to be
+ * the same ×scale ops the all-year scope writes. The id grammar has no
+ * season-scoped `scale` — `layer:<param>:season:<X>` is an `offset` and
+ * `…:season:<X>:set` is a whole value (`compile.ts`) — and compile.ts is not
+ * this bead's to extend. The season knob is therefore an additive shift of the
+ * wet-day probability on `pwd`, ±0.3, which is the same control in a different
+ * unit; the caption and the hint say so.
+ */
+const CHANNEL_KNOBS: Record<Channel, ChannelKnobTable> = {
+  temperature: {
+    all: [
+      ["offset", { write: "allYear", params: [TEMP_MEAN], op: "offset" }],
+      ["swing", { write: "swing", param: TEMP_MEAN }],
+      ["jitter", { write: "jitter", param: TEMP_MEAN }],
+    ],
+    season: [["offset", { write: "season", params: [TEMP_MEAN] }]],
+    cycle: [["depth", { write: "cycle" }]],
+  },
+  precipitation: {
+    all: [
+      ["stick", { write: "allYear", params: ["precipitation.pww"], op: "scale" }],
+      ["chance", { write: "allYear", params: [PRECIP_PWD], op: "scale" }],
+      ["amount", { write: "allYear", params: ["precipitation.scale"], op: "scale" }],
+    ],
+    season: [["wetShift", { write: "season", params: [PRECIP_PWD] }]],
+    cycle: [["depth", { write: "cycle" }]],
+  },
+  wind: {
+    all: [
+      ["wind", { write: "allYear", params: [WIND_SPEED], op: "offset" }],
+      ["gust", { write: "allYear", params: ["wind.speedSd"], op: "scale" }],
+      ["calm", { write: "allYear", params: ["wind.calmFraction"], op: "offset" }],
+    ],
+    season: [
+      ["wind", { write: "season", params: [WIND_SPEED] }],
+      ["direction", { write: "seasonSet", param: WIND_DIRECTION }],
+    ],
+    cycle: [["depth", { write: "cycle" }]],
+  },
+  sky: {
+    all: [
+      ["cloud", { write: "allYear", params: ["cloud.dry", "cloud.wet"], op: "offset" }],
+      ["humidity", { write: "allYear", params: ["humidity.dry", "humidity.wet"], op: "offset" }],
+    ],
+    season: [
+      ["cloud", { write: "season", params: ["cloud.dry", "cloud.wet"] }],
+      ["humidity", { write: "season", params: ["humidity.dry", "humidity.wet"] }],
+    ],
+    cycle: [["depth", { write: "cycle" }]],
+  },
+};
+
+/**
+ * What a channel's chart draws. `primary` is the series the panel opens on and
+ * the one the ☾ envelope and depth ride; `series` is every line the chart can
+ * carry, in draw order. One entry means there is no series picker — more than
+ * one becomes a Segmented, because the `automation` chart kind only makes its
+ * *first* series draggable (`components/chart.ts`), so exactly one line is
+ * editable at a time.
+ */
+interface ChannelChart {
+  primary: string;
+  series: readonly string[];
+}
+
+const CHANNEL_CHART: Record<Channel, ChannelChart> = {
+  temperature: { primary: TEMP_MEAN, series: [TEMP_MEAN] },
+  precipitation: { primary: PRECIP_PWD, series: ["precipitation.pww", PRECIP_PWD] },
+  wind: { primary: WIND_SPEED, series: [WIND_SPEED] },
+  sky: { primary: "cloud.dry", series: ["cloud.dry", "cloud.wet", "humidity.dry", "humidity.wet"] },
+};
+
+/** The series the panel opens on — and, in a ☾ scope, the parameter the envelope and its depth are written on. */
+export function primarySeries(channel: Channel): string {
+  return CHANNEL_CHART[channel].primary;
+}
+
+/** Every series the chart can draw, in draw order. A single entry means the panel shows no picker. */
+export function chartSeries(channel: Channel): string[] {
+  return [...CHANNEL_CHART[channel].series];
+}
+
+/**
+ * The other series drawn alongside `param` — its pair. Paired means "same
+ * section": `precipitation.pww`/`pwd` are the wet-day odds, `cloud.dry`/`wet`
+ * the two cloud fractions. A channel with one series has no companion.
+ */
+export function companionSeries(channel: Channel, param: string): string[] {
+  const section = param.split(".")[0] ?? "";
+  return CHANNEL_CHART[channel].series.filter((p) => p !== param && p.startsWith(`${section}.`));
+}
+
+function scopeKnobs(channel: Channel, scope: string): ScopeKnobs {
+  const table = CHANNEL_KNOBS[channel];
+  const s = parseScope(scope);
+  if (s.kind === "season") return table.season;
+  if (s.kind === "cycle") return table.cycle;
+  return table.all;
+}
+
+/** Which knobs this channel shows in this scope, in the order they are drawn (SPEC §3.4). */
+export function knobsFor(channel: Channel, scope: string): KnobId[] {
+  return scopeKnobs(channel, scope).map(([id]) => id);
+}
+
+/**
+ * The jitter knob's parameter: the channel's day-to-day spread, `<section>.sd`
+ * (PLAN §5.2 "jitter → `layer:temperature.sd` offset"). Returns `null` when the
+ * channel has no `sd` *curve* — `cloud.sd` and `humidity.sd` are scalars, and
+ * the other three channels have no jitter knob at all — so the write is
+ * dropped rather than aimed at a path `applyClimateOps` would throw on.
+ */
+export function jitterParam(param: string): string | null {
+  const section = param.split(".")[0] ?? "";
+  const sd = `${section}.sd`;
+  return isCurvePath(sd) ? sd : null;
+}
+
+/**
+ * Every knob's current value, by id.
+ *
+ * Lenient in two directions, so a caller may read past `knobsFor`: an id this
+ * scope does not offer falls back to the channel's all-year binding (which is
+ * why `swing` reads the same inside a season as outside it), and an id the
+ * channel has no binding for at all reads 0.
+ */
+export type ScopeValues = Record<KnobId, number>;
+
+function readBinding(z: ZoneProfile, b: KnobBinding, s: Scope, channel: Channel): number {
+  switch (b.write) {
+    case "allYear":
+      return getAllYear(z, b.params[0]!, b.op);
+    case "swing":
+      return getSwing(z, b.param);
+    case "jitter": {
+      const sd = jitterParam(b.param);
+      return sd === null ? 0 : getAllYear(z, sd, "offset");
+    }
+    case "season":
+      return s.kind === "season" ? getSeasonOffset(z, b.params[0]!, s.name) : 0;
+    case "seasonSet":
+      // No neutral: an unset bearing reads 0° until the knob is turned, and the
+      // reset chip (not a value) is what puts the station's own back.
+      return s.kind === "season" ? (getSeasonSet(z, b.param, s.name) ?? 0) : 0;
+    case "cycle":
+      return s.kind === "cycle" ? (getCycle(z, primarySeries(channel), s.moon)?.depth ?? 0) : 0;
+  }
+}
+
+export function read(z: ZoneProfile, channel: Channel, scope: string): ScopeValues {
+  const s = parseScope(scope);
+  const scoped = new Map<KnobId, KnobBinding>(scopeKnobs(channel, scope));
+  const allYear = new Map<KnobId, KnobBinding>(CHANNEL_KNOBS[channel].all);
+  const out = {} as ScopeValues;
+  for (const id of KNOB_IDS) {
+    const b = scoped.get(id) ?? allYear.get(id);
+    out[id] = b === undefined ? 0 : readBinding(z, b, s, channel);
+  }
+  // SPEC §3.4 lists the ☾ scope as "offset · depth"; the compiled layer carries
+  // one scalar, so both names report it (see the module header).
+  if (s.kind === "cycle") out.offset = out.depth;
+  return out;
+}
+
+/** The envelope a moon layer is born with: full strength all the way round, two handles so it is draggable at once. */
+const NEUTRAL_ENVELOPE: ReadonlyArray<readonly [number, number]> = [
+  [0, 1],
+  [0.5, 1],
+];
+
+/**
+ * Turn one knob. `knob` must be one `knobsFor(channel, scope)` offers —
+ * anything else is a caller bug, not a user action, so it throws rather than
+ * writing a layer the scope's caption does not describe.
+ */
+export function write(z: ZoneProfile, channel: Channel, scope: string, knob: KnobId, value: number): void {
+  const b = new Map<KnobId, KnobBinding>(scopeKnobs(channel, scope)).get(knob);
+  if (b === undefined) throw new RangeError(`the ${channel} channel's "${scope}" scope has no "${knob}" knob`);
+  const s = parseScope(scope);
+
+  switch (b.write) {
+    case "allYear":
+      for (const p of b.params) setAllYear(z, p, b.op, value);
+      return;
+    case "swing":
+      setSwing(z, b.param, value);
+      return;
+    case "jitter": {
+      const sd = jitterParam(b.param);
+      if (sd !== null) setAllYear(z, sd, "offset", value);
+      return;
+    }
+    case "season":
+      if (s.kind !== "season") return;
+      for (const p of b.params) setSeasonOffset(z, p, s.name, value);
+      return;
+    case "seasonSet":
+      if (s.kind !== "season") return;
+      setSeasonSet(z, b.param, s.name, value);
+      return;
+    case "cycle": {
+      if (s.kind !== "cycle") return;
+      const param = primarySeries(channel);
+      const current = getCycle(z, param, s.moon);
+      setCycle(z, param, { moon: s.moon, depth: value, envelope: current?.envelope.length ? current.envelope : NEUTRAL_ENVELOPE.map((p) => [p[0], p[1]] as [number, number]) });
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wind direction (the one knob with no neutral)
+// ---------------------------------------------------------------------------
+
+/** Compass sectors in the rose `components/chart.ts` draws — its own `ROSE_SECTORS`. */
+export const ROSE_SECTORS = 16;
+
+const SECTOR_DEGREES = 360 / ROSE_SECTORS;
+
+function sectorOf(deg: number): number {
+  const d = ((deg % 360) + 360) % 360;
+  return Math.round(d / SECTOR_DEGREES) % ROSE_SECTORS;
+}
+
+/** The season's own bearing layer, or `null` when the station's direction still stands. */
+export function directionLayer(z: ZoneProfile, season: string): number | null {
+  return getSeasonSet(z, WIND_DIRECTION, season);
+}
+
+/**
+ * Drop the season's bearing layer — the panel's "station's own" reset. A
+ * bearing has no neutral (0° is due north, a real answer), so `compile.ts`
+ * removes a `:set` layer only by `null` and this is the one way to send it.
+ */
+export function clearDirection(z: ZoneProfile, season: string): void {
+  setSeasonSet(z, WIND_DIRECTION, season, null);
+}
+
+/** The calendar shape `directionRose` needs — the seasons and where each begins. */
+export interface RoseCalendar {
+  seasons: ReadonlyArray<{ name: string; from: number }>;
+}
+
+/**
+ * `wind.direction` as the compass rose plots it: `ROSE_SECTORS` buckets, each
+ * carrying how many seasons blow from it. A season with its own `:set` layer
+ * counts at that bearing; one without counts at the station's own direction,
+ * sampled at the season's midpoint. A calendar with no seasons falls back to
+ * the twelve month centres, so the rose is never empty.
+ */
+export function directionRose(z: ZoneProfile, calendar: RoseCalendar): Array<[number, number]> {
+  const weights = new Array<number>(ROSE_SECTORS).fill(0);
+  const base = effectiveBase(z, WIND_DIRECTION);
+  const seasons = calendar.seasons
+    .filter((s) => s.name !== "" && Number.isFinite(s.from))
+    .map((s) => ({ name: s.name, from: wrapPhase(s.from) }))
+    .sort((a, b) => a.from - b.from);
+
+  if (seasons.length === 0) {
+    for (let m = 0; m < MONTHS; m++) weights[sectorOf(evalCurve(base, monthCentrePhase(m)))]! += 1;
+    return weights.map((w, i) => [i, w] as [number, number]);
+  }
+
+  seasons.forEach((s, i) => {
+    const span = seasons.length === 1 ? 1 : wrapPhase(seasons[(i + 1) % seasons.length]!.from - s.from) || 1;
+    const set = directionLayer(z, s.name);
+    weights[sectorOf(set ?? evalCurve(base, wrapPhase(s.from + span / 2)))]! += 1;
+  });
+  return weights.map((w, i) => [i, w] as [number, number]);
+}
+
+// ---------------------------------------------------------------------------
+// The chart
+// ---------------------------------------------------------------------------
+
+/** Below this a scale layer is treated as absent rather than divided by. */
+const EPS = 1e-9;
+
+/** The drawn curve keeps at least this many keyframes; right-click refuses to go below it. */
+export const MIN_KEYFRAMES = 3;
+
+/** Calendar months, the phases the drawn curve starts life on. */
+const MONTHS = 12;
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+
+function sortedKeyframes(c: Curve | null): Keyframe[] | null {
+  return Array.isArray(c) ? [...c].sort((a, b) => a.at - b.at) : null;
+}
+
+/**
+ * What the chart plots for `scope`.
+ *
+ * All-year and season: `effectiveBase` at the drawn curve's own keyframe
+ * phases, or at the 12 calendar-month centres when there is no drawn curve yet
+ * (`monthCentrePhase`, so the points sit where the preset's own keyframes do).
+ *
+ * Cycle: the moon layer's envelope, `[phase, strength]` with strength in
+ * [0, 1] — the same axis `windows/device.ts` draws an onset envelope on. The
+ * °C the envelope is worth is `depth × strength`, and `depth` is the knob.
+ */
+export function curvePoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  const s = parseScope(scope);
+  if (s.kind === "cycle") {
+    const layer = getCycle(z, param, s.moon);
+    const env = layer?.envelope ?? [];
+    const points = env.length > 0 ? env : NEUTRAL_ENVELOPE;
+    return points.map((p) => [wrapPhase(p[0]), clamp01(p[1])] as [number, number]).sort((a, b) => a[0] - b[0]);
+  }
+  const base = effectiveBase(z, param);
+  const drawn = sortedKeyframes(getCurveLayer(z, param));
+  const phases = drawn !== null ? drawn.map((k) => k.at) : Array.from({ length: MONTHS }, (_, m) => monthCentrePhase(m));
+  return phases.map((at) => [at, evalCurve(base, at)] as [number, number]);
+}
+
+/**
+ * The curve the swing knob produces from those points: `mean + (v − mean)·k`
+ * around the effective base's annual mean. Equal to `curvePoints` at k = 1, so
+ * the window can skip the second line when the knob is neutral.
+ */
+export function swungPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  const points = curvePoints(z, param, scope);
+  if (parseScope(scope).kind === "cycle") return points;
+  const k = getSwing(z, param);
+  const mean = points.reduce((a, p) => a + p[1], 0) / (points.length || 1);
+  return points.map((p) => [p[0], mean + (p[1] - mean) * k] as [number, number]);
+}
+
+/** The station's own curve, undimmed by any layer — the dim reference line under the drawn one. */
+export function stationPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  if (parseScope(scope).kind === "cycle") return [];
+  if (!isCurvePath(param)) return [];
+  // `getPath` is typed non-optional, but the optional curves (sdHigh/sdLow/…) really can be absent.
+  const curve: Curve | undefined = getPath(z.climate, param);
+  if (curve === undefined) return [];
+  return curvePoints(z, param, scope).map((p) => [p[0], evalCurve(curve, p[0])] as [number, number]);
+}
+
+/**
+ * Season boundaries as chart markers, so the year domain reads as a calendar
+ * rather than as [0, 1]. The cycle domain has no seasons in it.
+ */
+export function seasonMarkers(scope: string, calendar: { seasons: ReadonlyArray<{ name: string; from: number }> }): Array<{ x: number; label: string }> {
+  if (parseScope(scope).kind === "cycle") return [];
+  return calendar.seasons.filter((s) => s.name && Number.isFinite(s.from)).map((s) => ({ x: wrapPhase(s.from), label: s.name }));
+}
+
+/**
+ * Write drawn (screen-space) values back as the `layer:<param>:curve` layer.
+ * `effectiveBase` reads `((curve + offset) × scale)`, so the inverse is applied
+ * here — otherwise an all-year offset would be baked into the curve *and* still
+ * applied on top of it.
+ */
+function writeDrawn(z: ZoneProfile, param: string, drawn: ReadonlyArray<readonly [number, number]>): void {
+  const offset = getAllYear(z, param, "offset");
+  const scale = getAllYear(z, param, "scale");
+  const kfs: Keyframe[] = drawn.map(([at, value]) => ({ at: wrapPhase(at), value: (Math.abs(scale) < EPS ? value : value / scale) - offset })).sort((a, b) => a.at - b.at);
+  setCurveLayer(z, param, kfs);
+}
+
+/** Move one keyframe to `value` (the drawn °C, not the stored one). Out-of-range indices are ignored. */
+export function setKeyframe(z: ZoneProfile, param: string, index: number, value: number): boolean {
+  const points = curvePoints(z, param, ALL_SCOPE);
+  if (index < 0 || index >= points.length || !Number.isFinite(value)) return false;
+  writeDrawn(
+    z,
+    param,
+    points.map((p, i) => (i === index ? ([p[0], value] as const) : ([p[0], p[1]] as const))),
+  );
+  return true;
+}
+
+/** Double-click on the chart: a new keyframe at `at`. A phase already carrying one is left alone. */
+export function addKeyframe(z: ZoneProfile, param: string, at: number, value: number): boolean {
+  if (!Number.isFinite(at) || !Number.isFinite(value)) return false;
+  const phase = wrapPhase(at);
+  const points = curvePoints(z, param, ALL_SCOPE);
+  if (points.some((p) => Math.abs(p[0] - phase) < EPS)) return false;
+  writeDrawn(z, param, [...points, [phase, value] as const]);
+  return true;
+}
+
+/** Right-click on a keyframe. Refuses below `MIN_KEYFRAMES` — a curve needs a shape to interpolate. */
+export function removeKeyframe(z: ZoneProfile, param: string, index: number): boolean {
+  const points = curvePoints(z, param, ALL_SCOPE);
+  if (index < 0 || index >= points.length || points.length <= MIN_KEYFRAMES) return false;
+  writeDrawn(
+    z,
+    param,
+    points.filter((_, i) => i !== index),
+  );
+  return true;
+}
+
+/** Rewrite the ☾ layer's envelope, keeping its depth. Creates the layer when the scope has none yet. */
+function writeEnvelope(z: ZoneProfile, param: string, moon: string, envelope: ReadonlyArray<readonly [number, number]>): void {
+  const current = getCycle(z, param, moon);
+  const points = envelope.map((p) => [wrapPhase(p[0]), clamp01(p[1])] as [number, number]).sort((a, b) => a[0] - b[0]);
+  setCycle(z, param, { moon, depth: current?.depth ?? 0, envelope: points });
+}
+
+/** Drag one envelope point. Strength is clamped to [0, 1] — an envelope dims, it never amplifies (PLAN §0.1). */
+export function setEnvelopePoint(z: ZoneProfile, param: string, moon: string, index: number, phase: number, strength: number): boolean {
+  const points = curvePoints(z, param, moonScope(moon));
+  if (index < 0 || index >= points.length || !Number.isFinite(phase) || !Number.isFinite(strength)) return false;
+  writeEnvelope(
+    z,
+    param,
+    moon,
+    points.map((p, i) => (i === index ? ([phase, strength] as const) : ([p[0], p[1]] as const))),
+  );
+  return true;
+}
+
+export function addEnvelopePoint(z: ZoneProfile, param: string, moon: string, phase: number, strength: number): boolean {
+  if (!Number.isFinite(phase) || !Number.isFinite(strength)) return false;
+  writeEnvelope(z, param, moon, [...curvePoints(z, param, moonScope(moon)), [phase, strength] as const]);
+  return true;
+}
+
+/** One point is a flat envelope; zero is the shape the validator rejects, so the last one stays. */
+export function removeEnvelopePoint(z: ZoneProfile, param: string, moon: string, index: number): boolean {
+  const points = curvePoints(z, param, moonScope(moon));
+  if (index < 0 || index >= points.length || points.length <= 1) return false;
+  writeEnvelope(
+    z,
+    param,
+    moon,
+    points.filter((_, i) => i !== index),
+  );
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Writers → channel
+// ---------------------------------------------------------------------------
+
+/** Where a writer row's click lands: the window id `windows.open` takes, plus the scope a layer row selects on arrival. */
+export interface WriterTarget {
+  win: WindowRef;
+  /** the id `WindowManager.open` is called with */
+  id: string;
+  /** for a `layer:` writer, the scope chip that row belongs to */
+  scope?: string;
+}
+
+export interface WriterRow {
+  kind: Writer["kind"];
+  label: string;
+  /** the ops this source contributes to the channel, one line */
+  opsText: string;
+  target: WriterTarget;
+}
+
+const ATLAS_WINDOW_ID = "atlas";
+const REGIMES_WINDOW_ID = "regimes";
+const FORCINGS_WINDOW_ID = "forcings";
+const DEVICE_WINDOW_PREFIX = "device:";
+/** `channel:` — kept here rather than imported, so this module stays free of the UI layer (PLAN D3). */
+const CHANNEL_WINDOW_PREFIX = "channel:";
+
+function num(v: number): string {
+  if (!Number.isFinite(v)) return String(v);
+  const text = Math.abs(v) >= 100 || Number.isInteger(v) ? String(v) : String(Number(v.toFixed(3)));
+  return text.replace("-", "−");
+}
+
+function curveText(c: Curve): string {
+  if (typeof c === "number") return num(c);
+  if (Array.isArray(c)) return `curve · ${c.length} kf`;
+  return "curve · harmonic";
+}
+
+/** One op as the stack shows it: `temperature.mean offset +2` — enough to tell two writers apart at a glance. */
+export function opText(o: ModifierOp): string {
+  const head = `${o.param} ${o.op}`;
+  if (o.op === "clamp") {
+    const parts = [o.min === undefined ? null : `min ${num(o.min)}`, o.max === undefined ? null : `max ${num(o.max)}`].filter((p) => p !== null);
+    return parts.length === 0 ? head : `${head} ${parts.join(" ")}`;
+  }
+  const value = o.op === "set" ? curveText(o.value) : num(o.value);
+  const envelope = o.envelope === undefined ? "" : ` · envelope ${o.envelope.length}`;
+  const off = o.enabled === false ? " · off" : "";
+  return `${head} ${value}${envelope}${off}`;
+}
+
+/** The scope chip a `layer:` id belongs to, or `null` when the id is not one the editor owns. */
+function scopeOfLayer(id: string): string | null {
+  const p = parseLayerId(id);
+  if (p === null) return null;
+  if (p.kind === "season" || p.kind === "seasonSet") return p.scope ? seasonScope(p.scope) : null;
+  if (p.kind === "moon") return p.scope ? moonScope(p.scope) : null;
+  return ALL_SCOPE;
+}
+
+function targetFor(w: Writer, channel: Channel): WriterTarget {
+  switch (w.kind) {
+    case "station":
+      return { win: "atlas", id: ATLAS_WINDOW_ID };
+    case "layer": {
+      const scope = scopeOfLayer(w.id);
+      const base: WriterTarget = { win: "channel", id: `${CHANNEL_WINDOW_PREFIX}${channel}` };
+      return scope === null ? base : { ...base, scope };
+    }
+    case "regime":
+      return { win: "regimes", id: REGIMES_WINDOW_ID };
+    case "device":
+      return { win: "device", id: `${DEVICE_WINDOW_PREFIX}${w.id}` };
+    case "forcings":
+    case "automation":
+      return { win: "forcings", id: FORCINGS_WINDOW_ID };
+    case "era":
+      // `Writer.id` for an era is already `era:<name>` — the window id the era surface registers.
+      return { win: "era", id: w.id };
+  }
+}
+
+/**
+ * Every source that writes to `channel`, in signal order (SPEC §1), each row
+ * carrying the window its click opens. The order and the membership are
+ * `writersFor`'s; this only adds the label, the ops line and the target.
+ */
+export function writers(z: ZoneProfile, eras: readonly Era[], channel: Channel): WriterRow[] {
+  return writersFor(z, eras, channel).map((w) => ({
+    kind: w.kind,
+    label: w.label,
+    opsText: w.ops.length === 0 ? "the baseline the stack edits" : w.ops.map(opText).join(" · "),
+    target: targetFor(w, channel),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// The WRITES footer
+// ---------------------------------------------------------------------------
+
+/**
+ * The `layer:` ids a channel's panel can write, as the footer names them when
+ * nothing is written yet. SKY spans two sections, so it names both — there is
+ * no `layer:sky.*`, and printing one would be a lie about the grammar
+ * (SPEC law 5).
+ */
+export function layerGlob(channel: Channel): string {
+  const sections = [...new Set(chartSeries(channel).map((p) => p.split(".")[0] ?? ""))];
+  return sections.map((s) => `${LAYER}${s}.*`).join(" · ");
+}
+
+/**
+ * SPEC law 5: the exact grammar the panel produces — every `layer:` modifier
+ * on the zone whose parameter belongs to `channel`, in `modifiers[]` order.
+ * A stray (an id `parseLayerId` cannot decode) is still listed under its
+ * channel: the footer states what the file holds, not what the editor meant.
+ */
+export function writesText(z: ZoneProfile, channel: Channel): string {
+  const mine: string[] = [];
+  z.modifiers.forEach((m, i) => {
+    if (!m.id.startsWith(LAYER)) return;
+    const param = parseLayerId(m.id)?.param ?? m.id.slice(LAYER.length);
+    if (channelOrNull(param) === channel) mine.push(`modifiers[${i}] · ${JSON.stringify(m)}`);
+  });
+  return mine.length === 0 ? `modifiers[${layerGlob(channel)}] — neutral, nothing written` : mine.join("  ");
+}
+
+/** The channel a parameter path belongs to — re-exported so the window needs one import for both halves. */
+export { channelOf };

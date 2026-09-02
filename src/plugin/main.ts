@@ -1,4 +1,7 @@
 import { MarkdownView, Notice, Plugin, type MarkdownPostProcessorContext } from "obsidian";
+import type { StudioStash } from "../studio/model/stash";
+import { openStudioFromCommand } from "../studio/ui/open";
+import { StudioView, VIEW_TYPE as STUDIO_VIEW_TYPE } from "../studio/ui/view";
 import type { WeatherReport } from "../core/report";
 import { GENERATOR_VERSION, RNG_VERSION, SCHEMA_VERSION } from "../core/version";
 import { parseCodeblock, resolveDate } from "./codeblock-parse";
@@ -6,7 +9,7 @@ import { renderCard, renderError, renderLine, renderProse, renderTable, renderVa
 import { convertReport, reportField, type ConvertedReport, type Units } from "../core/units";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettings } from "./settings";
 import { WadjetSettingTab } from "./settings-tab";
-import { TimeRegistry, type TimeAdapter, type TimeContext } from "./time/adapter";
+import { TimeRegistry, type CalendarDescription, type TimeAdapter, type TimeContext } from "./time/adapter";
 import { InternalCalendar } from "./time/internal";
 import { World, type WorldEvent, type ZoneLocator, type ZoneResolver } from "./world";
 
@@ -33,11 +36,17 @@ export interface WadjetAPI {
   registerZoneResolver(resolver: ZoneResolver): () => void;
   resolveZone(locator: ZoneLocator): string | null;
 
+  /** the active adapter's calendar description, or null if it does not describe itself */
+  calendar(): CalendarDescription | null;
+  /** every registered time adapter, with a label (from `describe()` or the id) and whether it is active */
+  listTimeAdapters(): Array<{ id: string; label: string; active: boolean }>;
+
   describe(report: WeatherReport, style?: "short" | "prose"): string;
   /** the user's display units setting */
   units(): Units;
   /** the same report in metric or imperial, unit suffixes dropped from key names (amountMm -> amount ...) */
   convert(report: WeatherReport, units?: Units): ConvertedReport;
+  /** events: "ready" once on load, "profiles-changed"/"time-changed" on world edits, "adapters-changed" on any time adapter register/unregister */
   on(event: WorldEvent, cb: () => void): () => void;
 }
 
@@ -49,7 +58,15 @@ export default class WadjetPlugin extends Plugin {
   internalCalendar!: InternalCalendar;
   world!: World;
   api!: WadjetAPI;
-  settingTab!: WadjetSettingTab;
+  settingTab?: WadjetSettingTab;
+  /**
+   * Dirty studio drafts kept across a leaf close within this session (bead
+   * wadjet-9f9.36). Plain in-memory state — never read or written by
+   * `loadData`/`saveData` — taken by `StudioView.onClose` via
+   * `studio/model/stash.ts:takeStash` and consumed by the next
+   * `StudioView` constructor via `applyStash`.
+   */
+  studioStash?: StudioStash;
 
   override async onload(): Promise<void> {
     this.settings = migrateSettings(await this.loadData());
@@ -57,6 +74,11 @@ export default class WadjetPlugin extends Plugin {
     this.internalCalendar = new InternalCalendar(this.settings.calendar, () => this.settings.currentDayOrdinal);
     this.time.register(this.internalCalendar);
     this.world = new World(this.worldState(), this.time);
+    this.time.onChange((change) => {
+      if (change.id === this.settings.activeTimeAdapter) this.world.emit("time-changed");
+      this.world.emit("adapters-changed");
+      this.refreshSettingsTab(); // the "Calendar source" row lists registered adapters
+    });
 
     this.api = this.buildApi();
     (window as WindowWithWadjet).Wadjet = this.api;
@@ -64,6 +86,9 @@ export default class WadjetPlugin extends Plugin {
     this.settingTab = new WadjetSettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
     this.registerMarkdownCodeBlockProcessor("wadjet", (src, el, ctx) => this.renderCodeblock(src, el, ctx));
+    // The plugin registers the factory and never keeps the instance (eslint
+    // `noViewReferencesInPlugin`); the leaf owns its own store and view state.
+    this.registerView(STUDIO_VIEW_TYPE, (leaf) => new StudioView(leaf, this));
     this.registerCommands();
 
     if (generatorMismatch(this.settings)) {
@@ -96,10 +121,22 @@ export default class WadjetPlugin extends Plugin {
     this.world.setState(this.worldState());
   }
 
-  /** Re-render the settings tab if it is showing — commands change state it displays. */
+  /**
+   * Re-read the settings tab's definitions — commands, and the studio's Save,
+   * change state it displays.
+   *
+   * This must run whether or not the tab is on screen. `SettingTab.update()`
+   * stores the result of `getSettingDefinitions()` and only re-renders when
+   * the tab is showing; Obsidian itself calls it from `addSettingTab()`, long
+   * before any settings window exists, so calling it on a hidden tab is both
+   * safe and necessary. The declarative tab keeps the rows it built, so a pin
+   * saved from the studio while Settings was shut used to still be missing
+   * from "Pinned days" the next time it opened.
+   */
   refreshSettingsTab(): void {
-    const setting = (this.app as unknown as { setting?: { activeTab?: unknown } }).setting;
-    if (setting?.activeTab === this.settingTab) this.settingTab.update();
+    // `onload` subscribes to `time.onChange` before it builds the tab, so an
+    // adapter registered in that window can reach this one tick early.
+    this.settingTab?.update();
   }
 
   private buildApi(): WadjetAPI {
@@ -114,14 +151,17 @@ export default class WadjetPlugin extends Plugin {
       getRange: (zoneId, from, to) => w.getRange(zoneId, from, to),
       now: () => w.now(),
       listZones: () => w.listZones().map(({ id, name }) => ({ id, name })),
-      registerTimeAdapter: (a) => {
-        const off = this.time.register(a);
-        if (this.settings.activeTimeAdapter === a.id) w.emit("time-changed");
-        this.refreshSettingsTab(); // the "Calendar source" row lists registered adapters
-        return off;
-      },
+      registerTimeAdapter: (a) => this.time.register(a),
       registerZoneResolver: (r) => w.registerZoneResolver(r),
       resolveZone: (l) => w.resolveZone(l),
+      calendar: () => this.time.active?.describe?.() ?? null,
+      listTimeAdapters: () => {
+        const activeId = this.time.active?.id;
+        return this.time.list().map((id) => {
+          const adapter = this.time.get(id);
+          return { id, label: adapter?.describe?.().label ?? id, active: id === activeId };
+        });
+      },
       describe: (r, style) => w.describe(r, style),
       units: () => this.settings.units,
       convert: (r, units) => convertReport(r, units ?? this.settings.units),
@@ -210,6 +250,8 @@ export default class WadjetPlugin extends Plugin {
         new Notice(`Pinned ${zone.name} on ${this.internalCalendar.format(now.dayOrdinal)}.`);
       },
     });
+
+    this.addCommand({ id: "open-studio", name: "Open climate studio", callback: () => openStudioFromCommand(this) });
 
     this.addCommand({
       id: "refresh",

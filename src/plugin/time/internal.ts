@@ -4,7 +4,8 @@
  */
 import { hash32 } from "../../core/rng";
 import type { InternalCalendarConfig } from "../settings";
-import type { TimeAdapter, TimeContext } from "./adapter";
+import type { CalendarDescription, TimeAdapter, TimeContext } from "./adapter";
+import { seasonAtPhase } from "./seasons";
 
 export class InternalCalendar implements TimeAdapter {
   readonly id = "internal";
@@ -34,16 +35,31 @@ export class InternalCalendar implements TimeAdapter {
   }
 
   seasonAt(yearPhase: number): string | null {
-    const s = [...this.cfg.seasons].sort((a, b) => a.from - b.from);
-    if (s.length === 0) return null;
-    let cur = s[s.length - 1]!;
-    for (const x of s) if (yearPhase >= x.from) cur = x;
-    return cur.name;
+    return seasonAtPhase(this.cfg.seasons, yearPhase);
   }
 
   configHash(): string {
-    const json = JSON.stringify({ y: this.cfg.yearLength, e: this.cfg.epochYear, m: this.cfg.moons, s: this.cfg.seasons });
+    // phases are display metadata (PLAN §2.2), not part of the roll — excluded so adding/editing them never invalidates cached weather.
+    const moons = this.cfg.moons.map((m) => ({ name: m.name, cycleDays: m.cycleDays, phaseAtEpoch: m.phaseAtEpoch }));
+    const json = JSON.stringify({ y: this.cfg.yearLength, e: this.cfg.epochYear, m: moons, s: this.cfg.seasons });
     return `ical:${hash32(json, 0x43414c45).toString(16).padStart(8, "0")}`;
+  }
+
+  /** Static description of this calendar for UIs (PLAN §3). Returns copies, not the live config. */
+  describe(): CalendarDescription {
+    return {
+      label: "internal calendar",
+      readOnly: false,
+      yearLength: this.cfg.yearLength,
+      epochYear: this.cfg.epochYear,
+      seasons: [...this.cfg.seasons].sort((a, b) => a.from - b.from).map((s) => ({ ...s })),
+      moons: this.cfg.moons.map((m) => ({
+        name: m.name,
+        cycleDays: m.cycleDays,
+        phaseAtEpoch: m.phaseAtEpoch,
+        ...(m.phases ? { phases: m.phases.map((p) => ({ ...p })) } : {}),
+      })),
+    };
   }
 
   /** "Y-D" (year, day-of-year 1-based) or a bare integer dayOrdinal. */

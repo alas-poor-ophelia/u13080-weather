@@ -252,6 +252,60 @@ year spans (JSON, comments allowed):
 
 More recipes — seasons, moons, eras, curses — in [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
+## Climate studio
+
+If you'd rather not hand-write the JSON above, the studio is a DAW-style editor for one zone's
+climate: a **playlist** of lanes over a calendar ruler you can zoom from a two-day window out to
+eleven centuries, a **mixer** with a chain per channel (TEMP, PRECIP, WIND, SKY) plus a MASTER,
+floating **editor windows** for whatever you clicked, and a live **audition strip** along the
+bottom showing one seeded year rolled through the whole path.
+
+**It is an editor, not a simulator.** It writes the same zone JSON the settings editor does —
+anything you build in it you could have typed by hand, and *Zones → Edit* is still there for when
+you'd rather type. It invents nothing: every climate number still comes from the shipped station
+presets and the edits you make on top of them. And it changes past weather only where the JSON
+already would — the same knobs, the same rules, and the same warning that you are doing it.
+
+**Opening it.** *Settings → U+13080 Weather → Zones → Open in studio* on a zone row, or the *Open
+climate studio* command (which asks which zone if you have more than one). There is one studio
+tab; opening another zone re-points it rather than piling up tabs.
+
+**The signal path.** The lanes and the chains are laid out in the order the generator runs:
+
+1. **Station** — the preset copied into the zone. The `SRC` chip opens the Atlas, where you re-base
+   the zone on another station or match one by geography.
+2. **Baseline curves** — the four channels as yearly curves.
+3. **Climate-stage layers** — unconditional edits to those curves: the channel editor's offset,
+   scale, swing and drawn keyframes.
+4. **Regimes** — the sticky background states, slot `00` in every chain.
+5. **Devices** — your modifiers, in rack order: `when` × `apply`, plus optional spells, mod gates
+   and an onset envelope carried on a moon.
+6. **Forcings** — the zone's master: a temperature trim, a wetness factor, and the `FRC · warmth`
+   lane that walks a value across the years.
+7. **Eras** — the world's spans of history, which bend every zone.
+8. **Pins** — days you fixed by hand (right-click a day in the audition strip).
+9. **The roll** — the weather itself. Audited, never drawn on.
+
+**Every window shows what it writes.** Each editor window carries a `Writes →` footer with the
+exact JSON it produces, and `{ } JSON` in the header opens a read-only drawer with the whole zone
+file beside the world's eras, seasons and moons. The file is derived; you never type it.
+
+**Undo and Save.** ↶ / ↷ step back and forward one edit (one per knob drag). Nothing reaches disk
+until you press Save, which reads `Saved ✓` when there is nothing to write, `Save ●` when there
+is, carries a `⚠` count for warnings, and turns red with a count when something is actually wrong.
+Errors block saving; the offending unit's LED and its window's footer say what is wrong.
+
+**Third-party calendars.** Seasons and moons come from whichever calendar is active. If a calendar
+plugin describes its own (see the [`CalendarDescription`](docs/API.md#calendardescription)
+contract), the Seasons and cycle windows mirror it read-only — the badge reads
+`<plugin> · read-only` and points you back at that plugin to edit it. The internal calendar stays
+editable in place.
+
+The ids the studio writes into `modifiers[]` (`layer:*`, `forcings:*`) and its `frc.warmth`
+automation lane are documented in [docs/API.md](docs/API.md#7c-the-climate-studio). A hand-written
+zone can ignore all of it; anything the studio does not recognise it leaves alone and shows as an
+ordinary device.
+
 ## On Determinism
 
 A day's weather is a pure function of five things: the world seed, the generator version, the

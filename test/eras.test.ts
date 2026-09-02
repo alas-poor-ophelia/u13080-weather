@@ -79,6 +79,18 @@ describe("era timeline", () => {
     expect(erasHash([iceAge])).not.toBe(erasHash([{ ...iceAge, to: 5 }]));
   });
 
+  test("a disabled era tags nothing, makes no modifier, and leaves the weather as if it were not there", () => {
+    const off = { ...iceAge, enabled: false };
+    expect(eraTags([off, thaw], 3)).toEqual([]);
+    expect(eraTags([off, thaw], 5)).toEqual(["era:Thaw"]);
+    expect(withEraTags([off], { ...cal.toContext(365 * 2), tags: ["season:Winter"] }).tags).toEqual(["season:Winter"]);
+    expect(eraModifiers([off])).toEqual([]);
+    expect(eraModifiers([{ ...iceAge, enabled: true }]).map((m) => m.id)).toEqual(["era:Ice Age"]);
+    const plain = createGenerator(zone, "seed", (d) => cal.toContext(d)).generator;
+    const disabled = createGenerator(zone, "seed", (d) => withEraTags([off], cal.toContext(d)), eraModifiers([off])).generator;
+    for (let d = 365 * 3; d < 365 * 4; d += 11) expect(disabled.day(d)).toEqual(plain.day(d));
+  });
+
   test("validation", () => {
     const errs = (e: unknown) => validateEras(e).filter((i) => i.level === "error").map((i) => i.path);
     expect(errs([iceAge, thaw])).toEqual([]);
@@ -90,6 +102,8 @@ describe("era timeline", () => {
     expect(errs([{ name: "A", from: 1, apply: [{ param: "nope", op: "set", value: 1 }] }])).toEqual(["eras[0].apply[0].param"]);
     expect(errs([{ name: "A", from: 1, apply: [{ param: "temperature.phase", op: "set", value: 1 }] }])).toEqual(["eras[0].apply[0].param"]); // scalars are climate-stage only
     expect(validateEras([{ name: "A", from: 1, colour: "blue" }]).map((i) => i.level)).toEqual(["warning"]);
+    expect(validateEras([{ name: "A", from: 1, enabled: false }])).toEqual([]); // known field: no "unknown field" warning
+    expect(errs([{ name: "A", from: 1, enabled: "yes" }])).toEqual(["eras[0].enabled"]);
     expect(validateProfile({ ...zone, modifiers: [{ id: "era:x", apply: [] }] }).some((i) => i.path === "modifiers[0].id")).toBe(true);
   });
 });

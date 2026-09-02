@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { GENERATOR_VERSION } from "../src/core/version";
+import { calendarSummary } from "../src/plugin/calendar-summary";
+import { badMoonsLine, parseMoonsText, serialiseMoonsText } from "../src/plugin/calendar-text";
 import { parseCodeblock, resolveDate } from "../src/plugin/codeblock-parse";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings } from "../src/plugin/settings";
-import { TimeRegistry, type TimeAdapter } from "../src/plugin/time/adapter";
+import { TimeRegistry, type CalendarDescription, type TimeAdapter } from "../src/plugin/time/adapter";
 import { InternalCalendar } from "../src/plugin/time/internal";
 import { World } from "../src/plugin/world";
 import { slugify, uniqueId, zoneFromGeography, zoneFromPreset } from "../src/plugin/zones";
@@ -21,6 +23,44 @@ describe("settings", () => {
     expect(generatorMismatch(s)).toBe(false);
     expect(generatorMismatch({ ...s, generatorVersion: "wadjet-gen/0.0.0" })).toBe(true);
     expect(migrateSettings(undefined).zones).toEqual([]);
+  });
+
+  test("migrate: devicePresets defaults to [] when absent, and passes through an array", () => {
+    expect(migrateSettings({}).devicePresets).toEqual([]);
+    expect(migrateSettings(undefined).devicePresets).toEqual([]);
+    const preset = { name: "Full moon trim", kind: "trim" as const, apply: [{ param: "temperature.mean", op: "offset" as const, value: 1 }] };
+    const s = migrateSettings({ devicePresets: [preset] });
+    expect(s.devicePresets).toEqual([preset]);
+    // a non-array value (e.g. corrupt data.json) coerces to []
+    expect(migrateSettings({ devicePresets: "nope" }).devicePresets).toEqual([]);
+  });
+});
+
+describe("calendar-text (Moons textarea)", () => {
+  test("parses base fields and named phase tokens", () => {
+    const moons = parseMoonsText("Sable, 30, 0.5, New@0, Full@0.5\nTide, 7, 0");
+    expect(moons).toEqual([
+      { name: "Sable", cycleDays: 30, phaseAtEpoch: 0.5, phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] },
+      { name: "Tide", cycleDays: 7, phaseAtEpoch: 0 },
+    ]);
+  });
+
+  test("round-trips through serialise → parse, with and without phases", () => {
+    const moons = [
+      { name: "Sable", cycleDays: 30, phaseAtEpoch: 0.5, phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] },
+      { name: "Tide", cycleDays: 7, phaseAtEpoch: 0 },
+    ];
+    expect(parseMoonsText(serialiseMoonsText(moons))).toEqual(moons);
+  });
+
+  test("badMoonsLine: accepts good input, rejects bad base fields and bad phase tokens", () => {
+    expect(badMoonsLine("Sable, 30, 0.5, New@0, Full@0.5")).toBeUndefined();
+    expect(badMoonsLine("")).toBeUndefined();
+    expect(badMoonsLine("Sable, oops, 0.5")).toMatch(/Can't read/);
+    expect(badMoonsLine("Sable, 30, 0.5, nope")).toMatch(/Can't read phase/);
+    expect(badMoonsLine("Sable, 30, 0.5, Full@1")).toMatch(/fraction of the cycle/);
+    expect(badMoonsLine("Sable, 30, 0.5, Full@0.5, New@0.2")).toMatch(/ascending order/);
+    expect(badMoonsLine("Sable, 30, 0.5, New@0, New@0.5")).toMatch(/must be unique/);
   });
 });
 
@@ -58,6 +98,47 @@ describe("InternalCalendar", () => {
     expect(cal.configHash()).not.toBe(a);
     cal.update(cfg);
     expect(cal.configHash()).toBe(a);
+  });
+
+  test("configHash is invariant to moon phases (display metadata, not part of the roll)", () => {
+    const withoutPhases = cal.configHash();
+    cal.update({ ...cfg, moons: [{ ...cfg.moons[0]!, phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] }] });
+    expect(cal.configHash()).toBe(withoutPhases);
+    cal.update(cfg);
+  });
+
+  test("describe() mirrors the config, including phases, sorted seasons, and copies (not references)", () => {
+    const withPhases = { ...cfg, moons: [{ ...cfg.moons[0]!, phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] }] };
+    cal.update(withPhases);
+    const d: CalendarDescription = cal.describe();
+    expect(d).toEqual({
+      label: "internal calendar",
+      readOnly: false,
+      yearLength: 360,
+      epochYear: 1000,
+      seasons: [{ name: "Thaw", from: 0 }, { name: "Ashfall", from: 0.6 }, { name: "Frost", from: 0.75 }],
+      moons: [{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0.5, phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] }],
+    });
+    d.moons[0]!.phases!.push({ name: "Bogus", at: 0.9 });
+    expect(withPhases.moons[0]!.phases).toHaveLength(2); // describe() returned a copy
+    cal.update(cfg);
+  });
+});
+
+describe("TimeAdapter.describe / CalendarDescription", () => {
+  test("a minimal adapter without describe still satisfies TimeAdapter and registers fine (compile-time contract)", () => {
+    const opaque: TimeAdapter = {
+      id: "opaque-cal",
+      now: () => null,
+      toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 1, source: "opaque-cal" }),
+      configHash: () => "opaque:1",
+    };
+    expect("describe" in opaque).toBe(false);
+    const registry = new TimeRegistry("internal");
+    const off = registry.register(opaque);
+    expect(registry.get("opaque-cal")).toBe(opaque);
+    off();
+    expect(registry.get("opaque-cal")).toBeUndefined();
   });
 });
 
@@ -192,5 +273,110 @@ describe("bundled presets", () => {
       expect(p.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
       expect(p.match.koppen.length).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+describe("TimeRegistry.onChange", () => {
+  const fake = (id: string): TimeAdapter => ({
+    id,
+    now: () => null,
+    toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 1, source: id }),
+    configHash: () => `${id}:1`,
+  });
+
+  test("notifies on register and on unregister with the right kind/id", () => {
+    const registry = new TimeRegistry("internal");
+    const seen: Array<{ id: string; kind: "register" | "unregister" }> = [];
+    const off = registry.onChange((change) => seen.push(change));
+    const unregister = registry.register(fake("guest-cal"));
+    expect(seen).toEqual([{ id: "guest-cal", kind: "register" }]);
+    unregister();
+    expect(seen).toEqual([{ id: "guest-cal", kind: "register" }, { id: "guest-cal", kind: "unregister" }]);
+    off();
+  });
+
+  test("unregistering a non-active adapter does not change active", () => {
+    const registry = new TimeRegistry("internal");
+    const internal = fake("internal");
+    registry.register(internal);
+    const unregister = registry.register(fake("guest-cal"));
+    expect(registry.active).toBe(internal);
+    unregister();
+    expect(registry.active).toBe(internal);
+    expect(registry.list()).toEqual(["internal"]);
+  });
+
+  test("unregistering the active adapter falls back to internal and fires the change", () => {
+    const registry = new TimeRegistry("guest-cal");
+    const internal = fake("internal");
+    registry.register(internal);
+    const guest = fake("guest-cal");
+    const unregister = registry.register(guest);
+    expect(registry.active).toBe(guest);
+    const seen: Array<{ id: string; kind: "register" | "unregister" }> = [];
+    registry.onChange((change) => seen.push(change));
+    unregister();
+    expect(registry.active).toBe(internal); // falls back
+    expect(seen).toEqual([{ id: "guest-cal", kind: "unregister" }]);
+  });
+
+  test("a stale unregister closure does not remove a re-registered instance under the same id", () => {
+    const registry = new TimeRegistry("internal");
+    registry.register(fake("internal"));
+    const first = fake("guest-cal");
+    const staleOff = registry.register(first);
+    staleOff(); // consumed once, legitimately
+    const second = fake("guest-cal");
+    registry.register(second);
+    const seen: Array<{ id: string; kind: "register" | "unregister" }> = [];
+    registry.onChange((change) => seen.push(change));
+    staleOff(); // calling again — must not touch the new instance
+    expect(registry.get("guest-cal")).toBe(second);
+    expect(seen).toEqual([]);
+  });
+});
+
+describe("calendarSummary (settings tab read-only calendar row, PLAN §3)", () => {
+  const base: CalendarDescription = { label: "Fake calendar", readOnly: true, yearLength: 400, seasons: [], moons: [] };
+
+  test("year length only when there are no seasons or moons", () => {
+    expect(calendarSummary(base)).toBe("year of 400 days");
+  });
+
+  test("seasons and moons segments are included when present, omitted at zero", () => {
+    const seasonsOnly: CalendarDescription = { ...base, seasons: [{ name: "Wet", from: 0 }, { name: "Dry", from: 0.5 }] };
+    expect(calendarSummary(seasonsOnly)).toBe("year of 400 days · 2 seasons");
+
+    const moonsOnly: CalendarDescription = { ...base, moons: [{ name: "Moon", cycleDays: 29.53 }] };
+    expect(calendarSummary(moonsOnly)).toBe("year of 400 days · 1 moons");
+
+    const both: CalendarDescription = { ...seasonsOnly, moons: moonsOnly.moons };
+    expect(calendarSummary(both)).toBe("year of 400 days · 2 seasons · 1 moons");
+  });
+
+  test("editHint is appended at the end when present", () => {
+    const withHint: CalendarDescription = { ...base, seasons: [{ name: "Wet", from: 0 }], editHint: "edit in Fake calendar" };
+    expect(calendarSummary(withHint)).toBe("year of 400 days · 1 seasons · edit in Fake calendar");
+  });
+
+  test("no editHint means no trailing segment", () => {
+    expect(calendarSummary(base).endsWith("days")).toBe(true);
+  });
+});
+
+describe("World adapters-changed event", () => {
+  test("emit(\"adapters-changed\") reaches an on() listener", () => {
+    const cfg = { yearLength: 365, epochYear: 1, moons: [], seasons: [] };
+    const cal = new InternalCalendar(cfg, () => 1);
+    const time = new TimeRegistry("internal");
+    time.register(cal);
+    const world = new World({ seed: "s", zones: [], overrides: [] }, time);
+    let n = 0;
+    const off = world.on("adapters-changed", () => n++);
+    world.emit("adapters-changed");
+    expect(n).toBe(1);
+    off();
+    world.emit("adapters-changed");
+    expect(n).toBe(1);
   });
 });
