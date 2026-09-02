@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "wadjet",
+  "project_id": "37744853-b135-424f-8111-9772fccb5e28"
+}
