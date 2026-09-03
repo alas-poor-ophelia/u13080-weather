@@ -26,6 +26,7 @@ export const CHANNEL_HINTS: Record<string, Hint> = {
   "daycard.chip": ["Tag", "a tag this day carries — modifiers match on these"],
   "daycard.pin": ["Pinned day", "an override fixes this day's weather — edit it from the audition"],
   "daycard.neighbour": ["Nearby day", "the weather two days either side — click to move the window there"],
+  "daycard.moon": ["Moon", "this day's phase — click to open the moon's cycle editor"],
 };
 
 /**
@@ -34,7 +35,7 @@ export const CHANNEL_HINTS: Record<string, Hint> = {
  * list against them in both directions, so a control added without a hint
  * fails the unit gate instead of printing a raw key into the hint bar.
  */
-export const CHANNEL_HINT_KEYS: readonly string[] = ["channel.plot", "daycard.head", "daycard.readout", "daycard.chip", "daycard.pin", "daycard.neighbour"];
+export const CHANNEL_HINT_KEYS: readonly string[] = ["channel.plot", "daycard.head", "daycard.readout", "daycard.chip", "daycard.pin", "daycard.neighbour", "daycard.moon"];
 
 /** The `data-hint` attribute value for `key`; an unknown key falls back to the key itself, as `hintAttr` does. */
 export const channelHint: HintLookup = makeHintLookup(CHANNEL_HINTS);

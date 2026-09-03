@@ -585,7 +585,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         parts.push(picker);
       }
 
-      buildGateDisc(parent, range);
+      buildGateDisc(parent, range, name);
     }
 
     /**
@@ -594,9 +594,16 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
      * handle on each end. Dragging a handle writes `when.moon.phase` — which is
      * the compiled `[a, b)` the engine reads, so the phase chips follow it back.
      */
-    function buildGateDisc(parent: HTMLElement, range: [number, number]): void {
+    function buildGateDisc(parent: HTMLElement, range: [number, number], moonName: string): void {
       const box = parent.createDiv({ cls: "wadjet-studio-device-gate-disc", attr: { "data-hint": deviceHint("device.when.gate") } });
       const svg = box.createSvg("svg", { attr: { viewBox: `0 0 ${DISC} ${DISC}`, role: "img", "aria-label": `Moon gate ${range[0].toFixed(2)} to ${range[1].toFixed(2)}` } });
+      // The face is the prototype's door to the moon's CYCLE editor
+      // (`data-vst="sablemoon"` on the circle and the lit path); the handles
+      // keep their drag and never open anything.
+      svg.addEventListener("click", (ev: MouseEvent) => {
+        if ((ev.target as Element | null)?.closest("[data-gate]") !== null) return;
+        openCycleFor(ctx, moonName);
+      });
       svg.createSvg("circle", { cls: "wadjet-studio-device-disc-face", attr: { cx: DISC_C, cy: DISC_C, r: DISC_R } });
       const mid = range[0] + ringSpan(range[0], range[1]) / 2;
       svg.createSvg("path", { cls: "wadjet-studio-device-disc-moon", attr: { d: moonPath(((mid % 1) + 1) % 1, DISC_C, DISC_C, DISC_FACE_R) } });

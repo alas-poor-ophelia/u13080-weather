@@ -3722,6 +3722,49 @@ describe("climate studio · device window", () => {
     console.log(`  · device:${DEVICE_ID} → ${probe.badge} "${probe.title}" · ${probe.kind} · chance ${probe.chance} · ${probe.applyKnobs} apply knob; writes ${probe.writes}`);
   });
 
+  test("step 52a: on a moon device the gate disc's face opens the moon's CYCLE window", async () => {
+    // The prototype's Stormtide gate circle and lit path carry `data-vst="sablemoon"`;
+    // the handles keep their drag. wadjet-9f9.48.10 found the plugin's face inert.
+    const cycleIds = () =>
+      withApp(
+        ob.page,
+        (app, a: { type: string }) => (app.workspace.getLeavesOfType(a.type)[0].view.store.get().view.openWindows as string[]).filter((id) => id.startsWith("cycle:")),
+        { type: VIEW_TYPE },
+      );
+    const closeCycle = (id: string) =>
+      withApp(
+        ob.page,
+        (app, a: { type: string; id: string }) => {
+          app.workspace.getLeavesOfType(a.type)[0].view.windows.close(a.id);
+        },
+        { type: VIEW_TYPE, id },
+      );
+    await openDeviceWindow(DEVICE_ID);
+    await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=moon]').click();
+    await nextFrame();
+    expect((await probeDevice()).whenKind).toBe("moon");
+    // Earlier describes may leave a cycle panel up; this step asserts on what its own click adds.
+    const before = await cycleIds();
+    const face = devicePanel().locator(".wadjet-studio-device-gate-disc .wadjet-studio-device-disc-face").first();
+    await face.waitFor({ state: "visible", timeout: 10_000 });
+    // The lit path covers the face's centre; both are doors, so a forced click
+    // (no actionability retry against the overlapping path) is the honest one.
+    await face.click({ force: true });
+    await nextFrame();
+    const added = (await cycleIds()).filter((id) => !before.includes(id));
+    expect(added.length).toBe(1);
+    console.log(`  · gate face opened ${added[0]}`);
+    await closeCycle(added[0]!);
+    await nextFrame();
+    // A handle must still be a drag target, not a door: clicking it opens nothing new.
+    await devicePanel().locator(".wadjet-studio-device-disc-handle").first().click({ force: true });
+    await nextFrame();
+    expect((await cycleIds()).filter((id) => !before.includes(id))).toEqual([]);
+    // Leave the device as step 52 made it, so step 53 starts from the same place.
+    await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=chance]').click();
+    await nextFrame();
+  });
+
   test("step 53: the WHEN segmented switches to tag, and season chips write tag then any", async () => {
     // `open` focuses the panel step 52 left up and rebuilds it if that step
     // died and the shared afterEach closed it — one failure should not cascade
@@ -5411,6 +5454,38 @@ describe("climate studio · channel rows", () => {
     console.log(`  · day ${card.day} (${card.date}): card hero "${card.temp}" inside block "${block.rows["Temperature"]}"; humidity "${card.cells["humidity"]}"`);
     console.log(`  · condition: "${card.cond}" ${card.code} — block summary "${block.summary}"`);
     console.log(`  · chips: ${card.chips.join(" | ")}`);
+  });
+
+  test("channels 3b: the day card's moon disc opens the moon's CYCLE window", async () => {
+    // The prototype's day card is a door to the cycle editor (`data-vst="sablemoon"`
+    // on its moon svg); wadjet-9f9.48.10 found the plugin's disc was inert.
+    const card = await dayCardProbe();
+    expect(card.hidden).toBe(false);
+    const disc = ob.page.locator(".wadjet-studio-daycard .wadjet-studio-daycard-moon").first();
+    await expect.poll(() => disc.evaluate((e) => !e.classList.contains("is-hidden"))).toBe(true);
+    expect(await disc.getAttribute("role")).toBe("button");
+    await disc.click();
+    await nextFrame();
+    const opened = await withApp(
+      ob.page,
+      (app, a: { type: string }) => {
+        const leaf = app.workspace.getLeavesOfType(a.type)[0];
+        const ids = (leaf.view.store.get().view.openWindows as string[]).filter((id) => id.startsWith("cycle:"));
+        return { ids, panel: leaf.view.containerEl.querySelector(".wadjet-studio-window .wadjet-studio-cycle") !== null };
+      },
+      { type: VIEW_TYPE },
+    );
+    expect(opened.ids.length).toBe(1);
+    expect(opened.panel).toBe(true);
+    console.log(`  · moon disc opened ${opened.ids[0]}`);
+    await withApp(
+      ob.page,
+      (app, a: { type: string; id: string }) => {
+        app.workspace.getLeavesOfType(a.type)[0].view.windows.close(a.id);
+      },
+      { type: VIEW_TYPE, id: opened.ids[0]! },
+    );
+    await nextFrame();
   });
 
   test("channels 4: the label and the curve both open the channel window", async () => {

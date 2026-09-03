@@ -2469,6 +2469,7 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  cursor: pointer;
 }
 .wadjet-studio-daycard-moon svg {
   width: 62px;
@@ -4076,10 +4077,12 @@
 .wadjet-studio-device-disc-face {
   fill: var(--wadjet-studio-bg-alt);
   stroke: var(--wadjet-studio-border-bright);
+  cursor: pointer;
 }
 .wadjet-studio-device-disc-moon {
   fill: var(--wadjet-studio-moon);
   fill-opacity: 0.9;
+  cursor: pointer;
 }
 .wadjet-studio-device-disc-arc {
   fill: none;

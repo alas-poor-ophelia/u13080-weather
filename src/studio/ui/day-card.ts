@@ -27,6 +27,7 @@ import { conditionCode, conditionColour, conditionOf } from "../model/copy";
 import { format, yearLabel } from "../model/format";
 import { channelHint } from "../model/hints-channels";
 import { litShapePath, phaseTint } from "../model/moon-shape";
+import { openCycleFor } from "./windows/cycle";
 import { cycleColour, ERA_CYCLE, SEASON_CYCLE } from "../model/palette";
 import type { StudioState } from "../model/state";
 import { createChip, type ChipComponent } from "./components";
@@ -205,7 +206,19 @@ export function createDayCard(parent: HTMLElement, ctx: SurfaceContext, hint: st
     humidity: createStat(stats, "humidity", "humidity", "var(--wadjet-studio-gold)"),
   };
 
-  const moon = panel.createDiv({ cls: "wadjet-studio-daycard-moon", attr: { "data-hint": channelHint("daycard.readout") } });
+  // The disc is a door as well as a readout: the prototype's day card opens
+  // the moon's CYCLE editor from it (`data-vst="sablemoon"`), SPEC law 2.
+  const moon = panel.createDiv({ cls: "wadjet-studio-daycard-moon", attr: { "data-hint": channelHint("daycard.moon"), role: "button", tabindex: "0" } });
+  let moonName: string | null = null;
+  const openMoon = (): void => {
+    if (moonName !== null) openCycleFor(ctx, moonName);
+  };
+  moon.addEventListener("click", openMoon);
+  moon.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    openMoon();
+  });
   const svg = moon.createSvg("svg", { attr: { viewBox: `0 0 ${MOON_BOX} ${MOON_BOX}`, "aria-hidden": "true" } });
   svg.createSvg("circle", { cls: "wadjet-studio-daycard-moon-disc", attr: { cx: MOON_BOX / 2, cy: MOON_BOX / 2, r: MOON_R + 4 } });
   const moonLit = svg.createSvg("path", { cls: "wadjet-studio-daycard-moon-lit" });
@@ -293,7 +306,9 @@ export function createDayCard(parent: HTMLElement, ctx: SurfaceContext, hint: st
     cells.humidity.value.setText(`${humidity.text}${humidity.unit}`);
 
     const phase = day.time.moons?.[0]?.phase;
+    moonName = day.time.moons?.[0]?.name ?? null;
     moon.toggleClass("is-hidden", phase === undefined);
+    moon.setAttr("aria-label", moonName === null ? "Moon" : `Open the ${moonName} cycle editor`);
     if (phase !== undefined) {
       moonLit.setAttr("d", litShapePath(phase, MOON_BOX / 2, MOON_BOX / 2, MOON_R));
       moonLit.setCssProps({ "--wadjet-studio-daycard-moon-lit": phaseTint(phase).toFixed(2) });
