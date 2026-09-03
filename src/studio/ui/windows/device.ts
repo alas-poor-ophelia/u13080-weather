@@ -69,10 +69,13 @@ import {
   type DeviceKind,
   type WhenKind,
   ENVELOPE_SHAPES,
+  SPELL_DURATION_RANGE,
+  SPELL_STARTS_RANGE,
   deviceGrammar,
   envelopeShape,
   envelopeShapeName,
   gatePercent,
+  knobRangeOf,
   knobSpecFor,
   moonRange,
   opValueText,
@@ -80,9 +83,10 @@ import {
   whenSummary,
   yearWindowsOf,
 } from "../../model/devices";
+import { dayRangeLabel } from "../../model/format";
 import { deviceHint } from "../../model/hints-device";
 import { opQuantity, parseDisplay } from "../../model/knob-units";
-import { cycleColour } from "../../model/palette";
+import { BAND_TINT_ALPHA, SEASON_CYCLE, cycleColour, tintColour } from "../../model/palette";
 import { SHIPPED_PRESETS } from "../../model/presets";
 import type { StudioState } from "../../model/state";
 import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
@@ -166,10 +170,14 @@ function tagSources(seasons: ReadonlyArray<{ name: string }>, eras: readonly Era
   return [...seasons.map((s) => `season:${s.name}`), ...eras.map((e) => `era:${e.name}`)];
 }
 
-/** A tag's own hue: a season takes its band colour, an era takes calendar gold. */
+/**
+ * A tag's own hue: a season takes its band colour, an era takes calendar gold.
+ * A season walks `SEASON_CYCLE`, not `DATA_CYCLE` — the same list the Seasons
+ * window and the calendar ruler use, so Thaw is green in all three.
+ */
 function tagColour(tag: string, seasons: ReadonlyArray<{ name: string }>): string {
   const at = seasons.findIndex((s) => `season:${s.name}` === tag);
-  return at >= 0 ? cycleColour(at) : "var(--wadjet-studio-gold)";
+  return at >= 0 ? cycleColour(at, SEASON_CYCLE) : "var(--wadjet-studio-gold)";
 }
 
 /** `[a, b)` in year phase, split at the wrap so a window across new year draws as two clips. */
@@ -718,7 +726,13 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       const stripe = lane.createDiv({ cls: "wadjet-studio-device-lane-stripe" });
       for (const band of seasonBands(seasons)) {
         const seg = stripe.createDiv({ cls: "wadjet-studio-device-band", attr: { "data-name": band.name } });
-        seg.setCssProps({ "--wadjet-studio-device-band-w": `${((band.to - band.from) * 100).toFixed(2)}%`, "--wadjet-studio-device-band-color": cycleColour(band.index) });
+        seg.setCssProps({
+          "--wadjet-studio-device-band-w": `${((band.to - band.from) * 100).toFixed(2)}%`,
+          // The season's OWN hue (`SEASON_CYCLE`, so Thaw is green), composited
+          // at the prototype's `tc + "55"` third rather than laid on at full
+          // strength; the tint carries the whole alpha, the stylesheet adds none.
+          "--wadjet-studio-device-band-color": tintColour(band.index, BAND_TINT_ALPHA, SEASON_CYCLE),
+        });
       }
       const track = lane.createDiv({ cls: "wadjet-studio-device-track" });
       const svg = track.createSvg("svg", { cls: "wadjet-studio-device-lane-svg", attr: { viewBox: `0 0 ${LANE_W} ${LANE_H}`, preserveAspectRatio: "none" } });
@@ -756,12 +770,10 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
 
       const rows = parent.createDiv({ cls: "wadjet-studio-device-clips" });
       clips.forEach((clip, i) => {
-        const from = Math.round(clip.start * yearLength);
-        const to = Math.round((clip.start + clip.length) * yearLength);
         const season = seasonAtPhase(seasons, (((clip.start + clip.length / 2) % 1) + 1) % 1);
         const row = rows.createDiv({ cls: "wadjet-studio-device-clip-row", attr: { "data-clip": String(i), "data-selected": i === at ? "true" : "false", "data-hint": deviceHint("device.when.lane") } });
         row.createDiv({ cls: "wadjet-studio-device-clip-swatch" });
-        row.createSpan({ cls: "wadjet-studio-device-clip-label", text: `d${from} – d${to}` });
+        row.createSpan({ cls: "wadjet-studio-device-clip-label", text: dayRangeLabel(clip.start, clip.length, yearLength) });
         row.createSpan({ cls: "wadjet-studio-device-clip-dur", text: `${Math.round(clip.length * yearLength)} d${season === null ? "" : ` · ${season}`}` });
         row.createDiv({ cls: "wadjet-studio-device-spacer" });
         row.addEventListener("click", () => {
@@ -833,9 +845,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       knob(knobs, {
         part: "spell-starts",
         label: "starts / yr",
-        min: 0.05,
-        max: 20,
-        step: 0.05,
+        ...SPELL_STARTS_RANGE,
         value: spell.meanStartsPerYear,
         fmt: (v) => String(Number(v.toFixed(2))),
         color: "var(--wadjet-studio-gold)",
@@ -845,9 +855,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       knob(knobs, {
         part: "spell-duration",
         label: "duration",
-        min: 1,
-        max: 120,
-        step: 1,
+        ...SPELL_DURATION_RANGE,
         value: spell.meanDurationDays,
         fmt: (v) => `${v.toFixed(0)} d`,
         color: spell.meanDurationDays > LONG_SPELL_DAYS ? "var(--wadjet-studio-warn)" : "var(--wadjet-studio-temp)",
@@ -892,7 +900,8 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         cell.createSpan({ cls: "wadjet-studio-device-raw", text: `${paramName(op.param)} ${op.op}` });
         return;
       }
-      const spec = knobSpecFor(op);
+      const spec = knobSpecFor(op, "device");
+      const range = knobRangeOf(spec);
       const isOffset = op.op === "offset";
       const q = opQuantity(op.param, isOffset);
       const el = knob(cell, {
@@ -901,7 +910,9 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         min: spec.min,
         max: spec.max,
         step: spec.step,
-        neutral: spec.neutral,
+        // Omitted, not zero, where the prototype suppresses the detent — the
+        // arc then runs from the track minimum (`neutralFor` in `devices.ts`).
+        ...(spec.neutral !== undefined ? { neutral: spec.neutral } : {}),
         value: op.value,
         size: "lg",
         // The knob's own readout is the prototype's `0 — no rain`: the value in
@@ -910,7 +921,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         color: colourOf(op.param),
         hint: deviceHint("device.op", opGloss(op)),
         disabled: op.enabled === false,
-        ...(q !== null ? { parse: (text: string) => parseDisplay({ min: spec.min, max: spec.max, neutral: spec.neutral, step: spec.step }, q, ctx.units())(text) } : {}),
+        ...(q !== null ? { parse: (text: string) => parseDisplay(range, q, ctx.units())(text) } : {}),
         onChange: (v, phase) => gesture(phase, (x) => setOpValue(x, i, v)),
       });
 

@@ -6,7 +6,7 @@
  * there is nothing else pure to test here.
  */
 import { describe, expect, test } from "bun:test";
-import { cycleAt, cycleColour, DATA_CYCLE, ERA_CYCLE, REGIME_CYCLE, SEASON_CYCLE } from "../src/studio/model/palette";
+import { BAND_TINT_ALPHA, cycleAt, cycleColour, DATA_CYCLE, ERA_CYCLE, REGIME_CYCLE, SEASON_CYCLE, tintColour } from "../src/studio/model/palette";
 
 describe("palette · cycle orders", () => {
   test("DATA_CYCLE leads on calendar gold", () => {
@@ -44,5 +44,20 @@ describe("palette · cycleAt / cycleColour over ERA_CYCLE", () => {
 
   test("cycleColour with no cycle argument still falls back to DATA_CYCLE", () => {
     expect(cycleColour(0)).toBe("var(--wadjet-studio-gold)");
+  });
+});
+
+describe("palette · tintColour", () => {
+  test("composites the cycle hue at the given alpha rather than laying it on flat", () => {
+    expect(tintColour(0, BAND_TINT_ALPHA, SEASON_CYCLE)).toBe("color-mix(in srgb, var(--wadjet-studio-season-1) 33%, transparent)");
+    expect(tintColour(3, "12%", ERA_CYCLE)).toBe("color-mix(in srgb, var(--wadjet-studio-temp) 12%, transparent)");
+  });
+
+  test("BAND_TINT_ALPHA is the prototype's `tc + \"55\"` third, not a full-strength fill", () => {
+    expect(BAND_TINT_ALPHA).toBe("33%");
+  });
+
+  test("no cycle argument still falls back to DATA_CYCLE, same as cycleColour", () => {
+    expect(tintColour(0, "50%")).toBe("color-mix(in srgb, var(--wadjet-studio-gold) 50%, transparent)");
   });
 });

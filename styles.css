@@ -122,6 +122,13 @@
 :root {
   --wadjet-studio-bg: #141517;
   --wadjet-studio-bg-alt: #202225;
+  /* The header's own tier — one step LIGHTER than bg-alt, so the header
+     reads as the topmost surface above the playlist (bg-alt) and the
+     hint-bar/mixer-rail/JSON-drawer tier (bg-deep, below). Distinct from
+     bg-alt: the KIND badges, the WRITES footer and the playlist itself all
+     stay bg-alt on purpose (SPEC), only the header chrome is this lighter
+     graphite. */
+  --wadjet-studio-bg-header: #26282c;
   --wadjet-studio-panel: #2a2d31;
   --wadjet-studio-border: #35383d;
   --wadjet-studio-border-bright: #3d4147;
@@ -260,7 +267,7 @@
   gap: 12px;
   height: 44px;
   padding: 0 16px;
-  background: var(--wadjet-studio-bg-alt);
+  background: var(--wadjet-studio-bg-header);
   border-bottom: 1px solid var(--wadjet-studio-border);
 }
 .wadjet-studio-header-zone {
@@ -402,7 +409,8 @@
   padding: 3px 9px;
   border-radius: 3px;
   font-size: var(--wadjet-studio-fs-body);
-  background: var(--wadjet-studio-bg-alt);
+  background: var(--wadjet-studio-bg-header);
+  border: 1px solid var(--wadjet-studio-border);
 }
 .wadjet-studio-header-srctag {
   margin-right: 2px;
@@ -588,7 +596,9 @@
   padding: 12px;
   overflow-x: hidden;
   overflow-y: auto;
-  background: var(--wadjet-studio-bg-alt);
+  /* One tier below bg-alt (SPEC: prototype rail #1b1d20 vs playlist #202225)
+     — matches the hint bar and JSON drawer, which already use bg-deep. */
+  background: var(--wadjet-studio-bg-deep);
   border-left: 1px solid var(--wadjet-studio-border);
 }
 /* Below a 1300 px container the rail gives up its fluid width and settles at
@@ -732,7 +742,12 @@
 }
 .wadjet-studio-led.is-on[data-level="ok"] {
   background: var(--wadjet-studio-led-color, var(--wadjet-studio-wind));
-  box-shadow: 0 0 7px rgba(127, 214, 168, 0.9);
+  /* The glow is the core's own colour at low alpha (SPEC:
+     box-shadow:0 0 7px rgba(<channel rgb>,0.8-0.9)), not a fixed wind-green —
+     a channel window's LED must halo in its own hue. color-mix against the
+     same --wadjet-studio-led-color the core paints with reproduces the prior
+     rgba(127,214,168,0.9) byte-for-byte when no colour override is set. */
+  box-shadow: 0 0 7px color-mix(in srgb, var(--wadjet-studio-led-color, var(--wadjet-studio-wind)) 90%, transparent);
 }
 .wadjet-studio-led.is-on[data-level="warn"] {
   background: var(--wadjet-studio-warn);
@@ -1470,7 +1485,7 @@
   flex-direction: column;
   height: 100px;
   padding: 9px 16px 12px;
-  background: color-mix(in srgb, var(--wadjet-studio-bg) 60%, var(--wadjet-studio-bg-alt));
+  background: var(--wadjet-studio-bg-deep);
   border-top: 1px solid var(--wadjet-studio-border);
 }
 .wadjet-studio-audition-body {
@@ -4110,7 +4125,6 @@
 .wadjet-studio-device-band {
   width: var(--wadjet-studio-device-band-w, 25%);
   background: var(--wadjet-studio-device-band-color, var(--wadjet-studio-border));
-  opacity: 0.8;
 }
 .wadjet-studio-device-track {
   height: 10px;
@@ -4450,6 +4464,14 @@
    plot — what point is selected, what the macros do, who else writes here.
    Card geometry (12 px padding, 3 px radius, panel on border-bright) is the
    prototype's own and is shared by all four channels. */
+/* The channel window body is one step darker than the shared window body
+   (SPEC: linear-gradient(180deg,#26282c,#1f2124)) so the #2a2d31 cards read
+   as lighter than the body, not darker. Scoped to this window family, not
+   the shared component section, so world/device window chrome — verified
+   at #2c2f33 to #2a2d31 — is untouched. */
+.wadjet-studio-window:has(.wadjet-studio-channel-win) {
+  background: linear-gradient(180deg, #26282c, #1f2124);
+}
 .wadjet-studio-channel-win {
   display: flex;
   flex-direction: column;

@@ -33,7 +33,7 @@ import { ERA_TAG_PREFIX } from "../../../core/eras";
 import type { Era, ModifierOp, ZoneProfile } from "../../../core/types";
 import { channelOf, type Channel } from "../../model/compile";
 import { paramName, opGloss } from "../../model/copy";
-import { knobSpecFor } from "../../model/devices";
+import { knobRangeOf, knobSpecFor } from "../../model/devices";
 import { addOp, removeEra, removeOp, renameEra, setEnabled, setOpEnabled, setOpValue, setSpan } from "../../model/era-edit";
 import { eraHint } from "../../model/hints-era";
 import { opFmt, opQuantity, parseDisplay } from "../../model/knob-units";
@@ -292,8 +292,8 @@ export function buildEraWindow(name: string): WindowBuilder {
           text: "×",
           attr: { role: "button", tabindex: "0", "aria-label": `Remove ${paramName(op.param)}`, "data-hint": eraHint("era.opRemove"), "data-part": "era-op-remove" },
         });
-        const spec = knobSpecFor(op);
-        const opSpec = { min: spec.min, max: spec.max, neutral: spec.neutral, step: spec.step };
+        const spec = knobSpecFor(op, "era");
+        const opSpec = knobRangeOf(spec);
         const isOffset = op.op === "offset";
         const q = opQuantity(op.param, isOffset);
         const color = CHANNEL_COLOR[channelOf(op.param)];
@@ -433,7 +433,7 @@ export function buildEraWindow(name: string): WindowBuilder {
 
     /** One op as the prototype's authored WRITES clause: `offset[temperature.mean −8.0 °C]`. */
     function eraOpToken(op: ModifierOp): string {
-      const spec = knobSpecFor(op);
+      const spec = knobSpecFor(op, "era");
       const isOffset = op.op === "offset";
       const fmt = opFmt(op.param, isOffset, ctx.units(), spec.fmt);
       return `${op.op}[${op.param} ${fmt(opValue(op))}]`;

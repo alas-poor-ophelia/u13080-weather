@@ -355,8 +355,11 @@ describe("unit cards", () => {
     ]);
     expect(unitsFor(z, [], "precipitation", null, 1)[0]!.chips[1]!.label).toBe("storm odds ×1.50");
     expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[1]!.label).toBe("sky 0.95 — ash-dark");
-    // The rail's when chip is the gate alone, short enough for a card.
-    expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[0]!.label).toBe("clip d219–261");
+    // The rail's when chip is the gate alone, short enough for a card — and it
+    // reads `format.ts`'s day range, so it says exactly what the playlist
+    // caption and the device window say about the same clip (bead
+    // wadjet-9f9.48.2; it used to floor the start and print `d219–261`).
+    expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[0]!.label).toBe("clip d219–263");
     // The device name is product copy, never the modifier id.
     expect(unitsFor(z, [], "precipitation", null, 1)[0]!.name).toBe("Storm");
   });

@@ -27,7 +27,7 @@
  * status as the header's transport buttons and a floating window's ×.
  */
 import type { CalendarDescription } from "../../plugin/time/adapter";
-import { tabular } from "../model/format";
+import { dayLabel, tabular } from "../model/format";
 import { playlistHint } from "../model/hints-playlist";
 import { spanToPx } from "../model/lanes";
 import { cycleColour, ERA_CYCLE, SEASON_CYCLE } from "../model/palette";
@@ -154,13 +154,12 @@ export function spanCalendarFor(ctx: SurfaceContext, state: StudioState): SpanCa
 
 /**
  * A day tick's label: `d0`, 0-based within its year, as the prototype's ruler
- * writes it. Deliberately NOT `format.ts`'s `dayLabel` — that one is the
- * 1-based `d 130` the header readout and the day card speak, and a tick has
- * 24 px to fit a number into.
+ * writes it. This used to have its own copy of the wrap because `format.ts`'s
+ * `dayLabel` was the 1-based, spaced `d 130`; `dayLabel` is now the studio's
+ * one day-ordinal convention and says exactly this (bead wadjet-9f9.48.2).
  */
 function tickDay(dayIndex: number, yearLength: number): string {
-  const n = Math.max(1, Math.round(yearLength));
-  return `d${((dayIndex % n) + n) % n}`;
+  return dayLabel(dayIndex, yearLength);
 }
 
 /** A year tick's label: the bare year, no `Y` prefix (SPEC §3.2's `1100 1200 …`). */

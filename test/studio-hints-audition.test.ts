@@ -63,8 +63,9 @@ suite("audition hints", () => {
   test("dayTip names the day, describes the weather and always carries the regime", () => {
     const tip = dayTip(report, 129, 365);
     const [name, detail] = parseHint(tip);
-    // `dayOfYear` is 0-based on an AuditionDay; the label counts from 1.
-    expect(name).toBe("d 130");
+    // `dayOfYear` is 0-based on an AuditionDay, and so is the label — the tip
+    // agrees with the ruler under the strip (bead wadjet-9f9.48.2).
+    expect(name).toBe("d129");
     expect(detail).toContain("regime:frontal");
     expect(detail).toContain("rain");
     expect(detail.endsWith("regime:frontal")).toBe(true);

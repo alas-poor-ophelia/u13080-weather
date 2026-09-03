@@ -8,7 +8,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Modifier } from "../src/core/types";
 import { dragToWhen, hasLane, laneCaption, laneSpec, laneSub, spellRunsKey } from "../src/studio/model/device-lanes";
-import { toDevice } from "../src/studio/model/devices";
+import { toDevice, whenSummary } from "../src/studio/model/devices";
+import { dayRangeLabel } from "../src/studio/model/format";
+import { railWhenLabel } from "../src/studio/model/mixer";
 import type { CalendarDescription } from "../src/plugin/time/adapter";
 import { DEVICE_LANE_HINTS, DEVICE_LANE_HINT_KEYS, deviceLaneHint, deviceLaneTip, deviceSpanHintKey } from "../src/studio/model/hints-device-lanes";
 import { HINT_SEPARATOR, parseHint } from "../src/studio/model/hints";
@@ -350,6 +352,18 @@ describe("device lanes · laneSub", () => {
 
   test("a yearPhase clip is read in days, on the calendar's own year length", () => {
     expect(laneSub(device("c", { when: { yearPhase: [0.5, 0.75] } }), CAL)).toBe("clip d180–270 · yearly");
+  });
+
+  test("the lane sub-line, the rail chip and the window summary name the same days", () => {
+    // The Ashfall clip that used to read `clip d222–261` in the rail and
+    // `d223 – d263 · 40 d` in the playlist (bead wadjet-9f9.48.2). All three
+    // now go through `format.ts`'s one day-range helper, on one year length.
+    const m = device("ash", { when: { yearPhase: [223 / 365, 263 / 365] } });
+    const d = toDevice(m, { label: "T", readOnly: false, yearLength: 365, epochYear: 1, seasons: [], moons: [] });
+    expect(laneSub(m, { ...CAL, yearLength: 365 })).toBe("clip d223–263 · yearly");
+    expect(railWhenLabel(d, 365)).toBe("clip d223–263");
+    expect(whenSummary(d, 365)).toBe("days 223–263");
+    expect(dayRangeLabel(223 / 365, 40 / 365, 365)).toBe("d223 – d263");
   });
 
   test("it reads the PREDICATE, not the spans, so it is the same at every zoom", () => {

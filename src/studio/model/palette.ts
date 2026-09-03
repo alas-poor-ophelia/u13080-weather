@@ -72,3 +72,20 @@ export function cycleAt(index: number, cycle: readonly string[] = DATA_CYCLE): s
 export function cycleColour(index: number, cycle: readonly string[] = DATA_CYCLE): string {
   return `var(${cycleAt(index, cycle)})`;
 }
+
+/**
+ * `index`'s hue composited at `alpha` over whatever is behind it.
+ *
+ * The prototype writes a band fill as the hue plus a two-digit alpha —
+ * `tc + "55"` for the season ribbon on a device's year-window lane
+ * (Component.js `seasonSegs` / `devYearSegs`), which is a third, not the full
+ * hue. That is why its ribbon reads as four dark bands rather than four bright
+ * blocks. `color-mix(…, transparent)` is the same compositing, and unlike a CSS
+ * `opacity` it leaves the element's own alpha alone.
+ */
+export function tintColour(index: number, alpha: string, cycle: readonly string[] = DATA_CYCLE): string {
+  return `color-mix(in srgb, ${cycleColour(index, cycle)} ${alpha}, transparent)`;
+}
+
+/** The prototype's `"55"` band alpha, as a percentage `color-mix` understands. */
+export const BAND_TINT_ALPHA = "33%";

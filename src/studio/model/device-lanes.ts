@@ -35,6 +35,7 @@ import { canonicalJson } from "../../core/profile";
 import type { Era, Modifier, Predicate } from "../../core/types";
 import { displayName as tagName } from "./copy";
 import { displayName, type Device } from "./devices";
+import { dayRangeLabel, dayRangeLabelOf } from "./format";
 import type { Span } from "./lanes";
 import { spansFor, spellRuns, type SpanCalendar } from "./spans";
 import type { Window } from "./zoom";
@@ -150,11 +151,12 @@ export function laneSpec(m: Modifier, cal: SpanCalendar, window: Window, activeD
  *
  *  - a moon lane says which cycle its pulses follow (`active days · ↻ 29.53 d`)
  *  - a per-year clip or a spell window says the days it covers and that it
- *    repeats (`clip d223–d263 · yearly`)
+ *    repeats (`clip d223–263 · yearly`)
  *  - a season or era lane simply names the tag it is gated on
  *
  * Days are day-of-year numbers, which are calendar-invariant, so nothing here
- * needs `format.ts`.
+ * needs `format.ts`'s unit conversion — only its one day-ordinal convention
+ * (`dayRangeLabel`), so the sub-line can never disagree with the rail chip.
  */
 export function laneSub(m: Modifier, cal: SpanCalendar): string {
   const leaf = firstTimed(m.when);
@@ -167,10 +169,13 @@ export function laneSub(m: Modifier, cal: SpanCalendar): string {
   // The clip is the same every year, so it is read off the PREDICATE rather
   // than off the spans on screen: zoomed into a month the window shows no
   // clip at all, and the label still has to say which days it covers.
-  const [from, to] = "yearPhase" in leaf ? [Math.round(leaf.yearPhase[0] * cal.yearLength), Math.round(leaf.yearPhase[1] * cal.yearLength)] : leaf.dayOfYear;
-  // `d223–263`, not `d223–d263`: the label column is 136 px and the second
-  // `d` is the character that pushes this line into an ellipsis.
-  return `clip d${from}–${to} · yearly`;
+  // `tight`, so `d223–263` rather than `d223–d263`: the label column is 136 px
+  // and the second `d` is the character that pushes this line into an ellipsis.
+  const label =
+    "yearPhase" in leaf
+      ? dayRangeLabel(leaf.yearPhase[0], leaf.yearPhase[1] - leaf.yearPhase[0], cal.yearLength, { tight: true })
+      : dayRangeLabelOf(leaf.dayOfYear[0], leaf.dayOfYear[1], { tight: true });
+  return `clip ${label} · yearly`;
 }
 
 /**

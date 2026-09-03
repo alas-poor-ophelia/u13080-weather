@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { cToF, kphToMph, mmToIn } from "../src/core/units";
-import { dayLabel, displaySpec, format, fromDisplay, tabular, toDisplay, unitLabel, windowLabel, yearLabel, type Quantity } from "../src/studio/model/format";
+import { dayLabel, dayRange, dayRangeLabel, dayRangeLabelOf, displaySpec, format, fromDisplay, tabular, toDisplay, unitLabel, windowLabel, yearLabel, type Quantity } from "../src/studio/model/format";
 
 const MINUS = "−"; // real minus, not hyphen-minus
 
@@ -220,17 +220,49 @@ describe("displaySpec", () => {
 });
 
 describe("dayLabel / yearLabel", () => {
-  test("dayLabel is 1-based", () => {
-    expect(dayLabel(130, 365)).toBe("d 130");
-    expect(dayLabel(1, 365)).toBe("d 1");
+  // The studio's ONE day-ordinal convention (bead wadjet-9f9.48.2): 0-based,
+  // no space after the `d`, as the prototype's ruler / season rows / pin chips
+  // all write it.
+  test("dayLabel is 0-based and unspaced", () => {
+    expect(dayLabel(130, 365)).toBe("d130");
+    expect(dayLabel(0, 365)).toBe("d0");
   });
   test("dayLabel wraps out-of-range days into the year", () => {
-    expect(dayLabel(366, 365)).toBe("d 1");
-    expect(dayLabel(0, 365)).toBe("d 365");
+    expect(dayLabel(365, 365)).toBe("d0");
+    expect(dayLabel(-1, 365)).toBe("d364");
+    expect(dayLabel(366, 365)).toBe("d1");
+  });
+  test("the Seasons window's four boundaries read the way the prototype prints them", () => {
+    // `from d0 / d73 / d183 / d274` — `fromDay: Math.round(sn.from * 365)`.
+    const at = [0, 0.2, 0.5, 0.75];
+    expect(at.map((phase) => dayLabel(Math.round(phase * 365), 365))).toEqual(["d0", "d73", "d183", "d274"]);
   });
   test("yearLabel uses a real minus for negative years", () => {
     expect(yearLabel(1962)).toBe("Y 1962");
     expect(yearLabel(-40)).toBe(`Y ${MINUS}40`);
+  });
+});
+
+describe("dayRange / dayRangeLabel", () => {
+  // The Ashfall clip the mixer rail and the playlist caption used to disagree
+  // about: `clip d222–261` in the rail, `d223 – d263 · 40 d` in the playlist.
+  const ASH_START = 223 / 365;
+  const ASH_LENGTH = 40 / 365;
+
+  test("a clip is one range, whoever prints it", () => {
+    expect(dayRange(ASH_START, ASH_LENGTH, 365)).toEqual([223, 263]);
+    expect(dayRangeLabel(ASH_START, ASH_LENGTH, 365)).toBe("d223 – d263");
+    expect(dayRangeLabel(ASH_START, ASH_LENGTH, 365, { tight: true })).toBe("d223–263");
+  });
+  test("the year part of an absolute year fraction is dropped", () => {
+    expect(dayRangeLabel(1962 + ASH_START, ASH_LENGTH, 365)).toBe("d223 – d263");
+  });
+  test("a clip across new year keeps counting past the year end", () => {
+    expect(dayRange(0.95, 0.1, 365)).toEqual([347, 383]);
+  });
+  test("dayRangeLabelOf takes a range already counted in whole days", () => {
+    expect(dayRangeLabelOf(223, 263)).toBe("d223 – d263");
+    expect(dayRangeLabelOf(223, 263, { tight: true })).toBe("d223–263");
   });
 });
 

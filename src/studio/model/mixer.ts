@@ -27,6 +27,7 @@ import type { Units } from "../../core/units";
 import { channelOrNull, devices, getWetness, reorderDevice, totalWarmthAt, TRIM_ID, WARMTH_LANE_ID, WETNESS_ID, type Channel } from "./compile";
 import { describeOp, displayName, type Vocabulary } from "./copy";
 import { kindOf, toDevice, type Device } from "./devices";
+import { dayRangeLabel } from "./format";
 import { cycleColour, ERA_CYCLE } from "./palette";
 
 /** A mixer chain is a signal channel seen from the rail. Same four values. */
@@ -278,11 +279,12 @@ export function railWhenLabel(d: Device, yearLength = 365): string {
       return `moon:${w.moon} · ${w.phases.length ? w.phases.join(", ") : "custom range"}`;
     case "tag":
       return w.tags.length ? w.tags.join(" or ") : "no tag";
-    case "yearWindow": {
-      const from = Math.floor(w.start * yearLength);
-      const to = Math.floor((w.start + w.length) * yearLength) - 1;
-      return `clip d${from}–${to}`;
-    }
+    case "yearWindow":
+      // `format.ts`'s `dayRange`, never this chip's own arithmetic: flooring
+      // the start and subtracting one from the end put `clip d222–261` in the
+      // rail beside the playlist's `d223 – d263` for the one Ashfall clip
+      // (bead wadjet-9f9.48.2).
+      return `clip ${dayRangeLabel(w.start, w.length, yearLength, { tight: true })}`;
     case "chance":
       return `${Math.round(w.p * 100)}% of days`;
   }

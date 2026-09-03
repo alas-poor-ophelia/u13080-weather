@@ -203,13 +203,61 @@ function displayStep(step: number, q: Quantity, units: Units): number {
   }
 }
 
-/** "d 130" — 1-based, wrapped into [1, yearLength]. */
+/**
+ * The studio's ONE day-ordinal convention (bead wadjet-9f9.48.2): `d130` —
+ * **0-based** within the year, and no space after the `d`.
+ *
+ * The prototype writes a day exactly this way everywhere it names one
+ * (`1397-logic-class-Component.js`): the ruler ticks are
+ * `d${((d3 % 365) + 365) % 365}`, the season rows are
+ * `fromDay: Math.round(sn.from * 365)` under a `from d{{ sr.fromDay }}`
+ * template, and a pin chip is `d${p2.day}`. That makes the whole studio agree
+ * with its own ruler, which runs `d0 … d365`, and with the Seasons window's
+ * WRITES line, which is 0-based too.
+ *
+ * Days outside the year wrap into `[0, yearLength)`, so the day after `d364`
+ * is `d0`. **Display only** — day ordinals in `data.json` and in the engine are
+ * untouched by this.
+ */
 export function dayLabel(dayOfYear: number, yearLength: number): string {
-  return `d ${wrapDay(dayOfYear, yearLength)}`;
+  return `d${wrapDay(dayOfYear, yearLength)}`;
 }
 
 function wrapDay(day: number, yearLength: number): number {
-  return ((((day - 1) % yearLength) + yearLength) % yearLength) + 1;
+  const n = Math.max(1, Math.round(yearLength));
+  return ((Math.round(day) % n) + n) % n;
+}
+
+/**
+ * The two day ordinals a yearly clip `[start, start + length)` covers, in
+ * fractional years. The prototype's `whenLabel` rounds the two edges
+ * independently — `d${Math.round(w.s * 365)} – d${Math.round((w.s + w.len) * 365)}`
+ * — so this does too, and every surface that prints the clip reads it from
+ * here rather than rounding its own way. (The rail chip used to floor the
+ * start and subtract one from the end, which is how the same Ashfall clip came
+ * out as `clip d222–261` in the rail and `d223 – d263` in the playlist.)
+ *
+ * `start` may be an absolute year fraction (`1962.61`); the year part is
+ * dropped, and the end is allowed past `yearLength` for a clip that wraps.
+ */
+export function dayRange(start: number, length: number, yearLength: number): [number, number] {
+  const year = Math.floor(start);
+  return [Math.round((start - year) * yearLength), Math.round((start - year + length) * yearLength)];
+}
+
+/**
+ * A clip's day range: `d223 – d263`, or tight `d223–263` where the column is
+ * too narrow for the second `d` (the rail chip and a lane's sub-line — see
+ * `model/device-lanes.ts`).
+ */
+export function dayRangeLabel(start: number, length: number, yearLength: number, opts?: { tight?: boolean }): string {
+  const [from, to] = dayRange(start, length, yearLength);
+  return dayRangeLabelOf(from, to, opts);
+}
+
+/** `dayRangeLabel` for a range already counted in whole days (`{ dayOfYear: [223, 263] }`). */
+export function dayRangeLabelOf(from: number, to: number, opts?: { tight?: boolean }): string {
+  return opts?.tight === true ? `d${from}–${to}` : `d${from} – d${to}`;
 }
 
 /** "Y 1962" — negative years use a real minus. */
@@ -226,7 +274,8 @@ export function yearLabel(year: number): string {
  *   - **8 days or narrower** — the one day under the centre: `day 36 · 1962`.
  *   - **anything between** — days within the year, then the year:
  *     `d0 – d365 · 1962`. Days are counted from 0 at the year boundary, so a
- *     whole year reads `d0 – d365` rather than `d 1–365`.
+ *     whole year reads `d0 – d365` rather than `d 1–365` — `dayRangeLabel`'s
+ *     convention, which is the whole studio's.
  */
 export function windowLabel(a: number, b: number, yearLength: number): string {
   const widthYears = b - a;
@@ -234,6 +283,5 @@ export function windowLabel(a: number, b: number, yearLength: number): string {
   const midYear = Math.floor(mid);
   if (widthYears >= 2.5) return `${tabular(Math.round(a), 0)} – ${tabular(Math.round(b), 0)}`;
   if (widthYears * yearLength <= 8) return `day ${Math.round((mid - midYear) * yearLength)} · ${tabular(midYear, 0)}`;
-  const from = Math.round((a - Math.floor(a)) * yearLength);
-  return `d${from} – d${from + Math.round(widthYears * yearLength)} · ${tabular(midYear, 0)}`;
+  return `${dayRangeLabel(a, widthYears, yearLength)} · ${tabular(midYear, 0)}`;
 }

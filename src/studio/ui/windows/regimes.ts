@@ -41,7 +41,7 @@ import { CURVE_PATHS } from "../../../core/curve-ops";
 import type { ModifierOp, ZoneProfile } from "../../../core/types";
 import { channelOrNull, type Channel } from "../../model/compile";
 import { paramName } from "../../model/copy";
-import { defaultApplyFor, knobSpecFor } from "../../model/devices";
+import { defaultApplyFor, knobRangeOf, knobSpecFor } from "../../model/devices";
 import { tabular } from "../../model/format";
 import { regimeHint } from "../../model/hints-regimes";
 import { opFmt, opQuantity, parseDisplay } from "../../model/knob-units";
@@ -59,10 +59,20 @@ import type { WindowBuild } from "../windows";
 /** The id the panel is opened under. The mixer's fixed strip opens it (SPEC §3.3). */
 export const REGIMES_WINDOW = "regimes";
 
-/** HOW OFTEN — a relative weight, so the knob is the plain 0…1 dial; the share bar turns it into a percentage. */
+/**
+ * HOW OFTEN — a relative weight, so the knob is the plain 0…1 dial; the share
+ * bar turns it into a percentage. The prototype drags it the same way:
+ * `drag(r.id, "weight", 0, 1, 0.01)` (Component.js l.988).
+ */
 const WEIGHT_SPEC = { min: 0, max: 1, step: 0.01 };
-/** HOW LONG — the geometric run length in days. */
-const DWELL_SPEC = { min: 1, max: 60, step: 1 };
+/**
+ * HOW LONG — the geometric run length in days, `drag(r.id, "dwell", 1, 40, 1)`
+ * in the same call. 40, not 60: the ceiling is what a drag can *reach* as much
+ * as what the pointer shows, and at 1…60 the shipped `12 d` sat at 18% of the
+ * sweep instead of the prototype's 30%. A stored dwell above 40 still reads and
+ * still runs — the knob clamps the dial, it never rewrites the state.
+ */
+const DWELL_SPEC = { min: 1, max: 40, step: 1 };
 /** Above this the HOW LONG readout goes temp-orange, matching `RECOMMENDED_REGIME_DURATION` in `core/profile.ts`. */
 const LONG_DWELL_DAYS = 30;
 
@@ -491,8 +501,8 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
       });
       let knob: KnobComponent | null = null;
       if (op.op !== "clamp" && typeof op.value === "number") {
-        const spec = knobSpecFor(op);
-        const opSpec = { min: spec.min, max: spec.max, neutral: spec.neutral, step: spec.step };
+        const spec = knobSpecFor(op, "regime");
+        const opSpec = knobRangeOf(spec);
         const isOffset = op.op === "offset";
         const q = opQuantity(op.param, isOffset);
         knob = createKnob(el, {

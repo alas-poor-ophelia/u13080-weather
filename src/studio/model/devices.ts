@@ -20,6 +20,8 @@ import type { ModGate, Modifier, ModifierOp, Predicate, SpellSpec } from "../../
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import type { Channel } from "./compile";
 import { applyPhrase, describeOp, grammar, paramName } from "./copy";
+import { dayRange } from "./format";
+import type { KnobSpec } from "./knob";
 
 /** One per `Predicate` shape the studio exposes; `trim` is "no when" (SPEC §3.6). Mirrors `DevicePreset["kind"]`. */
 export type DeviceKind = "trim" | "moon" | "spell" | "tag" | "chance";
@@ -461,10 +463,12 @@ export function whenSummary(d: Device, yearLength = 365): string {
         head = `${clips.length} windows`;
         break;
       }
-      // The clip's own detail row reads `d223 – d263`; the summary rounds the
-      // same way so the two never disagree about which day a window starts on
-      // (`gap-device-windows.md` "day range off by one").
-      head = `days ${Math.round(w.start * yearLength)}–${Math.round((w.start + w.length) * yearLength)}`;
+      // The clip's own detail row reads `d223 – d263`; the summary takes its
+      // two numbers from the same `format.ts` helper, so the two can never
+      // disagree about which day a window starts on (`gap-device-windows.md`
+      // "day range off by one", bead wadjet-9f9.48.2). Only the wording
+      // differs — a sentence says `days`, a chip says `d`.
+      head = `days ${dayRange(w.start, w.length, yearLength).join("–")}`;
       break;
     }
     case "chance":
@@ -483,9 +487,114 @@ export function whenSummary(d: Device, yearLength = 365): string {
 export interface KnobSpecFor {
   min: number;
   max: number;
-  neutral: number;
+  /**
+   * The value the power arc starts from, or `undefined` where there is no
+   * visible detent — see `neutralFor`. `undefined`, not an omitted key, so
+   * `exactOptionalPropertyTypes` callers can read it without a branch;
+   * `knobRangeOf` turns it back into an optional `KnobSpec.neutral`.
+   */
+  neutral: number | undefined;
   step: number;
   fmt: (v: number) => string;
+}
+
+/**
+ * Which surface a knob lives on.
+ *
+ * The prototype keeps a SEPARATE target table per surface — `Component.TARGETS`
+ * plus `APPLY_TARGETS` for a device, `ERA_TARGETS` for an era, `REG_TARGETS`
+ * for a regime state — and the same parameter sweeps a different span in each:
+ * `temperature.mean offset` is ±8 on a device, −12…+4 on an era and ±6 on a
+ * regime. A knob's range is what a *drag does*, not only what the pointer
+ * looks like, so the surface has to be part of the lookup.
+ */
+export type KnobSurface = "device" | "era" | "regime";
+
+/** One prototype target's span. `step` falls back to the parameter's own `ParamShape`. */
+interface TargetRange {
+  min: number;
+  max: number;
+  step?: number;
+}
+
+/**
+ * The prototype's per-surface target tables, keyed `op|param`. The op is part
+ * of the key because the same parameter appears under two ops with two
+ * different spans — `wind.speed` is `offset 0…24` in `TARGETS` (the moon-bound
+ * device rack) and `scale ×0…×3` in `APPLY_TARGETS` (Ashfall's apply grid).
+ *
+ * Anything absent falls through to the generic derivation below, which is what
+ * the plugin did for everything before: a `scale` is ×0…×3, an `offset` is the
+ * parameter's symmetric ± range, a `set`/`clamp` is its whole domain.
+ */
+const DEVICE_RANGES: Record<string, TargetRange> = {
+  // Component.TARGETS (l.199-210) — the device rack's bindable targets.
+  "scale|precipitation.pwd": { min: 0.5, max: 2.5 },
+  "offset|wind.speed": { min: 0, max: 24 },
+  "offset|temperature.mean": { min: -8, max: 8 },
+  "scale|temperature.diurnalRange": { min: 0.5, max: 1.5 },
+  "scale|precipitation.pww": { min: 0.5, max: 2 },
+  "scale|precipitation.scale": { min: 0.5, max: 2.5 },
+  "scale|wind.calmFraction": { min: 0, max: 2 },
+  "set|cloud.dry": { min: 0, max: 1 },
+  "offset|humidity.wet": { min: -0.2, max: 0.2 },
+  // Component.APPLY_TARGETS (l.137-142) — Ashfall's own grid. `precip` there is
+  // one composed target over `precipitation.pww / pwd`; both halves sweep 0…1.
+  "set|precipitation.pwd": { min: 0, max: 1 },
+  "set|precipitation.pww": { min: 0, max: 1 },
+  "scale|wind.speed": { min: 0, max: 3 },
+};
+
+/** Component.ERA_TARGETS (l.123-128). An era leans cold, so `temp` is −12…+4, not symmetric. */
+const ERA_RANGES: Record<string, TargetRange> = {
+  "offset|temperature.mean": { min: -12, max: 4 },
+  "scale|precipitation.pwd": { min: 0, max: 1.5 },
+  "scale|wind.speed": { min: 0, max: 3 },
+  "offset|cloud.dry": { min: -0.3, max: 0.3 },
+};
+
+/** Component.REG_TARGETS (l.101-108). */
+const REGIME_RANGES: Record<string, TargetRange> = {
+  "scale|precipitation.pww": { min: 0, max: 2 },
+  "scale|precipitation.pwd": { min: 0, max: 2 },
+  "offset|temperature.mean": { min: -6, max: 6 },
+  "scale|temperature.diurnalRange": { min: 0.5, max: 2 },
+  "scale|wind.speed": { min: 0, max: 3 },
+  "offset|cloud.dry": { min: -0.3, max: 0.3 },
+};
+
+const SURFACE_RANGES: Record<KnobSurface, Record<string, TargetRange>> = { device: DEVICE_RANGES, era: ERA_RANGES, regime: REGIME_RANGES };
+
+/**
+ * The two SPELL knobs, which are not ops and so have no `ModifierOp` to look
+ * up. The prototype's generic device chrome drags them `knobOf(starts, 0, 6)`
+ * and `knobOf(dur, 1, 60)` (Component.js l.1062-1063); the floor here is 0.05
+ * rather than 0 because `profile.ts` rejects `meanStartsPerYear` that is not
+ * `> 0` — a knob must not be able to drag a device into an invalid world.
+ * Neither carries a `neutral`: a spell has no no-op rate to return to, so both
+ * arcs run from the track minimum.
+ */
+export const SPELL_STARTS_RANGE = { min: 0.05, max: 6, step: 0.1 } as const;
+/** @see SPELL_STARTS_RANGE */
+export const SPELL_DURATION_RANGE = { min: 1, max: 60, step: 1 } as const;
+
+/**
+ * The no-op value a power arc grows out of: ×1 for a `scale`, +0 for an
+ * `offset`, and nothing at all for a `set`/`clamp`, which have no value to
+ * return to.
+ *
+ * A detent that lands on either END of the track is suppressed, exactly as the
+ * prototype does it (`knobArcD` is handed `ctr`, and `ctr <= 0.01 || ctr >= 0.99`
+ * becomes `null`): a centre nobody can see is worse than none, because the arc
+ * then reads as a sliver out of the 12 o'clock detent instead of a sweep from
+ * the track minimum. This is why `wind.speed offset 0…24` draws a plain
+ * left-to-right arc — its "+0" sits *on* the minimum.
+ */
+function neutralFor(op: ModifierOp["op"], min: number, max: number): number | undefined {
+  const value = op === "scale" ? 1 : op === "offset" ? 0 : undefined;
+  if (value === undefined || max === min) return undefined;
+  const centre = (value - min) / (max - min);
+  return centre <= 0.01 || centre >= 0.99 ? undefined : value;
 }
 
 /** Metric units; the imperial readout is `format.ts`'s job, not the knob's range. */
@@ -523,8 +632,8 @@ const PARAM_SHAPES: Record<string, ParamShape> = {
 };
 
 const PROBABILITY_SHAPE: ParamShape = { domain: [0, 1], offset: 1, step: 0.01, unit: "" };
-/** Every `scale` op sweeps the same multiplier range, whatever it multiplies. */
-const SCALE_SHAPE = { min: 0, max: 3, neutral: 1, step: 0.01 };
+/** Every `scale` op with no prototype table entry sweeps the same multiplier range, whatever it multiplies. */
+const SCALE_SHAPE = { min: 0, max: 3, step: 0.01 };
 
 function shapeOf(param: string): ParamShape {
   if (PROBABILITY_PARAMS.has(param)) return PROBABILITY_SHAPE;
@@ -553,18 +662,34 @@ function signed(unit: string, decimals: number): (v: number) => string {
 }
 
 /**
- * The knob range for one op: a `scale` is always the ×0…×3 multiplier knob,
- * an `offset` is a symmetric ± range in the parameter's own unit (temperature
- * ±10 °C, cloud/probability ±1), and `set`/`clamp` sweep the parameter's whole
- * domain (probabilities 0…1, `wind.direction` 0…360).
+ * The knob range for one op on one `surface`.
+ *
+ * The prototype's own table for that surface wins where it has an entry (see
+ * `SURFACE_RANGES` — the same op is a different dial on a device, an era and a
+ * regime). Otherwise the generic derivation stands: a `scale` is the ×0…×3
+ * multiplier knob, an `offset` is a symmetric ± range in the parameter's own
+ * unit (temperature ±10 °C, cloud/probability ±1), and `set`/`clamp` sweep the
+ * parameter's whole domain (probabilities 0…1, `wind.direction` 0…360).
+ *
+ * The range is *display and drag* only. A stored value outside it is clamped
+ * on the way onto the dial (`knob.ts`'s `normalise`/`dragToValue`) and never
+ * written back.
  */
-export function knobSpecFor(op: ModifierOp): KnobSpecFor {
+export function knobSpecFor(op: ModifierOp, surface: KnobSurface = "device"): KnobSpecFor {
   const shape = shapeOf(op.param);
-  if (op.op === "scale") return { ...SCALE_SHAPE, fmt: (v) => `×${v.toFixed(2)}` };
-  const decimals = decimalsOf(shape.step);
-  if (op.op === "offset") return { min: -shape.offset, max: shape.offset, neutral: 0, step: shape.step, fmt: signed(shape.unit, decimals) };
-  // set / clamp: the parameter's own domain, neutral at the low end (there is no "no-op" value to return to).
-  return { min: shape.domain[0], max: shape.domain[1], neutral: shape.domain[0], step: shape.step, fmt: plain(shape.unit, decimals) };
+  const override = SURFACE_RANGES[surface][`${op.op}|${op.param}`];
+  const generic = op.op === "scale" ? { min: SCALE_SHAPE.min, max: SCALE_SHAPE.max, step: SCALE_SHAPE.step } : op.op === "offset" ? { min: -shape.offset, max: shape.offset, step: shape.step } : { min: shape.domain[0], max: shape.domain[1], step: shape.step };
+  const min = override?.min ?? generic.min;
+  const max = override?.max ?? generic.max;
+  const step = override?.step ?? generic.step;
+  const neutral = neutralFor(op.op, min, max);
+  const fmt = op.op === "scale" ? (v: number) => `×${v.toFixed(2)}` : op.op === "offset" ? signed(shape.unit, decimalsOf(step)) : plain(shape.unit, decimalsOf(step));
+  return { min, max, neutral, step, fmt };
+}
+
+/** `spec` as a `KnobSpec` — the same numbers with `neutral` back to being an optional key. */
+export function knobRangeOf(spec: KnobSpecFor): KnobSpec {
+  return { min: spec.min, max: spec.max, step: spec.step, ...(spec.neutral !== undefined ? { neutral: spec.neutral } : {}) };
 }
 
 // ---------------------------------------------------------------------------

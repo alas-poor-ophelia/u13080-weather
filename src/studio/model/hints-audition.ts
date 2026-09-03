@@ -39,7 +39,7 @@ export const AUDITION_HINT_KEYS: readonly string[] = ["audition.strip", "auditio
 export const auditionHint: HintLookup = makeHintLookup(AUDITION_HINTS);
 
 /**
- * One cell's hint: `d 130 — <the report, short> · regime:<id>`.
+ * One cell's hint: `d129 — <the report, short> · regime:<id>`.
  *
  * The sentence is `core/report.ts`'s own `describe(report, "short")` — the same
  * text the codeblock renderer and the public API produce, so the strip can
@@ -48,9 +48,10 @@ export const auditionHint: HintLookup = makeHintLookup(AUDITION_HINTS);
  * and `describe` has no reason to name it.
  *
  * `dayOfYear` is **0-based**, the way `AuditionDay` carries it (the internal
- * calendar's `TimeContext.dayOfYear`); `dayLabel` counts from 1, so the tip
- * shows `d 1` for the first day of the year.
+ * calendar's `TimeContext.dayOfYear`), and so is `dayLabel` — the tip shows
+ * `d0` for the first day of the year, matching the ruler under the strip
+ * (bead wadjet-9f9.48.2).
  */
 export function dayTip(report: WeatherReport, dayOfYear: number, yearLength: number): string {
-  return `${dayLabel(dayOfYear + 1, yearLength)}${HINT_SEPARATOR}${describe(report, "short")} · regime:${report.regime}`;
+  return `${dayLabel(dayOfYear, yearLength)}${HINT_SEPARATOR}${describe(report, "short")} · regime:${report.regime}`;
 }

@@ -315,7 +315,7 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
     });
   }
 
-  /** `▪ Thaw …… from d 1   73 d   ×` — the row that owns the name, the rename and the merge. */
+  /** `▪ Thaw …… from d0   73 d   ×` — the row that owns the name, the rename and the merge. */
   function renderRows(view: CalendarView, marks: Mark[], segs: Segment[]): void {
     rowsEl.empty();
     marks.forEach((m, index) => {
@@ -332,7 +332,11 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
         });
       }
 
-      row.createSpan({ cls: "wadjet-studio-seasons-from", text: `from ${dayLabel(Math.round(m.at * view.yearLength) + 1, view.yearLength)}`, attr: { "data-hint": seasonsHint("seasons.day") } });
+      // No `+ 1`: the prototype's season row is `fromDay: Math.round(sn.from *
+      // 365)`, 0-based, and so is `dayLabel` (bead wadjet-9f9.48.2). The row now
+      // agrees with the ruler underneath it and with this window's own WRITES
+      // line, which have always counted from d0.
+      row.createSpan({ cls: "wadjet-studio-seasons-from", text: `from ${dayLabel(Math.round(m.at * view.yearLength), view.yearLength)}`, attr: { "data-hint": seasonsHint("seasons.day") } });
       row.createSpan({ cls: "wadjet-studio-seasons-days", text: `${tabular(Math.round((seg?.length ?? 0) * view.yearLength), 0)} d` });
 
       if (!view.readOnly) {

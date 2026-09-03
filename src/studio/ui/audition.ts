@@ -380,7 +380,7 @@ export function createAuditionSurface(): Surface {
     const moon = described?.moons[0];
     if (moon !== undefined && days.length > 0) {
       for (const at of fullMoonIndices(days, moon)) {
-        const dot = marks.createDiv({ cls: "wadjet-studio-audition-moon", attr: { "data-hint": auditionHint("audition.moon", `${moon.name} full · ${dayLabel(days[at]!.dayOfYear + 1, days.length)}`) } });
+        const dot = marks.createDiv({ cls: "wadjet-studio-audition-moon", attr: { "data-hint": auditionHint("audition.moon", `${moon.name} full · ${dayLabel(days[at]!.dayOfYear, days.length)}`) } });
         dot.setCssProps({ "--wadjet-studio-audition-x": `${(at / days.length) * 100}%` });
       }
     }
@@ -402,12 +402,14 @@ export function createAuditionSurface(): Surface {
     const time = adapter();
     const units = ctx?.units() ?? "metric";
     // Before the first roll there is no year to measure; fall back to the
-    // adapter's own year length so a chip never reads `d 1` for every pin.
+    // adapter's own year length so a chip never reads `d0` for every pin.
     const yearLength = days.length > 0 ? days.length : Math.max(1, Math.round(time?.toContext(0).yearLength ?? 365));
     for (const override of myPins(state)) {
       const at = days.findIndex((d) => d.dayOrdinal === override.dayOrdinal);
       const doy = at >= 0 ? days[at]!.dayOfYear : (time?.toContext(override.dayOrdinal).dayOfYear ?? 0);
-      const label = dayLabel(doy + 1, yearLength);
+      // `dayOfYear` is already 0-based, and so is `dayLabel` — no `+ 1`
+      // (bead wadjet-9f9.48.2).
+      const label = dayLabel(doy, yearLength);
       const hint = auditionHint("audition.pin", `${label} is fixed by hand — × removes it`);
       if (at >= 0) {
         const mark = marks.createDiv({ cls: "wadjet-studio-audition-pin wadjet-studio-pin", text: "▼", attr: { "data-day-ordinal": String(override.dayOrdinal), "data-hint": hint } });

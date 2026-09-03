@@ -2210,7 +2210,7 @@ describe("climate studio · audition", () => {
     await cell.hover();
 
     const hinted = await probeAudition();
-    expect(hinted.hintName).toMatch(/^d \d+$/);
+    expect(hinted.hintName).toMatch(/^d\d+$/);
     expect(hinted.hintDetail).toContain("regime:");
     // `describe(report, "short")` always ends in the day's range in °C.
     expect(hinted.hintDetail).toContain("°C");
@@ -5989,7 +5989,7 @@ describe("climate studio · device lanes", () => {
     const probe = await probeDeviceLane("lane-clip");
     expect(probe.present).toBe(true);
     // Product copy, not the engine id (F1/F2): the slug reads as a name, and
-    // the sub-line says what the lane is — `clip d219–255 · yearly`.
+    // the sub-line says what the lane is — `clip d223–263 · yearly`.
     expect(probe.rowName).toBe("Lane Clip");
     expect(probe.rowSub).toContain("yearly");
     // SPEC 4: "in rack order, under the eras lane".

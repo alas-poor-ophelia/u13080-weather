@@ -17,6 +17,8 @@ import {
   envelopeShapeName,
   gatePercent,
   kindOf,
+  type KnobSurface,
+  knobRangeOf,
   knobSpecFor,
   moonRange,
   newDevice,
@@ -247,27 +249,53 @@ describe("whenSummary chips", () => {
 });
 
 describe("knob ranges", () => {
-  test("offsets are symmetric in the parameter's own unit", () => {
-    const temp = knobSpecFor({ param: "temperature.mean", op: "offset", value: 0 });
-    expect([temp.min, temp.max, temp.neutral, temp.step]).toEqual([-10, 10, 0, 0.1]);
-    expect(temp.fmt(1.5)).toBe("+1.5 °C");
-    expect(temp.fmt(-3)).toBe("-3.0 °C");
-
-    const sky = knobSpecFor({ param: "cloud.dry", op: "offset", value: 0 });
-    expect([sky.min, sky.max, sky.neutral, sky.step]).toEqual([-1, 1, 0, 0.01]);
-    expect(sky.fmt(-0.3)).toBe("-0.30");
-
-    const wind = knobSpecFor({ param: "wind.speed", op: "offset", value: 0 });
-    expect([wind.min, wind.max, wind.step]).toEqual([-50, 50, 0.5]);
-    expect(wind.fmt(12)).toBe("+12.0 km/h");
+  test("a parameter with no prototype entry keeps the generic symmetric offset", () => {
+    // `temperature.diurnalRange offset` is in none of the three tables.
+    const swing = knobSpecFor({ param: "temperature.diurnalRange", op: "offset", value: 0 });
+    expect([swing.min, swing.max, swing.neutral, swing.step]).toEqual([-10, 10, 0, 0.1]);
+    expect(swing.fmt(1.5)).toBe("+1.5 °C");
+    expect(swing.fmt(-3)).toBe("-3.0 °C");
   });
 
-  test("every scale is the same multiplier knob, neutral at ×1", () => {
-    for (const param of ["precipitation.pwd", "wind.speed", "temperature.mean"]) {
+  test("each surface gets its own prototype span for the same op", () => {
+    // Component.TARGETS ±8 · ERA_TARGETS −12…+4 · REG_TARGETS ±6.
+    const temp = (surface: KnobSurface) => knobSpecFor({ param: "temperature.mean", op: "offset", value: 0 }, surface);
+    expect([temp("device").min, temp("device").max]).toEqual([-8, 8]);
+    expect([temp("era").min, temp("era").max]).toEqual([-12, 4]);
+    expect([temp("regime").min, temp("regime").max]).toEqual([-6, 6]);
+    // `device` is the default, and every one of them still detents at +0.
+    expect(knobSpecFor({ param: "temperature.mean", op: "offset", value: 0 }).max).toBe(8);
+    expect([temp("device").neutral, temp("era").neutral, temp("regime").neutral]).toEqual([0, 0, 0]);
+  });
+
+  test("an era's precip is the era table's ×0…×1.5, not the wind target's ×0…×3", () => {
+    const era = knobSpecFor({ param: "precipitation.pwd", op: "scale", value: 0.7 }, "era");
+    expect([era.min, era.max, era.neutral]).toEqual([0, 1.5, 1]);
+    const wind = knobSpecFor({ param: "wind.speed", op: "scale", value: 1.3 }, "era");
+    expect([wind.min, wind.max, wind.neutral]).toEqual([0, 3, 1]);
+    // …and a regime's is ×0…×2, a third table again.
+    expect(knobSpecFor({ param: "precipitation.pwd", op: "scale", value: 1 }, "regime").max).toBe(2);
+  });
+
+  test("a detent that lands on the end of the track is suppressed", () => {
+    // `wind.speed offset` is 0…24 on a device, so "+0" IS the minimum: no
+    // centre detent, and the arc runs from the track minimum instead.
+    const wind = knobSpecFor({ param: "wind.speed", op: "offset", value: 12 });
+    expect([wind.min, wind.max, wind.neutral]).toEqual([0, 24, undefined]);
+    expect(wind.fmt(12)).toBe("+12.0 km/h");
+    // `set`/`clamp` never have a no-op value to return to.
+    expect(knobSpecFor({ param: "cloud.dry", op: "set", value: 0.9 }).neutral).toBeUndefined();
+  });
+
+  test("a scale with no table entry is still the ×0…×3 multiplier knob", () => {
+    for (const param of ["humidity.wet", "temperature.sd"]) {
       const k = knobSpecFor({ param, op: "scale", value: 1 });
       expect([k.min, k.max, k.neutral, k.step]).toEqual([0, 3, 1, 0.01]);
       expect(k.fmt(1.4)).toBe("×1.40");
     }
+    // The device rack's own targets are narrower — Component.TARGETS l.200.
+    const storm = knobSpecFor({ param: "precipitation.pwd", op: "scale", value: 1.5 });
+    expect([storm.min, storm.max, storm.neutral]).toEqual([0.5, 2.5, 1]);
   });
 
   test("set and clamp sweep the parameter's own domain", () => {
@@ -281,6 +309,11 @@ describe("knob ranges", () => {
 
     const clamped = knobSpecFor({ param: "humidity.dry", op: "clamp", max: 0.3 });
     expect([clamped.min, clamped.max]).toEqual([0, 1]);
+  });
+
+  test("knobRangeOf omits a suppressed neutral rather than passing undefined", () => {
+    expect(knobRangeOf(knobSpecFor({ param: "wind.speed", op: "offset", value: 12 }))).toEqual({ min: 0, max: 24, step: 0.5 });
+    expect(knobRangeOf(knobSpecFor({ param: "temperature.mean", op: "offset", value: 0 }, "era"))).toEqual({ min: -12, max: 4, step: 0.1, neutral: 0 });
   });
 
   test("an unknown parameter still gets a usable knob", () => {

@@ -38,6 +38,7 @@ import { channelOrNull, devices } from "../../model/compile";
 import { displayName } from "../../model/copy";
 import { dragToWhen, hasLane, laneCaption, laneSpec, laneSub, spellRunsKey, type LaneKind } from "../../model/device-lanes";
 import { toDevice, whenSummary } from "../../model/devices";
+import { dayRangeLabel } from "../../model/format";
 import { deviceLaneHint, deviceLaneTip, deviceSpanHintKey } from "../../model/hints-device-lanes";
 import { spanToPx, type Span } from "../../model/lanes";
 import { CHAIN_COLOR_VAR } from "../../model/mixer";
@@ -256,8 +257,8 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
     const { left, width } = spanToPx(clip, geo.lane);
     if (width < CAPTION_MIN_PX || left + width > geo.widthPx - CAPTION_MIN_PX) return;
     const days = Math.round((clip.to - clip.from) * yearLength);
-    const from = Math.round((clip.from - Math.floor(clip.from)) * yearLength);
-    captionEl = el.createSpan({ cls: "wadjet-studio-device-caption", text: `d${from} – d${from + days} · ${days} d` });
+    const range = dayRangeLabel(clip.from, clip.to - clip.from, yearLength);
+    captionEl = el.createSpan({ cls: "wadjet-studio-device-caption", text: `${range} · ${days} d` });
     captionEl.setCssProps({ "--wadjet-studio-device-caption-left": `${left + width + CAPTION_GAP_PX}px` });
   }
 
