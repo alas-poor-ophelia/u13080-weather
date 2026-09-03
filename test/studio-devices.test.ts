@@ -257,7 +257,7 @@ describe("knob ranges", () => {
     const swing = knobSpecFor({ param: "temperature.diurnalRange", op: "offset", value: 0 });
     expect([swing.min, swing.max, swing.neutral, swing.step]).toEqual([-10, 10, 0, 0.1]);
     expect(swing.fmt(1.5)).toBe("+1.5 °C");
-    expect(swing.fmt(-3)).toBe("-3.0 °C");
+    expect(swing.fmt(-3)).toBe("−3.0 °C"); // typeset minus, the studio house style
   });
 
   test("each surface gets its own prototype span for the same op", () => {

@@ -27,28 +27,36 @@ export const HINT_SEPARATOR = " — ";
  * ("zoom preset") and spends the detail on what the pointer can do, rather
  * than describing the view the button lands on (gap-shell §2).
  */
-const ZOOM_HINT: Hint = ["Zoom preset", "wheel = zoom under cursor · shift+wheel = pan"];
+const ZOOM_HINT: Hint = ["zoom preset", "wheel = zoom under cursor · shift+wheel = pan"];
 
+/**
+ * **Chrome hint names are lower case** (bead wadjet-9f9.48.5.3). The prototype
+ * writes `zoom preset`, `insert`, `zone file`, `opposite hemisphere`,
+ * `timeline`, `audition`, `re-roll` — the name is a *description of the
+ * control*, and title case made every one of them read like a proper noun.
+ * Capitals are reserved for things that ARE named: a unit (`Regimes`, `Eras`,
+ * `Stormtide`), a moon (`Sable full`), a person (`Köppen`).
+ */
 export const HINTS: Record<string, Hint> = {
   // --- header · zone side (SPEC §3.1) ---
-  "zone.menu": ["Zone", "this studio edits one zone · switch zones here · eras, calendar and moons are world-level and shared"],
+  "zone.menu": ["zone", "this studio edits one zone · switch zones here · eras, calendar and moons are world-level and shared"],
   "zone.koppen": ["Köppen", "the class the compiled climate resolves to — diagnostic only"],
-  "zone.src": ["Source station", "the real station this zone was copied from — opens the atlas"],
-  "zone.flip": ["Opposite hemisphere", "the record's curves are shifted half a year here · on: season tag gates remap to this zone's seasons · off: tags read the world calendar"],
+  "zone.src": ["source station", "the real station this zone was copied from — opens the atlas"],
+  "zone.flip": ["opposite hemisphere", "the record's curves are shifted half a year here · on: season tag gates remap to this zone's seasons · off: tags read the world calendar"],
 
   // --- header · tools (SPEC §3.1) ---
-  "transport.readout": ["Window", "the span the playlist is showing"],
-  "transport.back": ["Back", "pan a quarter window earlier"],
-  "transport.forward": ["Forward", "pan a quarter window later"],
-  "transport.out": ["Zoom out", "widen the window around its centre"],
-  "transport.in": ["Zoom in", "narrow the window around its centre"],
+  "transport.readout": ["window", "the span the playlist is showing"],
+  "transport.back": ["back", "pan a quarter window earlier"],
+  "transport.forward": ["forward", "pan a quarter window later"],
+  "transport.out": ["zoom out", "widen the window around its centre"],
+  "transport.in": ["zoom in", "narrow the window around its centre"],
   "zoom.day": ZOOM_HINT,
   "zoom.month": ZOOM_HINT,
   "zoom.season": ZOOM_HINT,
   "zoom.year": ZOOM_HINT,
   "zoom.era": ZOOM_HINT,
-  "header.json": ["Zone file", "the live JSON everything here writes"],
-  "header.save": ["Save", "write the drafts into the world"],
+  "header.json": ["zone file", "the live JSON everything here writes"],
+  "header.save": ["save", "write the drafts into the world"],
 };
 
 /**

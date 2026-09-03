@@ -25,7 +25,7 @@ import type { CalendarDescription } from "../../plugin/time/adapter";
 import type { Era, Modifier, ModifierOp, ZoneProfile } from "../../core/types";
 import type { Units } from "../../core/units";
 import { channelOrNull, devices, getWetness, reorderDevice, totalWarmthAt, TRIM_ID, WARMTH_LANE_ID, WETNESS_ID, type Channel } from "./compile";
-import { describeOp, displayName, type Vocabulary } from "./copy";
+import { describeOp, displayName, factorText, type Vocabulary } from "./copy";
 import { badgeFor, kindOf, toDevice, type Device } from "./devices";
 import { dayRangeLabel } from "./format";
 import { cycleColour, ERA_CYCLE } from "./palette";
@@ -120,8 +120,14 @@ export function chainOps(m: Modifier, chain: Chain): ModifierOp[] {
   return m.apply.filter((o) => channelOrNull(o.param) === chain);
 }
 
-/** Every chain `m` writes to. Size > 1 is the ⧉ linked twin. */
-export function chainsOf(m: Modifier): Set<Chain> {
+/**
+ * Every chain `m` writes to. Size > 1 is the ⧉ linked twin.
+ *
+ * Takes anything with an `apply` list, not just a `Modifier`, because an era
+ * earns the glyph on exactly the same grounds (0556 keeps ⧉ on both era
+ * cards): one unit, several rails.
+ */
+export function chainsOf(m: { apply: readonly ModifierOp[] }): Set<Chain> {
   const out = new Set<Chain>();
   for (const o of m.apply) {
     const c = channelOrNull(o.param);
@@ -248,11 +254,26 @@ function vocabularyFor(kind: string): Vocabulary {
   return kind === "moon" ? "macro" : "target";
 }
 
+/**
+ * A chip's reading of one op — `describeOp`, except that a scale of **exactly
+ * zero** prints `×0`, not `×0.00`.
+ *
+ * The prototype's rail says `precip ×0` on the Neverain card while every tuned
+ * factor beside it keeps two decimals (`storm odds ×1.50`, `precip ×0.70`):
+ * zero is not a setting, it is an off switch, and two decimals of nothing read
+ * as one. Rail chips only — `copy.ts`'s `factorText` still backs the knobs,
+ * the WRITES footers and the device windows unchanged.
+ */
+function railChipLabel(o: ModifierOp, kind: string, units: Units): string {
+  const label = describeOp(o, { vocabulary: vocabularyFor(kind), units });
+  return o.op === "scale" && o.value === 0 ? label.replace(factorText(0), "×0") : label;
+}
+
 function opChips(ops: readonly ModifierOp[], chain: Chain, kind: string, units: Units): UnitChip[] {
   const out: UnitChip[] = [];
   const seen = new Set<string>();
   for (const o of ops) {
-    const label = describeOp(o, { vocabulary: vocabularyFor(kind), units });
+    const label = railChipLabel(o, kind, units);
     // Two ops can say the same thing in product terms — `precipitation.pwd`
     // and `.pww` set to 0 are both "no rain". The card shows the reading once;
     // the device window is where the individual ops live.
@@ -270,6 +291,22 @@ function opChips(ops: readonly ModifierOp[], chain: Chain, kind: string, units: 
  * sentence — it carries the spell tail as well — where a rack chip only has
  * room for the gate itself: `clip d223–263`, `moon:Sable · Full`, `era:Drought`.
  */
+/**
+ * Does this device's rail card lead with a *when* chip?
+ *
+ * The prototype's rail (0556, `Component.js devChips`) shows the gate only
+ * where the gate is not already said twice over: a spell leads with
+ * `clip d223–263`, a tag/curse with `era:Drought` — but a **moon** device
+ * leads with its write (`storm odds ×1.50`, `wind +12 km/h`) and nothing else,
+ * because the card already carries a `moon` kind pill and the moon vocabulary
+ * makes each op name itself in full (`vocabularyFor`). `moon:Sable · Full`
+ * belongs to the device window, where the phases can be edited; on a 270 px
+ * rail it only pushes the writes out of sight.
+ */
+export function showsRailWhenChip(d: Device): boolean {
+  return d.when.kind !== "moon";
+}
+
 export function railWhenLabel(d: Device, yearLength = 365): string {
   const w = d.when;
   switch (w.kind) {
@@ -331,7 +368,7 @@ export function unitsFor(
       // `kindOf` said — it is what `opChips` picks its vocabulary from.
       kind: badgeFor(d) === "CURSE" ? "curse" : kind,
       linked: chainsOf(m).size > 1,
-      chips: [{ label: railWhenLabel(d, yearLength), color: "var(--wadjet-studio-gold)" }, ...opChips(ops, chain, kind, units)],
+      chips: [...(showsRailWhenChip(d) ? [{ label: railWhenLabel(d, yearLength), color: "var(--wadjet-studio-gold)" }] : []), ...opChips(ops, chain, kind, units)],
       enabled: m.enabled !== false,
       mutedInChain: isMutedInChain(m, chain),
       reorderable: true,
@@ -348,7 +385,10 @@ export function unitsFor(
       id: ERA_UNIT + e.name,
       name: e.name,
       kind: "era",
-      linked: false,
+      // Same rule as a device's ⧉: this era writes to more than one chain, so
+      // the card is one of several faces of one unit (0556 keeps the glyph on
+      // both era cards). World scope is the `world · N zones` badge, not this.
+      linked: chainsOf({ apply: e.apply ?? [] }).size > 1,
       world: zoneCount,
       chips: [{ label: eraSpanLabel(e), color: cycleColour(eraColours[i] ?? i, ERA_CYCLE) }, ...opChips(ops, chain, "era", units)],
       enabled: e.enabled !== false,

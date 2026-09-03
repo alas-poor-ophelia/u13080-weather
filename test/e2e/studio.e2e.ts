@@ -681,7 +681,9 @@ describe("climate studio · header and hint bar", () => {
 
     await save.hover();
     const hinted = await probeHeader();
-    expect(hinted.hintName).toBe("Save");
+    // Chrome hint names are lower case (B3): the prototype's own vocabulary —
+    // `zoom preset`, `zone file`, `save` — reserves capitals for named things.
+    expect(hinted.hintName).toBe("save");
     expect(hinted.hintDetail.length).toBeGreaterThan(0);
 
     // The hint bar itself carries no hint: the bar falls back to the default.
@@ -915,7 +917,7 @@ describe("climate studio · header and hint bar", () => {
 /* ── The playlist ruler, zoom and pan (bead wadjet-9f9.17) ──────────────── */
 
 /** `layout.ts`'s `LABEL_WIDTH`; must equal `--wadjet-studio-label-w`. */
-const LABEL_WIDTH = 136;
+const LABEL_WIDTH = 164;
 
 interface PlaylistProbe {
   window: { a: number; b: number };
@@ -1165,7 +1167,14 @@ describe("climate studio · playlist ruler and zoom", () => {
     await seedWindow({ a: epoch, b: epoch + 1000 });
     const era = await probePlaylist();
     for (const name of seasons) expect(era.bandLabels).not.toContain(name);
-    expect(era.bandLabels).toContain(ERA);
+    // The band-name row is EMPTY at Era zoom (B3): the prototype builds no
+    // ruler labels on the era lane, because the Eras row immediately under
+    // the ruler already names every era. The elements are still there — one
+    // per drawn band, still positioned and coloured — carrying no text, so
+    // this asserts BOTH halves: the row is populated, and none of it reads.
+    expect(era.bandLabels.length).toBeGreaterThan(0);
+    expect(era.bandLabels).not.toContain(ERA);
+    expect(era.bandLabels.every((t) => t === "")).toBe(true);
 
     await withApp(
       ob.page,
@@ -1250,7 +1259,10 @@ async function probeJson(): Promise<JsonProbe> {
       const climate = root?.querySelector('.wadjet-studio-json-section[data-key="climate"]') as HTMLDetailsElement | null;
       return {
         visible: root !== null && !root.hasClass("is-hidden"),
-        zoneTitle: text('.wadjet-studio-json-col[data-scope="zone"] .wadjet-studio-json-title'),
+        // The zone half no longer captions itself inside the code block (the
+        // drawer's own bar is the caption); the world half still marks where
+        // the scope changes.
+        zoneTitle: text(".wadjet-studio-json-bar-label"),
         worldTitle: text('.wadjet-studio-json-col[data-scope="world"] .wadjet-studio-json-title'),
         zoneKeys: keys("zone"),
         worldKeys: keys("world"),
@@ -1296,7 +1308,7 @@ describe("climate studio · json drawer", () => {
 
     const probe = await probeJson();
     expect(probe.visible).toBe(true);
-    expect(probe.zoneTitle).toContain("Zone file");
+    expect(probe.zoneTitle).toContain("zone file · live");
     expect(probe.worldTitle).toBe("World");
     expect(probe.zoneKeys).toContain("climate");
     expect(probe.zoneKeys).toContain("modifiers");
@@ -1361,7 +1373,8 @@ describe("climate studio · json drawer", () => {
     await revealStudio();
     await setJsonOpen(true);
 
-    await ob.page.locator('.wadjet-studio-json-col[data-scope="zone"] .wadjet-studio-json-copy').click();
+    // Copy lives in the drawer's header bar now, not inside the code block.
+    await ob.page.locator('.wadjet-studio-json-copy[data-scope="zone"]').click();
     await ob.page.waitForTimeout(300);
 
     const shown = (await notices(ob.page)).some((t) => t.includes("Copied"));
@@ -5717,8 +5730,24 @@ describe("climate studio · mixer reorder", () => {
 const FORCINGS_WINDOW_ID = "forcings";
 /** `PAD` in `ui/components/chart.ts`, which `ui/rows/automation-row.ts` mirrors. */
 const LANE_PAD = 6;
-/** The lane a fresh `ensureLane` draws is flat, so its drawn range is the ± minimum span. */
-const FLAT_LANE_RANGE: [number, number] = [-4, 4];
+/**
+ * The lane's drawn °C range, and where 0 sits inside it.
+ *
+ * `ui/rows/automation-row.ts` plots the prototype's own affine map — its
+ * `autoY(v) = 8 − v · 2.4` over a 34 px lane — so neutral sits 8 px down
+ * rather than at the centre, the top edge is worth `8 / 2.4` °C and the bottom
+ * `(8 − 34) / 2.4`. A flat lane needs no more room than that, so this IS the
+ * range `laneScale` paints one at. Mirrored here rather than imported: the row
+ * draws with `obsidian` and cannot be loaded from the harness.
+ *
+ * The lane also plots EDGE TO EDGE vertically (`pad: { top: 0, bottom: 0 }`),
+ * which is what keeps neutral on that pixel — hence `LANE_PAD_Y`.
+ */
+const LANE_HEIGHT_PX = 34;
+const LANE_NEUTRAL_PX = 8;
+const LANE_DEGREES_PER_PX = 1 / 2.4;
+const LANE_PAD_Y = 0;
+const FLAT_LANE_RANGE: [number, number] = [(LANE_NEUTRAL_PX - LANE_HEIGHT_PX) * LANE_DEGREES_PER_PX, LANE_NEUTRAL_PX * LANE_DEGREES_PER_PX];
 
 interface ForcingsProbe {
   open: boolean;
@@ -5820,7 +5849,7 @@ async function openForcingsFromMixer(): Promise<void> {
 async function pressLane(year: number, value: number, range: [number, number]): Promise<void> {
   await withApp(
     ob.page,
-    (app, a: { type: string; year: number; value: number; lo: number; hi: number; pad: number }) => {
+    (app, a: { type: string; year: number; value: number; lo: number; hi: number; pad: number; padY: number }) => {
       const leaf = app.workspace.getLeavesOfType(a.type)[0];
       const el: HTMLElement = leaf.view.containerEl;
       const lane = el.querySelector('[data-part="automation-lane"]');
@@ -5831,12 +5860,12 @@ async function pressLane(year: number, value: number, range: [number, number]): 
       const fx = (a.year - w.a) / (w.b - w.a);
       const fy = 1 - (a.value - a.lo) / (a.hi - a.lo);
       const x = Math.round(r.left + a.pad + fx * (r.width - 2 * a.pad));
-      const y = Math.round(r.top + a.pad + fy * (r.height - 2 * a.pad));
+      const y = Math.round(r.top + a.padY + fy * (r.height - 2 * a.padY));
       const base = { pointerId: 7, pointerType: "mouse", isPrimary: true, bubbles: true, cancelable: true, view: window };
       lane.dispatchEvent(new PointerEvent("pointerdown", { ...base, button: 0, buttons: 1, clientX: x, clientY: y }));
       window.dispatchEvent(new PointerEvent("pointerup", { ...base, button: 0, buttons: 0, clientX: x, clientY: y }));
     },
-    { type: VIEW_TYPE, year, value, lo: range[0], hi: range[1], pad: LANE_PAD },
+    { type: VIEW_TYPE, year, value, lo: range[0], hi: range[1], pad: LANE_PAD, padY: LANE_PAD_Y },
   );
   await nextFrame();
 }
@@ -5990,7 +6019,7 @@ describe("climate studio · forcings", () => {
     console.log(`  · lane row: window → [${window.a}, ${window.b}] · automation[0] = frc.warmth with 2 points`);
   });
 
-  test("forcings 3: pressing the empty lane adds a +4 °C point, and the audition year warms by it", async () => {
+  test("forcings 3: pressing the lane's top edge adds a point at the lane's top value, and the audition year warms by it", async () => {
     await revealStudio();
     const epoch = await epochYear();
     const target = epoch + 50;
@@ -6001,7 +6030,10 @@ describe("climate studio · forcings", () => {
     const added = draft.points[1]!;
     warmthPointYear = added[0];
     expect(Math.abs(added[0] - target)).toBeLessThanOrEqual(2);
-    expect(added[1]).toBeCloseTo(4, 5);
+    // A press on the top row of pixels writes the lane's TOP value — the
+    // meaning the assertion has always had, now read off the map the lane is
+    // actually drawn with rather than off a range that centred neutral.
+    expect(added[1]).toBeCloseTo(FLAT_LANE_RANGE[1], 5);
     expect(await waitForForcingsDots(3)).toBe(3);
 
     // The lane has to reach the engine, not just the draft: roll the point's
@@ -6015,9 +6047,11 @@ describe("climate studio · forcings", () => {
     expect((await forcingsDraft()).points.length).toBe(2);
     await waitForAuditionYear(warmthPointYear);
     const cold = await settledAuditionMean(warm);
-    expect(warm - cold).toBeGreaterThan(3);
-    expect(warm - cold).toBeLessThan(5);
-    console.log(`  · year ${warmthPointYear}: ${cold.toFixed(1)} °C flat → ${warm.toFixed(1)} °C with the +4 point`);
+    // The same ±1 °C band the assertion always held, around the point's own
+    // value instead of a hard-coded 4.
+    expect(warm - cold).toBeGreaterThan(FLAT_LANE_RANGE[1] - 1);
+    expect(warm - cold).toBeLessThan(FLAT_LANE_RANGE[1] + 1);
+    console.log(`  · year ${warmthPointYear}: ${cold.toFixed(1)} °C flat → ${warm.toFixed(1)} °C with the +${added[1].toFixed(2)} point`);
 
     expect(await studioHistory("redo")).toBe(true);
     expect((await forcingsDraft()).points.length).toBe(3);
@@ -6068,6 +6102,14 @@ describe("climate studio · forcings", () => {
     }
     expect(shown).toBe(true);
     console.log("  · right-click: 3 points → 2, and the 2-point lane is kept (≥ 2, SPEC §3.2)");
+
+    // The panel `forcings 1` opened is carried by steps 2–4; this walk is the
+    // last one that wants it, so it hands the studio back with nothing open
+    // (H-1390). It used to be harmless — the windows layer spanned the whole
+    // root, so a cascaded panel landed over the lane-label column — but the
+    // layer is now the playlist BODY, and (24, 24) of it is on top of the day
+    // card the channel walk clicks.
+    await closeStudioWindows();
   });
 });
 
@@ -6382,6 +6424,10 @@ describe("climate studio · channel rows", () => {
   test("channels 3b: the day card's moon disc opens the moon's CYCLE window", async () => {
     // The prototype's day card is a door to the cycle editor (`data-vst="sablemoon"`
     // on its moon svg); wadjet-9f9.48.10 found the plugin's disc was inert.
+    // Nothing floating first: the windows layer is the playlist body, and a
+    // panel another walk left at the cascade origin sits on the day card and
+    // eats the click this step is making.
+    await closeStudioWindows();
     const card = await dayCardProbe();
     expect(card.hidden).toBe(false);
     const disc = ob.page.locator(".wadjet-studio-daycard .wadjet-studio-daycard-moon").first();
@@ -7030,7 +7076,7 @@ describe("climate studio · device lanes", () => {
     console.log(`  · lane-clip resized: yearPhase[1] ${before.when.yearPhase[1]} → ${after.when.yearPhase[1]} (+40 px)`);
   });
 
-  test("device lanes 3: a spell draws its when dashed and the roll's runs solid", async () => {
+  test("device lanes 3: a spell draws its when as a clip and the roll's runs solid", async () => {
     await revealStudio();
     const epoch = await epochYear();
     await seedDeviceLanes([
@@ -7049,16 +7095,19 @@ describe("climate studio · device lanes", () => {
     await waitForDeviceLane("lane-spell", 2);
 
     const probe = await probeDeviceLane("lane-spell");
-    expect(probe.kind).toBe("window");
-    const windows = probe.spans.filter((s) => s.kind === "window");
+    // A spell over a PER-YEAR `when` is a solid, capped clip, not a dashed
+    // marquee (`ui/rows/device-rows.ts` `solidYearClips`, matching the
+    // prototype's Ashfall lane); only a composite `when` stays a `window`.
+    expect(probe.kind).toBe("clip");
+    const windows = probe.spans.filter((s) => s.kind === "clip");
     const runs = probe.spans.filter((s) => s.kind === "run");
     expect(windows.length).toBe(1);
     expect(runs.length).toBeGreaterThanOrEqual(1);
-    // The dashed window is the `when`; every solid run falls inside it.
+    // The clip is the `when`; every solid run falls inside it.
     expect(windows[0]!.from - Math.floor(windows[0]!.from)).toBeCloseTo(0.2, 6);
     // A day covers `[d, d + 1)` (`model/spans.ts` `spellRuns`), so a run whose
     // last active day is the last day inside the `when` closes one day PAST the
-    // dashed edge — 5.8027 against a window ending at 5.8000 is that one day,
+    // clip edge — 5.8027 against a clip ending at 5.8000 is that one day,
     // not float noise. Every run still has to START inside the window: that is
     // the property "the spell only fires inside its when".
     const dayYears = 1 / (await withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.calendar.yearLength as number));
@@ -7068,7 +7117,7 @@ describe("climate studio · device lanes", () => {
       expect(r.from).toBeLessThan(windows[0]!.to);
       expect(r.to).toBeLessThanOrEqual(windows[0]!.to + dayYears + 1e-6);
     }
-    console.log(`  · lane-spell: 1 dashed window + ${runs.length} rolled run(s) in Y ${epoch + 4}`);
+    console.log(`  · lane-spell: 1 clip + ${runs.length} rolled run(s) in Y ${epoch + 4}`);
   });
 
   test("device lanes 4: a moon device is pulses, dimmed where a season gate mutes it", async () => {
@@ -9069,7 +9118,7 @@ describe("climate studio · validation", () => {
 
     await ob.page.locator(".wadjet-studio-header-save").hover();
     const hinted = await probeHeader();
-    expect(hinted.hintName).toBe("Save");
+    expect(hinted.hintName).toBe("save");
     expect(hinted.hintDetail).toContain("required");
     console.log(`  · blanked regime id: window LED error, mixer Regimes LED error on every chain, Save "${header.save}" (blocked), hint "${hinted.hintDetail}"`);
   });

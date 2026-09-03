@@ -79,7 +79,7 @@ suite("studio channel hints", () => {
   test("the day card's detail replaces the playlist table's placeholder too", () => {
     expect(DAY_CARD_DETAIL.length).toBeGreaterThan(0);
     expect(DAY_CARD_DETAIL).not.toContain("arrives with the channel rows");
-    expect(parseHint(playlistHint("playlist.daycard", DAY_CARD_DETAIL))).toEqual(["Day card", DAY_CARD_DETAIL]);
+    expect(parseHint(playlistHint("playlist.daycard", DAY_CARD_DETAIL))).toEqual(["day card", DAY_CARD_DETAIL]);
   });
 
   test("the channel table does not collide with the header's, the playlist's or the rows'", async () => {

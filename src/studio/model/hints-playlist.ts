@@ -16,12 +16,14 @@ import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 
 export const PLAYLIST_HINTS: Record<string, Hint> = {
   // --- the calendar ruler (SPEC §3.2) ---
-  "ruler.calendar": ["Calendar", "season bands and era tint — opens the seasons window"],
-  "ruler.ticks": ["Timeline", "drag to pan; wheel to zoom under the cursor"],
+  // Chrome, so lower case (see the note over `HINTS` in `hints.ts`); the four
+  // channel rows below name a *channel* and keep their capital.
+  "ruler.calendar": ["calendar", "season bands and era tint — opens the seasons window"],
+  "ruler.ticks": ["timeline", "drag to pan; wheel to zoom under the cursor"],
 
   // --- the playlist itself ---
-  "playlist.window": ["Playlist", "wheel zooms under the cursor, shift+wheel pans, the labels scroll"],
-  "playlist.daycard": ["Day card", "the generated day at this zoom — arrives with the channel rows"],
+  "playlist.window": ["playlist", "wheel zooms under the cursor, shift+wheel pans, the labels scroll"],
+  "playlist.daycard": ["day card", "the generated day at this zoom — arrives with the channel rows"],
 
   // --- the four composed channel rows (SPEC §1) ---
   "row.temperature": ["Temperature", "the composed temperature curve — empty until the channel rows land"],

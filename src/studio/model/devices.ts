@@ -17,6 +17,7 @@
  * Pure: no Obsidian imports (PLAN D3).
  */
 import type { ModGate, Modifier, ModifierOp, Predicate, SpellSpec } from "../../core/types";
+import { withMinus } from "../../core/report";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import type { Channel } from "./compile";
 import { applyPhrase, describeOp, grammar, paramName } from "./copy";
@@ -695,7 +696,7 @@ const NO_SPACE_UNITS = new Set(["°"]);
 
 function plain(unit: string, decimals: number): (v: number) => string {
   return (v) => {
-    const n = v.toFixed(decimals);
+    const n = withMinus(v.toFixed(decimals));
     if (!unit) return n;
     return NO_SPACE_UNITS.has(unit) ? `${n}${unit}` : `${n} ${unit}`;
   };

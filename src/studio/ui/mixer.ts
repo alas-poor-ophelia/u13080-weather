@@ -307,9 +307,15 @@ export function createMixerSurface(): Surface {
     head.createSpan({ cls: "wadjet-studio-mixer-title", text: CHAIN_LABEL[chain] });
     head.createDiv({ cls: "wadjet-studio-mixer-rule" });
     const add = clickable(head.createDiv({ cls: "wadjet-studio-mixer-add", text: "＋" }), mixerHint("mixer.insert"), () => {
-      if (ctx !== null) openInsertPicker(ctx, chain, add);
+      if (ctx !== null) openInsertPicker(ctx, chain, add, pickerSlot);
     });
     add.setAttrs({ "aria-label": "Insert a device", "data-part": "insert" });
+
+    // The insert picker's mount: empty (and so zero-height) until a `＋` opens
+    // one, and between the header row and the strip because that is where the
+    // prototype's picker sits — in flow, pushing the strip and the rack down
+    // rather than covering them (`0556-mixer-rail.html`, `insert-picker.ts`).
+    const pickerSlot = el.createDiv();
 
     const strip = el.createDiv({ cls: "wadjet-studio-strip" });
     // The strip itself is the expander (SPEC §3.3 "strip click expands to full
@@ -421,7 +427,11 @@ export function createMixerSurface(): Surface {
         color,
         linked: card.linked,
         ...(card.world === undefined ? {} : { world: card.world }),
-        grip: card.reorderable,
+        // Every card keeps the grip column, draggable or not: 0556 dims the
+        // glyph on an era card rather than dropping it, so the slot marker,
+        // LED and name stay on the device cards' left edge. `grip: false`
+        // collapses the column and shifts the whole row ~7 px left.
+        grip: true,
         dim: !on,
         chips: card.chips,
         led: era
@@ -431,7 +441,15 @@ export function createMixerSurface(): Surface {
         ...grip,
       });
       unit.el.setAttrs({ "data-unit": card.id, "data-slot": card.slot });
-      if (card.reorderable) unit.el.querySelector(".wadjet-studio-rack-grip")?.setAttr("data-hint", mixerHint("mixer.unit.grip"));
+      const gripEl = unit.el.querySelector<HTMLElement>(".wadjet-studio-rack-grip");
+      if (card.reorderable) gripEl?.setAttr("data-hint", mixerHint("mixer.unit.grip"));
+      // An era is world-scoped and cannot be dragged, so the glyph is present
+      // but inert — dimmed, announced disabled, and with no `onGrip` for
+      // `rack-unit.ts`'s pointerdown to reach.
+      else {
+        gripEl?.addClass("is-disabled");
+        gripEl?.setAttr("aria-disabled", "true");
+      }
       unit.el.querySelector(".wadjet-studio-rack-name")?.setAttr("data-hint", era ? mixerHint("mixer.era.name") : mixerHint("mixer.unit.name"));
       b.units.push(unit);
     }

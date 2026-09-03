@@ -58,6 +58,14 @@ const CHART_BAND_ALPHA = "5%";
 /** A band narrower than this has no room for its name (SPEC §3.2: no collisions). */
 const NAME_MIN_PX = 44;
 
+/**
+ * How close to either edge of the ticks box a tick has to be before its label
+ * is anchored rather than centred. Half the widest label the ruler prints — a
+ * four-digit year at 10 px in the studio's mono is ~24 px — so a label is
+ * re-anchored exactly when centring it would have run outside the box.
+ */
+const TICK_LABEL_INSET = 14;
+
 /** Lane width to assume before the leaf has been laid out (clientWidth 0). */
 const FALLBACK_WIDTH = 800;
 
@@ -244,6 +252,14 @@ export function createRuler(props: RulerProps): RulerComponent {
   function paintBands(state: StudioState, geo: RowGeometry): void {
     bandsEl.empty();
     namesEl.empty();
+    // At Era zoom the name row stays EMPTY: the prototype builds its ruler
+    // labels as `eraLane ? [] : bands.filter(w > 44)`
+    // (`1397-logic-class-Component.js:673`), because the Eras row directly
+    // under the ruler already names every era — repeating them was the one
+    // place two adjacent rows said the same word. The elements are still
+    // built (one per wide band, positioned and coloured); only the text is
+    // dropped, so nothing that measures or selects them changes.
+    const eraZoom = zoomLabel(geo.window) === "era";
     for (const band of calendarBands(props.ctx, state, geo)) {
       const el = bandsEl.createDiv({ cls: "wadjet-studio-ruler-band" });
       el.setCssProps({
@@ -252,7 +268,7 @@ export function createRuler(props: RulerProps): RulerComponent {
         "--wadjet-studio-ruler-band-color": `color-mix(in srgb, ${band.colour} ${RULER_BAND_ALPHA}, transparent)`,
       });
       if (band.width < NAME_MIN_PX) continue;
-      const name = namesEl.createDiv({ cls: "wadjet-studio-ruler-band-label", text: band.name });
+      const name = namesEl.createDiv({ cls: "wadjet-studio-ruler-band-label", text: eraZoom ? "" : band.name });
       name.setCssProps({ "--wadjet-studio-ruler-band-left": `${band.mid}px`, "--wadjet-studio-ruler-name-color": band.colour });
     }
   }
@@ -267,11 +283,21 @@ export function createRuler(props: RulerProps): RulerComponent {
     stripEl.empty();
     const yearLength = spanCalendarFor(props.ctx, state)?.yearLength ?? DEFAULT_YEAR_LENGTH;
     const plan = ticks(geo.window, geo.widthPx, { year: tickYear, day: (_year, dayIndex) => tickDay(dayIndex, yearLength) });
+    const measured = geo.widthPx > 0;
     for (const t of plan) {
       const el = stripEl.createDiv({ cls: "wadjet-studio-tick wadjet-studio-ruler-tick" });
       el.toggleClass("is-major", t.major);
-      el.setCssProps({ "--wadjet-studio-ruler-tick-left": `${yearToPx(t.year, geo.window, geo.widthPx)}px` });
-      if (t.label !== "") el.createSpan({ cls: "wadjet-studio-ruler-tick-label wadjet-studio-num", text: t.label });
+      const x = yearToPx(t.year, geo.window, geo.widthPx);
+      el.setCssProps({ "--wadjet-studio-ruler-tick-left": `${x}px` });
+      if (t.label === "") continue;
+      const label = el.createSpan({ cls: "wadjet-studio-ruler-tick-label wadjet-studio-num", text: t.label });
+      // A tick label is centred on its tick, and the ticks box clips, so the
+      // two at the window's edges lost half their characters (`d0` → `0`,
+      // `1100` → `00`, `d35` → `l5`). Anchor those to the edge instead: the
+      // number reads whole and still sits on the pixel it labels.
+      if (!measured) continue;
+      if (x < TICK_LABEL_INSET) label.addClass("is-start");
+      else if (x > geo.widthPx - TICK_LABEL_INSET) label.addClass("is-end");
     }
   }
 

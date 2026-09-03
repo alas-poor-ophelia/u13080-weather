@@ -65,7 +65,22 @@ describe("studio hints", () => {
   });
 
   test("hintAttr takes a detail override without losing the name", () => {
-    expect(parseHint(hintAttr("header.save", "2 issues block the save"))).toEqual(["Save", "2 issues block the save"]);
+    expect(parseHint(hintAttr("header.save", "2 issues block the save"))).toEqual(["save", "2 issues block the save"]);
+  });
+
+  test("chrome hint names are lower case; only a real name keeps its capital", () => {
+    // The prototype writes `zoom preset`, `zone file`, `opposite hemisphere`
+    // (`0025-header.html`, `0065-hint-bar-*.html`): a chrome hint names a
+    // control, not a thing, and title case made every one read like a proper
+    // noun. `Köppen` is the header's one exception — it is a person's name.
+    const named = new Set(["zone.koppen"]);
+    for (const [key, [name]] of Object.entries(HINTS)) {
+      const first = name[0]!;
+      if (named.has(key)) expect(first, key).toBe(first.toUpperCase());
+      else expect(first, key).toBe(first.toLowerCase());
+    }
+    expect(HINTS["zoom.day"]![0]).toBe("zoom preset");
+    expect(HINTS["header.json"]![0]).toBe("zone file");
   });
 
   test("an unknown key is visible rather than blank", () => {

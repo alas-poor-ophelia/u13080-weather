@@ -37,7 +37,7 @@
 import { validateProfile } from "../../../core/profile";
 import { auditionKey, isRolled, rollCached, shareOfYear, type AuditionInput, type AuditionYear } from "../../model/audition";
 import { regimeBlockTip, regimeShareTip, rowHint } from "../../model/hints-rows";
-import { hitTest, pxToYear, type LaneGeometry, type Span } from "../../model/lanes";
+import { hitTest, pxToYear, spanToPx, type LaneGeometry, type Span } from "../../model/lanes";
 import { colourOf, laneSub } from "../../model/regimes";
 import type { StudioState } from "../../model/state";
 import { ROLL_DEBOUNCE_MS } from "../audition";
@@ -64,7 +64,12 @@ export const ROLL_GAP_MS = 30;
  */
 const LABEL_MIN_PX = 54;
 
-/** Below this the run is a few pixels wide and a name inside it is noise, however long the run. */
+/**
+ * At this density or below, the run is a few pixels wide and a name inside it
+ * is noise however long the run. Both this and `LABEL_MIN_PX` are STRICT — the
+ * prototype's own `x1 - x0 > 54 && pxDay > 3`, and Year zoom sits at exactly
+ * 3.0 px/day, so `>=` would label a whole zoom level the prototype leaves bare.
+ */
 const LABEL_MIN_PX_PER_DAY = 3;
 
 /** The lane's drawn height — the thin arrangement lane the whole device stack shares. */
@@ -218,7 +223,7 @@ export function createRegimesRow(): PlaylistRow {
         const to = year + (run.to + 1) / yearLength;
         const days = run.to - run.from + 1;
         const at = index.get(run.regime);
-        const wide = (to - from) * geo.pxPerYear >= LABEL_MIN_PX && geo.morph.pxPerDay >= LABEL_MIN_PX_PER_DAY;
+        const wide = (to - from) * geo.pxPerYear > LABEL_MIN_PX && geo.morph.pxPerDay > LABEL_MIN_PX_PER_DAY;
         const label = wide ? run.regime : null;
         out.push({
           span: {
@@ -281,13 +286,34 @@ export function createRegimesRow(): PlaylistRow {
       const item = id === null ? undefined : byId.get(id);
       if (id === null || item === undefined) continue;
       nodes.set(id, node);
-      node.setCssProps({ "--wadjet-studio-span-color": item.colour, "--wadjet-studio-span-alpha": String(item.alpha) });
+      // A PERCENTAGE, not a number: the weight is mixed into the block's fill
+      // rather than applied as `opacity`, so the label the block carries stays
+      // at full strength (styles.css, the regimes lane block).
+      node.setCssProps({ "--wadjet-studio-span-color": item.colour, "--wadjet-studio-span-alpha": `${item.alpha * 100}%` });
       node.setAttr("data-span-from", String(item.span.from));
       node.setAttr("data-span-to", String(item.span.to));
       node.setAttr("data-regime", item.regime);
       if (item.days > 0) node.setAttr("data-span-days", String(item.days));
       node.setAttr("data-hint", tipFor(item, 1));
+      centreLabel(el, node, item);
     }
+  }
+
+  /**
+   * Put a block's name over the part of the block you can SEE. The prototype
+   * clamps a run to the window before it takes the midpoint (`s = max(…, aW)`,
+   * `e = min(…, bW)`); our spans are never clipped to the window (`spans.ts`),
+   * so a run wider than the window — a long spell at Month zoom — would centre
+   * its name somewhere off-screen and read as an unlabelled band.
+   */
+  function centreLabel(el: HTMLElement, node: HTMLElement, item: RegimeSpan): void {
+    const label = node.querySelector<HTMLElement>(".wadjet-studio-span-label");
+    const g = geometry;
+    if (label === null || g === null) return;
+    const { left, width } = spanToPx(item.span, g);
+    const a = Math.max(0, left);
+    const b = Math.min(el.clientWidth, left + width);
+    label.setCssProps({ "--wadjet-studio-span-label-x": `${(b > a ? (a + b) / 2 : left + width / 2) - left}px` });
   }
 
   // --- the pointer ---------------------------------------------------------
@@ -421,6 +447,7 @@ export function createRegimesRow(): PlaylistRow {
       next.label.setAttr("data-hint", rowHint("row.regimes"));
       next.body.setAttr("data-hint", rowHint("row.regimes"));
       next.dot.setCssProps({ "--wadjet-studio-row-dot-color": "var(--wadjet-studio-text-mute)" });
+      next.dot.addClass("is-square"); // an arrangement lane's LED is a chip, not a device circle
       lane = createLane(next.body, {
         geometry: { x0: 0, pxPerYear: 1, windowFrom: 0, edgePx: 4 },
         spans: [],
@@ -450,6 +477,8 @@ export function createRegimesRow(): PlaylistRow {
       // front of the audition's own debounce.
       if (p.mode === "blocks" && !warm(state, geo)) {
         l.update({ geometry: geo.lane });
+        // Before `decorate`, which measures each label against it.
+        geometry = geo.lane;
         // `Lane.paint` rebuilds every span element from scratch, so the
         // per-span tint, `data-span-*` and tip this row adds on top are gone
         // the moment the geometry moves. Re-decorate: until the debounced roll
@@ -457,7 +486,6 @@ export function createRegimesRow(): PlaylistRow {
         // themselves — a stripped, uncoloured, untipped lane is not a truer
         // picture of "still rolling", it is just a broken one.
         decorate();
-        geometry = geo.lane;
         schedule();
         return;
       }

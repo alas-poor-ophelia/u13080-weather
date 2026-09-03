@@ -245,3 +245,28 @@ describe("automation-edit · the row's chart padding mirrors the component's", (
     expect(mirror).toBe(pad);
   });
 });
+
+/**
+ * The FRC lane's 0 °C rule is the reading the row is *about*, and where it sits
+ * is data, not decoration: the prototype's own map is `y = 8 − v · 2.4` over a
+ * 34 px lane, so neutral sits a quarter of the way down and the lane keeps its
+ * room for the deep excursions warmth actually takes. A data-derived range
+ * centres it instead, which is the regression this pins. The row cannot be
+ * imported under `bun test` (it draws with `obsidian`), so the constants are
+ * read from its source, as `CHART_PAD` above is.
+ */
+describe("automation-edit · the row's neutral line sits where the prototype's does", () => {
+  test("0 °C lands 8 px into a 34 px lane, edge to edge", async () => {
+    const row = await Bun.file(new URL("../src/studio/ui/rows/automation-row.ts", import.meta.url)).text();
+    const neutral = Number(/^const NEUTRAL_PX = ([\d.]+);$/m.exec(row)?.[1]);
+    const height = Number(/^const ROW_HEIGHT = (\d+);$/m.exec(row)?.[1]);
+    const perPx = /^const DEGREES_PER_PX = 1 \/ ([\d.]+);$/m.exec(row)?.[1];
+    expect(height).toBe(34);
+    expect(neutral).toBe(8);
+    expect(perPx).toBe("2.4");
+    expect(neutral / height).toBeCloseTo(8 / 34, 10);
+    // A vertical inset would push the rule down off that pixel, so the lane
+    // plots edge to edge and carries its headroom inside the scale instead.
+    expect(row).toContain("top: 0, bottom: 0");
+  });
+});

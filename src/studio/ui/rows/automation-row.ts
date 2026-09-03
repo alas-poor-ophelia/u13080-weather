@@ -36,7 +36,7 @@
 import { Notice } from "obsidian";
 import { laneValue } from "../../../core/automation";
 import type { ZoneProfile } from "../../../core/types";
-import { addPoint, ensureLane, hasLane, lanePoints, laneYRange, movePoint, removePoint, type LaneBounds, type LanePoint } from "../../model/automation-edit";
+import { addPoint, ensureLane, hasLane, LANE_Y_PAD, lanePoints, movePoint, removePoint, type LaneBounds, type LanePoint } from "../../model/automation-edit";
 import { getWarmthLane } from "../../model/compile";
 import { format } from "../../model/format";
 import { forcingsHint } from "../../model/hints-forcings";
@@ -50,11 +50,46 @@ import { FORCINGS_WINDOW } from "../windows/forcings";
 /** The row's id, in `ROW_ORDER` and in the playlist registry. */
 export const AUTOMATION_ROW_ID = "automation";
 
-/** Must equal `PAD` in `ui/components/chart.ts` — see the header note and its test. */
+/**
+ * The chart's HORIZONTAL inset. Must equal `PAD` in `ui/components/chart.ts` —
+ * see the header note and its test. The vertical inset is 0 here: the lane's
+ * own headroom is `LANE_Y_PAD` °C inside the scale (see `laneScale`), so the
+ * neutral line can land on the pixel the prototype puts it on.
+ */
 const CHART_PAD = 6;
 
 /** The lane's drawn height. Must equal `--wadjet-studio-automation-h` in styles.css. */
 const ROW_HEIGHT = 34;
+
+/**
+ * Where 0 °C sits, and how many °C a pixel is worth. The prototype's
+ * automation lane is a FIXED affine map — `y = 8 − v · 2.4` over its 34 px
+ * lane — so neutral sits a quarter of the way down rather than at the centre:
+ * an ice age is a deep excursion and a warm spell a shallow one, and the lane
+ * reserves its room the way the data actually uses it. Centring 0 (which a
+ * data-derived range does) gives a warm lane half a lane it never enters.
+ */
+const NEUTRAL_PX = 8;
+const DEGREES_PER_PX = 1 / 2.4;
+
+/** The °C at the lane's top and bottom edge under the prototype's own map. */
+const TOP_C = NEUTRAL_PX * DEGREES_PER_PX;
+const BOTTOM_C = (NEUTRAL_PX - ROW_HEIGHT) * DEGREES_PER_PX;
+
+/**
+ * The lane's °C scale: the prototype's, grown in PROPORTION when the authored
+ * points need more room than it has, so 0 °C keeps its pixel at every scale.
+ * `LANE_Y_PAD` is the headroom a point's handle needs above the value it
+ * marks — the same headroom `laneYRange` leaves, here inside the scale rather
+ * than in the chart's own vertical inset.
+ */
+export function laneScale(points: readonly LanePoint[]): [number, number] {
+  const values = points.map((p) => p[1]).filter((v) => Number.isFinite(v));
+  const hi = Math.max(0, ...values) + LANE_Y_PAD;
+  const lo = Math.min(0, ...values) - LANE_Y_PAD;
+  const grow = Math.max(1, hi / TOP_C, lo / BOTTOM_C);
+  return [BOTTOM_C * grow, TOP_C * grow];
+}
 
 /** Chart width to assume before the leaf has been laid out (`clientWidth` 0). */
 const FALLBACK_WIDTH = 800;
@@ -80,7 +115,7 @@ export function createAutomationRow(): PlaylistRow {
   let cancelDrag: (() => void) | null = null;
   /** chart point index → lane point index, rebuilt on every paint */
   let visible: number[] = [];
-  let painted: Painted = { window: { a: 0, b: 1 }, yRange: [-4, 4] };
+  let painted: Painted = { window: { a: 0, b: 1 }, yRange: [BOTTOM_C, TOP_C] };
   let signature = "";
 
   function openWindow(): void {
@@ -106,20 +141,22 @@ export function createAutomationRow(): PlaylistRow {
 
   /**
    * The pointer's (year, °C) on the lane, from the geometry the chart was last
-   * painted with. Clamped to the plotted rectangle: the 6 px the chart pads
-   * its plot with are still inside the element, so a press on the very top row
-   * of pixels must read as the top of the range rather than past it.
+   * painted with. Clamped to the plotted rectangle: the 6 px the chart insets
+   * its plot by horizontally are still inside the element, so a press on the
+   * very first column of pixels must read as the window's start rather than
+   * before it. Vertically there is no inset — the lane plots edge to edge
+   * (see `laneScale`), so the y is the element's own fraction.
    */
   function atPointer(ev: MouseEvent): { year: number; value: number } | null {
     const svg = chart?.el.querySelector("svg");
     if (!svg) return null;
     const r = svg.getBoundingClientRect();
     const plotW = r.width - 2 * CHART_PAD;
-    const plotH = r.height - 2 * CHART_PAD;
+    const plotH = r.height;
     if (plotW <= 0 || plotH <= 0) return null;
     const { window: w, yRange } = painted;
     const fx = (ev.clientX - r.left - CHART_PAD) / plotW;
-    const fy = (ev.clientY - r.top - CHART_PAD) / plotH;
+    const fy = (ev.clientY - r.top) / plotH;
     const year = clamp(w.a + fx * (w.b - w.a), w.a, w.b);
     const value = clamp(yRange[0] + (1 - fy) * (yRange[1] - yRange[0]), yRange[0], yRange[1]);
     return { year, value };
@@ -217,7 +254,7 @@ export function createAutomationRow(): PlaylistRow {
     // extent, and what draws the flat run either side of the authored points.
     const at = (year: number): number => (zone === null ? 0 : laneValue(getWarmthLane(zone), year));
     const line: LanePoint[] = [[w.a, at(w.a)], ...inside, [w.b, at(w.b)]];
-    const yRange = laneYRange(all);
+    const yRange = laneScale(all);
     // Warmth feeds TEMP, so the lane wears TEMP's hue whether or not the zone
     // has authored a point yet (SPEC §9: the lane IS the data). An empty lane
     // says so by being flat at neutral, not by going grey.
@@ -260,7 +297,10 @@ export function createAutomationRow(): PlaylistRow {
         width: FALLBACK_WIDTH,
         height: ROW_HEIGHT,
         series: [],
-        yRange: [-4, 4],
+        yRange: [BOTTOM_C, TOP_C],
+        // Edge to edge vertically: the lane's headroom is inside the scale,
+        // so the neutral rule lands on the prototype's own pixel.
+        pad: { left: CHART_PAD, right: CHART_PAD, top: 0, bottom: 0 },
         editable: true,
         onPoint,
         onRemove,

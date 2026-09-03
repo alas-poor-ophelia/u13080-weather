@@ -455,7 +455,10 @@ export function createAuditionSurface(): Surface {
     const id = state.view.zoneId;
     const zone = id === null ? undefined : state.zones[id];
     const dry = zone === undefined ? [] : noRainDevices(zone);
-    const dryName = dry.length === 1 ? displayName(dry[0]!) : dry.length > 1 ? "no rain" : "";
+    // The legend is lower case throughout — `dry`, `wet`, `snow`, `ashfall`
+    // — because each entry names a *kind of day*, not a thing. The one
+    // exception is the moon below, which carries a real name (`Sable full`).
+    const dryName = dry.length === 1 ? displayName(dry[0]!).toLowerCase() : dry.length > 1 ? "no rain" : "";
     const key = `${moon}|${dryName}`;
     if (key === legendKey) return;
     legendKey = key;

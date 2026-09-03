@@ -296,4 +296,32 @@ describe("tabular", () => {
     expect(s).toBe(`${MINUS}5.5`);
     expect(s.includes("-")).toBe(false);
   });
+
+  /**
+   * `tabular` is the ONE place a negative becomes text in the studio, so every
+   * readout that prints one is this test: the day card's hero, a rail chip's
+   * `temp −8.0 °C`, a lane sub-label's range, a chart's y-axis tick. Each is a
+   * different route through `format`/`tabular` (digits, unit, composition),
+   * and none of them may leak an ASCII hyphen-minus (bead wadjet-9f9.48.5.3).
+   */
+  test("every readout the studio prints a negative into uses U+2212", () => {
+    const hero = format(-0.3, "temperature", "metric", { digits: 1 });
+    expect(`${hero.text}°`).toBe(`${MINUS}0.3°`);
+
+    const chip = format(-8, "temperature", "metric");
+    expect(`${chip.text} ${chip.unit}`).toBe(`${MINUS}8.0 °C`);
+
+    const lo = format(-6.3, "temperature", "metric");
+    const hi = format(-5.2, "temperature", "metric");
+    expect(`${lo.text} – ${hi.text} ${hi.unit}`).toBe(`${MINUS}6.3 – ${MINUS}5.2 °C`);
+
+    expect(`${tabular(-4, 0)}°`).toBe(`${MINUS}4°`);
+    // A signed readout keeps `+` for positives and the real minus for negatives.
+    expect(format(-2.5, "temperatureDelta", "metric", { signed: true }).text).toBe(`${MINUS}2.5`);
+    expect(format(2.5, "temperatureDelta", "metric", { signed: true }).text).toBe("+2.5");
+
+    for (const s of [hero.text, chip.text, lo.text, hi.text, tabular(-4, 0), yearLabel(-40), windowLabel(-40, 1000, 365)]) {
+      expect(s.includes("-"), s).toBe(false);
+    }
+  });
 });

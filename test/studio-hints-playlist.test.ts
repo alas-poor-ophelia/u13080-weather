@@ -71,7 +71,7 @@ describe("studio playlist hints", () => {
   });
 
   test("playlistHint takes a detail override without losing the name", () => {
-    expect(parseHint(playlistHint("ruler.calendar", "this calendar does not describe its seasons"))).toEqual(["Calendar", "this calendar does not describe its seasons"]);
+    expect(parseHint(playlistHint("ruler.calendar", "this calendar does not describe its seasons"))).toEqual(["calendar", "this calendar does not describe its seasons"]);
   });
 
   test("an unknown key is visible rather than blank", () => {

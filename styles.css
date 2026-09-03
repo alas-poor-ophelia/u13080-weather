@@ -135,6 +135,10 @@
   --wadjet-studio-text: #f2f3f5;
   --wadjet-studio-text-dim: #aab0b9;
   --wadjet-studio-text-mute: #9298a1;
+  /* The name a tinted block carries INSIDE itself — the prototype's own
+     #d3d7dd, one step below --wadjet-studio-text so a state's id reads as part
+     of its block rather than as chrome laid over it. */
+  --wadjet-studio-text-block: #d3d7dd;
   --wadjet-studio-accent: #e9ebee;
   --wadjet-studio-temp: #f0885c;
   --wadjet-studio-precip: #5cb8f0;
@@ -148,13 +152,17 @@
   /* The WRITES bar's mono text — amber-bronze, distinct from the calendar
      gold so the footer never reads as an era. 8.6:1 on bg, 6.4:1 on panel. */
   --wadjet-studio-writes-text: #d9a95f;
-  /* The audition's day-cell shades (SPEC §3.5). Derived from the palette, not
-     new hues: a dry day is graphite so it recedes behind the year's weather,
-     and a wet one is the precipitation channel in three steps of amount. */
-  --wadjet-studio-audition-dry: color-mix(in srgb, var(--wadjet-studio-panel) 70%, var(--wadjet-studio-border));
-  --wadjet-studio-audition-wet1: color-mix(in srgb, var(--wadjet-studio-precip) 62%, #000);
-  --wadjet-studio-audition-wet2: color-mix(in srgb, var(--wadjet-studio-precip) 86%, #000);
-  --wadjet-studio-audition-wet3: color-mix(in srgb, var(--wadjet-studio-precip) 80%, #fff);
+  /* The audition's day-cell shades (SPEC §3.5): a dry day is graphite so it
+     recedes behind the year's weather, and a wet one is a blue in three steps
+     of amount. The prototype's own four (`1397-logic-class-Component.js:722`
+     — `#303338`, then `#38689e / #4f8fd9 / #7ab8f5` by mm) rather than a
+     color-mix off --wadjet-studio-precip: the mixes drifted a hue step cool
+     of them (#2d3035 / #397295 / #4f9ece / #7cc6f3), which flattened the two
+     lighter wet steps against each other on a strip 120 cells wide. */
+  --wadjet-studio-audition-dry: #303338;
+  --wadjet-studio-audition-wet1: #38689e;
+  --wadjet-studio-audition-wet2: #4f8fd9;
+  --wadjet-studio-audition-wet3: #7ab8f5;
   /* The season cycle (model/palette.ts's SEASON_CYCLE). Six of the SPEC §9
      data hues in the prototype's own order, so the shipped four read Thaw
      green · High Sun gold · Harvest orange · Deepcold blue. It is NOT the
@@ -176,7 +184,6 @@
   --wadjet-studio-bg-deep: #1b1d20;
   /* The JSON drawer's keys, light blue against the dim values (SPEC §3.7).
      9.1:1 on bg, 6.8:1 on panel. */
-  --wadjet-studio-json-key: #8fbcd8;
   /* The playlist's own hairline: the row separators are a whisper darker than
      `--wadjet-studio-border`, because a lane stack ten rows deep drawn at the
      panel border reads as a table rather than as an arrangement (SPEC §3.2). */
@@ -241,9 +248,23 @@
   font-size: 12px;
   color: var(--wadjet-studio-text);
   background: var(--wadjet-studio-bg);
-  --wadjet-studio-label-w: 136px;
+  /* 164 px = the prototype's 136 px of label content plus its 12/16 padding.
+     Must equal `LABEL_WIDTH` in `ui/layout.ts`. */
+  --wadjet-studio-label-w: 164px;
   /* The channel rows' y-axis gutter. Must equal `AXIS_WIDTH` in `ui/layout.ts`. */
   --wadjet-studio-axis-w: 44px;
+  /* The mixer rail's width. Read twice: by the rail itself, and by the floating
+     window overlay, whose right edge is the rail's left edge (SPEC §3.4). */
+  --wadjet-studio-rail-w: clamp(250px, 18cqi, 296px);
+  /* The chrome the floating-window overlay may not cover (SPEC §3.4): the
+     header and the hint bar above it, the pinned audition strip below. All
+     three are border-box totals. The overlay reads them; the blocks themselves
+     should too, so these stay one number rather than two — `.wadjet-studio-header`
+     is padding-driven today (11px + content + 11px + 1px rule) and wants a
+     `min-height: var(--wadjet-studio-header-h)` to make this authoritative. */
+  --wadjet-studio-header-h: 51px;
+  --wadjet-studio-hint-h: 22px;
+  --wadjet-studio-audition-h: 100px;
   /* Type scale (bead wadjet-6rw.1). The 0.3.0 studio topped out at 13px and
      had no display tier at all; the prototype runs from a 46px day-card
      number down to 9px section captions. These are the rungs — a surface
@@ -259,14 +280,20 @@
   --wadjet-studio-fs-micro: 9px;
 }
 
-/* Header (44 px) */
+/* Header (51 px) — the prototype's `padding:11px 16px` around its controls
+   (`0025-header.html:2`), never a fixed height: 11 + 28 (the Save button, the
+   tallest control) + 11 + the 1 px rule = 51. A `height` here squeezed the
+   same controls into 44 and made every one of them read tight. */
 .wadjet-studio-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 44px;
-  padding: 0 16px;
+  /* The floating-window overlay clears the header by this number, so the two
+     have to agree: the padding above IS the height, and --wadjet-studio-header-h
+     is the same 51 written down where the overlay can read it. */
+  min-height: var(--wadjet-studio-header-h);
+  padding: 11px 16px;
   background: var(--wadjet-studio-bg-header);
   border-bottom: 1px solid var(--wadjet-studio-border);
 }
@@ -394,13 +421,21 @@
   font-size: var(--wadjet-studio-fs-body);
   font-weight: 600;
   color: var(--wadjet-studio-koppen-color, var(--wadjet-studio-text-dim));
-  background: color-mix(in srgb, var(--wadjet-studio-koppen-color, var(--wadjet-studio-text-dim)) 10%, var(--wadjet-studio-bg));
-  border-color: color-mix(in srgb, var(--wadjet-studio-koppen-color, var(--wadjet-studio-text-dim)) 32%, var(--wadjet-studio-bg));
+  /* The prototype's pill is the class hue sunk into black, not floated on the
+     studio background: fill `#101a16`, border `#1c2f28` for the green classes
+     (`0025-header.html:21`). Mixing 12%/22% toward black on the same hue
+     reproduces both to within a point, and keeps the pill a *tint of the
+     class* for the blue, gold and moon groups too. Mixing toward
+     --wadjet-studio-bg (as this did) landed at #1f2826/#365345 — a
+     green-outlined neutral pill rather than a green-tinted classification. */
+  background: color-mix(in srgb, var(--wadjet-studio-koppen-color, var(--wadjet-studio-text-dim)) 12%, #000);
+  border-color: color-mix(in srgb, var(--wadjet-studio-koppen-color, var(--wadjet-studio-text-dim)) 22%, #000);
 }
+/* One hue across the whole pill: the prototype draws `Cfb` and `temperate
+   oceanic` at the same value, the reading only a lighter weight. */
 .wadjet-studio-header-koppen-desc {
   font-weight: 400;
   white-space: nowrap;
-  opacity: 0.72;
 }
 
 /* SRC — `SRC` is a dim letterspaced tag, not part of the station's name. */
@@ -501,6 +536,12 @@
    when there is something to write, quiet graphite when there is not, and a
    dark red when an error blocks it. */
 .wadjet-studio-header-save {
+  /* The button's resting graphite (`Saved ✓` / `Saving…`). A shade above
+     --wadjet-studio-panel, which is the card tier and read a touch too dark
+     up here; the prototype's own `#2e3236` (`saveBg`, 1397-logic:1240). No
+     other surface in the studio uses it, so it is declared here rather than
+     added to the palette in :root. */
+  --wadjet-studio-save-rest: #2e3236;
   min-width: 78px;
   padding: 0 15px;
   height: 28px;
@@ -508,7 +549,7 @@
   font-weight: 600;
   border-color: transparent;
   color: var(--wadjet-studio-text-dim);
-  background: var(--wadjet-studio-panel);
+  background: var(--wadjet-studio-save-rest);
 }
 .wadjet-studio-header-save:hover,
 .wadjet-studio-header-save:focus-visible {
@@ -518,7 +559,7 @@
 .wadjet-studio-header-save[data-state="saved"],
 .wadjet-studio-header-save[data-state="saving"] {
   color: var(--wadjet-studio-text-dim);
-  background: var(--wadjet-studio-panel);
+  background: var(--wadjet-studio-save-rest);
 }
 .wadjet-studio-header-save[data-state="dirty"],
 .wadjet-studio-header-save[data-state="warn"] {
@@ -532,13 +573,18 @@
 }
 
 /* Hint bar (22 px, full width): `● name  detail`. The name never truncates;
-   the detail ellipsizes with the full text in the bar's own `title`. */
+   the detail ellipsizes with the full text in the bar's own `title`.
+   Only ONE border, along the bottom (`0065-hint-bar-*.html:2`). The bar used
+   to carry a border-top as well, which drew a second hairline directly under
+   the header's own border-bottom — a 2 px rule at the seam — and, under
+   border-box, ate 2 px of the declared 22 so the bar measured 20. One border
+   leaves 21 px of content inside a 22 px box, which is the prototype's. */
 .wadjet-studio-hintbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 22px;
+  height: var(--wadjet-studio-hint-h);
   min-width: 0;
   padding: 0 16px;
   font-size: var(--wadjet-studio-fs-chip);
@@ -546,7 +592,6 @@
   overflow: hidden;
   color: var(--wadjet-studio-text-mute);
   background: var(--wadjet-studio-bg-deep);
-  border-top: 1px solid var(--wadjet-studio-border);
   border-bottom: 1px solid var(--wadjet-studio-border);
 }
 /* The marker: graphite at rest, calendar gold while a hint is up. */
@@ -592,7 +637,7 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  width: clamp(250px, 18cqi, 296px);
+  width: var(--wadjet-studio-rail-w);
   padding: 12px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -606,8 +651,11 @@
    chip row keeps wrapping at every width: a rack chip is a readout
    (`storm odds ×1.50`) and half of one says nothing. */
 @container (max-width: 1300px) {
-  .wadjet-studio-mixer {
-    width: 240px;
+  /* On the overlay too: its right edge is the rail's left edge, and a
+     container query cannot re-declare the property on the container itself. */
+  .wadjet-studio-mixer,
+  .wadjet-studio-windows {
+    --wadjet-studio-rail-w: 240px;
   }
 }
 .wadjet-studio-mixer-chain {
@@ -906,7 +954,10 @@
   width: 4px;
   height: 100%;
   background: var(--wadjet-studio-text);
-  opacity: 0;
+  /* The prototype draws the caps as part of the clip, not as a hover
+     affordance: an editable span always shows where its edges are, and hover
+     only brightens them. */
+  opacity: 0.55;
   cursor: ew-resize;
 }
 .wadjet-studio-span:hover .wadjet-studio-span-edge {
@@ -1091,6 +1142,16 @@
 .wadjet-studio-rack-grip {
   cursor: grab;
   color: var(--wadjet-studio-text-mute);
+}
+/* An era (or any world-scoped unit) keeps the grip column so its slot marker,
+   LED and name line up with the device cards above it — the glyph is dimmed
+   and inert, never dropped (0556 `u.gripC` = the border tone). Dimmed with
+   `opacity`, not a darker `color`: the glyph is decorative (`aria-hidden`) and
+   a hard-coded low-contrast text token would breach the SPEC §9 floor for
+   every other use of it. */
+.wadjet-studio-rack-grip.is-disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 .wadjet-studio-rack-slot {
   font-family: var(--wadjet-studio-mono);
@@ -1446,7 +1507,7 @@
   box-shadow: 0 1px 0 var(--wadjet-studio-hairline);
 }
 
-/* Rows share the ruler's 136 px label column, so every lane lines up with it.
+/* Rows share the ruler's 164 px label column, so every lane lines up with it.
    A hairline separates lanes; nothing is boxed (SPEC §9). */
 .wadjet-studio-row {
   display: flex;
@@ -1490,6 +1551,12 @@
   height: 6px;
   border-radius: 50%;
   background: var(--wadjet-studio-row-dot-color, var(--wadjet-studio-text-mute));
+}
+/* Arrangement rows (Regimes, Eras) are not devices, and the prototype says so
+   with the LED's shape: a square chip for a lane you arrange, a circle for a
+   device that fires. */
+.wadjet-studio-row-dot.is-square {
+  border-radius: 1px;
 }
 .wadjet-studio-row-name {
   overflow: hidden;
@@ -1536,6 +1603,16 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+/* A lane is shorter than the label column beside it, so the row stretches the
+   body taller than what it draws. The prototype hangs that content in the
+   middle of the row (11 px of air above and below the Regimes blocks), not at
+   the top. Column flow keeps every child at the body's full width — the lane's
+   geometry is measured from it. */
+.wadjet-studio-row-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 
 /* Audition strip, pinned to the bottom (SPEC §3.5).
    100 px: 9 px of top padding, a 23 px header row with 8 px under it, the
@@ -1546,7 +1623,7 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  height: 100px;
+  height: var(--wadjet-studio-audition-h);
   padding: 9px 16px 12px;
   background: var(--wadjet-studio-bg-deep);
   border-top: 1px solid var(--wadjet-studio-border);
@@ -1563,13 +1640,18 @@
 }
 
 /* JSON drawer — between the playlist and the pinned audition strip (SPEC
-   §3.5), roughly 200 px, one caption over one continuously scrolling
-   document. Never a third of the viewport (gap-shell §18). */
+   §3.5), one caption over one continuously scrolling document. Never a third
+   of the viewport (gap-shell §18). 222 px is the prototype's own drawer box
+   (0645, proto y626–848): 10 px of padding, the 15 px caption row and its
+   6 px gap, then a 181 px code block, then 10 px more. */
 .wadjet-studio-json {
+  /* The code block's ground — one step under bg-deep, so the document reads as
+     recessed INTO the drawer rather than sitting on the studio's own floor. */
+  --wadjet-studio-json-ground: #191b1e;
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
-  max-height: 200px;
+  max-height: 222px;
   padding: 10px 16px;
   overflow: hidden;
   font-family: var(--wadjet-studio-mono);
@@ -1582,11 +1664,22 @@
   display: none;
 }
 
-/* Floating-window overlay: real dimensions so createWindow can clamp to it,
-   transparent to the pointer so the surfaces underneath stay live. */
+/* Floating-window overlay: the PLAYLIST BODY, not the whole studio
+   (proto-win-macro.png — a panel's top edge sits under the hint bar and its
+   left edge inside the lane body; windows never cover the header, the hint
+   bar, the lane-label column or the mixer rail). `inset: 0` made
+   clientWidth/clientHeight the studio's own, so `clampRect` let a panel park
+   on top of the chrome. Every inset below is a shell block's own border-box
+   size, named once in the root block so a block that changes height moves this
+   box with it: header + hint bar above, the pinned audition strip below, the
+   label column + its axis gutter left, the rail right. Transparent to the
+   pointer so the surfaces underneath stay live. */
 .wadjet-studio-windows {
   position: absolute;
-  inset: 0;
+  top: calc(var(--wadjet-studio-header-h) + var(--wadjet-studio-hint-h));
+  right: var(--wadjet-studio-rail-w);
+  bottom: var(--wadjet-studio-audition-h);
+  left: calc(var(--wadjet-studio-label-w) + var(--wadjet-studio-axis-w));
   z-index: 5;
   overflow: hidden;
   pointer-events: none;
@@ -1637,8 +1730,8 @@
   overflow: auto;
   padding: 10px 12px;
   border-radius: 2px;
-  background: var(--wadjet-studio-bg);
-  border: 1px solid var(--wadjet-studio-border);
+  background: var(--wadjet-studio-json-ground);
+  border: 1px solid var(--wadjet-studio-hairline);
   line-height: 1.55;
 }
 .wadjet-studio-json-col {
@@ -1650,6 +1743,11 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+/* The zone half has no heading of its own (the drawer's caption is it), so its
+   title span is empty and must not take a line inside the code block. */
+.wadjet-studio-json-title:empty {
+  display: none;
 }
 .wadjet-studio-json-title {
   flex: 1 1 auto;
@@ -1687,11 +1785,14 @@
   padding: 0;
   border: none;
 }
-/* The heading IS the JSON line — the literal key, in the key colour. */
+/* The heading IS the JSON line — the literal key. Flat, not highlighted: the
+   prototype's drawer paints keys, values and numbers all one `#aab3bf`
+   (0645), and a two-tone drawer reads as an editor pane rather than as the
+   file the studio is writing. */
 .wadjet-studio-json-section summary {
   cursor: pointer;
   font-size: var(--wadjet-studio-fs-body);
-  color: var(--wadjet-studio-json-key);
+  color: var(--wadjet-studio-text-dim);
   list-style: none;
 }
 .wadjet-studio-json-section summary::-webkit-details-marker {
@@ -2160,13 +2261,17 @@
 }
 
 /* `Calendar ⚑` — the ruler's label column opens the Seasons window. */
+/* `CALENDAR ⚑` is a dim section marker that GOES gold on hover, not a gold
+   control (`0117-overview.html:5` — `color:#9298a1`, hover `#e8c15a`). This
+   rule used to paint it gold at rest, which overrode
+   `.wadjet-studio-ruler-label`'s own mute and made the ruler's label column
+   the loudest thing in the playlist. Colour is left to that rule. */
 .wadjet-studio-ruler-label-btn {
   cursor: pointer;
-  color: var(--wadjet-studio-gold);
 }
 .wadjet-studio-ruler-label-btn:hover,
 .wadjet-studio-ruler-label-btn:focus-visible {
-  color: var(--wadjet-studio-text);
+  color: var(--wadjet-studio-gold);
   outline: none;
 }
 
@@ -2229,6 +2334,17 @@
   white-space: nowrap;
   color: var(--wadjet-studio-text-mute);
 }
+/* The ticks box clips (`overflow: hidden`, above), so a centred label on the
+   first or last tick loses half its characters: `d0` rendered `0`, `1100`
+   rendered `00`, `d35` rendered `l5`. A label whose tick sits within
+   `TICK_LABEL_INSET` px of either edge (`ui/ruler.ts`) is anchored to that
+   edge instead of centred, so the number reads whole. */
+.wadjet-studio-ruler-tick-label.is-start {
+  transform: none;
+}
+.wadjet-studio-ruler-tick-label.is-end {
+  transform: translateX(-100%);
+}
 
 /* The day card's slot: the top of the playlist column, above the calendar
    ruler and flush to its edges (the prototype's `padding:18px` row). The lane
@@ -2271,6 +2387,13 @@
 .wadjet-studio-eras-row .wadjet-studio-span[data-kind="bar"].is-dim {
   opacity: 0.45;
 }
+/* An era clip's resize caps are SOLID white in the prototype (its own two
+   `data-part="s"` / `"e"` rects at #f2f3f5), not the half-strength hover
+   affordance the shared span rule draws. */
+.wadjet-studio-eras-row .wadjet-studio-span-edge {
+  background: var(--wadjet-studio-text);
+  opacity: 1;
+}
 
 /* Regimes lane (SPEC §3.2, §6) — the rolled state sequence, read-only. Every
    block carries its own `--wadjet-studio-span-color` (the Lane paints one
@@ -2282,29 +2405,46 @@
   inset: 4px 0;
 }
 .wadjet-studio-regimes-lane .wadjet-studio-span {
-  /* A transparent right border is the 1 px gutter the prototype leaves between
-     runs: without it a run of blocks in similar tints reads as one band. */
+  /* A transparent right border is the gutter the prototype leaves between runs
+     (its own is 0.8 px, taken out of each block's width). `padding-box` is what
+     makes it a gutter at all: a border-box background paints UNDER a
+     transparent border, so a run of blocks read as one unbroken band. */
   border: none;
   border-right: 1px solid transparent;
   border-radius: 1.5px;
   cursor: pointer;
-  background: var(--wadjet-studio-span-color, var(--wadjet-studio-text-mute));
-  opacity: var(--wadjet-studio-span-alpha, 0.55);
+  /* The weight lives in the FILL, never in `opacity`. The prototype draws its
+     labels as siblings of the blocks, so a 0.22 block still carries a
+     full-strength name; `opacity` here takes the label down with the block,
+     which is how the state names came to render #4e5053 on #393c40. */
+  background: color-mix(in srgb, var(--wadjet-studio-span-color, var(--wadjet-studio-text-mute)) var(--wadjet-studio-span-alpha, 55%), transparent);
+  /* AFTER the `background` shorthand, which resets `background-clip` to
+     `border-box` — declared before it, the gutter above silently paints over
+     itself and the run reads unbroken again. */
+  background-clip: padding-box;
+  /* Re-assert over the shared `bar` rule above, which the share bar matches. */
+  opacity: 1;
 }
+/* Centred on the VISIBLE part of its block, not on the block: the row measures
+   that and writes `--wadjet-studio-span-label-x` (see `centreLabel`), so a run
+   wider than the window keeps its name on screen. */
 .wadjet-studio-regimes-lane .wadjet-studio-span-label {
-  display: block;
+  position: absolute;
+  top: 0;
+  left: var(--wadjet-studio-span-label-x, 50%);
+  transform: translateX(-50%);
   padding: 0;
   line-height: 12px;
   font-size: 9.5px;
-  text-align: center;
   white-space: nowrap;
-  overflow: hidden;
-  color: var(--wadjet-studio-text);
+  color: var(--wadjet-studio-span-text, var(--wadjet-studio-text-block));
 }
 /* The Era-zoom collapse is one proportion bar edge to edge: no gaps, no
    rounding, no labels — the sub-label above it already reads the shares out. */
 .wadjet-studio-regimes-lane[data-mode="share"] .wadjet-studio-span {
   border-radius: 0;
+  /* …and no gutter either: the segments are one bar, not a run of blocks. */
+  border-right: none;
 }
 .wadjet-studio-regimes-lane .wadjet-studio-span:hover {
   filter: brightness(1.4);
@@ -2643,22 +2783,34 @@
 .wadjet-studio-device-lane .wadjet-studio-span[data-kind="pulse"] {
   opacity: 0.9;
 }
+/* The prototype dims a gated pulse to three tenths OF its own 0.9, not to
+   three tenths flat — `clipOp(u) * (gate > 0.5 ? 1 : 0.3)`. */
 .wadjet-studio-device-lane .wadjet-studio-span[data-kind="pulse"].is-dim {
-  opacity: 0.3;
+  opacity: 0.27;
 }
 
-/* A rolled run sits INSIDE its dashed spell window, so it draws over it */
+/* A rolled run sits INSIDE its spell clip, so it draws over it */
 .wadjet-studio-device-lane .wadjet-studio-span[data-kind="run"] {
   z-index: 1;
 }
 
+/* …but never over the clip's own end caps. The caps are the resize handles and
+   the clip's stated edges (the prototype's solid #f2f3f5 `s`/`e` rects, drawn
+   last), so a run that reaches the clip's right edge must pass UNDER them. */
+.wadjet-studio-device-lane .wadjet-studio-span-edge {
+  background: var(--wadjet-studio-text);
+  opacity: 1;
+  z-index: 2;
+}
+
 /* Era zoom merges dense yearly clips into ONE span. A full-height saturated
    bar reads as a rendering failure; the prototype draws a thin muted line at
-   mid-lane, which reads as "too many to draw". */
+   mid-lane (its own `y: 7, h: 6` in a 20 px lane, at 0.14), which reads as
+   "too many to draw". */
 .wadjet-studio-device-lane .wadjet-studio-span[data-id="many"] {
   top: 35%;
   height: 30%;
-  opacity: 0.35;
+  opacity: 0.14;
   border-radius: 1px;
 }
 .wadjet-studio-device-lane .wadjet-studio-span[data-id="many"] .wadjet-studio-span-label {
@@ -2677,10 +2829,16 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   pointer-events: none;
-  color: var(--wadjet-studio-text-mute);
+  /* A clip's caption is the clip still speaking — the prototype prints it in
+     the clip's own hue (gold beside the Ashfall window) rather than in lane
+     grey. `--wadjet-studio-span-color` is the Lane's, and the caption is its
+     sibling, so it inherits the lane's hue without the row setting anything. */
+  color: var(--wadjet-studio-span-color, var(--wadjet-studio-text-mute));
 }
 /* A moon lane's caption leads its own row, so it carries the lane's panel
-   behind it rather than sitting bare on the pulses. */
+   behind it rather than sitting bare on the pulses — and stays lane grey,
+   which is what the prototype prints a moon caption in, rather than taking
+   the moon's own hue from the rule above. */
 .wadjet-studio-device-caption.is-lead {
   padding: 1px 7px;
   border-radius: 2px;
@@ -5288,22 +5446,17 @@
   display: none;
 }
 
-/* Insert picker (wadjet-9f9.23 §3.6; restyled wadjet-6rw.6): the popover a
-   chain's ＋ opens. Not a floating window (windows.ts) — a transient popover
-   appended straight to shell.root, sized and placed to sit exactly where the
-   prototype's inline picker sits: the chain header's own width, its top edge
-   on that header's bottom edge, with a real shadow so it reads as a layer. */
+/* Insert picker (wadjet-9f9.23 §3.6; restyled wadjet-6rw.6): what a chain's ＋
+   opens. Not a floating window (windows.ts) and not a popover either — the
+   prototype (`0556-mixer-rail.html`) puts it IN FLOW, a block inside the chain
+   between its header row and its strip, so opening it pushes the rows below it
+   down instead of hiding them. It therefore needs no position, no width and no
+   z-index: the chain gives it all three, and the rail's own scroll carries it.
+   The shadow stays — it still reads as a drawer laid over the rack. */
 .wadjet-studio-insert {
-  position: absolute;
-  left: var(--wadjet-studio-insert-x, 0);
-  top: var(--wadjet-studio-insert-y, 0);
-  width: var(--wadjet-studio-insert-w, 240px);
-  z-index: 900;
-  min-width: 210px;
-  max-height: 70vh;
-  overflow: hidden auto;
-  padding: 0;
-  background: var(--wadjet-studio-panel);
+  margin-bottom: 6px;
+  overflow: hidden;
+  background: var(--wadjet-studio-bg-header);
   border: 1px solid #565b61;
   border-radius: 3px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);

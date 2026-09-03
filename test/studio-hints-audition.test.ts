@@ -56,7 +56,7 @@ suite("audition hints", () => {
 
   test("auditionHint builds a two-half attribute and honours a detail override", () => {
     expect(parseHint(auditionHint("audition.reroll"))).toEqual(AUDITION_HINTS["audition.reroll"]!);
-    expect(auditionHint("audition.reroll", "spelled out")).toBe(`Re-roll${HINT_SEPARATOR}spelled out`);
+    expect(auditionHint("audition.reroll", "spelled out")).toBe(`re-roll${HINT_SEPARATOR}spelled out`);
     expect(auditionHint("nope")).toBe("nope");
   });
 

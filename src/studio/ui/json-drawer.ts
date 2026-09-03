@@ -32,12 +32,27 @@ import type { Surface, SurfaceContext } from "./surfaces";
  */
 function summaryFor(key: string, text: string, folded: boolean): string {
   if (folded) return `"${key}": { … 5 sections }`;
-  return text.includes("\n") ? `"${key}":` : `"${key}": ${text}`;
+  // An open brace never gets a line to itself: the prototype's drawer writes
+  // `"climate": {` (0645), and `"preset":` over a lone `{` is not the grammar
+  // the file is saved in either.
+  return isInline(text) ? `"${key}": ${text}` : `"${key}": ${text[0] ?? ""}`;
 }
 
 /** True when a section's value is short enough to sit on the heading line. */
 function isInline(text: string): boolean {
   return !text.includes("\n");
+}
+
+/**
+ * `sha256:8c1ba2e3…` — a content hash is a fingerprint to compare, not 78
+ * columns of hex to read, and the drawer is 181 px tall. Display only: `Copy`
+ * still hands over `zoneFileText`, hash and all.
+ */
+const LONG_HASH = /("(?:sha256|sha1|md5):[0-9a-f]{8})[0-9a-f]{4,}"/g;
+
+/** A section's `<pre>` body: the value minus the brace `summaryFor` hoisted, hashes elided. */
+function bodyText(text: string): string {
+  return text.slice(text.indexOf("\n") + 1).replace(LONG_HASH, '$1…"');
 }
 
 /** The zone keys the drawer's breadcrumb names, in the order §3.7 lists them. */
@@ -51,24 +66,41 @@ interface SectionEls {
   pre: HTMLElement;
 }
 
-/** One scope column: its head (title + Copy) and its list of `<details>` sections. */
+/** One scope column: its head (the scope divider) and its list of `<details>` sections. */
 interface Column {
   root: HTMLElement;
-  title: HTMLElement;
   list: HTMLElement;
   els: Map<string, SectionEls>;
   keys: string[];
   textCache: Map<string, string>;
 }
 
-function buildColumn(parent: HTMLElement, scope: "zone" | "world", onCopy: () => void): Column {
+/**
+ * The drawer's own `ZONE FILE · LIVE` bar already names the document, so the
+ * zone half carries no heading of its own — 0645's `<pre>` holds JSON and
+ * nothing else. Only the world half keeps a line, where the scope changes.
+ */
+function buildColumn(parent: HTMLElement, scope: "zone" | "world"): Column {
   const root = parent.createDiv({ cls: "wadjet-studio-json-col", attr: { "data-scope": scope } });
   const head = root.createDiv({ cls: "wadjet-studio-json-head" });
-  const title = head.createSpan({ cls: "wadjet-studio-json-title" });
-  const copy = head.createDiv({
+  head.createSpan({ cls: "wadjet-studio-json-title", text: scope === "world" ? "World" : "" });
+  const list = root.createDiv({ cls: "wadjet-studio-json-list" });
+  return { root, list, els: new Map(), keys: [], textCache: new Map() };
+}
+
+/**
+ * `Copy`, in the drawer's header row rather than floating inside the code
+ * block (0645: the block is text). Not in the prototype at all — kept as the
+ * escape hatch, parked with the other chrome where it cannot be mistaken for
+ * part of the file.
+ */
+function buildCopy(bar: HTMLElement, scope: "zone" | "world", onCopy: () => void): void {
+  const copy = bar.createDiv({
     cls: "wadjet-studio-json-copy",
-    text: "Copy",
-    attr: { role: "button", tabindex: "0", "aria-label": `Copy ${scope} JSON`, "data-hint": jsonHint(scope === "zone" ? "json.copy.zone" : "json.copy.world") },
+    // Side by side in one header row, two buttons both reading `COPY` name
+    // nothing — the scope is the whole distinction between them.
+    text: `Copy ${scope}`,
+    attr: { role: "button", tabindex: "0", "data-scope": scope, "aria-label": `Copy ${scope} JSON`, "data-hint": jsonHint(scope === "zone" ? "json.copy.zone" : "json.copy.world") },
   });
   copy.addEventListener("click", onCopy);
   copy.addEventListener("keydown", (ev) => {
@@ -76,8 +108,6 @@ function buildColumn(parent: HTMLElement, scope: "zone" | "world", onCopy: () =>
     ev.preventDefault();
     onCopy();
   });
-  const list = root.createDiv({ cls: "wadjet-studio-json-list" });
-  return { root, title, list, els: new Map(), keys: [], textCache: new Map() };
 }
 
 /** Rebuild `col`'s `<details>` elements only when the set/order of keys changed; otherwise patch text. */
@@ -108,7 +138,7 @@ function paintColumn(col: Column, entries: readonly JsonSection[]): void {
     if (els !== undefined) {
       // An inline value lives in the heading and leaves the `<pre>` empty
       // (`styles.css` collapses it); `climate` keeps its fold-aware heading.
-      els.pre.setText(isInline(entry.text) ? "" : entry.text);
+      els.pre.setText(isInline(entry.text) ? "" : bodyText(entry.text));
       if (entry.key !== "climate") els.summary.setText(summaryFor(entry.key, entry.text, false));
     }
     col.textCache.set(entry.key, entry.text);
@@ -151,9 +181,11 @@ export function createJsonDrawerSurface(): Surface {
       const head = next.shell.json.createDiv({ cls: "wadjet-studio-json-bar" });
       head.createSpan({ cls: "wadjet-studio-json-bar-label", text: "zone file · live" });
       crumb = head.createSpan({ cls: "wadjet-studio-json-bar-crumb" });
+      buildCopy(head, "zone", () => copyToClipboard(currentZoneText));
+      buildCopy(head, "world", () => copyToClipboard(currentWorldText));
       const body = next.shell.json.createDiv({ cls: "wadjet-studio-json-body" });
-      zoneCol = buildColumn(body, "zone", () => copyToClipboard(currentZoneText));
-      worldCol = buildColumn(body, "world", () => copyToClipboard(currentWorldText));
+      zoneCol = buildColumn(body, "zone");
+      worldCol = buildColumn(body, "world");
     },
 
     render(state: StudioState) {
@@ -164,8 +196,6 @@ export function createJsonDrawerSurface(): Surface {
       const zoneId = state.view.zoneId;
       const zone: ZoneProfile | undefined = zoneId === null ? undefined : state.zones[zoneId];
 
-      zoneCol.title.setText(zone === undefined ? "Zone file" : `Zone file · ${zone.name}`);
-      worldCol.title.setText("World");
       crumb?.setText(`zones[${zone?.name ?? "—"}] → ${ZONE_CRUMBS}  |  world → ${WORLD_CRUMBS}`);
 
       if (zone === undefined) {

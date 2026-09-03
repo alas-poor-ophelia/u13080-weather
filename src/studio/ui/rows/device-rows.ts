@@ -36,7 +36,7 @@
 import { rollCached, type AuditionInput } from "../../model/audition";
 import { channelOrNull, devices } from "../../model/compile";
 import { displayName } from "../../model/copy";
-import { dragToWhen, hasLane, laneCaption, laneSpec, laneSub, spellRunsKey, type LaneKind } from "../../model/device-lanes";
+import { dragToWhen, hasLane, laneCaption, laneSpec, laneSub, spellRunsKey, type LaneKind, type LaneSpec } from "../../model/device-lanes";
 import { toDevice, whenSummary } from "../../model/devices";
 import { dayRangeLabel } from "../../model/format";
 import { deviceLaneHint, deviceLaneTip, deviceSpanHintKey } from "../../model/hints-device-lanes";
@@ -87,6 +87,34 @@ const CAPTION_GAP_PX = 6;
  * to read on their own; tighter and the text runs over the next pulse.
  */
 const MOON_CAPTION_PX_PER_DAY: readonly [number, number] = [1.6, 20];
+
+/**
+ * At or below this density a moon lane draws NOTHING. A pulse is a handful of
+ * days; at Era zoom there are thousands of them and `spans.ts` answers with its
+ * `many` overflow bar — a bar across the whole window, which reads as "this
+ * device is always on" and is the opposite of true. The prototype's own floor
+ * (`pxDay > 0.45`) simply leaves the lane empty, and an empty lane at a zoom
+ * that cannot draw a pulse is the honest picture.
+ */
+const PULSE_MIN_PX_PER_DAY = 0.45;
+
+/**
+ * A spell over a per-year clip is a CLIP, not a marquee. `spans.ts` marks every
+ * span of a spell device `window` so a COMPOSITE `when` reads as "somewhere in
+ * here" (dashed, no caps), but a `yp:` / `doy:` span is the same solid,
+ * capped, draggable clip it is without the spell — which is how the prototype
+ * draws the Ashfall window, and the only reason its rolled runs have an edge to
+ * sit inside. Only the drawn kind changes; `editable` and the drag are the
+ * lane spec's, untouched.
+ */
+const YEAR_CLIP = /^(?:yp|doy):/;
+
+function solidYearClips(spec: LaneSpec): LaneSpec {
+  if (spec.kind !== "window") return spec;
+  const spans = spec.spans.map((s) => (s.kind === "window" && YEAR_CLIP.test(s.id) ? { ...s, kind: "clip" as const } : s));
+  const solid = spans.some((s) => s.kind === "clip");
+  return solid ? { ...spec, spans, kind: "clip" } : spec;
+}
 
 /** The colour of the first chain the device writes into (SPEC §9) — its rack unit's own hue. */
 function colourFor(m: { apply: ReadonlyArray<{ param: string }> }): string {
@@ -352,11 +380,16 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
         return;
       }
       yearLength = Math.max(1, cal.yearLength);
-      const spec = laneSpec(m, cal, geo.window, m.spell === undefined ? undefined : activeDays(state, geo.window));
+      const drawn = solidYearClips(laneSpec(m, cal, geo.window, m.spell === undefined ? undefined : activeDays(state, geo.window)));
       const device = toDevice(m, ctx?.calendar() ?? null);
+      const moon = laneCaption(device, cal);
+      // A moon lane below the prototype's density floor draws nothing at all
+      // (see `PULSE_MIN_PX_PER_DAY`); everything else keeps its own overflow.
+      const hidden = moon !== "" && geo.morph.pxPerDay <= PULSE_MIN_PX_PER_DAY;
+      const spec: LaneSpec = hidden ? { ...drawn, spans: [] } : drawn;
       const colour = laneColour(spec.kind, m);
       lane?.update({ geometry: geo.lane, spans: spec.spans, color: colour });
-      caption(spec, laneCaption(device, cal), geo);
+      caption(spec, moon, geo);
       lane?.el.setAttrs({ "data-kind": spec.kind, "data-editable": String(spec.editable) });
       decorate(spec.spans);
       // The lane's own hue leads the label, so a glance down the column tells

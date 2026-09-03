@@ -21,7 +21,10 @@ import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 
 export const MIXER_HINTS: Record<string, Hint> = {
   "mixer.chain": ["Chain", "every source that writes to this channel, in signal order"],
-  "mixer.insert": ["Insert", "add a device to this chain"],
+  // Chrome, so lower case (see the note over `HINTS` in `hints.ts`), and the
+  // second clause is the prototype's: the picker offers a KIND or a saved
+  // preset, and dropping that clause left the two-column picker unexplained.
+  "mixer.insert": ["insert", "add a device to this chain · a new one from a kind, or a saved preset"],
   "mixer.strip": ["Fixed strip", "expand regimes and forcings into full unit cards"],
   "mixer.regimes.led": ["Regimes power", "writes enabled: false on every regime op in this chain"],
   "mixer.regimes.name": ["Regimes", "open the states window"],

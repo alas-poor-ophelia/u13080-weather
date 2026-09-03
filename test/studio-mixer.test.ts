@@ -29,8 +29,11 @@ import {
   setChainMute,
   setForcingsChainMute,
   setRegimesChainMute,
+  showsRailWhenChip,
   unitsFor,
 } from "../src/studio/model/mixer";
+import { factorText } from "../src/studio/model/copy";
+import { toDevice } from "../src/studio/model/devices";
 
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 
@@ -353,7 +356,7 @@ describe("unit cards", () => {
       { id: "storm", when: { moon: { name: "Sable", phase: [0.9, 1] } }, apply: [{ param: "precipitation.pwd", op: "scale", value: 1.5 }] },
       { id: "ash", when: { yearPhase: [0.6, 0.72] }, apply: [{ param: "cloud.dry", op: "set", value: 0.95 }] },
     ]);
-    expect(unitsFor(z, [], "precipitation", null, 1)[0]!.chips[1]!.label).toBe("storm odds ×1.50");
+    expect(unitsFor(z, [], "precipitation", null, 1)[0]!.chips[0]!.label).toBe("storm odds ×1.50");
     expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[1]!.label).toBe("sky 0.95 — ash-dark");
     // The rail's when chip is the gate alone, short enough for a card — and it
     // reads `format.ts`'s day range, so it says exactly what the playlist
@@ -362,6 +365,55 @@ describe("unit cards", () => {
     expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[0]!.label).toBe("clip d219–263");
     // The device name is product copy, never the modifier id.
     expect(unitsFor(z, [], "precipitation", null, 1)[0]!.name).toBe("Storm");
+  });
+
+  test("the when chip leads every gate except a moon's, which the writes speak for", () => {
+    // The prototype's rail (0556, Component.js `devChips`) leads a spell with
+    // `clip d…`, a tag/curse with its tag, and a moon device with its WRITE:
+    // `moon:Sable · Full` is the device window's business, not a 270 px rail's.
+    const z = zone([
+      { id: "storm", when: { moon: { name: "Sable", phase: [0.9, 1] } }, apply: [{ param: "wind.speed", op: "offset", value: 12 }] },
+      { id: "ash", when: { yearPhase: [0.6, 0.72] }, apply: [{ param: "wind.speed", op: "scale", value: 1.6 }] },
+      { id: "curse", when: { tag: "era:Drought" }, apply: [{ param: "wind.speed", op: "scale", value: 0 }] },
+    ]);
+    const labels = unitsFor(z, [], "wind", null, 1).map((c) => c.chips.map((p) => p.label));
+    expect(labels[0]).toEqual(["wind +12 km/h"]);
+    expect(labels[1]![0]).toBe("clip d219–263");
+    expect(labels[2]![0]).toBe("era:Drought");
+    // …and it is the gate that decides, not the kind pill: a device gated on a
+    // moon keeps its writes alone whatever else it is called.
+    expect(showsRailWhenChip(toDevice(z.modifiers[0]!, null))).toBe(false);
+    expect(showsRailWhenChip(toDevice(z.modifiers[2]!, null))).toBe(true);
+  });
+
+  test("a rail chip prints a scale of exactly zero as ×0, and every other factor to two places", () => {
+    // `precip ×0` on the Neverain card (0556); `×0.00` reads as a tuned value
+    // where zero is an off switch. Knobs and writes keep `factorText`.
+    const z = zone([
+      { id: "curse", when: { tag: "era:Drought" }, apply: [{ param: "precipitation.pwd", op: "scale", value: 0 }] },
+      { id: "damp", when: { tag: "era:Drought" }, apply: [{ param: "precipitation.pwd", op: "scale", value: 0.7 }] },
+    ]);
+    const labels = unitsFor(z, [], "precipitation", null, 1).map((c) => c.chips[1]!.label);
+    expect(labels).toEqual(["precip ×0", "precip ×0.70"]);
+    expect(factorText(0)).toBe("×0.00");
+  });
+
+  test("an era that writes to more than one chain carries the ⧉ twin glyph", () => {
+    const twin: Era[] = [
+      {
+        name: "Ice Age",
+        from: 1200,
+        to: 1900,
+        apply: [
+          { param: "temperature.mean", op: "offset", value: -8 },
+          { param: "precipitation.pwd", op: "scale", value: 0.7 },
+        ],
+      },
+    ];
+    expect(unitsFor(zone(), twin, "temperature", null, 2)[0]!.linked).toBe(true);
+    expect(unitsFor(zone(), twin, "precipitation", null, 2)[0]!.linked).toBe(true);
+    // One chain, no twin — the same rule a device's ⧉ follows.
+    expect(unitsFor(zone(), eras, "wind", null, 2)[0]!.linked).toBe(false);
   });
 
   test("eraNameOf recovers world.eras[i].name from an era unit's id", () => {

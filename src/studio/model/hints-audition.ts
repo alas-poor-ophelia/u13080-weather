@@ -16,15 +16,17 @@ import { describe, type WeatherReport } from "../../core/report";
 import { dayLabel } from "./format";
 import { HINT_SEPARATOR, makeHintLookup, type Hint, type HintLookup } from "./hints";
 
+// Chrome hints, so lower-case names (see the note over `HINTS` in `hints.ts`);
+// the prototype writes `audition`, `re-roll` and `pinned day` exactly so.
 export const AUDITION_HINTS: Record<string, Hint> = {
-  "audition.strip": ["Audition", "one seeded year — hover a day, right-click to pin it"],
-  "audition.seasons": ["Seasons", "the calendar's season bands under the year — edit them in Calendar"],
-  "audition.moon": ["Full moon", "the first moon's phase crossing 0.5"],
-  "audition.reroll": ["Re-roll", "draw another preview year — the world seed never changes and pins are kept"],
-  "audition.legend": ["Legend", "what a cell's colour means"],
-  "audition.pin": ["Pinned day", "an override fixes this day's weather — × removes it"],
-  "audition.pins": ["Pins", "the days this zone has fixed by hand"],
-  "audition.seed": ["Audition year", "the year and world seed this roll used — a re-roll salts the preview, never the seed"],
+  "audition.strip": ["audition", "one seeded year — hover a day, right-click to pin it"],
+  "audition.seasons": ["seasons", "the calendar's season bands under the year — edit them in Calendar"],
+  "audition.moon": ["full moon", "the first moon's phase crossing 0.5"],
+  "audition.reroll": ["re-roll", "draw another preview year — the world seed never changes and pins are kept"],
+  "audition.legend": ["legend", "what a cell's colour means"],
+  "audition.pin": ["pinned day", "an override fixes this day's weather — × removes it"],
+  "audition.pins": ["pins", "the days this zone has fixed by hand"],
+  "audition.seed": ["audition year", "the year and world seed this roll used — a re-roll salts the preview, never the seed"],
 };
 
 /**

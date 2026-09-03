@@ -11,7 +11,7 @@
  */
 
 /** The playlist's label column, in px. Must equal `--wadjet-studio-label-w`. */
-export const LABEL_WIDTH = 136;
+export const LABEL_WIDTH = 164;
 
 /**
  * The axis gutter between the label column and the lane body, in px. Must
