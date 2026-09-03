@@ -201,6 +201,13 @@ export interface PresetSource {
   license: string;
   ghcnId: string;
   stationName: string;
+  /**
+   * The place the station stands in, for display — `Bergen`, not the GHCN
+   * record's `Bergen Florida`. Curated in `scripts/build-presets/stations.json`
+   * (the dataset's own names are ASCII-folded and carry facility suffixes), and
+   * outside `contentHash`, which covers only `{climate, regimes}`.
+   */
+  place: string;
   country: string;
   latitude: number;
   longitude: number;

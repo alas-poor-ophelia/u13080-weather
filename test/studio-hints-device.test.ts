@@ -31,8 +31,11 @@ describe("device hints", () => {
     expect(keysUsedByWindow()).toEqual([...DEVICE_HINT_KEYS].sort());
   });
 
+  // The name and the preset control moved into the shared window chrome
+  // (SPEC §3.4 "one title row"), which carries no `data-hint` of its own, so
+  // they are no longer this table's business.
   test("the table covers every section SPEC 3.4 lists for a device", () => {
-    for (const key of ["device.power", "device.name", "device.preset", "device.when", "device.spell", "device.op", "device.mod", "device.remove"]) {
+    for (const key of ["device.power", "device.when", "device.spell", "device.op", "device.mod", "device.remove"]) {
       expect(DEVICE_HINT_KEYS).toContain(key);
     }
   });

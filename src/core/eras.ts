@@ -6,7 +6,7 @@
  */
 import { hash32 } from "./rng";
 import { canonicalJson, type ValidationIssue, validateDailyOps } from "./profile";
-import type { DayTime, Era, Modifier } from "./types";
+import type { DayTime, Era, Modifier, ModifierOp } from "./types";
 
 export const ERA_TAG_PREFIX = "era:";
 
@@ -39,6 +39,25 @@ export function withEraTags<T extends DayTime & { dayOrdinal: number; yearLength
  */
 export function eraModifiers(eras: readonly Era[]): Modifier[] {
   return eras.filter((e) => e.enabled !== false && e.apply && e.apply.length > 0).map((e) => ({ id: ERA_TAG_PREFIX + e.name, stage: "daily", when: { tag: ERA_TAG_PREFIX + e.name }, apply: e.apply! }));
+}
+
+/**
+ * The daily-stage ops every era covering `year` applies, in list order —
+ * `eraModifiers`' `apply` arrays with the engine's own two power switches
+ * already honoured (a disabled era contributes nothing, and so does a
+ * disabled op). Hand the result to `ops.ts`'s `applyDayOps`: this function
+ * decides *which* ops are live, never what an op means.
+ *
+ * The studio's composed curves read it so a plotted year inside an era shows
+ * the era's step, exactly as a rolled day inside it does.
+ */
+export function eraOpsAt(eras: readonly Era[], year: number): ModifierOp[] {
+  const out: ModifierOp[] = [];
+  for (const e of eras) {
+    if (!eraActive(e, year)) continue;
+    for (const op of e.apply ?? []) if (op.enabled !== false) out.push(op);
+  }
+  return out;
 }
 
 export function validateEras(eras: unknown): ValidationIssue[] {

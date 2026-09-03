@@ -24,7 +24,6 @@ import {
   forcingsMutedInChain,
   isEraUnit,
   isMutedInChain,
-  opLabel,
   regimesMutedInChain,
   reorderInChain,
   setChainMute,
@@ -293,7 +292,8 @@ describe("unit cards", () => {
     const z = zone([single("alpha"), linked("bravo"), single("charlie")]);
     const cards = unitsFor(z, eras, "temperature", null, 4);
     expect(ids(cards)).toEqual(["alpha", "bravo", "charlie", "era:Long Winter"]);
-    expect(slots(cards)).toEqual(["01", "02", "03", "04"]);
+    // An era is appended, never numbered into the rack it cannot be dragged in.
+    expect(slots(cards)).toEqual(["01", "02", "03", "E"]);
   });
 
   test("a device in several chains is linked; one in a single chain is not", () => {
@@ -314,11 +314,12 @@ describe("unit cards", () => {
     const era = cards[0]!;
     expect(isEraUnit(era)).toBe(true);
     expect(era.name).toBe("Doldrums");
-    expect(era.kind).toBe("ERA");
+    expect(era.kind).toBe("era");
+    expect(era.slot).toBe("E");
     expect(era.world).toBe(7);
     expect(era.reorderable).toBe(false);
-    expect(era.chips[0]!.label).toBe("years 1200–∞");
-    expect(era.chips[1]!.label).toBe("wind.speed ×0.7");
+    expect(era.chips[0]!.label).toBe("1200 – ∞");
+    expect(era.chips[1]!.label).toBe("wind ×0.70");
     // An era with no ops on this channel is not a unit at all.
     expect(unitsFor(z, eras, "sky", null, 7)).toEqual([]);
   });
@@ -336,24 +337,28 @@ describe("unit cards", () => {
     const z = zone([linked("bravo")]);
     setChainMute(z, "bravo", "precipitation", true);
     const [card] = unitsFor(z, [], "precipitation", null, 1);
-    expect(card!.kind).toBe("TAG");
+    expect(card!.kind).toBe("tag");
     expect(card!.enabled).toBe(true);
     expect(card!.mutedInChain).toBe(true);
     expect(card!.reorderable).toBe(true);
     expect(card!.world).toBeUndefined();
-    expect(card!.chips.map((c) => c.label)).toEqual(["season:Winter", "precipitation.pww ×1.4"]);
+    expect(card!.chips.map((c) => c.label)).toEqual(["season:Winter", "precip ×1.40"]);
     // A muted op loses the chain colour, so the card reads as "declared, off".
     expect(card!.chips[1]!.color).toBeUndefined();
     expect(unitsFor(z, [], "temperature", null, 1)[0]!.chips[1]!.color).toBe(CHAIN_COLOR_VAR.temperature);
   });
 
-  test("opLabel prints the grammar the op writes, not a display-unit number", () => {
-    expect(opLabel({ param: "temperature.mean", op: "offset", value: 2 })).toBe("temperature.mean +2");
-    expect(opLabel({ param: "temperature.mean", op: "offset", value: -1.25 })).toBe("temperature.mean −1.25");
-    expect(opLabel({ param: "wind.speed", op: "scale", value: 1.2 })).toBe("wind.speed ×1.2");
-    expect(opLabel({ param: "precipitation.freezingPoint", op: "set", value: 0 })).toBe("precipitation.freezingPoint = 0");
-    expect(opLabel({ param: "temperature.mean", op: "set", value: { mean: 8, amplitude: 6, phase: 0.1 } })).toBe("temperature.mean = curve");
-    expect(opLabel({ param: "cloud.dry", op: "clamp", min: 0, max: 1 })).toBe("cloud.dry clamp 0…1");
+  test("a chip speaks product copy: the macro name for a moon device, the apply word for the rest", () => {
+    const z = zone([
+      { id: "storm", when: { moon: { name: "Sable", phase: [0.9, 1] } }, apply: [{ param: "precipitation.pwd", op: "scale", value: 1.5 }] },
+      { id: "ash", when: { yearPhase: [0.6, 0.72] }, apply: [{ param: "cloud.dry", op: "set", value: 0.95 }] },
+    ]);
+    expect(unitsFor(z, [], "precipitation", null, 1)[0]!.chips[1]!.label).toBe("storm odds ×1.50");
+    expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[1]!.label).toBe("sky 0.95 — ash-dark");
+    // The rail's when chip is the gate alone, short enough for a card.
+    expect(unitsFor(z, [], "sky", null, 1)[0]!.chips[0]!.label).toBe("clip d219–261");
+    // The device name is product copy, never the modifier id.
+    expect(unitsFor(z, [], "precipitation", null, 1)[0]!.name).toBe("Storm");
   });
 
   test("eraNameOf recovers world.eras[i].name from an era unit's id", () => {

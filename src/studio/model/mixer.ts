@@ -23,8 +23,11 @@
  */
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import type { Era, Modifier, ModifierOp, ZoneProfile } from "../../core/types";
+import type { Units } from "../../core/units";
 import { channelOrNull, devices, getWetness, reorderDevice, totalWarmthAt, TRIM_ID, WARMTH_LANE_ID, WETNESS_ID, type Channel } from "./compile";
-import { kindOf, toDevice, whenSummary } from "./devices";
+import { describeOp, displayName, type Vocabulary } from "./copy";
+import { kindOf, toDevice, type Device } from "./devices";
+import { cycleColour, ERA_CYCLE } from "./palette";
 
 /** A mixer chain is a signal channel seen from the rail. Same four values. */
 export type Chain = Channel;
@@ -69,6 +72,8 @@ export interface UnitChip {
   label: string;
   color?: string;
   hint?: string;
+  /** Force the leading dot on when the chip carries no colour of its own. */
+  dot?: boolean;
 }
 
 /**
@@ -77,11 +82,11 @@ export interface UnitChip {
  * `validation.ts`, so the LED's level is one lookup either way.
  */
 export interface UnitCard {
-  /** two digits in rack order, `"01"` first; devices then eras, one sequence */
+  /** two digits in rack order, `"01"` first; devices then `"E"` for every era */
   slot: string;
   id: string;
   name: string;
-  /** short badge — TRIM, MOON, SPELL, TAG, CHANCE, CUSTOM, ERA */
+  /** the kind pill's word — `trim`, `moon`, `spell`, `tag`, `chance`, `custom`, `era` */
   kind: string;
   /** ⧉: this device writes to more than one chain — one brain, several rails */
   linked: boolean;
@@ -226,46 +231,66 @@ export function fixedStripFor(z: ZoneProfile, chain: Chain, windowCentreYear: nu
   return { regimes, forcings: { present: forcingsPresent(z, chain), total, mutedInChain: forcingsMutedInChain(z, chain) } };
 }
 
-/** Trim trailing zeros so 1.2 reads "1.2" and 2 reads "2" — grammar, not a display unit. */
-function num(v: number): string {
-  return String(Number(v.toFixed(4)));
+const slotLabel = (i: number): string => String(i + 1).padStart(2, "0");
+
+/** The slot marker on an era card: appended, never numbered into the rack (SPEC §3.3). */
+const ERA_SLOT = "E";
+
+/**
+ * Which of `copy.ts`'s two vocabularies a device's op chips speak. A
+ * moon-bound device's chip has to stand alone — the card says *when*, not
+ * *what*, so the op names itself in full (`storm odds ×1.50`). Every other
+ * kind sits under a name that already carries the meaning, so the short apply
+ * word is enough (`precip 0 — no rain`).
+ */
+function vocabularyFor(kind: string): Vocabulary {
+  return kind === "moon" ? "macro" : "target";
+}
+
+function opChips(ops: readonly ModifierOp[], chain: Chain, kind: string, units: Units): UnitChip[] {
+  const out: UnitChip[] = [];
+  const seen = new Set<string>();
+  for (const o of ops) {
+    const label = describeOp(o, { vocabulary: vocabularyFor(kind), units });
+    // Two ops can say the same thing in product terms — `precipitation.pwd`
+    // and `.pww` set to 0 are both "no rain". The card shows the reading once;
+    // the device window is where the individual ops live.
+    if (seen.has(label)) continue;
+    seen.add(label);
+    // A muted op keeps its chip but loses the chain colour, so the card reads
+    // as "still declared, currently off" rather than gone.
+    out.push(o.enabled === false ? { label, dot: true, hint: `${label} — off in this chain` } : { label, color: CHAIN_COLOR_VAR[chain] });
+  }
+  return out;
 }
 
 /**
- * One op as the grammar it writes (SPEC law 5), not as a display-unit number:
- * a chip on a rack card names the write, the knob in the device window is what
- * shows the value in the reader's units.
+ * The rail's short *when* chip. `devices.ts`'s `whenSummary` is the window's
+ * sentence — it carries the spell tail as well — where a rack chip only has
+ * room for the gate itself: `clip d223–263`, `moon:Sable · Full`, `era:Drought`.
  */
-export function opLabel(op: ModifierOp): string {
-  switch (op.op) {
-    case "set":
-      return typeof op.value === "number" ? `${op.param} = ${num(op.value)}` : `${op.param} = curve`;
-    case "offset":
-      return `${op.param} ${op.value < 0 ? "−" : "+"}${num(Math.abs(op.value))}`;
-    case "scale":
-      return `${op.param} ×${num(op.value)}`;
-    case "clamp": {
-      const lo = op.min === undefined ? "" : num(op.min);
-      const hi = op.max === undefined ? "" : num(op.max);
-      return `${op.param} clamp ${lo}…${hi}`;
+export function railWhenLabel(d: Device, yearLength = 365): string {
+  const w = d.when;
+  switch (w.kind) {
+    case "always":
+      return "always";
+    case "moon":
+      return `moon:${w.moon} · ${w.phases.length ? w.phases.join(", ") : "custom range"}`;
+    case "tag":
+      return w.tags.length ? w.tags.join(" or ") : "no tag";
+    case "yearWindow": {
+      const from = Math.floor(w.start * yearLength);
+      const to = Math.floor((w.start + w.length) * yearLength) - 1;
+      return `clip d${from}–${to}`;
     }
+    case "chance":
+      return `${Math.round(w.p * 100)}% of days`;
   }
 }
 
-const slotLabel = (i: number): string => String(i + 1).padStart(2, "0");
-
-function opChips(ops: readonly ModifierOp[], chain: Chain): UnitChip[] {
-  return ops.map((o) => {
-    const label = opLabel(o);
-    // A muted op keeps its chip but loses the chain colour, so the card reads
-    // as "still declared, currently off" rather than gone.
-    return o.enabled === false ? { label, hint: `${label} — off in this chain` } : { label, color: CHAIN_COLOR_VAR[chain] };
-  });
-}
-
-/** `years 400–900`, or `years 400–∞` for a span with no end (`Era.to` omitted). */
+/** `400 – 900`, or `400 – ∞` for a span with no end (`Era.to` omitted). */
 function eraSpanLabel(e: Era): string {
-  return `years ${e.from}–${e.to === undefined ? "∞" : e.to}`;
+  return `${e.from} – ${e.to === undefined ? "∞" : e.to}`;
 }
 
 /**
@@ -277,43 +302,55 @@ function eraSpanLabel(e: Era): string {
  * `layer:*` and `forcings:*` never appear: `devices()` filters them, and the
  * eras come from the world draft, never from `modifiers[]`.
  */
-export function unitsFor(z: ZoneProfile, eras: readonly Era[], chain: Chain, calendar: CalendarDescription | null, zoneCount: number): UnitCard[] {
+export function unitsFor(
+  z: ZoneProfile,
+  eras: readonly Era[],
+  chain: Chain,
+  calendar: CalendarDescription | null,
+  zoneCount: number,
+  units: Units = "metric",
+  eraColours: readonly number[] = [],
+): UnitCard[] {
   const out: UnitCard[] = [];
   const yearLength = calendar?.yearLength ?? 365;
+  let slot = 0;
 
   for (const m of devices(z)) {
     const ops = chainOps(m, chain);
     if (ops.length === 0) continue;
     const d = toDevice(m, calendar);
+    const kind = kindOf(m);
     out.push({
-      slot: slotLabel(out.length),
+      slot: slotLabel(slot++),
       id: m.id,
-      name: d.name,
-      kind: kindOf(m).toUpperCase(),
+      name: displayName(d.name),
+      kind,
       linked: chainsOf(m).size > 1,
-      chips: [{ label: whenSummary(d, yearLength) }, ...opChips(ops, chain)],
+      chips: [{ label: railWhenLabel(d, yearLength), color: "var(--wadjet-studio-gold)" }, ...opChips(ops, chain, kind, units)],
       enabled: m.enabled !== false,
       mutedInChain: isMutedInChain(m, chain),
       reorderable: true,
     });
   }
 
-  for (const e of eras) {
+  // Eras are appended after every device and share one marker rather than a
+  // number, because they are world-scoped and cannot be dragged (SPEC §3.3).
+  eras.forEach((e, i) => {
     const ops = (e.apply ?? []).filter((o) => channelOrNull(o.param) === chain);
-    if (ops.length === 0) continue;
+    if (ops.length === 0) return;
     out.push({
-      slot: slotLabel(out.length),
+      slot: ERA_SLOT,
       id: ERA_UNIT + e.name,
       name: e.name,
-      kind: "ERA",
+      kind: "era",
       linked: false,
       world: zoneCount,
-      chips: [{ label: eraSpanLabel(e) }, ...opChips(ops, chain)],
+      chips: [{ label: eraSpanLabel(e), color: cycleColour(eraColours[i] ?? i, ERA_CYCLE) }, ...opChips(ops, chain, "era", units)],
       enabled: e.enabled !== false,
       mutedInChain: ops.every((o) => o.enabled === false),
       reorderable: false,
     });
-  }
+  });
 
   return out;
 }

@@ -66,7 +66,7 @@ describe("MODIFIER_EXAMPLES decompile into devices", () => {
     const chips = Object.fromEntries(MODIFIER_EXAMPLES.map((e) => [e.title, whenSummary(toDevice(e.modifier, calendar), calendar.yearLength)]));
     expect(chips).toEqual({
       "Stormtide under a full moon": "moon:Sable · custom range",
-      "Ashfall spells": "days 222–261 · + spell 0.6/yr · 18 d",
+      "Ashfall spells": "days 223–263 · + spell 0.6/yr · 18 d",
       "Dark-moon calm": "moon:Sable · custom range",
       "The valley where it never rains": "always",
       "Sky-fire (flavour only)": "always",

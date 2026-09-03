@@ -92,14 +92,24 @@ export function applyTierA(climate: ClimateParams, adj: TierAAdjustment): Climat
   return c;
 }
 
-/** One-line provenance for the UI: "Closest match: Astana (BSk). Temperature adjusted −3.2 °C for altitude." */
-export function describeTierA(preset: Preset, adj: TierAAdjustment): string {
+/**
+ * What Tier A changed, one clause each and nothing else — the pieces
+ * `describeTierA` joins into its sentence, and the pieces the Atlas's
+ * closest-match card prints on their own line. Empty when nothing moved.
+ */
+export function tierAParts(adj: TierAAdjustment): string[] {
   const parts: string[] = [];
   if (Math.abs(adj.latitudeDeltaC) >= 0.05) parts.push(`${fmt(adj.latitudeDeltaC)} °C for latitude`);
   if (Math.abs(adj.altitudeDeltaC) >= 0.05) parts.push(`${fmt(adj.altitudeDeltaC)} °C for altitude`);
   if (Math.abs(adj.amplitudeScale - 1) >= 0.01) parts.push(`seasonal swing ×${adj.amplitudeScale.toFixed(2)} for continentality`);
   if (adj.hemisphereFlipped) parts.push("seasons flipped for the opposite hemisphere");
-  const head = `Closest match: ${preset.source.stationName} (${preset.match.koppen}, ${preset.name}).`;
+  return parts;
+}
+
+/** One-line provenance for the UI: "Closest match: Astana (BSk). Temperature adjusted −3.2 °C for altitude." */
+export function describeTierA(preset: Preset, adj: TierAAdjustment): string {
+  const parts = tierAParts(adj);
+  const head = `Closest match: ${preset.source.place ?? preset.source.stationName} (${preset.match.koppen}, ${preset.name}).`;
   return parts.length ? `${head} Adjusted: ${parts.join("; ")}.` : `${head} No adjustment.`;
 }
 

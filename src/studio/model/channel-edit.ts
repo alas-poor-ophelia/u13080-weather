@@ -48,6 +48,7 @@
  */
 import { evalCurve, monthCentrePhase, wrapPhase } from "../../core/curve";
 import { getPath, isCurvePath } from "../../core/curve-ops";
+import { compassPoint } from "../../core/report";
 import type { Curve, Era, Keyframe, ModifierOp, ZoneProfile } from "../../core/types";
 import {
   channelOf,
@@ -146,12 +147,29 @@ export function scopeChips(z: ZoneProfile, calendar: ScopeCalendar): ScopeChip[]
   return chips;
 }
 
-/** The stage line under the knob set (SPEC §3.4 "Caption states the stage"). */
-export function stageCaption(scope: string): string {
+/**
+ * The stage line under the knob set (SPEC §3.4 "Caption states the stage").
+ *
+ * It names the modifier id the scope writes, not just the stage, because that
+ * id is the one thing on the panel that maps a chip back onto the file — the
+ * prototype's `writes modifiers[layer:temperature.mean] · stage climate · …`.
+ * `param` is the drawn series, so a paired channel's caption follows the
+ * picker; `periodDays` is the moon's real cycle length, omitted when the
+ * calendar does not describe one.
+ */
+export function stageCaption(param: string, scope: string, periodDays?: number): string {
   const s = parseScope(scope);
-  if (s.kind === "season") return `daily stage · when.tag season:${s.name}`;
-  if (s.kind === "cycle") return `daily stage · when.moon ${s.moon} · envelope`;
-  return "climate stage · applied once to the curves";
+  if (s.kind === "season") return `writes modifiers[${LAYER}${param}:season:${s.name}] · when.tag season:${s.name}`;
+  if (s.kind === "cycle") {
+    const repeats = periodDays !== undefined && Number.isFinite(periodDays) ? ` · repeats every ${round1(periodDays)} d` : "";
+    return `writes modifiers[${LAYER}${param}:moon:${s.moon}] · when.moon ${s.moon} · the drawn curve is its envelope${repeats}`;
+  }
+  return `writes modifiers[${LAYER}${param}] · stage climate · unconditional, reshapes the baseline once`;
+}
+
+/** One decimal, trailing zero dropped — `29.53` stays, `30.0` prints as `30`. */
+function round1(v: number): string {
+  return String(Math.round(v * 100) / 100);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,22 +285,34 @@ const CHANNEL_KNOBS: Record<Channel, ChannelKnobTable> = {
 
 /**
  * What a channel's chart draws. `primary` is the series the panel opens on and
- * the one the ☾ envelope and depth ride; `series` is every line the chart can
- * carry, in draw order. One entry means there is no series picker — more than
- * one becomes a Segmented, because the `automation` chart kind only makes its
- * *first* series draggable (`components/chart.ts`), so exactly one line is
- * editable at a time.
+ * the one the ☾ envelope and depth ride; `plots` is the stack of plots the
+ * panel draws, each carrying the series that share one y axis.
+ *
+ * A plot is the unit here, not a series, because a pair belongs *together* on
+ * one axis: PRECIP's `pww`/`pwd` are the Markov pair and are only readable
+ * against each other, SKY's `dry`/`wet` halves are the point of the window.
+ * Both lines of a pair are always drawn; the panel picks which one carries the
+ * handles, because the `automation` chart kind makes only its *first* series
+ * draggable (`components/chart.ts`). A parameter on its own axis — the wet-day
+ * amount in mm, the calm-day fraction — is its own plot rather than a line
+ * squeezed onto someone else's scale.
  */
 interface ChannelChart {
   primary: string;
-  series: readonly string[];
+  plots: ReadonlyArray<readonly string[]>;
 }
 
 const CHANNEL_CHART: Record<Channel, ChannelChart> = {
-  temperature: { primary: TEMP_MEAN, series: [TEMP_MEAN] },
-  precipitation: { primary: PRECIP_PWD, series: ["precipitation.pww", PRECIP_PWD] },
-  wind: { primary: WIND_SPEED, series: [WIND_SPEED] },
-  sky: { primary: "cloud.dry", series: ["cloud.dry", "cloud.wet", "humidity.dry", "humidity.wet"] },
+  temperature: { primary: TEMP_MEAN, plots: [[TEMP_MEAN]] },
+  precipitation: { primary: PRECIP_PWD, plots: [[PRECIP_PWD, "precipitation.pww"], ["precipitation.scale"]] },
+  wind: { primary: WIND_SPEED, plots: [[WIND_SPEED], ["wind.calmFraction"]] },
+  sky: {
+    primary: "cloud.dry",
+    plots: [
+      ["cloud.dry", "cloud.wet"],
+      ["humidity.dry", "humidity.wet"],
+    ],
+  },
 };
 
 /** The series the panel opens on — and, in a ☾ scope, the parameter the envelope and its depth are written on. */
@@ -290,19 +320,25 @@ export function primarySeries(channel: Channel): string {
   return CHANNEL_CHART[channel].primary;
 }
 
-/** Every series the chart can draw, in draw order. A single entry means the panel shows no picker. */
+/** The stack of plots the panel draws, each a list of series sharing one y axis. */
+export function chartPlots(channel: Channel): string[][] {
+  return CHANNEL_CHART[channel].plots.map((p) => [...p]);
+}
+
+/** Every series the channel draws, plot by plot, in draw order. */
 export function chartSeries(channel: Channel): string[] {
-  return [...CHANNEL_CHART[channel].series];
+  return CHANNEL_CHART[channel].plots.flatMap((p) => [...p]);
 }
 
 /**
- * The other series drawn alongside `param` — its pair. Paired means "same
- * section": `precipitation.pww`/`pwd` are the wet-day odds, `cloud.dry`/`wet`
- * the two cloud fractions. A channel with one series has no companion.
+ * The other series drawn on the same plot as `param` — its pair.
+ * `precipitation.pww`/`pwd` are the wet-day odds, `cloud.dry`/`wet` the two
+ * cloud fractions. A parameter alone on its own axis has no companion, and a
+ * parameter on another plot is never one: they do not share a scale.
  */
 export function companionSeries(channel: Channel, param: string): string[] {
-  const section = param.split(".")[0] ?? "";
-  return CHANNEL_CHART[channel].series.filter((p) => p !== param && p.startsWith(`${section}.`));
+  const plot = CHANNEL_CHART[channel].plots.find((p) => p.includes(param));
+  return plot === undefined ? [] : plot.filter((p) => p !== param);
 }
 
 function scopeKnobs(channel: Channel, scope: string): ScopeKnobs {
@@ -463,6 +499,43 @@ export interface RoseCalendar {
  * sampled at the season's midpoint. A calendar with no seasons falls back to
  * the twelve month centres, so the rose is never empty.
  */
+/** One wedge of the compass rose: which season it is, and the bearing it blows from. */
+export interface SeasonDirection {
+  name: string;
+  /** the season's own list position, so the caller picks its palette entry */
+  index: number;
+  /** degrees from north, clockwise */
+  degrees: number;
+  /** the same bearing as a compass point — `E`, `ESE` */
+  compass: string;
+  /** true when the season carries its own `:set` bearing layer rather than the station's */
+  own: boolean;
+}
+
+/**
+ * The rose as the prototype draws it: one wedge per season, at the bearing
+ * that season blows from. A season with its own `:set` layer sits at that
+ * bearing; one without is sampled off the station's own curve at the season's
+ * midpoint — the same rule `directionRose` buckets by, told per season instead
+ * of per sector, because a wedge carries the season's name and colour and a
+ * histogram bucket cannot.
+ */
+export function seasonDirections(z: ZoneProfile, calendar: RoseCalendar): SeasonDirection[] {
+  const base = effectiveBase(z, WIND_DIRECTION);
+  const seasons = calendar.seasons
+    .map((s, index) => ({ name: s.name, index, from: wrapPhase(s.from) }))
+    .filter((s) => s.name !== "" && Number.isFinite(s.from))
+    .sort((a, b) => a.from - b.from);
+  if (seasons.length === 0) return [];
+  return seasons.map((s, i) => {
+    const span = seasons.length === 1 ? 1 : wrapPhase(seasons[(i + 1) % seasons.length]!.from - s.from) || 1;
+    const set = directionLayer(z, s.name);
+    const raw = set ?? evalCurve(base, wrapPhase(s.from + span / 2));
+    const degrees = ((raw % 360) + 360) % 360;
+    return { name: s.name, index: s.index, degrees, compass: compassPoint(degrees), own: set !== null };
+  });
+}
+
 export function directionRose(z: ZoneProfile, calendar: RoseCalendar): Array<[number, number]> {
   const weights = new Array<number>(ROSE_SECTORS).fill(0);
   const base = effectiveBase(z, WIND_DIRECTION);
@@ -558,6 +631,210 @@ export function stationPoints(z: ZoneProfile, param: string, scope: string): Arr
 export function seasonMarkers(scope: string, calendar: { seasons: ReadonlyArray<{ name: string; from: number }> }): Array<{ x: number; label: string }> {
   if (parseScope(scope).kind === "cycle") return [];
   return calendar.seasons.filter((s) => s.name && Number.isFinite(s.from)).map((s) => ({ x: wrapPhase(s.from), label: s.name }));
+}
+
+/** One tint band behind the plot: `[from, to)` of the domain, and which list position it is. */
+export interface ChannelBand {
+  from: number;
+  to: number;
+  /** the season's / phase's own list position, so the caller picks the palette entry */
+  index: number;
+  name: string;
+}
+
+/**
+ * The tint bands behind a channel chart — seasons on the year domain, the
+ * moon's named phases on a cycle one. A band *is* the season label (SPEC §9:
+ * the studio never prints a name inside a plot), which is why this returns the
+ * span rather than the boundary `seasonMarkers` gives.
+ *
+ * Bands are returned in list order and always cover the whole domain: the last
+ * one wraps back to the first, so a year whose first season does not start at
+ * phase 0 still has no bare gap at its left edge.
+ */
+export function seasonBands(scope: string, calendar: { seasons: ReadonlyArray<{ name: string; from: number }>; moons?: ReadonlyArray<{ name: string; phases?: ReadonlyArray<{ name: string; at: number }> }> }): ChannelBand[] {
+  const s = parseScope(scope);
+  const spans =
+    s.kind === "cycle"
+      ? (calendar.moons?.find((m) => m.name === s.moon)?.phases ?? []).map((p) => ({ name: p.name, from: p.at }))
+      : calendar.seasons.map((x) => ({ name: x.name, from: x.from }));
+  const usable = spans.filter((x) => x.name && Number.isFinite(x.from)).map((x) => ({ name: x.name, from: wrapPhase(x.from) }));
+  if (usable.length === 0) return [];
+  const order = usable.map((x, index) => ({ ...x, index })).sort((a, b) => a.from - b.from);
+  return order.map((x, i) => ({ from: x.from, to: i + 1 < order.length ? order[i + 1]!.from : 1 + order[0]!.from, index: x.index, name: x.name }));
+}
+
+/**
+ * The half-width of the translucent ribbon drawn around `param`, at the same
+ * phases the drawn curve uses — temperature's own day/night spread, wind's
+ * speed deviation. `[]` when the parameter has no companion spread curve,
+ * which is every fraction-valued one.
+ */
+const SPREAD_OF: Record<string, { param: string; halve: boolean }> = {
+  "temperature.mean": { param: "temperature.diurnalRange", halve: true },
+  "wind.speed": { param: "wind.speedSd", halve: false },
+};
+
+export function spreadPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  const spread = SPREAD_OF[param];
+  if (spread === undefined || parseScope(scope).kind === "cycle") return [];
+  const curve: Curve | undefined = isCurvePath(spread.param) ? getPath(z.climate, spread.param) : undefined;
+  if (curve === undefined) return [];
+  return curvePoints(z, param, scope).map((p) => [p[0], Math.abs(evalCurve(curve, p[0])) / (spread.halve ? 2 : 1)] as [number, number]);
+}
+
+/**
+ * The dashed comparison curve: the same parameter as it reads on a *wet* day.
+ * Temperature is the one channel that carries the offset as a curve
+ * (`temperature.wetDayOffset`), so the other three return `[]` until they
+ * grow one.
+ */
+const WET_DAY_OFFSET_OF: Record<string, string> = { "temperature.mean": "temperature.wetDayOffset" };
+
+export function wetDayPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  const path = WET_DAY_OFFSET_OF[param];
+  if (path === undefined || parseScope(scope).kind === "cycle") return [];
+  const curve: Curve | undefined = isCurvePath(path) ? getPath(z.climate, path) : undefined;
+  if (curve === undefined) return [];
+  const drawn = curvePoints(z, param, scope);
+  if (drawn.every((p) => Math.abs(evalCurve(curve, p[0])) < EPS)) return [];
+  return drawn.map((p) => [p[0], p[1] + evalCurve(curve, p[0])] as [number, number]);
+}
+
+/**
+ * Where the selected keyframe sits, in the reader's calendar rather than in
+ * phase space: `day 196 · 54% of year`, or `cycle d16.3 · phase 0.55` inside a
+ * ☾ scope. `at` is the point's own x; the caller formats its *value*, because
+ * only the caller knows the unit (SPEC §8).
+ */
+export function pointWhen(scope: string, at: number, calendar: { yearLength: number; cycleDays?: number }): string {
+  const s = parseScope(scope);
+  if (s.kind === "cycle") {
+    const days = calendar.cycleDays;
+    const cycle = days !== undefined && Number.isFinite(days) ? `cycle d${(at * days).toFixed(1)} · ` : "";
+    return `${cycle}phase ${at.toFixed(2)}`;
+  }
+  return `day ${Math.round(at * calendar.yearLength)} · ${(at * 100).toFixed(0)}% of year`;
+}
+
+/**
+ * The per-channel fact card under the writers stack — the numbers that shape
+ * the drawn curve but are not on it (SPEC §8 parity: every channel gets one,
+ * not just temperature).
+ *
+ * Every field is real zone data or `null`. A channel reports only the fields
+ * its own schema carries, so the panel draws a line per non-null field and
+ * drops the card when they are all null — nothing here is invented to keep a
+ * card the same height on four windows.
+ */
+export interface ChannelStat {
+  /** min and max of the drawn curve, in the parameter's own unit */
+  range: [number, number] | null;
+  /**
+   * How far a wet day shifts the value across the year, `[min, max]` — the
+   * spread the dashed ghost is drawn at. Not a mean: on a real record the
+   * offset is positive in winter and negative in summer, so its average is
+   * near zero and would read as "no effect" while the ghost visibly moves.
+   * `null` where the channel has no such curve.
+   */
+  wetDayOffset: [number, number] | null;
+  /** `temperature.persistence` — how much of yesterday carries into today */
+  persistence: number | null;
+  /**
+   * PRECIP — the share of days that come out wet, as the Markov pair settles:
+   * `pwd / (1 + pwd − pww)` at each drawn phase, averaged over the year. The
+   * one number the pair is *for*, and it is on neither line.
+   */
+  wetShare: number | null;
+  /** PRECIP — the peak of `pww`, the prototype's `p(wet | wet) peak`. */
+  wetRunPeak: number | null;
+  /** PRECIP — the mean wet-day fall in mm: gamma `shape × scale`, averaged. */
+  amountMm: number | null;
+  /** PRECIP — °C below which the day's rain falls as snow. */
+  freezingPoint: number | null;
+  /** PRECIP — the gamma shape κ the amount is drawn from, averaged. */
+  gammaShape: number | null;
+  /** WIND — the mean share of days that come out calm. */
+  calmShare: number | null;
+  /** WIND — `wind.wetDayScale`, the multiplier a wet day puts on the speed. */
+  wetDayScale: number | null;
+  /** SKY — the dry-day mean of the drawn section over the year. */
+  mean: number | null;
+  /** SKY — the same section's wet-day mean, so the pair reads as a pair. */
+  companionMean: number | null;
+  /** SKY — `<section>.sd`, the day-to-day scatter around the drawn curve. */
+  daySigma: number | null;
+}
+
+/** The mean of a parameter's effective curve over the phases the panel draws it at. */
+function meanOf(z: ZoneProfile, param: string): number | null {
+  if (!isCurvePath(param)) return null;
+  const pts = curvePoints(z, param, ALL_SCOPE);
+  if (pts.length === 0) return null;
+  return pts.reduce((a, p) => a + p[1], 0) / pts.length;
+}
+
+/** Two effective curves multiplied phase by phase, then averaged — the gamma mean `κ·θ`. */
+function meanProduct(z: ZoneProfile, a: string, b: string): number | null {
+  const pa = curvePoints(z, a, ALL_SCOPE);
+  const pb = curvePoints(z, b, ALL_SCOPE);
+  if (pa.length === 0 || pa.length !== pb.length) return null;
+  return pa.reduce((sum, p, i) => sum + p[1] * (pb[i]?.[1] ?? 0), 0) / pa.length;
+}
+
+/**
+ * `pwd / (1 + pwd − pww)` — the stationary wet-day share of a two-state Markov
+ * chain, at each drawn phase and averaged. A degenerate pair (`pww` at 1, so
+ * wet weather never ends) has no stationary share; it reports the odds
+ * themselves rather than dividing by nothing.
+ */
+function wetShareOf(z: ZoneProfile): number | null {
+  const pwd = curvePoints(z, PRECIP_PWD, ALL_SCOPE);
+  const pww = curvePoints(z, "precipitation.pww", ALL_SCOPE);
+  if (pwd.length === 0) return null;
+  const total = pwd.reduce((sum, p, i) => {
+    const d = p[1];
+    const denom = 1 + d - (pww[i]?.[1] ?? d);
+    return sum + (Math.abs(denom) < EPS ? d : d / denom);
+  }, 0);
+  return clamp01(total / pwd.length);
+}
+
+/** The scalar day-to-day spread of a paired fraction section (`cloud.sd`, `humidity.sd`). */
+function daySigmaOf(z: ZoneProfile, param: string): number | null {
+  const section = param.split(".")[0] ?? "";
+  if (section !== "cloud" && section !== "humidity") return null;
+  return z.climate[section].sd;
+}
+
+export function channelStat(z: ZoneProfile, param: string, scope: string): ChannelStat {
+  const drawn = curvePoints(z, param, scope);
+  const ys = drawn.map((p) => p[1]);
+  const wet = WET_DAY_OFFSET_OF[param];
+  const wetCurve: Curve | undefined = wet !== undefined && isCurvePath(wet) ? getPath(z.climate, wet) : undefined;
+  const wetVals = wetCurve === undefined ? [] : drawn.map((p) => evalCurve(wetCurve, p[0]));
+  const section = param.split(".")[0] ?? "";
+  const isPrecip = section === "precipitation";
+  const isWind = section === "wind";
+  const isSky = section === "cloud" || section === "humidity";
+  const pwwPoints = isPrecip ? curvePoints(z, "precipitation.pww", ALL_SCOPE) : [];
+  // Always dry then wet, whichever half the handles are on: a pair that swaps
+  // its own order as the legend is clicked reads as a change in the data.
+  return {
+    range: ys.length === 0 ? null : [Math.min(...ys), Math.max(...ys)],
+    wetDayOffset: wetVals.length === 0 ? null : [Math.min(...wetVals), Math.max(...wetVals)],
+    persistence: section === "temperature" ? (z.climate.temperature.persistence ?? null) : null,
+    wetShare: isPrecip ? wetShareOf(z) : null,
+    wetRunPeak: pwwPoints.length === 0 ? null : Math.max(...pwwPoints.map((p) => p[1])),
+    amountMm: isPrecip ? meanProduct(z, "precipitation.shape", "precipitation.scale") : null,
+    freezingPoint: isPrecip ? z.climate.precipitation.freezingPoint : null,
+    gammaShape: isPrecip ? meanOf(z, "precipitation.shape") : null,
+    calmShare: isWind ? meanOf(z, "wind.calmFraction") : null,
+    wetDayScale: isWind ? z.climate.wind.wetDayScale : null,
+    mean: isSky ? meanOf(z, `${section}.dry`) : null,
+    companionMean: isSky ? meanOf(z, `${section}.wet`) : null,
+    daySigma: daySigmaOf(z, param),
+  };
 }
 
 /**
@@ -765,6 +1042,20 @@ export function layerGlob(channel: Channel): string {
  * A stray (an id `parseLayerId` cannot decode) is still listed under its
  * channel: the footer states what the file holds, not what the editor meant.
  */
+/**
+ * The `layer:` ids this channel actually carries right now, in `modifiers[]`
+ * order — the keys the WRITES footer names once something has been written.
+ */
+export function writtenLayers(z: ZoneProfile, channel: Channel): string[] {
+  return z.modifiers
+    .filter((m) => {
+      if (!m.id.startsWith(LAYER)) return false;
+      const param = parseLayerId(m.id)?.param ?? m.id.slice(LAYER.length);
+      return channelOrNull(param) === channel;
+    })
+    .map((m) => m.id);
+}
+
 export function writesText(z: ZoneProfile, channel: Channel): string {
   const mine: string[] = [];
   z.modifiers.forEach((m, i) => {

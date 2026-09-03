@@ -64,9 +64,9 @@ import { playlistHint } from "../model/hints-playlist";
 import type { LaneGeometry } from "../model/lanes";
 import type { StudioState } from "../model/state";
 import { addRow, createRowRegistry, removeRow, sortedRows, type RowRegistry } from "../model/row-registry";
-import { morph, panByWheel, wheelZoomFactor, zoomAt, type Window, type ZoomBounds } from "../model/zoom";
+import { clampWindow, morph, panByWheel, wheelZoomFactor, worldBounds, zoomAt, type Window, type ZoomBounds } from "../model/zoom";
 import { createDayCard, type DayCardComponent } from "./day-card";
-import { createRow, LABEL_WIDTH, type Row } from "./layout";
+import { AXIS_WIDTH, createRow, LABEL_WIDTH, type Row } from "./layout";
 import { EDGE_PX_MOUSE } from "./pointer";
 import { createChannelRow } from "./rows/channel-row";
 import { createRuler, type RulerComponent } from "./ruler";
@@ -82,8 +82,16 @@ export interface RowHost {
   row: Row;
   /** the lane's parent and its measuring box */
   body: HTMLElement;
-  /** the 136 px label column */
+  /** the 136 px label column (the click target and the `data-hint` host) */
   label: HTMLElement;
+  /** the label's colour swatch */
+  dot: HTMLElement;
+  /** the label's name line — `setText` this, never `label` */
+  name: HTMLElement;
+  /** the label's live second line */
+  sub: HTMLElement;
+  /** the 44 px y-axis gutter left of the lane */
+  axis: HTMLElement;
   ctx: SurfaceContext;
 }
 
@@ -164,10 +172,6 @@ export const CHANNELS = [
 /** Lane width to assume before the leaf has been laid out (clientWidth 0). */
 const FALLBACK_LANE_WIDTH = 800;
 
-/** How far either side of the world's epoch the timeline may be panned, in years. */
-const BOUNDS_BEFORE = 100;
-const BOUNDS_AFTER = 1100;
-
 // ---------------------------------------------------------------------------
 // The surface
 // ---------------------------------------------------------------------------
@@ -182,7 +186,25 @@ export function createPlaylistSurface(): Surface {
   function bounds(): ZoomBounds {
     const c = ctx;
     const epoch = c?.calendar()?.epochYear ?? c?.plugin.settings.calendar.epochYear ?? 1;
-    return { min: epoch - BOUNDS_BEFORE, max: epoch + BOUNDS_AFTER };
+    return worldBounds(epoch, c?.store.get().world.eras ?? []);
+  }
+
+  /**
+   * Slide the window onto `dayOrdinal`, keeping its width — the day card's
+   * NEIGHBOUR list, and the prototype's `jumpDay`. The centre lands on the
+   * MIDDLE of the day so a 3-day window frames it the way the card assumes.
+   */
+  function jumpToDay(dayOrdinal: number): void {
+    const c = ctx;
+    if (c === null) return;
+    const cal = c.calendar();
+    const yearLength = cal?.yearLength ?? 0;
+    if (yearLength <= 0) return;
+    const epoch = cal?.epochYear ?? c.plugin.settings.calendar.epochYear ?? 1;
+    const w = c.store.get().view.window;
+    const half = (w.b - w.a) / 2;
+    const centre = epoch + (dayOrdinal + 0.5) / yearLength;
+    setWindow(clampWindow({ a: centre - half, b: centre + half }, bounds()));
   }
 
   /** Persist a window move: view state, no history, then the layout save. */
@@ -238,9 +260,10 @@ export function createPlaylistSurface(): Surface {
     const strip = c.shell.rulerTicks.getBoundingClientRect();
     if (strip.width > 0) return { left: strip.left, width: strip.width };
     const playlist = c.shell.playlist.getBoundingClientRect();
-    const width = playlist.width - LABEL_WIDTH;
+    const inset = LABEL_WIDTH + AXIS_WIDTH;
+    const width = playlist.width - inset;
     if (width <= 0) return null;
-    return { left: playlist.left + LABEL_WIDTH, width };
+    return { left: playlist.left + inset, width };
   }
 
   function onWheel(ev: WheelEvent): void {
@@ -283,7 +306,7 @@ export function createPlaylistSurface(): Surface {
     for (const row of rows) {
       if (mounted.has(row.id)) continue;
       const created = createRow(c.shell.lanes, row.label);
-      const host: RowHost = { row: created, body: created.body, label: created.label, ctx: c };
+      const host: RowHost = { row: created, body: created.body, label: created.label, dot: created.dot, name: created.name, sub: created.sub, axis: created.axis, ctx: c };
       mounted.set(row.id, { row, host });
       row.mount(host);
     }
@@ -302,11 +325,11 @@ export function createPlaylistSurface(): Surface {
     if (c === null) return;
     const geo = geometry(state);
     ruler?.render(state, geo);
-    // Day view (≤ 7.5 days): the rows below the ruler give way to the day card.
-    for (const { row, host } of mounted.values()) {
-      host.row.el.toggleClass("is-hidden", geo.morph.isDay);
-      row.render(state, geo);
-    }
+    // Day view (≤ 7.5 days) ADDS the day card above the ruler; it takes
+    // nothing away. The prototype keeps the whole stack — regimes, eras,
+    // devices, automation, the four channels — running at day resolution
+    // underneath it, which is where a day gets its context from.
+    for (const { row } of mounted.values()) row.render(state, geo);
     dayCard?.render(state, geo);
   }
 
@@ -316,7 +339,10 @@ export function createPlaylistSurface(): Surface {
       next.shell.playlist.setAttr("data-hint", playlistHint("playlist.window"));
       ruler = createRuler({ ctx: next, bounds, setWindow });
 
-      dayCard = createDayCard(next.shell.playlist, next, playlistHint("playlist.daycard", DAY_CARD_DETAIL));
+      dayCard = createDayCard(next.shell.playlist, next, playlistHint("playlist.daycard", DAY_CARD_DETAIL), jumpToDay);
+      // The prototype puts the card ABOVE the calendar ruler, at the top of
+      // the column. `createDayCard` appends, so move it once at mount.
+      next.shell.playlist.insertBefore(dayCard.el, next.shell.ruler);
 
       // `passive: false` because the wheel over the lane body is prevented; the
       // leaf owns the teardown, so the listener never outlives the view.

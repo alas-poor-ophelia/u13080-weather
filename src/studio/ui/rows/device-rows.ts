@@ -35,10 +35,11 @@
  */
 import { rollCached, type AuditionInput } from "../../model/audition";
 import { channelOrNull, devices } from "../../model/compile";
-import { dragToWhen, hasLane, laneSpec, spellRunsKey } from "../../model/device-lanes";
+import { displayName } from "../../model/copy";
+import { dragToWhen, hasLane, laneCaption, laneSpec, laneSub, spellRunsKey, type LaneKind } from "../../model/device-lanes";
 import { toDevice, whenSummary } from "../../model/devices";
 import { deviceLaneHint, deviceLaneTip, deviceSpanHintKey } from "../../model/hints-device-lanes";
-import type { Span } from "../../model/lanes";
+import { spanToPx, type Span } from "../../model/lanes";
 import { CHAIN_COLOR_VAR } from "../../model/mixer";
 import type { StudioState } from "../../model/state";
 import type { Window } from "../../model/zoom";
@@ -72,6 +73,20 @@ const MAX_DEVICE_ORDER_OFFSET = ROW_ORDER.automation - ROW_ORDER.devices - 1;
 /** A lane with no colour of its own falls back to the calendar's gold, as the Lane component does. */
 const DEFAULT_COLOR = "var(--wadjet-studio-gold)";
 
+/** The lane's drawn height — the same thin arrangement lane the regimes and eras rows use. */
+const ROW_HEIGHT = 20;
+
+/** A clip narrower than this, or one that close to the right edge, has nowhere to put its caption. */
+const CAPTION_MIN_PX = 70;
+/** The gap between a clip's right edge and its caption. */
+const CAPTION_GAP_PX = 6;
+/**
+ * The pixels-per-day band a moon lane's caption shows in — the prototype's
+ * own `pxDay > 1.6 && pxDay < 20`. Wider and the pulses are far enough apart
+ * to read on their own; tighter and the text runs over the next pulse.
+ */
+const MOON_CAPTION_PX_PER_DAY: readonly [number, number] = [1.6, 20];
+
 /** The colour of the first chain the device writes into (SPEC §9) — its rack unit's own hue. */
 function colourFor(m: { apply: ReadonlyArray<{ param: string }> }): string {
   for (const op of m.apply) {
@@ -79,6 +94,19 @@ function colourFor(m: { apply: ReadonlyArray<{ param: string }> }): string {
     if (channel !== null) return CHAIN_COLOR_VAR[channel];
   }
   return DEFAULT_COLOR;
+}
+
+/**
+ * A lane is coloured by what its SHAPE is, not by what the device writes
+ * (SPEC §9). A moon lane's pulses are where the moon is, so they wear the
+ * moon's hue — painted precipitation blue, the Stormtide row read as a second
+ * precipitation curve. A clip or a spell window is a span of calendar, so it
+ * wears calendar gold. Everything else falls back to the chain it feeds.
+ */
+function laneColour(kind: LaneKind, m: { apply: ReadonlyArray<{ param: string }> }): string {
+  if (kind === "pulse") return "var(--wadjet-studio-moon)";
+  if (kind === "clip" || kind === "window") return DEFAULT_COLOR;
+  return colourFor(m);
 }
 
 /** The zone the surfaces are pointed at, or `null`. */
@@ -117,6 +145,9 @@ function yearsIn(w: Window): number[] {
 export function createDeviceRow(modifierId: string): PlaylistRow {
   let host: RowHost | null = null;
   let lane: LaneComponent | null = null;
+  let captionEl: HTMLElement | null = null;
+  /** the calendar's year length, for the caption's day numbers */
+  let yearLength = 365;
   /** the last gathered runs, and the roll key they were gathered under */
   let runsMemo: { key: string; days: Array<{ dayOrdinal: number; active: boolean }> } | null = null;
 
@@ -187,6 +218,49 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
     }
   }
 
+  /**
+   * The caption the prototype prints inside the lane.
+   *
+   *  - a CLIP or a spell window puts it just to the RIGHT of the first span —
+   *    `d223 – d263 · 40 d` — so a 40-day window says how long it is without
+   *    having to be wide enough to hold the text;
+   *  - a MOON lane puts it beside the FIRST pulse — `sable full ↻ 29.5 d ·
+   *    gated by Harvest` — because a row of pulses cannot say which moon,
+   *    which phase or which gate it is on its own. It shows only in the
+   *    prototype's own density band (`MOON_CAPTION_PX_PER_DAY`): wider and the
+   *    pulses are days apart with nothing to explain, tighter and the caption
+   *    would run over the next one.
+   *
+   * Outside `.wadjet-studio-lane-spans`, so the Lane's own repaint never has
+   * to know about it.
+   */
+  function caption(spec: { spans: readonly Span[] }, moon: string, geo: RowGeometry): void {
+    const el = lane?.el;
+    if (el === undefined) return;
+    captionEl?.remove();
+    captionEl = null;
+
+    if (moon !== "") {
+      const [lo, hi] = MOON_CAPTION_PX_PER_DAY;
+      if (geo.morph.pxPerDay <= lo || geo.morph.pxPerDay >= hi) return;
+      const pulse = spec.spans.find((s) => s.kind === "pulse");
+      if (pulse === undefined) return;
+      const { left, width } = spanToPx(pulse, geo.lane);
+      captionEl = el.createSpan({ cls: "wadjet-studio-device-caption is-lead", text: moon });
+      captionEl.setCssProps({ "--wadjet-studio-device-caption-left": `${Math.max(0, left + width) + CAPTION_GAP_PX}px` });
+      return;
+    }
+
+    const clip = spec.spans.find((s) => s.kind === "clip" || s.kind === "window");
+    if (clip === undefined) return;
+    const { left, width } = spanToPx(clip, geo.lane);
+    if (width < CAPTION_MIN_PX || left + width > geo.widthPx - CAPTION_MIN_PX) return;
+    const days = Math.round((clip.to - clip.from) * yearLength);
+    const from = Math.round((clip.from - Math.floor(clip.from)) * yearLength);
+    captionEl = el.createSpan({ cls: "wadjet-studio-device-caption", text: `d${from} – d${from + days} · ${days} d` });
+    captionEl.setCssProps({ "--wadjet-studio-device-caption-left": `${left + width + CAPTION_GAP_PX}px` });
+  }
+
   /** A drop on an editable clip: the new modifier, written as one undoable action (SPEC §3.8). */
   function write(span: Span, from: number, to: number): void {
     const ctx = host?.ctx;
@@ -241,7 +315,7 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
 
   return {
     id: deviceRowId(modifierId),
-    label: modifierId,
+    label: displayName(modifierId),
     order: ROW_ORDER.devices,
 
     mount(next) {
@@ -256,6 +330,7 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
       lane = createLane(next.body, {
         geometry: { x0: 0, pxPerYear: 1, windowFrom: 0, edgePx: 4 },
         spans: [],
+        height: ROW_HEIGHT,
         color: DEFAULT_COLOR,
         onMove,
         onResize,
@@ -270,17 +345,30 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
       const m = modifier(state);
       const cal = ctx === undefined ? null : spanCalendarFor(ctx, state);
       if (m === null || cal === null) {
+        captionEl?.remove();
+        captionEl = null;
         lane?.update({ spans: [], geometry: geo.lane });
         return;
       }
+      yearLength = Math.max(1, cal.yearLength);
       const spec = laneSpec(m, cal, geo.window, m.spell === undefined ? undefined : activeDays(state, geo.window));
-      lane?.update({ geometry: geo.lane, spans: spec.spans, color: colourFor(m) });
+      const device = toDevice(m, ctx?.calendar() ?? null);
+      const colour = laneColour(spec.kind, m);
+      lane?.update({ geometry: geo.lane, spans: spec.spans, color: colour });
+      caption(spec, laneCaption(device, cal), geo);
       lane?.el.setAttrs({ "data-kind": spec.kind, "data-editable": String(spec.editable) });
       decorate(spec.spans);
-      host?.label.setAttr("data-hint", deviceLaneTip(spec.label, whenSummary(toDevice(m, ctx?.calendar() ?? null), cal.yearLength)));
+      // The lane's own hue leads the label, so a glance down the column tells
+      // you which chain each device writes into before you read a word.
+      host?.dot.setCssProps({ "--wadjet-studio-row-dot-color": colour });
+      host?.name.setText(displayName(m.id));
+      host?.sub.setText(laneSub(m, cal));
+      host?.label.setAttr("data-hint", deviceLaneTip(spec.label, whenSummary(device, cal.yearLength)));
     },
 
     destroy() {
+      captionEl?.remove();
+      captionEl = null;
       lane?.destroy();
       lane = null;
       host?.label.removeEventListener("click", openDevice);
@@ -316,7 +404,9 @@ export function createDeviceRowsManager(): PlaylistRow {
     syncing = true;
     try {
       const zone = zoneOf(state);
-      const wanted = zone === null ? [] : devices(zone).filter(hasLane).map((m) => m.id);
+      // The eras decide whether an `era:`-gated device has a timeline at all,
+      // so a world edit that adds or removes an era re-syncs the row stack.
+      const wanted = zone === null ? [] : devices(zone).filter((m) => hasLane(m, state.world.eras)).map((m) => m.id);
       const keep = new Set(wanted);
 
       for (const id of [...rows.keys()]) {

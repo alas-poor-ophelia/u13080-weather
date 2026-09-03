@@ -17,7 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { validateProfile } from "../src/core/profile";
 import type { Modifier, Preset, ZoneProfile } from "../src/core/types";
 import { shareOfYear } from "../src/studio/model/audition";
-import { addApply, addState, applyFor, colourOf, REGIME_COLOURS, removeApply, removeState, renameState, setApplyChainMute, setApplyValue, setDwell, setWeight, shareBar } from "../src/studio/model/regimes";
+import { addApply, addState, applyFor, applySummary, colourOf, laneSub, REGIME_COLOURS, regimeApplyText, regimesWrites, regimeTargetName, removeApply, removeState, renameState, setApplyChainMute, setApplyValue, setDwell, setWeight, shareBar } from "../src/studio/model/regimes";
 
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 
@@ -389,5 +389,72 @@ describe("studio regimes · a whole editing session stays valid", () => {
     expect(removeState(z, "storm")).toBe(true);
     expect(ids(z)).toEqual(["normal", "storm-2", "dry-spell"]);
     expectClean(z);
+  });
+});
+
+/**
+ * The copy and grammar half: the apply knobs' own short names, the line under
+ * each state's name, and the WRITES footer's one-line grammar. The footer is
+ * the reason these exist — it used to print `JSON.stringify`, and a footer
+ * that wraps is a footer that decides the panel's width.
+ */
+describe("studio regimes · copy and the WRITES grammar", () => {
+  test("the two precipitation transitions are told apart, unlike the shared vocabulary", () => {
+    // `paramName` calls both of these "precip" — correct on a device, useless
+    // on a state whose two knobs ARE the two transition probabilities.
+    expect(regimeTargetName("precipitation.pww")).toBe("wet→wet");
+    expect(regimeTargetName("precipitation.pwd")).toBe("dry→wet");
+    expect(regimeTargetName("temperature.diurnalRange")).toBe("day swing");
+    expect(regimeTargetName("cloud.dry")).toBe("sky");
+    // Anything unlisted falls back to the shared name rather than throwing.
+    expect(regimeTargetName("humidity.wet")).toBe("humidity");
+  });
+
+  test("one op reads as its own name plus the formatted value", () => {
+    expect(regimeApplyText({ param: "precipitation.pww", op: "scale", value: 1.25 })).toBe("wet→wet ×1.25");
+    expect(regimeApplyText({ param: "temperature.mean", op: "offset", value: 2 })).toBe("temp +2.0 °C");
+  });
+
+  test("a state with no apply says so rather than showing an empty line", () => {
+    const z = zone();
+    expect(applySummary(z, "normal")).toBe("— no apply · baseline as-is");
+    expect(applySummary(z, "wet-spell")).toBe("wet→wet ×1.25 · dry→wet ×1.60");
+  });
+
+  test("the WRITES footer is one line of engine grammar, never JSON", () => {
+    const z = zone();
+    const line = regimesWrites(z);
+    expect(line.startsWith("regimes [ { normal w 0.70 · 12 d }")).toBe(true);
+    expect(line).toContain("scale[precipitation.pww ×1.25]");
+    // Param paths stay intact (SPEC law 5), and nothing wraps or quotes.
+    expect(line.includes("\n")).toBe(false);
+    expect(line.includes('"')).toBe(false);
+  });
+
+  test("an added state appears in the grammar with its own weight and dwell", () => {
+    const z = zone();
+    const id = addState(z);
+    expect(regimesWrites(z)).toContain(`{ ${id} w 0.10 · 7 d }`);
+  });
+});
+
+describe("regimes · the playlist lane's sub-label (bead wadjet-6rw.2)", () => {
+  test("it counts the states and reads every share out, in list order", () => {
+    const z = zone();
+    const shares = shareOfYear(z.regimes);
+    const expected = `${z.regimes.length} states · ${shares.map((s) => `${s.id} ${Math.round(s.share * 100)}%`).join(" · ")}`;
+    expect(laneSub(z)).toBe(expected);
+    expect(laneSub(z).startsWith(`${z.regimes.length} states · `)).toBe(true);
+  });
+
+  test("the shares it prints are `shareOfYear`'s, so a weight change moves it", () => {
+    const z = zone();
+    const before = laneSub(z);
+    setWeight(z, z.regimes[1]!.id, z.regimes[1]!.weight * 4);
+    expect(laneSub(z)).not.toBe(before);
+  });
+
+  test("a stateless draft says so rather than printing `0 states · `", () => {
+    expect(laneSub({ regimes: [] })).toBe("no states");
   });
 });

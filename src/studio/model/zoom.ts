@@ -22,6 +22,64 @@ export const MIN_WINDOW_DAYS = 2;
 /** The widest a window may ever get, in years. */
 export const MAX_WINDOW_YEARS = 1100;
 
+/** How far *before* the world's epoch the timeline may always be panned, in years. */
+export const BOUNDS_BEFORE = 100;
+/** How far *after* the world's epoch the timeline may always be panned, in years. */
+export const BOUNDS_AFTER = 1100;
+
+/** The air the Era preset leaves either side of the world's eras, in years. */
+export const ERA_PAD = 100;
+/** The Era preset's own width when the eras themselves need less, in years. */
+export const ERA_SPAN = 1000;
+
+/**
+ * What the era reach reads off an `Era`: `to` absent is open-ended, and a
+ * disabled era reaches nowhere. `name` is here only so a whole `Era` may be
+ * passed straight in; nothing in this module looks at it (PLAN D3 — `zoom.ts`
+ * knows about windows, not about the world).
+ */
+export interface EraReach {
+  from: number;
+  to?: number;
+  enabled?: boolean;
+  name?: string;
+}
+
+/**
+ * The window the Era preset frames: the world's eras with `ERA_PAD` years of
+ * air in front, at least `ERA_SPAN` wide — the prototype's `1100 – 2100` for
+ * eras that start at 1200 and run open-ended. `null` for a world with no eras,
+ * where the preset stays centred on wherever the reader already is.
+ *
+ * An open-ended era contributes only its `from`: it has no end to frame, and
+ * the minimum width is what carries the window past it.
+ */
+export function eraFrame(eras: readonly EraReach[]): Window | null {
+  let from = Infinity;
+  let to = -Infinity;
+  for (const e of eras) {
+    if (e.enabled === false) continue;
+    if (e.from < from) from = e.from;
+    if (e.to !== undefined && e.to > to) to = e.to;
+  }
+  if (!Number.isFinite(from)) return null;
+  const a = from - ERA_PAD;
+  return { a, b: Math.max(a + ERA_SPAN, to + ERA_PAD) };
+}
+
+/**
+ * The world's pannable extent: the epoch's own reach, widened to hold every
+ * era. Without this an era seeded at 1200 in a world whose epoch is year 1 is
+ * simply unreachable — `clampWindow` would shove the window back to
+ * `epoch + 1100` and the Eras lane would read empty at every zoom.
+ */
+export function worldBounds(epoch: number, eras: readonly EraReach[] = []): ZoomBounds {
+  const frame = eraFrame(eras);
+  const min = frame === null ? epoch - BOUNDS_BEFORE : Math.min(epoch - BOUNDS_BEFORE, frame.a);
+  const max = frame === null ? epoch + BOUNDS_AFTER : Math.max(epoch + BOUNDS_AFTER, frame.b);
+  return { min, max };
+}
+
 const MIN_WIDTH_YEARS = MIN_WINDOW_DAYS / 365;
 const DAYS_PER_YEAR = 365;
 
@@ -134,13 +192,18 @@ function centredWindow(centre: number, widthYears: number, bounds: ZoomBounds): 
  * - Season = the season containing the centre's `yearPhase`, from `seasons`
  *   (a quarter of the year when `seasons` is empty).
  * - Year = one calendar year, floored on the current centre.
- * - Era = 1000 years, centred on the current centre, clamped to `bounds`.
+ * - Era = `eraFrame(eras)` — the world's eras, framed — or, in a world with
+ *   no eras, `ERA_SPAN` years centred on the current centre. The prototype
+ *   jumps straight to the eras too (`setWin(1100, 2100)`): Era is the one
+ *   preset that is about the world's history rather than about where the
+ *   reader happens to be standing.
  */
 export function presetWindow(
   p: ZoomPreset,
   current: Window,
   bounds: ZoomBounds,
-  seasons: ReadonlyArray<{ name: string; from: number }>
+  seasons: ReadonlyArray<{ name: string; from: number }>,
+  eras: readonly EraReach[] = []
 ): Window {
   const centre = centreOf(current);
   switch (p) {
@@ -168,8 +231,10 @@ export function presetWindow(
       const year = Math.floor(centre);
       return clampWindow({ a: year, b: year + 1 }, bounds);
     }
-    case "era":
-      return centredWindow(centre, 1000, bounds);
+    case "era": {
+      const frame = eraFrame(eras);
+      return frame === null ? centredWindow(centre, ERA_SPAN, bounds) : clampWindow(frame, bounds);
+    }
   }
 }
 

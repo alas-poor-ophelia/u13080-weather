@@ -38,9 +38,10 @@ import { laneValue } from "../../../core/automation";
 import type { ZoneProfile } from "../../../core/types";
 import { addPoint, ensureLane, hasLane, lanePoints, laneYRange, movePoint, removePoint, type LaneBounds, type LanePoint } from "../../model/automation-edit";
 import { getWarmthLane } from "../../model/compile";
+import { format } from "../../model/format";
 import { forcingsHint } from "../../model/hints-forcings";
 import type { StudioState } from "../../model/state";
-import type { Window } from "../../model/zoom";
+import { worldBounds, type Window } from "../../model/zoom";
 import { createChart, type ChartComponent, type ChartPhase, type ChartSeries } from "../components";
 import { ROW_ORDER, type PlaylistRow, type RowGeometry, type RowHost } from "../playlist";
 import { beginDrag } from "../pointer";
@@ -53,14 +54,10 @@ export const AUTOMATION_ROW_ID = "automation";
 const CHART_PAD = 6;
 
 /** The lane's drawn height. Must equal `--wadjet-studio-automation-h` in styles.css. */
-const ROW_HEIGHT = 44;
+const ROW_HEIGHT = 34;
 
 /** Chart width to assume before the leaf has been laid out (`clientWidth` 0). */
 const FALLBACK_WIDTH = 800;
-
-/** Mirrors `header.ts` / `windows/era.ts`: 100 years before the epoch, 1100 after. */
-const BOUNDS_BEFORE = 100;
-const BOUNDS_AFTER = 1100;
 
 /** What the lane was last painted with — the pixel → (year, °C) map a drag-create needs. */
 interface Painted {
@@ -102,9 +99,9 @@ export function createAutomationRow(): PlaylistRow {
   }
 
   function bounds(): LaneBounds {
-    const epoch = epochYear();
+    const world = worldBounds(epochYear(), host?.ctx.store.get().world.eras ?? []);
     const [minValue, maxValue] = painted.yRange;
-    return { minYear: epoch - BOUNDS_BEFORE, maxYear: epoch + BOUNDS_AFTER, minValue, maxValue };
+    return { minYear: world.min, maxYear: world.max, minValue, maxValue };
   }
 
   /**
@@ -221,18 +218,27 @@ export function createAutomationRow(): PlaylistRow {
     const at = (year: number): number => (zone === null ? 0 : laneValue(getWarmthLane(zone), year));
     const line: LanePoint[] = [[w.a, at(w.a)], ...inside, [w.b, at(w.b)]];
     const yRange = laneYRange(all);
-    // A zone with no lane draws the same flat run, in the muted "nothing here yet" grey.
-    const color = drawn ? "var(--wadjet-studio-temp)" : "var(--wadjet-studio-text-mute)";
+    // Warmth feeds TEMP, so the lane wears TEMP's hue whether or not the zone
+    // has authored a point yet (SPEC §9: the lane IS the data). An empty lane
+    // says so by being flat at neutral, not by going grey.
+    const color = "var(--wadjet-studio-temp)";
     const series: ChartSeries[] = [
       { points: inside, color },
       { points: line, color },
     ];
 
     painted = { window: w, yRange };
-    const key = `${width}|${w.a}|${w.b}|${yRange[0]}|${yRange[1]}|${JSON.stringify(all)}`;
+    // The value under the window's centre — what the lane is worth right here.
+    const units = host?.ctx.plugin.settings.units ?? "metric";
+    const now = format(at((w.a + w.b) / 2), "temperatureDelta", units, { digits: 1 });
+    host?.sub.setText(`${now.text} ${now.unit}`);
+
+    const key = `${width}|${w.a}|${w.b}|${yRange[0]}|${yRange[1]}|${drawn}|${JSON.stringify(all)}`;
     if (key === signature) return;
     signature = key;
-    chart.update({ width, height: ROW_HEIGHT, series, yRange });
+    // Neutral is the reading the lane is *about*: without a line at 0 a flat
+    // run at +2 °C looks exactly like a flat run at 0.
+    chart.update({ width, height: ROW_HEIGHT, series, yRange, rules: [{ value: 0, dash: "2 4", color: "var(--wadjet-studio-precip)" }] });
   }
 
   return {
@@ -244,6 +250,7 @@ export function createAutomationRow(): PlaylistRow {
       host = next;
       next.row.el.addClass("wadjet-studio-automation-row");
       next.label.setAttrs({ "data-hint": forcingsHint("forcings.row"), "data-part": "automation-label", role: "button", tabindex: "0" });
+      next.dot.setCssProps({ "--wadjet-studio-row-dot-color": "var(--wadjet-studio-temp)" });
       next.label.addEventListener("click", openWindow);
       next.label.addEventListener("keydown", onLabelKey);
 

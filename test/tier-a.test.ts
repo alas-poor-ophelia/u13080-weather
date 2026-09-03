@@ -61,7 +61,7 @@ describe("Tier A", () => {
     expect(evalCurve(out.precipitation.scale, 0.3)).toBeCloseTo(evalCurve(fjord.climate.precipitation.scale, 0.8), 9);
 
     const text = describeTierA(fjord, adj);
-    expect(text).toContain("Closest match: Bergen Florida");
+    expect(text).toContain("Closest match: Bergen (");
     expect(text).toContain("−6.5 °C for altitude");
     expect(text).toContain("flipped");
   });

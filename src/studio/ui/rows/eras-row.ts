@@ -22,9 +22,10 @@
  *    CYCLE and Seasons windows use — the first era edit of a session asks,
  *    later ones do not.
  *  - **Colour is per span, and the Lane component is per lane.** `LaneProps`
- *    carries one `color` for the whole lane, but SPEC §3.2 wants each era in
- *    its own hue from the band cycle. The row therefore sets
- *    `--wadjet-studio-span-color` on each span node *after* `lane.update`
+ *    carries one `color` for the whole lane, but SPEC §3.2 wants each era's
+ *    Era-zoom clip in its own hue from `ERA_CYCLE` (`model/palette.ts`) — the
+ *    Year-zoom bar is calendar chrome and stays gold. The row therefore sets
+ *    `--wadjet-studio-span-color` on each clip node *after* `lane.update`
  *    repaints — custom properties inherit, so the per-node value wins over the
  *    lane's. It only ever touches the lane instance it owns.
  *  - **`onCreate` is zoom-gated, the rest is `editable`-gated.** At Year zoom
@@ -37,7 +38,7 @@ import { addEra, removeEra, setSpan } from "../../model/era-edit";
 import { tabular } from "../../model/format";
 import { rowHint } from "../../model/hints-rows";
 import { stackRows, type Span } from "../../model/lanes";
-import { cycleColour } from "../../model/palette";
+import { cycleColour, ERA_CYCLE } from "../../model/palette";
 import type { StudioState } from "../../model/state";
 import { needsWorldConfirm } from "../../model/world-confirm";
 import { zoomLabel, type Window } from "../../model/zoom";
@@ -49,8 +50,25 @@ import { confirmWorldEdit } from "../world-confirm-modal";
 /** SPEC §3.2: "Overlapping eras stack in up to 3 sub-rows". */
 const MAX_SUB_ROWS = 3;
 
-/** Taller than the 28 px default: three sub-rows of era clips have to stay readable. */
-const ROW_HEIGHT = 36;
+/**
+ * The lane's drawn height. The prototype's arrangement lanes are thin — the
+ * clips carry their own label, so 20 px is enough for one row and the three
+ * sub-rows an overlap needs divide it (SPEC §3.2).
+ */
+const ROW_HEIGHT = 20;
+
+/**
+ * The lane's second line (SPEC §3.2): at Era zoom the row is *about* the
+ * world's history, so it counts it; at Year zoom and tighter it names the era
+ * the window is standing in.
+ */
+export function erasSub(state: StudioState, w: Window): string {
+  const eras = state.world.eras;
+  if (zoomLabel(w) === "era") return `world · ${eras.length} era${eras.length === 1 ? "" : "s"}`;
+  const centre = Math.floor((w.a + w.b) / 2);
+  const here = eras.filter((e) => e.enabled !== false && e.from <= centre && (e.to === undefined || e.to >= centre));
+  return here.length === 0 ? "no era here" : `${SPAN_PREFIX}${here.map((e) => e.name).join(" · ")}`;
+}
 
 /** Span ids are `era:<name>` — the same key `eraWindowId` opens the panel under. */
 const SPAN_PREFIX = "era:";
@@ -99,12 +117,15 @@ export function drawEras(state: StudioState, w: Window): Drawing {
       const { from, to } = clipRange(e, w);
       if (!(to > from) || !overlaps(from, to, w)) return;
       out.push({ id, from, to, kind: "clip", editable: true, label: e.name, ...dim });
+      // Era zoom's clip is the per-era tint; the Year-zoom bar below stays
+      // calendar gold (the CSS default) — it is calendar chrome, not a
+      // per-era swatch (SPEC §9, the eras-row docstring above).
+      colours.set(id, cycleColour(state.view.colours.eras[i] ?? i, ERA_CYCLE));
     } else {
       if (e.from > centre) return;
       if (e.to !== undefined && e.to < centre) return;
       out.push({ id, from: w.a, to: w.b, kind: "bar", editable: false, label: barLabel(e), ...dim });
     }
-    colours.set(id, cycleColour(state.view.colours.eras[i] ?? i));
   });
 
   return { spans: stackRows(out, MAX_SUB_ROWS), colours };
@@ -230,7 +251,10 @@ export function createErasRow(): PlaylistRow {
       const span = node as HTMLElement;
       const id = span.getAttribute("data-id");
       const colour = id === null ? undefined : colours.get(id);
-      if (colour !== undefined) span.setCssProps({ "--wadjet-studio-span-color": colour });
+      // The prototype pairs every era hue with a lighter one for its label —
+      // the clip is a translucent wash of the hue, so a label AT the hue
+      // disappears into it (`ERA_COLORS` is a [fill, text] pair).
+      if (colour !== undefined) span.setCssProps({ "--wadjet-studio-span-color": colour, "--wadjet-studio-span-text": `color-mix(in srgb, ${colour} 55%, white)` });
       span.setAttr("data-hint", rowHint(span.getAttribute("data-kind") === "bar" ? "row.eras.bar" : "row.eras.clip"));
     }
   }
@@ -247,12 +271,13 @@ export function createErasRow(): PlaylistRow {
 
   return {
     id: "eras",
-    label: "Eras · world",
+    label: "Eras",
     order: ROW_ORDER.eras,
 
     mount(next) {
       host = next;
       next.label.setAttr("data-hint", rowHint("row.eras"));
+      next.dot.setCssProps({ "--wadjet-studio-row-dot-color": "var(--wadjet-studio-gold)" });
       next.body.addClass("wadjet-studio-eras-row");
       lane = createLane(next.body, {
         geometry: { x0: 0, pxPerYear: 1, windowFrom: 0, edgePx: 4 },
@@ -270,6 +295,7 @@ export function createErasRow(): PlaylistRow {
     render(state, geo: RowGeometry) {
       const drawing = drawEras(state, state.view.window);
       colours = drawing.colours;
+      host?.sub.setText(erasSub(state, state.view.window));
       lane?.update({ geometry: geo.lane, spans: drawing.spans });
       decorate();
     },

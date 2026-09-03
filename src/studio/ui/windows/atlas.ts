@@ -1,21 +1,22 @@
 /**
  * The Atlas window (SPEC §3.4 "Atlas · STATION", PLAN §5.4).
  *
- * The zone's *source*, in two modes behind one Segmented:
+ * The zone's *source*, in two modes behind one Segmented, over one shared map:
  *
- *   STATION    the 26 shipped stations, searchable; a record card for the one
- *              selected, a spark of its year of temperature against the zone's
- *              own, and `Re-base zone → X`.
+ *   STATION    every shipped station as a dot in Köppen climate space, the
+ *              list beside it by STATION NAME, a record card for the one
+ *              selected with its year of temperature against the zone's
+ *              current base, and `Re-base zone → X`.
  *   GEOGRAPHY  a place rather than a station: the zone dot dragged ↕ latitude
- *              ↔ terrain, knobs for latitude / altitude / continentality, and
- *              the closest match Tier A picks for it — live, as the knobs move
- *              — behind `Match by geography → X`.
+ *              ↔ terrain across the same map, knobs for latitude / altitude /
+ *              continentality, and the closest match Tier A picks for it —
+ *              live, as the knobs move — behind `Match by geography → X`.
  *
- * Three things worth knowing before editing this file:
+ * Four things worth knowing before editing this file:
  *
  *  - **Every rule about what a re-base or a match writes lives in
- *    `model/atlas.ts`**, not here (PLAN D3). This file is the list, the knobs,
- *    the chart and two buttons; the two buttons call one pure function each
+ *    `model/atlas.ts`**, not here (PLAN D3). This file is the map, the list,
+ *    the knobs and two buttons; the two buttons call one pure function each
  *    and put the result in the draft under `history: true`.
  *  - **Geography mode is a scratchpad until the button is pressed.** The knobs
  *    and the map move a *window-local* `Geography`, not the draft, so the
@@ -31,6 +32,13 @@
  *    from this body's own panel ancestor — the one place the panel's chrome is
  *    touched from a body. `level` (SPEC §3.9, `flipSeasons`) *is* store state,
  *    so it uses the shared mechanism like every other window.
+ *  - **The map and the two sparks are drawn here, not by Chart.** Both need
+ *    marks Chart does not carry — soft climate blobs with their own labels, a
+ *    per-dot name, a dashed comparison curve and a 0 °C guide — and neither is
+ *    reusable anywhere else in the studio, so the component bin stays closed
+ *    at nine (SPEC §0 law 3). All geometry is the prototype's, in its own
+ *    480 × 380 and 196 × 50 user spaces; `model/atlas.ts` computes the
+ *    positions, this file only draws them.
  *
  * Continentality carries an *unset* state, mirroring `AddZoneModal`'s "adjust
  * the seasonal swing" toggle: off omits the axis from `Geography` entirely,
@@ -38,14 +46,40 @@
  * own seasonal swing (`core/types.ts`, `Geography.continentality`).
  */
 import { Notice } from "obsidian";
-import type { Geography, Orographic, ZoneProfile } from "../../../core/types";
+import type { Geography, Orographic, Preset, ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
-import { matchByGeography, presetOf, previewMatch, rebase, searchStations, sparkOf, stationOf, type Station } from "../../model/atlas";
-import { format } from "../../model/format";
+import {
+  adjustedSpark,
+  climateSpace,
+  CLIMATE_BLOBS,
+  latitudeBaselineC,
+  latitudeForBaselineC,
+  matchByGeography,
+  matchParts,
+  presetOf,
+  previewMatch,
+  rebase,
+  SPACE_H,
+  SPACE_UNITS_PER_C,
+  SPACE_W,
+  spaceXForTerrain,
+  sparkOf,
+  stationOf,
+  stations,
+  terrainForSpaceX,
+  tierAAdjustment,
+  zonePoint,
+  type KoppenGroup,
+  type Station,
+} from "../../model/atlas";
+import { grammar } from "../../model/copy";
+import { format, unitLabel } from "../../model/format";
 import { atlasHint } from "../../model/hints-atlas";
 import type { StudioState } from "../../model/state";
 import { ledLevel, unitKey } from "../../model/validation";
-import { createChart, createKnob, createSegmented, type ChartComponent, type ChartSeries, type KnobComponent, type SegmentedComponent } from "../components";
+import { createSegmented, type SegmentedComponent } from "../components";
+import { createKnob, type KnobComponent } from "../components/knob";
+import { beginDrag, markDragTarget } from "../pointer";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 
@@ -59,39 +93,43 @@ const LATITUDE_SPEC = { min: -90, max: 90, step: 1, neutral: 0 } as const;
 const ALTITUDE_SPEC = { min: 0, max: 5000, step: 10 } as const;
 const CONTINENTALITY_SPEC = { min: 0, max: 1, step: 0.05 } as const;
 
-/** The spark and the map, in SVG user units. */
-const SPARK_W = 296;
-const SPARK_H = 62;
-const MAP_W = 296;
-const MAP_H = 168;
+/** The spark's own user space (`proto-markup/1267-vst-atlas.html`): 196 × 50, 0 °C at 26.6. */
+const SPARK_W = 196;
+const SPARK_H = 50;
+const SPARK_ZERO_Y = 26.6;
+/** −30 °C at the floor, +35 °C at the ceiling — the prototype's fixed scale, so two sparks compare. */
+const SPARK_MIN_C = -30;
+const SPARK_SPAN_C = 65;
 
-/** The three terrain columns the map's x axis is, in order. */
-const TERRAIN: readonly Orographic[] = ["none", "windward", "leeward"];
+/** The three terrain columns the map's x axis is, driest first. */
+const TERRAIN: readonly Orographic[] = ["leeward", "none", "windward"];
 
 /** `AddZoneModal`'s defaults, for a zone that has never been described as a place. */
 const DEFAULT_GEOGRAPHY: Geography = { latitude: 45, altitude: 200, orographic: "none" };
 const DEFAULT_CONTINENTALITY = 0.5;
 
-/** The column centre for a terrain, in the map's [0,1] x axis. */
-function terrainX(o: Orographic): number {
-  const at = TERRAIN.indexOf(o);
-  return ((at < 0 ? 0 : at) + 0.5) / TERRAIN.length;
-}
+/** The palette a Köppen group carries, on its blob, its dots and its rows (SPEC §9). */
+const GROUP_COLOR: Record<KoppenGroup, string> = {
+  A: "var(--wadjet-studio-wind)",
+  B: "var(--wadjet-studio-temp)",
+  C: "var(--wadjet-studio-precip)",
+  D: "var(--wadjet-studio-moon)",
+  E: "var(--wadjet-studio-moon)",
+};
 
-/** Sentence case, for the terrain Segmented and the map's column labels. */
+/** The prototype's terrain words: `open` for none, the slope names otherwise. */
 function terrainLabel(o: Orographic): string {
-  return o === "windward" ? "Windward" : o === "leeward" ? "Leeward" : "None";
+  return o === "windward" ? "windward" : o === "leeward" ? "leeward" : "open";
 }
 
-/** Which terrain column an x in [0,1] fell in. */
-function terrainAt(x: number): Orographic {
-  const at = Math.min(TERRAIN.length - 1, Math.max(0, Math.floor(x * TERRAIN.length)));
-  return TERRAIN[at] ?? "none";
-}
-
-/** `52°` / `−35°` — degrees of latitude, real minus, no unit table needed. */
+/**
+ * `60.4°` / `−35.0°` — degrees of latitude, real minus, no unit table needed.
+ * One decimal, like the prototype; the hemisphere stays in the sign rather
+ * than becoming an `N`/`S` suffix, so the knob's typed entry still reads back
+ * what it printed.
+ */
 function latitudeText(v: number): string {
-  return `${format(v, "count", "metric").text}°`;
+  return `${format(v, "count", "metric", { digits: 1 }).text}°`;
 }
 
 /**
@@ -103,16 +141,26 @@ function altitudeText(v: number): string {
   return `${format(v, "count", "metric").text} m`;
 }
 
+/** `0.10 coast` / `0.90 interior` — the prototype's reading of the axis. */
 function continentalityText(v: number, units: Units): string {
-  return format(v, "fraction", units).text;
+  const n = format(v, "fraction", units).text;
+  return v < 0.25 ? `${n} coast` : v > 0.7 ? `${n} interior` : n;
 }
 
-/** A body button — a real button for the keyboard, hinted like everything else. Its text follows the selection, so it is set at paint. */
-function actionButton(parent: HTMLElement, o: { hint: string; part: string; onClick: () => void }): HTMLElement {
+/** `2° … 14 °C` — the one number pair that says what a station is. */
+function rangeText(min: number, max: number, units: Units): string {
+  const lo = format(min, "temperature", units, { digits: 0 });
+  const hi = format(max, "temperature", units, { digits: 0 });
+  return `${lo.text}° … ${hi.text} ${hi.unit}`;
+}
+
+/** A body button — a real button for the keyboard, hinted like everything else. */
+function actionButton(parent: HTMLElement, o: { hint: string; part: string; text?: string; onClick: () => void }): HTMLElement {
   const el = parent.createDiv({
     cls: "wadjet-studio-atlas-action",
     attr: { role: "button", tabindex: "0", "data-hint": o.hint, "data-part": o.part },
   });
+  if (o.text !== undefined) el.setText(o.text);
   el.addEventListener("click", () => {
     if (!el.hasClass("is-disabled")) o.onClick();
   });
@@ -124,23 +172,21 @@ function actionButton(parent: HTMLElement, o: { hint: string; part: string; onCl
   return el;
 }
 
-/** Twelve monthly samples as a year-domain line: month centres across [0,1]. */
-function sparkSeries(values: number[], color: string): ChartSeries {
-  return { points: values.map((v, i): [number, number] => [(i + 0.5) / values.length, v]), color };
-}
-
-/** One `label · value` line of the station record card. */
-function cardRow(parent: HTMLElement, label: string): HTMLElement {
-  const row = parent.createDiv({ cls: "wadjet-studio-atlas-cardrow" });
-  row.createSpan({ cls: "wadjet-studio-atlas-cardlabel", text: label });
-  return row.createSpan({ cls: "wadjet-studio-atlas-cardvalue" });
+/** Twelve monthly means as a polyline in the spark's own 196 × 50 space. */
+function sparkPoints(values: number[]): string {
+  return values
+    .map((v, i) => {
+      const x = ((i + 0.5) / values.length) * SPARK_W;
+      const y = SPARK_H - 4 - ((v - SPARK_MIN_C) / SPARK_SPAN_C) * (SPARK_H - 8);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
 }
 
 export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuild => {
   let unsubscribe: (() => void) | null = null;
 
   let mode: Mode = "station";
-  let query = "";
   let selected: string | null = null;
   /** the working place, seeded from the zone; only the button writes it */
   let geo: Geography = { ...DEFAULT_GEOGRAPHY };
@@ -148,6 +194,8 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   let useContinentality = false;
   /** the zone the scratchpad above was seeded from */
   let seededFrom: string | null = null;
+  /** the mode the WRITES footer was last pulled for; see `repaint` */
+  let footedMode: string | null = null;
   let listSignature = "";
 
   function zone(state: StudioState = ctx.store.get()): ZoneProfile | null {
@@ -158,6 +206,12 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   /** The place as the match sees it: continentality is an axis only while it is on. */
   function place(): Geography {
     return useContinentality ? { ...geo, continentality } : { ...geo };
+  }
+
+  /** The station the zone currently sits on — the `base` chip and the dashed spark. */
+  function baseStation(z: ZoneProfile | null): Station | null {
+    const id = z?.preset?.id;
+    return id === undefined ? null : stationOf(id);
   }
 
   /**
@@ -181,11 +235,17 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
     continentality = DEFAULT_CONTINENTALITY;
   }
 
-  // --- the body ------------------------------------------------------------
+  // --- the body: the map on the left, the controls on the right -------------
 
   const root = createDiv({ cls: "wadjet-studio-atlas" });
 
-  const modeRow = root.createDiv({ cls: "wadjet-studio-atlas-moderow" });
+  const mapBox = root.createDiv({ cls: "wadjet-studio-atlas-mapbox", attr: { "data-hint": atlasHint("atlas.map"), "data-part": "atlas-map" } });
+  const mapSvg = mapBox.createSvg("svg", { cls: "wadjet-studio-atlas-map", attr: { viewBox: `0 0 ${SPACE_W} ${SPACE_H}`, preserveAspectRatio: "xMidYMid meet" } });
+  markDragTarget(mapBox);
+
+  const side = root.createDiv({ cls: "wadjet-studio-atlas-side" });
+
+  const modeRow = side.createDiv({ cls: "wadjet-studio-atlas-moderow" });
   const modeSeg: SegmentedComponent = createSegmented(modeRow, {
     options: [
       { value: "station", label: "Station", hint: atlasHint("atlas.mode") },
@@ -201,56 +261,36 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
 
   // --- station mode ---------------------------------------------------------
 
-  const stationPane = root.createDiv({ cls: "wadjet-studio-atlas-pane" });
-  const search = stationPane.createEl("input", {
-    cls: "wadjet-studio-atlas-search",
-    type: "text",
-    attr: { placeholder: "Search stations", "aria-label": "Search stations", "data-hint": atlasHint("atlas.search"), "data-part": "atlas-search" },
-  });
-  search.addEventListener("input", () => {
-    query = search.value;
-    repaint();
-  });
-
+  const stationPane = side.createDiv({ cls: "wadjet-studio-atlas-pane" });
   const list = stationPane.createDiv({ cls: "wadjet-studio-atlas-list", attr: { role: "listbox", "data-part": "atlas-list" } });
 
   const card = stationPane.createDiv({ cls: "wadjet-studio-atlas-card", attr: { "data-hint": atlasHint("atlas.card"), "data-part": "atlas-card" } });
-  const cardName = card.createDiv({ cls: "wadjet-studio-atlas-cardname", attr: { "data-part": "atlas-card-name" } });
-  const cardCharacter = card.createDiv({ cls: "wadjet-studio-atlas-cardcharacter" });
-  const cardStation = cardRow(card, "Station");
-  const cardYears = cardRow(card, "Years of record");
-  const cardPlace = cardRow(card, "Latitude · altitude");
-  const cardKoppen = cardRow(card, "Köppen");
+  const cardHead = card.createDiv({ cls: "wadjet-studio-atlas-cardhead" });
+  const cardName = cardHead.createSpan({ cls: "wadjet-studio-atlas-cardname", attr: { "data-part": "atlas-card-name" } });
+  const cardKoppen = cardHead.createSpan({ cls: "wadjet-studio-atlas-koppen" });
+  cardHead.createDiv({ cls: "wadjet-studio-atlas-fill" });
+  const cardYears = cardHead.createSpan({ cls: "wadjet-studio-atlas-cardyears" });
+  const cardStats = card.createDiv({ cls: "wadjet-studio-atlas-cardstats" });
+  const cardText = card.createDiv({ cls: "wadjet-studio-atlas-cardtext" });
+  const cardSpark = card.createSvg("svg", { cls: "wadjet-studio-atlas-spark", attr: { viewBox: `0 0 ${SPARK_W} ${SPARK_H}`, preserveAspectRatio: "none", "data-hint": atlasHint("atlas.spark"), "data-part": "atlas-spark" } });
+  const cardSparkLabel = card.createDiv({ cls: "wadjet-studio-atlas-sparklabel" });
 
-  const sparkBox = stationPane.createDiv({ cls: "wadjet-studio-atlas-spark", attr: { "data-hint": atlasHint("atlas.spark"), "data-part": "atlas-spark" } });
-  const spark: ChartComponent = createChart(sparkBox, { kind: "curve", domain: "year", width: SPARK_W, height: SPARK_H, series: [] });
-
-  const rebaseBtn = actionButton(stationPane, { hint: atlasHint("atlas.rebase"), part: "atlas-rebase", onClick: () => doRebase() });
+  stationPane.createDiv({ cls: "wadjet-studio-atlas-fill" });
+  const stationActions = stationPane.createDiv({ cls: "wadjet-studio-atlas-actions" });
+  actionButton(stationActions, { hint: atlasHint("atlas.close"), part: "atlas-close", text: "Close", onClick: () => ctx.windows.close(ATLAS_WINDOW) });
+  const rebaseBtn = actionButton(stationActions, { hint: atlasHint("atlas.rebase"), part: "atlas-rebase", onClick: () => doRebase() });
+  rebaseBtn.addClass("is-primary");
 
   // --- geography mode -------------------------------------------------------
 
-  const geoPane = root.createDiv({ cls: "wadjet-studio-atlas-pane" });
-  const mapBox = geoPane.createDiv({ cls: "wadjet-studio-atlas-map", attr: { "data-hint": atlasHint("atlas.map"), "data-part": "atlas-map" } });
-  const map: ChartComponent = createChart(mapBox, {
-    kind: "automation",
-    domain: "year",
-    width: MAP_W,
-    height: MAP_H,
-    series: [],
-    yRange: [LATITUDE_SPEC.min, LATITUDE_SPEC.max],
-    editable: true,
-    markers: TERRAIN.map((o) => ({ x: terrainX(o), label: terrainLabel(o) })),
-    onPoint: (_index, x, y) => {
-      geo = { ...geo, latitude: Math.round(Math.min(LATITUDE_SPEC.max, Math.max(LATITUDE_SPEC.min, y))), orographic: terrainAt(x) };
-      repaint();
-    },
-  });
+  const geoPane = side.createDiv({ cls: "wadjet-studio-atlas-pane" });
 
   const knobRow = geoPane.createDiv({ cls: "wadjet-studio-atlas-knobs" });
   const latitude: KnobComponent = createKnob(knobRow, {
     spec: LATITUDE_SPEC,
     value: geo.latitude,
-    label: "Latitude",
+    label: "latitude",
+    size: "lg",
     color: "var(--wadjet-studio-temp)",
     hint: atlasHint("atlas.latitude"),
     fmt: latitudeText,
@@ -264,8 +304,9 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   const altitude: KnobComponent = createKnob(knobRow, {
     spec: ALTITUDE_SPEC,
     value: geo.altitude,
-    label: "Altitude",
-    color: "var(--wadjet-studio-sky)",
+    label: "altitude",
+    size: "lg",
+    color: "var(--wadjet-studio-moon)",
     hint: atlasHint("atlas.altitude"),
     fmt: altitudeText,
     onChange: (value) => {
@@ -278,8 +319,9 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   const continental: KnobComponent = createKnob(knobRow, {
     spec: CONTINENTALITY_SPEC,
     value: continentality,
-    label: "Continentality",
-    color: "var(--wadjet-studio-precip)",
+    label: "continentality",
+    size: "lg",
+    color: "var(--wadjet-studio-gold)",
     hint: atlasHint("atlas.continentality"),
     fmt: (v) => continentalityText(v, ctx.units()),
     disabled: true,
@@ -290,23 +332,8 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   });
   continental.el.setAttr("data-part", "atlas-continentality");
 
-  const swingRow = geoPane.createDiv({ cls: "wadjet-studio-atlas-row" });
-  swingRow.createSpan({ cls: "wadjet-studio-atlas-rowlabel", text: "Seasonal swing" });
-  const swingSeg: SegmentedComponent = createSegmented(swingRow, {
-    options: [
-      { value: "station", label: "Station's own", hint: atlasHint("atlas.swing") },
-      { value: "adjust", label: "Adjust", hint: atlasHint("atlas.swing") },
-    ],
-    value: "station",
-    onChange: (value) => {
-      useContinentality = value === "adjust";
-      repaint();
-    },
-  });
-  swingSeg.el.setAttr("data-part", "atlas-swing");
-
   const terrainRow = geoPane.createDiv({ cls: "wadjet-studio-atlas-row" });
-  terrainRow.createSpan({ cls: "wadjet-studio-atlas-rowlabel", text: "Terrain" });
+  terrainRow.createSpan({ cls: "wadjet-studio-atlas-rowlabel", text: "terrain" });
   const terrainSeg: SegmentedComponent = createSegmented(terrainRow, {
     options: TERRAIN.map((o) => ({ value: o, label: terrainLabel(o), hint: atlasHint("atlas.terrain") })),
     value: geo.orographic,
@@ -318,12 +345,37 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   });
   terrainSeg.el.setAttr("data-part", "atlas-terrain");
 
-  const matchCard = geoPane.createDiv({ cls: "wadjet-studio-atlas-match", attr: { "data-hint": atlasHint("atlas.match"), "data-part": "atlas-match" } });
-  const matchName = matchCard.createDiv({ cls: "wadjet-studio-atlas-matchname", attr: { "data-part": "atlas-match-name" } });
-  const matchDistance = matchCard.createDiv({ cls: "wadjet-studio-atlas-matchdistance", attr: { "data-part": "atlas-match-distance" } });
-  const matchText = matchCard.createDiv({ cls: "wadjet-studio-atlas-matchtext", attr: { "data-part": "atlas-match-text" } });
+  const swingRow = geoPane.createDiv({ cls: "wadjet-studio-atlas-row" });
+  swingRow.createSpan({ cls: "wadjet-studio-atlas-rowlabel", text: "swing" });
+  const swingSeg: SegmentedComponent = createSegmented(swingRow, {
+    options: [
+      { value: "station", label: "station's own", hint: atlasHint("atlas.swing") },
+      { value: "adjust", label: "adjust", hint: atlasHint("atlas.swing") },
+    ],
+    value: "station",
+    onChange: (value) => {
+      useContinentality = value === "adjust";
+      repaint();
+    },
+  });
+  swingSeg.el.setAttr("data-part", "atlas-swing");
 
-  const matchBtn = actionButton(geoPane, { hint: atlasHint("atlas.matchbtn"), part: "atlas-matchbtn", onClick: () => doMatch() });
+  const matchCard = geoPane.createDiv({ cls: "wadjet-studio-atlas-match", attr: { "data-hint": atlasHint("atlas.match"), "data-part": "atlas-match" } });
+  const matchHead = matchCard.createDiv({ cls: "wadjet-studio-atlas-cardhead" });
+  matchHead.createSpan({ cls: "wadjet-studio-atlas-rowlabel", text: "closest match" });
+  const matchName = matchHead.createSpan({ cls: "wadjet-studio-atlas-cardname", attr: { "data-part": "atlas-match-name" } });
+  const matchKoppen = matchHead.createSpan({ cls: "wadjet-studio-atlas-koppen" });
+  matchHead.createDiv({ cls: "wadjet-studio-atlas-fill" });
+  const matchDistance = matchHead.createSpan({ cls: "wadjet-studio-atlas-matchdistance", attr: { "data-part": "atlas-match-distance" } });
+  const matchText = matchCard.createDiv({ cls: "wadjet-studio-atlas-matchtext", attr: { "data-part": "atlas-match-text" } });
+  const matchSpark = matchCard.createSvg("svg", { cls: "wadjet-studio-atlas-spark", attr: { viewBox: `0 0 ${SPARK_W} ${SPARK_H}`, preserveAspectRatio: "none" } });
+  const matchSparkLabel = matchCard.createDiv({ cls: "wadjet-studio-atlas-sparklabel" });
+
+  geoPane.createDiv({ cls: "wadjet-studio-atlas-fill" });
+  const geoActions = geoPane.createDiv({ cls: "wadjet-studio-atlas-actions" });
+  actionButton(geoActions, { hint: atlasHint("atlas.close"), part: "atlas-geo-close", text: "Close", onClick: () => ctx.windows.close(ATLAS_WINDOW) });
+  const matchBtn = actionButton(geoActions, { hint: atlasHint("atlas.matchbtn"), part: "atlas-matchbtn", onClick: () => doMatch() });
+  matchBtn.addClass("is-primary");
 
   // --- the two writes -------------------------------------------------------
 
@@ -355,6 +407,104 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
     if (result.flipped) new Notice("Seasons flipped for this zone (southern hemisphere match)", 8000);
   }
 
+  // --- the map --------------------------------------------------------------
+
+  /**
+   * Drag the zone dot: ↕ moves it through temperature, which is a latitude,
+   * and ↔ moves it between the terrain columns. Landing on the map in Station
+   * mode adopts the selected station's place first, so the drag starts from
+   * where the dot already is (the prototype's `atlasDotDown`).
+   */
+  function onMapDown(ev: PointerEvent): void {
+    if (ev.button !== 0) return;
+    const box = mapSvg.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) return;
+    const scale = SPACE_W / box.width;
+    if (mode !== "geography") {
+      const station = selected === null ? null : stationOf(selected);
+      if (station !== null) {
+        geo = { latitude: station.latitude, altitude: station.altitude, orographic: station.orographic };
+        useContinentality = false;
+        continentality = station.continentality;
+      }
+      mode = "geography";
+    }
+    const startLat = geo.latitude;
+    const south = startLat < 0;
+    const baseC = latitudeBaselineC(startLat);
+    const startX = spaceXForTerrain(geo.orographic);
+    ev.preventDefault();
+    beginDrag(ev, {
+      capture: mapSvg,
+      onMove: (_e, dx, dy) => {
+        const wantC = baseC - (dy * scale) / SPACE_UNITS_PER_C;
+        const lat = Number(latitudeForBaselineC(wantC, south).toFixed(1));
+        geo = { ...geo, latitude: Math.max(-90, Math.min(90, lat)), orographic: terrainForSpaceX(startX + dx * scale) };
+        repaint();
+      },
+    });
+    repaint();
+  }
+
+  mapBox.addEventListener("pointerdown", onMapDown);
+
+  function paintMap(): void {
+    mapSvg.empty();
+    for (const b of CLIMATE_BLOBS) {
+      // `cls` must be an array here: createSvg hands a bare string straight to
+      // classList.add, which rejects anything with a space in it.
+      mapSvg.createSvg("ellipse", { cls: ["wadjet-studio-atlas-blob", `is-group-${b.group.toLowerCase()}`], attr: { cx: b.cx, cy: b.cy, rx: b.rx, ry: b.ry } });
+    }
+    for (const b of CLIMATE_BLOBS) {
+      const color = b.group === "D-E" ? GROUP_COLOR.D : GROUP_COLOR[b.group];
+      mapSvg.createSvg("text", { cls: "wadjet-studio-atlas-bloblabel", attr: { x: b.labelX, y: b.labelY, fill: color } }).setText(b.label);
+    }
+
+    const highlight = mode === "geography" ? (previewMatch(place())?.candidate.preset.id ?? null) : selected;
+    const points = climateSpace();
+    let zoneX = 0;
+    let zoneY = 0;
+    let linkTo: { x: number; y: number } | null = null;
+    if (mode === "geography") {
+      const p = zonePoint(place());
+      if (p !== null) {
+        zoneX = p.x;
+        zoneY = p.y;
+        linkTo = { x: p.matchX, y: p.matchY };
+      }
+    } else {
+      const at = points.find((p) => p.id === selected);
+      zoneX = at?.x ?? 0;
+      zoneY = at?.y ?? 0;
+    }
+
+    for (const p of points) {
+      const on = p.id === highlight;
+      const dot = mapSvg.createSvg("circle", {
+        cls: "wadjet-studio-atlas-dot",
+        attr: { cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: on ? 7 : 4.5, fill: GROUP_COLOR[p.group], "data-id": p.id, "data-hint": atlasHint("atlas.station"), tabindex: "0", role: "button" },
+      });
+      dot.toggleClass("is-on", on);
+      dot.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        selected = p.id;
+        mode = "station";
+        repaint();
+      });
+      mapSvg
+        .createSvg("text", { cls: "wadjet-studio-atlas-dotlabel", attr: { x: p.labelX.toFixed(1), y: p.labelY.toFixed(1), "text-anchor": p.anchor } })
+        .setText(p.name);
+    }
+
+    if (linkTo !== null) {
+      mapSvg.createSvg("line", { cls: "wadjet-studio-atlas-link", attr: { x1: zoneX.toFixed(1), y1: zoneY.toFixed(1), x2: linkTo.x.toFixed(1), y2: linkTo.y.toFixed(1) } });
+    }
+    if (zoneX > 0 || zoneY > 0) {
+      mapSvg.createSvg("circle", { cls: "wadjet-studio-atlas-zonering", attr: { cx: zoneX.toFixed(1), cy: zoneY.toFixed(1), r: 11 } });
+      mapSvg.createSvg("circle", { cls: "wadjet-studio-atlas-zonecore", attr: { cx: zoneX.toFixed(1), cy: zoneY.toFixed(1), r: 3 } });
+    }
+  }
+
   // --- paint ---------------------------------------------------------------
 
   /**
@@ -367,21 +517,23 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
     if (badge instanceof HTMLElement) badge.setText(mode === "station" ? "STATION" : "GEOGRAPHY");
   }
 
-  function paintList(): void {
-    const rows = searchStations(query);
-    const key = `${query}|${selected ?? ""}`;
+  function paintList(z: ZoneProfile | null): void {
+    const baseId = baseStation(z)?.id ?? null;
+    const key = `${selected ?? ""}|${baseId ?? ""}`;
     if (key === listSignature) return;
     listSignature = key;
     list.empty();
-    for (const s of rows) {
+    for (const s of stations()) {
       const row = list.createDiv({
         cls: "wadjet-studio-atlas-station",
         attr: { role: "option", tabindex: "0", "aria-selected": s.id === selected ? "true" : "false", "data-hint": atlasHint("atlas.station"), "data-part": "atlas-station", "data-id": s.id },
       });
       row.toggleClass("is-selected", s.id === selected);
+      row.createSpan({ cls: "wadjet-studio-atlas-stationdot" }).setCssProps({ "--wadjet-studio-atlas-color": GROUP_COLOR[s.group] });
       row.createSpan({ cls: "wadjet-studio-atlas-stationname", text: s.name });
+      row.createDiv({ cls: "wadjet-studio-atlas-fill" });
+      if (s.id === baseId) row.createSpan({ cls: "wadjet-studio-atlas-stationbase", text: "base" });
       row.createSpan({ cls: "wadjet-studio-atlas-stationkoppen", text: s.koppen });
-      row.createSpan({ cls: "wadjet-studio-atlas-stationcharacter", text: s.character });
       const pick = (): void => {
         selected = s.id;
         repaint();
@@ -393,80 +545,137 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
         pick();
       });
     }
-    if (rows.length === 0) list.createDiv({ cls: "wadjet-studio-atlas-empty", text: "No station matches that." });
+  }
+
+  /** One spark: the comparison record dashed, the subject solid, 0 °C dotted through. */
+  function paintSpark(svg: SVGElement, base: number[] | null, subject: number[] | null, color: string): void {
+    svg.empty();
+    svg.createSvg("line", { cls: "wadjet-studio-atlas-sparkzero", attr: { x1: 0, x2: SPARK_W, y1: SPARK_ZERO_Y, y2: SPARK_ZERO_Y } });
+    if (base !== null) svg.createSvg("polyline", { cls: "wadjet-studio-atlas-sparkbase", attr: { points: sparkPoints(base) } });
+    if (subject !== null) svg.createSvg("polyline", { cls: "wadjet-studio-atlas-sparkline", attr: { points: sparkPoints(subject), stroke: color } });
   }
 
   function paintCard(station: Station | null, z: ZoneProfile | null): void {
-    cardName.setText(station?.name ?? "No station selected");
-    cardCharacter.setText(station?.character ?? "");
-    cardStation.setText(station === null ? "—" : `${station.sourceName}, ${station.country}`);
-    cardYears.setText(station === null ? "—" : format(station.years, "years", ctx.units()).text);
-    cardPlace.setText(station === null ? "—" : `${latitudeText(station.latitude)} · ${altitudeText(station.altitude)}`);
-    cardKoppen.setText(station?.koppen ?? "—");
-
+    const units = ctx.units();
+    const base = baseStation(z);
     const preset = station === null ? null : presetOf(station.id);
-    const series: ChartSeries[] = [];
-    // The zone's own year goes in first so the station's line draws over it.
-    if (z !== null) series.push(sparkSeries(sparkOf(z), "var(--wadjet-studio-text-dim)"));
-    if (preset !== null) series.push(sparkSeries(sparkOf(preset), "var(--wadjet-studio-temp)"));
-    spark.update({ series });
+    const basePreset: Preset | null = base === null ? null : presetOf(base.id);
 
-    rebaseBtn.setText(station === null ? "Re-base zone" : `Re-base zone → ${station.name}`);
-    rebaseBtn.toggleClass("is-disabled", station === null || z === null);
-    rebaseBtn.setAttr("aria-disabled", station === null || z === null ? "true" : "false");
+    cardName.setText(station?.name ?? "No station selected");
+    cardKoppen.setText(station?.koppen ?? "—");
+    cardKoppen.setCssProps({ "--wadjet-studio-atlas-color": station === null ? "var(--wadjet-studio-text-dim)" : GROUP_COLOR[station.group] });
+    cardYears.setText(station === null ? "" : `${format(station.years, "count", units).text} yr`);
+    cardStats.setText(
+      station === null
+        ? "—"
+        : grammar(rangeText(station.minC, station.maxC, units), `wet ${format(station.wetDays, "count", units).text} d/yr`, `${station.country} · ${station.koppenDescription}`),
+    );
+    cardText.setText(station === null ? "" : `${station.presetName} — ${station.character}`);
+
+    paintSpark(cardSpark, basePreset === null ? null : sparkOf(basePreset), preset === null ? null : sparkOf(preset), station === null ? "var(--wadjet-studio-text-dim)" : GROUP_COLOR[station.group]);
+    const by = `mean ${unitLabel("temperature", units)} by month`;
+    cardSparkLabel.setText(base === null || station === null ? by : `${by} · ${base.name} (dashed) vs ${station.name}`);
+
+    const isBase = station !== null && base !== null && station.id === base.id && z?.geography === undefined;
+    rebaseBtn.setText(station === null ? "Re-base zone" : isBase ? "✓ current base" : `Re-base zone → ${station.name}`);
+    rebaseBtn.toggleClass("is-done", isBase);
+    rebaseBtn.toggleClass("is-disabled", station === null || z === null || isBase);
+    rebaseBtn.setAttr("aria-disabled", station === null || z === null || isBase ? "true" : "false");
   }
 
-  function paintGeography(): void {
+  function paintGeography(z: ZoneProfile | null): void {
     latitude.update({ value: geo.latitude });
     altitude.update({ value: geo.altitude });
     continental.update({ value: continentality, disabled: !useContinentality });
     swingSeg.update({ value: useContinentality ? "adjust" : "station" });
     terrainSeg.update({ value: geo.orographic });
-    map.update({ series: [{ points: [[terrainX(geo.orographic), geo.latitude]], color: "var(--wadjet-studio-accent)" }] });
 
     const preview = previewMatch(place());
-    matchName.setText(preview === null ? "—" : preview.candidate.preset.name);
-    matchDistance.setText(preview === null ? "" : `distance ${format(preview.candidate.distance, "fraction", ctx.units()).text}`);
-    matchText.setText(preview?.provenance ?? "No station ships to match this place.");
-    matchBtn.setText(preview === null ? "Match by geography" : `Match by geography → ${preview.candidate.preset.name}`);
-    matchBtn.toggleClass("is-disabled", preview === null);
-    matchBtn.setAttr("aria-disabled", preview === null ? "true" : "false");
+    const station = preview === null ? null : stationOf(preview.candidate.preset.id);
+    const color = station === null ? "var(--wadjet-studio-text-dim)" : GROUP_COLOR[station.group];
+    matchName.setText(station?.name ?? "—");
+    matchKoppen.setText(station?.koppen ?? "—");
+    matchKoppen.setCssProps({ "--wadjet-studio-atlas-color": color });
+    matchDistance.setText(preview === null ? "" : `match Δ ${preview.candidate.distance.toFixed(2)}`);
+
+    const parts = matchParts(place());
+    matchText.setText(preview === null ? "No station ships to match this place." : parts.length > 0 ? parts.join(" · ") : "no adjustment");
+    // The full sentence the button's Notice will carry, one hover away.
+    matchText.setAttr("title", preview?.provenance ?? "");
+
+    const preset = preview?.candidate.preset ?? null;
+    const adj = preset === null ? null : tierAAdjustment(place(), preset.match);
+    paintSpark(matchSpark, preset === null ? null : sparkOf(preset), preset === null || adj === null ? null : adjustedSpark(preset, adj), color);
+    const by = `mean ${unitLabel("temperature", ctx.units())} by month`;
+    matchSparkLabel.setText(station === null ? by : `${by} · ${station.name} record (dashed) → adjusted`);
+
+    const already = z?.preset?.matched === "auto" && z.preset.id === preset?.id && z.geography !== undefined && sameGeography(z.geography, place());
+    matchBtn.setText(preview === null ? "Match by geography" : already ? "✓ current base" : `Match by geography → ${station?.name ?? preview.candidate.preset.name}`);
+    matchBtn.toggleClass("is-done", already);
+    matchBtn.toggleClass("is-disabled", preview === null || already);
+    matchBtn.setAttr("aria-disabled", preview === null || already ? "true" : "false");
+  }
+
+  function sameGeography(a: Geography, b: Geography): boolean {
+    return a.latitude === b.latitude && a.altitude === b.altitude && a.orographic === b.orographic && (a.continentality ?? null) === (b.continentality ?? null);
   }
 
   /**
-   * Repaint from the live state. Both panes are guarded by their own
-   * signature, so a store tick that changed nothing this panel shows touches
-   * no DOM — and the hidden pane is not painted at all.
+   * Repaint from the live state. The list is guarded by its own signature, so
+   * a store tick that changed nothing this panel shows touches no DOM — and
+   * the hidden pane is not painted at all.
    */
   function repaint(): void {
     const state = ctx.store.get();
     const z = zone(state);
     // A zone switch (or the first paint) re-seeds the scratchpad and the
     // selection; an edit inside the same zone leaves the user's place alone.
-    if ((z?.id ?? null) !== seededFrom) seed(z);
+    if ((z?.id ?? null) !== seededFrom) {
+      seed(z);
+      listSignature = "";
+    }
 
     stationPane.toggleClass("is-hidden", mode !== "station");
     geoPane.toggleClass("is-hidden", mode !== "geography");
     modeSeg.update({ value: mode });
     paintBadge();
+    paintMap();
+
+    // `writes` is pull-based: the window manager re-reads it on a STORE tick,
+    // and `mode` is window-local (it is not in the store at all). Without this
+    // the footer would keep naming the other mode's grammar until something
+    // else moved the world, and SPEC law 5 asks it to be true now.
+    if (mode !== footedMode) {
+      footedMode = mode;
+      ctx.windows.renderAll(state);
+    }
 
     if (mode === "station") {
-      paintList();
+      paintList(z);
       paintCard(selected === null ? null : stationOf(selected), z);
     } else {
-      paintGeography();
+      paintGeography(z);
     }
   }
 
   // --- pull-based readout ----------------------------------------------------
 
-  /** The exact grammar this panel produces (SPEC law 5). */
+  /** The exact grammar this panel produces (SPEC law 5) — what the buttons would write. */
   function writes(): string {
-    const z = zone();
-    if (z === null) return "zone.preset · zone.geography";
-    const parts = [`zone.preset · ${z.preset === undefined ? "—" : JSON.stringify(z.preset)}`];
-    parts.push(`zone.geography · ${z.geography === undefined ? "—" : JSON.stringify(z.geography)}`);
-    return parts.join("  ");
+    if (mode === "station") {
+      const id = selected ?? zone()?.preset?.id ?? null;
+      return grammar(id === null ? "zone.preset { — }" : `zone.preset { id ${id}, matched manual }`, "climate copied from the station record");
+    }
+    const g = place();
+    const parts = matchParts(g);
+    const match = previewMatch(g);
+    const described = grammar(
+      `latitude ${g.latitude.toFixed(1)}`,
+      `altitude ${Math.round(g.altitude)}`,
+      g.continentality === undefined ? null : `continentality ${g.continentality.toFixed(2)}`,
+      `terrain ${terrainLabel(g.orographic)}`,
+    );
+    return grammar(`zone.geography { ${described} }`, match === null ? null : `preset ${match.candidate.preset.id} (auto)`, `Tier A ${parts.length > 0 ? parts.join(", ") : "—"}`);
   }
 
   unsubscribe = ctx.store.subscribe(() => repaint());
@@ -474,9 +683,14 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
 
   return {
     title: "Atlas",
-    // The chrome paints this once, at open; `paintBadge()` (called from
-    // `repaint()`) keeps it live across a `mode` toggle (see the file header).
-    badge: mode === "station" ? "STATION" : "GEOGRAPHY",
+    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
+    width: 720,
+    // A reader, not a snapshot. `mode` is window-local, so the chrome would
+    // otherwise keep the badge it was opened with — and worse, any later
+    // `update()` (a `writes` tick) re-stamps the badge from `props`, undoing
+    // the direct poke `paintBadge()` makes. `renderAll` re-pulls this.
+    badge: () => (mode === "station" ? "STATION" : "GEOGRAPHY"),
+    badgeColor: "var(--wadjet-studio-wind)",
     body: root,
     led: { on: true, scope: "device" },
     // `flipSeasons` is the one core-validated path this window owns (SPEC §3.9 mapIssue).
@@ -485,14 +699,13 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
     onClose: () => {
       unsubscribe?.();
       unsubscribe = null;
+      mapBox.removeEventListener("pointerdown", onMapDown);
       modeSeg.destroy();
       swingSeg.destroy();
       terrainSeg.destroy();
       latitude.destroy();
       altitude.destroy();
       continental.destroy();
-      spark.destroy();
-      map.destroy();
       root.remove();
     },
   };

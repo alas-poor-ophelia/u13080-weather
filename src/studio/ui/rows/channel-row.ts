@@ -3,49 +3,75 @@
  *
  * One `PlaylistRow` per signal chain, built from `playlist.ts`'s `CHANNELS`
  * list so the label, colour, order and hint key stay where the mixer can read
- * them. What this file adds is the row's *body*: a Chart, sized to the
- * measured lane width, drawn from `model/channel-series.ts`.
+ * them. What this file adds is the row's *body*: the composed climate drawn
+ * across the window, sized to the measured lane width.
  *
- * Three things worth knowing before editing it:
+ * Four things worth knowing before editing it:
  *
- *  - **The morph picks the data, not the drawing.** `geo.morph.fine` (and a
- *    window no wider than `FINE_MAX_YEARS`) means the row draws the *real
- *    roll* — `rollCached` per year in the window, one point per rolled day,
- *    never an average (SPEC law 4). Anything wider draws the resolved
- *    climate's yearly ribbon repeated per year, and wider than
- *    `RIBBON_FLAT_YEARS` draws one flat mean line, because at Era zoom a
- *    thousand repeats of a 13-point ring is a grey smear that costs 14 000
- *    points to produce.
+ *  - **The row draws the COMPOSED curve, not the roll.** SPEC §3.2's "fine
+ *    zoom → composed curves" is literal: at Year, Season and Month zoom the
+ *    row samples the *resolved* climate (`model/channel-series.ts`'s
+ *    `composedAcross` — every climate-stage layer the mixer wrote is already
+ *    in it) at `COMPOSED_SAMPLES` points across the window. A per-day roll was
+ *    drawn here until this bead; it made the seasonal shape — the single most
+ *    important reading in the studio — invisible under day-to-day jitter, and
+ *    a day's rolled weather is what the audition strip and the day card are
+ *    for. Only Era zoom leaves the curve: past `RIBBON_FLAT_YEARS` the yearly
+ *    shape cannot resolve at all, so the row draws the yearly ribbon's mean.
+ *  - **The spread band is the second reading.** Temperature fills between the
+ *    day's low and high (its `diurnalRange`), wind between speed ± its SD,
+ *    precipitation from the wet-day fraction down to the floor. Each is a
+ *    `Chart` layer stacked under the headline line.
+ *  - **Sky is a cell strip, not a curve.** Cloud cover has no shape worth a
+ *    line; the prototype shades one swatch per sampled slice, which is the
+ *    same object the audition strip's day cells are.
  *  - **Nothing is redrawn unless something moved.** Every render computes
- *    `seriesKey` — mode, data identity (the `auditionKey`s at fine zoom, the
- *    profile hash at wide zoom), window and measured width — *before* it does
- *    any work, and returns on a hit. A knob drag that does not touch this
- *    channel never rebuilds this SVG (PLAN §7).
- *  - **Colour is the palette (SPEC §9).** The chain's own custom property for
- *    the headline series, `--wadjet-studio-moon` for the second one; the row
- *    never invents a hue and never takes one from a caller.
- *
- * Temperature is the one row with two charts stacked in the body: `Chart`'s
- * `band` kind fills between two series and strokes the upper one, which leaves
- * nowhere to put the mean line SPEC §3.2 asks for. Two instances of a part in
- * the bin is not a tenth part (SPEC law 3), and the band chart only exists at
- * fine zoom.
+ *    `seriesKey` — mode, profile identity, window and measured width — before
+ *    it does any work, and returns on a hit.
  */
-import { auditionKey, rollCached, type AuditionDay, type AuditionInput } from "../../model/audition";
-import { FINE_MAX_YEARS, fineSeries, flatMean, RIBBON_FLAT_YEARS, ribbonAcross, ribbonSeries, ribbonSourceKey, seriesKey, windowPoints, yRangeFor, type ChannelSeries, type SeriesRole, type YearGrid } from "../../model/channel-series";
+import type { AuditionInput } from "../../model/audition";
+import { erasHash } from "../../../core/eras";
+import { axisLabelled, axisTicks, composedAcross, HEADLINE_ROLE, RIBBON_FLAT_YEARS, ribbonSourceKey, seriesKey, statsOf, steppedAcross, yRangeFor, type ChannelSeries, type SeriesRole, type YearGrid } from "../../model/channel-series";
 import type { Channel } from "../../model/compile";
+import { displayName } from "../../model/copy";
+import { format } from "../../model/format";
 import { channelHint, channelRowDetail } from "../../model/hints-channels";
 import { playlistHint } from "../../model/hints-playlist";
 import type { StudioState } from "../../model/state";
-import { createChart, type ChartComponent, type ChartSeries } from "../components";
+import { ticks, yearToPx } from "../../model/zoom";
+import type { Units } from "../../../core/units";
+import { createChart, type ChartComponent, type ChartRule, type ChartSeries } from "../components";
 import type { PlaylistRow, RowGeometry, RowHost } from "../playlist";
+import { calendarBands } from "../ruler";
 import type { SurfaceContext } from "../surfaces";
 // The id is the CHANNEL WINDOW's to define (`ui/windows/channel.ts`), not this
 // row's: the row is only one of the things that opens the panel.
 import { channelWindowId } from "../windows/channel";
 
-/** The channel row's body height in px. Must equal `--wadjet-studio-channel-h`. */
-export const CHANNEL_ROW_HEIGHT = 48;
+/**
+ * The row body's height per channel, in px. SPEC §3.2's proportions: the
+ * temperature row is the studio's anchor and gets the most vertical
+ * resolution, sky the least because a strip of swatches needs none.
+ * Must equal `--wadjet-studio-channel-h` per `[data-channel]` in styles.css.
+ */
+export const CHANNEL_ROW_HEIGHT: Record<Channel, number> = {
+  temperature: 150,
+  precipitation: 104,
+  wind: 84,
+  sky: 28,
+};
+
+/** Kept for callers that only need "how tall is a channel row" without a channel. */
+export const DEFAULT_CHANNEL_ROW_HEIGHT = CHANNEL_ROW_HEIGHT.temperature;
+
+/** Swatches in the Sky strip. The prototype's own count, and independent of zoom. */
+export const SKY_CELLS = 56;
+
+/** Vertical padding the Chart component reserves; the axis column has to agree with it. */
+const CHART_PAD = 6;
+
+/** The grid only needs the ticks' POSITIONS; the ruler above already labels them. */
+const TICK_POSITIONS_ONLY = { year: () => "", day: () => "" };
 
 /** The shape `playlist.ts`'s `CHANNELS` entries have; taken structurally so the list stays the mixer's to read. */
 export interface ChannelSpec {
@@ -57,9 +83,9 @@ export interface ChannelSpec {
 }
 
 /**
- * The calendar grid the fractional-year x axis is measured on — the same
- * `epochYear`/`yearLength` the playlist's own bounds use, so a point lands on
- * the pixel the ruler puts that day at.
+ * The calendar grid a fractional-year x axis is measured on — the same
+ * `epochYear`/`yearLength` the playlist's own bounds use. Kept here (rather
+ * than moved) because `ui/day-card.ts` reads it from this module.
  */
 export function yearGridFor(ctx: SurfaceContext): YearGrid | null {
   const described = ctx.calendar();
@@ -72,7 +98,9 @@ export function yearGridFor(ctx: SurfaceContext): YearGrid | null {
  * The audition input for one year of the selected zone's draft, or `null`
  * when there is no zone or the adapter cannot be reached. Identical in every
  * field to the one `ui/audition.ts` builds — same seed, same salt, same pins —
- * so at `salt: 0` the curve is byte-for-byte the weather the vault reports.
+ * so at `salt: 0` the day it reports is byte-for-byte the weather the vault
+ * reports. The channel rows no longer roll (they draw the composed curve);
+ * `ui/day-card.ts` does, and reads this from here.
  */
 export function auditionInputFor(ctx: SurfaceContext, state: StudioState, year: number): AuditionInput | null {
   const adapter = ctx.plugin.time.active;
@@ -102,52 +130,76 @@ function colorFor(role: SeriesRole, channelColor: string): string {
   return role === "pww" || role === "cloudWet" ? "var(--wadjet-studio-moon)" : channelColor;
 }
 
-/** Precipitation's amount is the only filled series: the wet-day marks read as bars, not a line. */
-function toChartSeries(series: readonly ChannelSeries[], channelColor: string): ChartSeries[] {
-  return series.map((s) => (s.role === "amount" ? { points: s.points, color: colorFor(s.role, channelColor), fill: true } : { points: s.points, color: colorFor(s.role, channelColor) }));
-}
-
-type Mode = "fine" | "ribbon" | "flat" | "empty";
+type Mode = "composed" | "flat" | "empty";
 
 /** What the row would draw, decided before any of it is derived. */
 interface Plan {
   mode: Mode;
   source: string;
-  inputs: AuditionInput[];
+}
+
+/** The mode and the data's identity, cheaply — one profile hash, no roll. */
+function planFor(state: StudioState, geo: RowGeometry): Plan {
+  const id = state.view.zoneId;
+  const zone = id === null ? undefined : state.zones[id];
+  if (zone === undefined) return { mode: "empty", source: "none" };
+  const span = geo.window.b - geo.window.a;
+  // The eras are part of the plotted shape now (they step the curve), so they
+  // are part of its identity: an era edit must invalidate the memoised SVG.
+  return { mode: span > RIBBON_FLAT_YEARS ? "flat" : "composed", source: `${ribbonSourceKey(zone)}|${erasHash(state.world.eras)}` };
 }
 
 /**
- * The mode and the data's identity, cheaply: a hash per year at fine zoom, one
- * profile hash otherwise. Everything expensive happens only after `seriesKey`
- * has said the row actually moved.
+ * The row's second label line (SPEC §3.2): what this channel is actually
+ * doing in the window on screen. Every number goes through `format.ts`, so a
+ * reader on imperial units gets °F and mph without this file knowing.
  */
-function planFor(ctx: SurfaceContext, state: StudioState, geo: RowGeometry): Plan {
-  const grid = yearGridFor(ctx);
-  const id = state.view.zoneId;
-  const zone = id === null ? undefined : state.zones[id];
-  if (zone === undefined || grid === null) return { mode: "empty", source: "none", inputs: [] };
-
-  const span = geo.window.b - geo.window.a;
-  if (geo.morph.fine && span <= FINE_MAX_YEARS) {
-    const inputs: AuditionInput[] = [];
-    for (const year of yearsIn(geo.window.a, geo.window.b)) {
-      const input = auditionInputFor(ctx, state, year);
-      if (input !== null) inputs.push(input);
-    }
-    // `auditionKey` folds in the profile, calendar, eras, salt and pins, so
-    // the joined keys are the whole identity of what the fine curve draws.
-    if (inputs.length > 0) return { mode: "fine", source: inputs.map((i) => auditionKey(i)).join(","), inputs };
+export function channelSub(channel: Channel, series: readonly ChannelSeries[], units: Units): string {
+  // The ribbon's sky role is `cloudDry`, the composed one's is `cloud`; either
+  // way the row's headline is the first series it was handed.
+  const stats = statsOf(series, HEADLINE_ROLE[channel]) ?? (series[0] === undefined ? null : statsOf(series, series[0].role));
+  if (stats === null) return "";
+  const range = (q: "temperature" | "speed", digits: number): string => {
+    const lo = format(stats.min, q, units, { digits });
+    const hi = format(stats.max, q, units, { digits });
+    return `${lo.text} – ${hi.text} ${hi.unit}`;
+  };
+  switch (channel) {
+    case "temperature":
+      return range("temperature", 1);
+    case "wind":
+      return range("speed", 0);
+    case "precipitation":
+      return `wet ${Math.round(stats.mean * 100)}% of days`;
+    case "sky":
+      return `cloud ${Math.round(stats.mean * 100)}%`;
   }
-  return { mode: span > RIBBON_FLAT_YEARS ? "flat" : "ribbon", source: ribbonSourceKey(zone), inputs: [] };
+}
+
+/** An axis value's own text: bare degrees on temperature, a leading-dot fraction on precipitation. */
+function axisText(channel: Channel, value: number, units: Units): string {
+  switch (channel) {
+    case "temperature":
+      return `${format(value, "temperature", units, { digits: 0 }).text}°`;
+    case "precipitation":
+      return format(value, "fraction", units, { digits: 2 }).text.replace(/^0/, "").replace(/0$/, "");
+    case "wind":
+      return format(value, "speed", units, { digits: 0 }).text;
+    case "sky":
+      return "";
+  }
 }
 
 export function createChannelRow(channel: ChannelSpec): PlaylistRow {
   const id = channel.id;
+  const height = CHANNEL_ROW_HEIGHT[id];
   let context: SurfaceContext | null = null;
-  let labelEl: HTMLElement | null = null;
+  let host: RowHost | null = null;
   let plotEl: HTMLElement | null = null;
+  let bandsEl: HTMLElement | null = null;
   let bandEl: HTMLElement | null = null;
   let lineEl: HTMLElement | null = null;
+  let cellsEl: HTMLElement | null = null;
   let band: ChartComponent | null = null;
   let line: ChartComponent | null = null;
   /** The last `seriesKey` drawn. Empty means "nothing drawn yet". */
@@ -164,12 +216,76 @@ export function createChannelRow(channel: ChannelSpec): PlaylistRow {
   }
 
   /** The chart for one layer, created on first use so the row costs nothing until it draws. */
-  function chartIn(parent: HTMLElement, existing: ChartComponent | null, kind: "curve" | "band", geo: RowGeometry, series: ChartSeries[], yRange: [number, number]): ChartComponent {
+  function chartIn(parent: HTMLElement, existing: ChartComponent | null, kind: "curve" | "band", geo: RowGeometry, series: ChartSeries[], yRange: [number, number], rules: ChartRule[]): ChartComponent {
+    const next = { kind, width: geo.widthPx, height, series, yRange, rules, padX: 0 };
     if (existing !== null) {
-      existing.update({ kind, width: geo.widthPx, height: CHANNEL_ROW_HEIGHT, series, yRange });
+      existing.update(next);
       return existing;
     }
-    return createChart(parent, { kind, domain: "year", width: geo.widthPx, height: CHANNEL_ROW_HEIGHT, series, yRange });
+    return createChart(parent, { ...next, domain: "year" as const });
+  }
+
+  /**
+   * The calendar showing through, behind the curve: the same season (or era)
+   * bands the ruler draws, full height, plus a hairline at every ruler tick.
+   * SPEC §3.2 — the seasonal shape has to be legible even before the curve is.
+   */
+  function paintBands(state: StudioState, geo: RowGeometry): void {
+    const el = bandsEl;
+    const ctx = context;
+    if (el === null || ctx === null) return;
+    el.empty();
+    for (const b of calendarBands(ctx, state, geo)) {
+      const node = el.createDiv({ cls: "wadjet-studio-channel-band" });
+      node.setCssProps({
+        "--wadjet-studio-ruler-band-left": `${b.left}px`,
+        "--wadjet-studio-ruler-band-width": `${b.width}px`,
+        "--wadjet-studio-ruler-band-color": b.tint,
+      });
+    }
+    // A hairline under every labelled ruler tick: the chart's own x scale,
+    // read off the same plan the ruler drew (`model/zoom.ts`'s `ticks`).
+    for (const t of ticks(geo.window, geo.widthPx, TICK_POSITIONS_ONLY)) {
+      if (!t.major) continue;
+      const line = el.createDiv({ cls: "wadjet-studio-channel-grid" });
+      line.setCssProps({ "--wadjet-studio-ruler-band-left": `${yearToPx(t.year, geo.window, geo.widthPx)}px` });
+    }
+  }
+
+  /** The y-axis values, in the row's own 44 px gutter (SPEC §3.2's `15° 10° 5° 0°`). */
+  function paintAxis(values: readonly number[], yRange: [number, number], units: Units): void {
+    const el = host?.axis;
+    if (el === undefined) return;
+    el.empty();
+    const [lo, hi] = yRange;
+    if (!(hi > lo)) return;
+    for (const v of values) {
+      const text = axisText(id, v, units);
+      if (text === "") continue;
+      const y = CHART_PAD + (1 - (v - lo) / (hi - lo)) * (height - 2 * CHART_PAD);
+      const node = el.createSpan({ cls: "wadjet-studio-axis-tick wadjet-studio-num", text });
+      node.setCssProps({ "--wadjet-studio-axis-top": `${y}px` });
+    }
+  }
+
+  /** Sky: one shaded swatch per sampled slice of the window, gutters and all. */
+  function paintCells(series: readonly ChannelSeries[]): void {
+    const el = cellsEl;
+    if (el === null) return;
+    el.empty();
+    // At Era zoom the row falls back to the yearly ribbon, whose sky role is
+    // `cloudDry` rather than the composed `cloud` — either way the first
+    // series is the one the strip shades with.
+    const cloud = series.find((s) => s.role === "cloud") ?? series[0];
+    if (cloud === undefined || cloud.points.length === 0) return;
+    for (let i = 0; i < SKY_CELLS; i++) {
+      const at = Math.min(cloud.points.length - 1, Math.round(((i + 0.5) / SKY_CELLS) * (cloud.points.length - 1)));
+      const g = Math.max(0, Math.min(1, cloud.points[at]![1]));
+      const cell = el.createDiv({ cls: "wadjet-studio-channel-cell" });
+      // The prototype's own ramp: a nearly black overcast-free sky up to a
+      // pale grey overcast one, on the studio's neutral hue.
+      cell.setCssProps({ "--wadjet-studio-cell-color": `hsl(220, 5%, ${(13 + g * 44).toFixed(1)}%)` });
+    }
   }
 
   function draw(state: StudioState, geo: RowGeometry, plan: Plan): void {
@@ -177,53 +293,80 @@ export function createChannelRow(channel: ChannelSpec): PlaylistRow {
     const lineHost = lineEl;
     if (bandHost === null || lineHost === null || context === null) return;
 
+    const zoneId = state.view.zoneId;
+    const zone = zoneId === null ? undefined : state.zones[zoneId];
     let series: ChannelSeries[] = [];
-    if (plan.mode === "fine") {
-      const grid = yearGridFor(context);
-      const days: AuditionDay[] = [];
-      for (const input of plan.inputs) days.push(...rollCached(input).days);
-      const fine = grid === null ? [] : fineSeries(days, id, grid);
-      // Fine points arrive in fractional years; the Chart's `"year"` domain
-      // plots [0,1], so the window itself becomes the x axis.
-      series = fine.map((s) => ({ role: s.role, points: windowPoints(s.points, geo.window.a, geo.window.b) }));
-    } else if (plan.mode === "ribbon" || plan.mode === "flat") {
-      const zone = state.view.zoneId === null ? undefined : state.zones[state.view.zoneId];
-      const ribbon = zone === undefined ? [] : ribbonSeries(zone, id);
-      series = plan.mode === "flat" ? flatMean(ribbon) : ribbonAcross(ribbon, geo.window.a, geo.window.b);
+    if (zone !== undefined) {
+      const eras = state.world.eras;
+      series = plan.mode === "flat" ? steppedAcross(zone, id, geo.window.a, geo.window.b, eras) : composedAcross(zone, id, geo.window.a, geo.window.b, undefined, eras);
+    }
+
+    const units = context.plugin.settings.units;
+    host?.sub.setText(channelSub(id, series, units));
+
+    if (id === "sky") {
+      paintCells(series);
+      paintAxis([], [0, 1], units);
+      return;
     }
 
     const yRange = yRangeFor(id, series);
-    // The band is temperature's low/high pair; every other channel draws lines only.
-    const bandPair = id === "temperature" ? series.filter((s) => s.role === "low" || s.role === "high") : [];
+    const ticks = axisTicks(id, yRange[0], yRange[1]);
+    paintAxis(axisLabelled(id, ticks), yRange, units);
+
+    // A grid line is solid and the playlist's own hairline; the Chart never
+    // declares its own paint, so the row names the hue it wants.
+    const rules: ChartRule[] = ticks.map((y) => ({ value: y, color: "var(--wadjet-studio-hairline)" }));
+    // Freezing is the one value on the temperature axis that means something
+    // by itself, so it is a reference line rather than a grid line — and a
+    // reference is what `dash` says.
+    if (id === "temperature" && yRange[0] < 0 && yRange[1] > 0) rules.push({ value: 0, dash: "2 4", color: "var(--wadjet-studio-precip)" });
+
+    // The spread band is a low/high pair; the headline line is everything else.
+    const bandPair = series.filter((s) => s.role === "low" || s.role === "high");
     const lines = series.filter((s) => !bandPair.includes(s));
+    const chartLines: ChartSeries[] = lines.map((s) => (s.role === "amount" ? { points: s.points, color: colorFor(s.role, channel.color), fill: true } : { points: s.points, color: colorFor(s.role, channel.color) }));
 
     const hasBand = bandPair.length >= 2;
     bandHost.toggleClass("is-hidden", !hasBand);
-    if (hasBand) band = chartIn(bandHost, band, "band", geo, toChartSeries(bandPair, channel.color), yRange);
+    // `Chart`'s band kind strokes its upper series as well as filling between
+    // the pair. Here the band is a *background* — the headline line is the one
+    // stroke the row draws — so the upper edge is handed a transparent stroke
+    // rather than the channel's hue.
+    if (hasBand) band = chartIn(bandHost, band, "band", geo, [{ points: bandPair[0]!.points, color: channel.color }, { points: bandPair[1]!.points, color: "transparent" }], yRange, []);
     else if (band !== null) band.update({ series: [] });
 
-    line = chartIn(lineHost, line, "curve", geo, toChartSeries(lines, channel.color), yRange);
+    line = chartIn(lineHost, line, "curve", geo, chartLines, yRange, rules);
   }
 
   return {
     id: channel.id,
-    label: channel.label,
+    // Title case, not the mixer's `TEMP`: the caps short forms are the signal
+    // path's vocabulary, and the arrangement view is a different reading.
+    label: displayName(channel.id),
     order: channel.order,
 
-    mount(host: RowHost) {
-      context = host.ctx;
-      labelEl = host.label;
-      host.label.setAttr("data-hint", playlistHint(channel.hint, channelRowDetail(id)));
-      host.label.addClass("is-clickable");
-      host.label.setAttrs({ role: "button", tabindex: "0" });
-      host.label.addEventListener("click", open);
-      host.label.addEventListener("keydown", onLabelKey);
+    mount(next: RowHost) {
+      context = next.ctx;
+      host = next;
+      next.row.el.addClass("wadjet-studio-channel-row");
+      next.label.setAttr("data-hint", playlistHint(channel.hint, channelRowDetail(id)));
+      next.label.addClass("is-clickable");
+      next.label.setAttrs({ role: "button", tabindex: "0" });
+      next.label.addEventListener("click", open);
+      next.label.addEventListener("keydown", onLabelKey);
+      // The label's accent stripe and its name both wear the chain's hue: the
+      // one place in the playlist where colour names a thing rather than data.
+      next.label.setCssProps({ "--wadjet-studio-channel-color": channel.color });
+      next.dot.addClass("is-hidden");
 
-      plotEl = host.body.createDiv({ cls: "wadjet-studio-channel", attr: { "data-channel": channel.id, "data-hint": channelHint("channel.plot", channelRowDetail(id)) } });
-      plotEl.setCssProps({ "--wadjet-studio-channel-color": channel.color });
+      plotEl = next.body.createDiv({ cls: "wadjet-studio-channel", attr: { "data-channel": channel.id, "data-hint": channelHint("channel.plot", channelRowDetail(id)) } });
+      plotEl.setCssProps({ "--wadjet-studio-channel-color": channel.color, "--wadjet-studio-channel-h": `${height}px` });
       plotEl.addEventListener("click", open);
+      bandsEl = plotEl.createDiv({ cls: "wadjet-studio-channel-bands" });
       bandEl = plotEl.createDiv({ cls: "wadjet-studio-channel-layer is-band is-hidden" });
       lineEl = plotEl.createDiv({ cls: "wadjet-studio-channel-layer is-line" });
+      if (id === "sky") cellsEl = plotEl.createDiv({ cls: "wadjet-studio-channel-cells" });
     },
 
     render(state: StudioState, geo: RowGeometry) {
@@ -233,20 +376,22 @@ export function createChannelRow(channel: ChannelSpec): PlaylistRow {
       // a row instance belongs to one leaf, so its plot must always carry that
       // leaf's zone — never the other leaf's).
       plotEl?.setAttr("data-zone", state.view.zoneId ?? "");
-      // The playlist hides every row at Day zoom and shows the day card
-      // instead; deriving a curve nothing can see is pure cost.
-      if (geo.morph.isDay) return;
-      const plan = planFor(context, state, geo);
+      const plan = planFor(state, geo);
       const key = seriesKey({ mode: plan.mode, source: plan.source, a: geo.window.a, b: geo.window.b, widthPx: geo.widthPx });
+      // The bands follow the window, so they repaint whenever the key moves —
+      // which is exactly when the curve under them does.
       if (key === painted) return;
       painted = key;
+      paintBands(state, geo);
       draw(state, geo, plan);
     },
 
     destroy() {
-      labelEl?.removeEventListener("click", open);
-      labelEl?.removeEventListener("keydown", onLabelKey);
-      labelEl = null;
+      host?.label.removeEventListener("click", open);
+      host?.label.removeEventListener("keydown", onLabelKey);
+      host?.row.el.removeClass("wadjet-studio-channel-row");
+      host?.axis.empty();
+      host = null;
       plotEl?.removeEventListener("click", open);
       band?.destroy();
       line?.destroy();
@@ -254,8 +399,10 @@ export function createChannelRow(channel: ChannelSpec): PlaylistRow {
       line = null;
       plotEl?.remove();
       plotEl = null;
+      bandsEl = null;
       bandEl = null;
       lineEl = null;
+      cellsEl = null;
       painted = "";
       context = null;
     },

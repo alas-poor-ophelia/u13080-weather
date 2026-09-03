@@ -1,10 +1,15 @@
 /**
  * The header and everything in it (SPEC §3.1).
  *
- * Left: the zone the studio is pointed at — its name (a dropdown over every
- * zone, with dirty state and base station), its live Köppen class, the station
- * it was copied from, and the hemisphere flag when it is set. Right: the tools
- * that move the playlist's window, the JSON drawer, undo/redo and **Save**.
+ * Left: the wordmark, then the zone the studio is pointed at — its name (a
+ * dropdown over every zone, with dirty state and base station), its live
+ * Köppen class, the station it was copied from, and the hemisphere flag when
+ * it is offered. Right: the tools that move the playlist's window, the JSON
+ * drawer and **Save**.
+ *
+ * There are no undo/redo buttons (bead wadjet-6rw.6): the prototype's header
+ * has none, SPEC §3.1 does not list them, and the leaf's own Mod+Z scope
+ * (`ui/view.ts`) already carries the feature.
  *
  * Three things worth knowing before editing this file:
  *
@@ -19,13 +24,13 @@
  *  - **Save is the only thing in the studio that writes `plugin.settings`.**
  *    Every other edit lands in a draft. Errors block it; warnings do not.
  *
- * Chrome buttons (transport, JSON, undo/redo, Save) are plain header controls,
- * not additions to the closed component bin (SPEC law 3) — the same status as
+ * Chrome buttons (transport, JSON, Save) are plain header controls, not
+ * additions to the closed component bin (SPEC law 3) — the same status as
  * the window's × and the ruler's label. The four things that stand for an
  * *entity* (zone, Köppen class, station, hemisphere flag) are Chips.
  */
 import { Menu, Notice } from "obsidian";
-import { koppenOfClimate } from "../../core/koppen";
+import { koppenOfClimate, type KoppenResult } from "../../core/koppen";
 import { canonicalJson, resolveProfile, validateProfile } from "../../core/profile";
 import type { ZoneProfile } from "../../core/types";
 import { PRESETS } from "../../generated/presets";
@@ -37,7 +42,7 @@ import { hintAttr } from "../model/hints";
 import { zoneForSave } from "../model/json-view";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
-import { panBy, presetWindow, width, zoomAt, zoomLabel, type Window, type ZoomBounds, type ZoomPreset } from "../model/zoom";
+import { panBy, presetWindow, width, worldBounds, zoomAt, zoomLabel, type Window, type ZoomBounds, type ZoomPreset } from "../model/zoom";
 import { createChip, createLed, createSegmented, type ChipComponent, type LedComponent, type SegmentedComponent } from "./components";
 import type { Surface, SurfaceContext } from "./surfaces";
 // The SRC chip's destination (SPEC law 2: reached from the thing it
@@ -51,10 +56,6 @@ const ZOOM_OUT = 1.25;
 /** Transport pan step, as a fraction of the visible window. */
 const PAN_FRACTION = 0.25;
 
-/** How far either side of the world's epoch the timeline may be panned, in years. */
-const BOUNDS_BEFORE = 100;
-const BOUNDS_AFTER = 1100;
-
 /** Year length to label with when the active adapter does not describe itself. */
 const DEFAULT_YEAR_LENGTH = 365;
 
@@ -66,12 +67,32 @@ const PRESET_OPTIONS: ReadonlyArray<{ value: ZoomPreset; label: string; hint: st
   { value: "era", label: "Era", hint: hintAttr("zoom.era") },
 ];
 
-const PRESET_LABEL: Record<ZoomPreset, string> = { day: "Day", month: "Month", season: "Season", year: "Year", era: "Era" };
+/** The studio's wordmark: EGYPTIAN HIEROGLYPH D010, the plugin's own glyph. */
+const WORDMARK = "\u{13080}";
+
+/**
+ * The Köppen pill's hue, by climate group — the prototype's own pairing
+ * (`1397-logic-class-Component.js:511-515`): green for the temperate and
+ * tropical classes, moon-blue for continental, precip-blue for polar, gold
+ * for the dry ones. The pill's fill and border derive from it in `styles.css`.
+ */
+function koppenColour(group: KoppenResult["group"]): string {
+  switch (group) {
+    case "E":
+      return "var(--wadjet-studio-precip)";
+    case "D":
+      return "var(--wadjet-studio-moon)";
+    case "B":
+      return "var(--wadjet-studio-gold)";
+    default:
+      return "var(--wadjet-studio-wind)";
+  }
+}
 
 /**
  * The window readout's range (SPEC §3.1) — `model/format.ts`'s `windowLabel`
- * with the active calendar's year length: `Y 1962 · d 1–365` inside one year,
- * `Y 1962 – 2961` once it spans more.
+ * with the active calendar's year length: `d0 – d365 · 1962` inside one year,
+ * `1962 – 2962` once it spans 2.5 years or more.
  */
 export function formatWindow(w: Window, calendar: CalendarDescription | null): string {
   return windowLabel(w.a, w.b, calendar?.yearLength ?? DEFAULT_YEAR_LENGTH);
@@ -85,13 +106,36 @@ export function baseLabel(zone: ZoneProfile): string {
   return PRESETS.find((p) => p.id === id)?.name ?? id;
 }
 
-/** `SRC <station> · 30 yr` — or `· by geography` when Tier A matched it (SPEC §3.1). */
-function srcLabel(zone: ZoneProfile): string {
+/**
+ * The SRC chip's body — `Bergen · 30 yr`, or `· by geography` when Tier A
+ * matched it (SPEC §3.1). The `SRC` prefix is a separate span so it can wear
+ * the prototype's dim letterspaced caps; `srcLabel` glues the two back
+ * together for `title` and `aria-label`.
+ */
+function srcBody(zone: ZoneProfile): string {
   const preset = zone.preset === undefined ? undefined : PRESETS.find((p) => p.id === zone.preset?.id);
-  const station = preset?.source.stationName ?? zone.preset?.id ?? "no station";
+  const station = preset?.source.place ?? preset?.source.stationName ?? zone.preset?.id ?? "no station";
   const byGeography = zone.geography !== undefined && zone.preset?.matched === "auto";
   const tail = byGeography ? "by geography" : `${preset?.source.yearsOfRecord ?? 30} yr`;
-  return `SRC ${station} · ${tail}`;
+  return `${station} · ${tail}`;
+}
+
+/** `SRC <station> · 30 yr` — the whole chip as one string. */
+function srcLabel(zone: ZoneProfile): string {
+  return `SRC ${srcBody(zone)}`;
+}
+
+/**
+ * Split a chip label into the dim `SRC` tag and the rest. `createChip` writes
+ * the label with `setText`, so this runs *after* every `update` and rebuilds
+ * the two spans the tag needs.
+ */
+function paintSrcLabel(chip: ChipComponent, body: string): void {
+  const labelEl = chip.el.querySelector<HTMLElement>(".wadjet-studio-chip-label");
+  if (labelEl === null) return;
+  labelEl.empty();
+  labelEl.createSpan({ cls: "wadjet-studio-header-srctag", text: "SRC" });
+  labelEl.appendText(` ${body}`);
 }
 
 /** A header chrome button: a real button for the keyboard, hinted like everything else. */
@@ -121,7 +165,7 @@ function setDisabled(el: HTMLElement, disabled: boolean): void {
 
 /** What the header derives per render; memoised because a knob drag repaints every frame. */
 interface Derived {
-  koppen: string | null;
+  koppen: KoppenResult | null;
   issues: StudioIssue[];
 }
 
@@ -129,18 +173,17 @@ export function createHeaderSurface(): Surface {
   let ctx: SurfaceContext | null = null;
 
   let zoneButton: HTMLElement | null = null;
+  let zoneName: HTMLElement | null = null;
   let koppenLed: LedComponent | null = null;
   let koppenChip: ChipComponent | null = null;
+  let koppenDesc: HTMLElement | null = null;
   let srcChip: ChipComponent | null = null;
   let flipLed: LedComponent | null = null;
   let flipChip: ChipComponent | null = null;
 
-  let readoutLabel: HTMLElement | null = null;
   let readoutRange: HTMLElement | null = null;
   let presets: SegmentedComponent | null = null;
   let jsonButton: HTMLElement | null = null;
-  let undoButton: HTMLElement | null = null;
-  let redoButton: HTMLElement | null = null;
   let saveButton: HTMLElement | null = null;
 
   let memoKey = "";
@@ -158,7 +201,12 @@ export function createHeaderSurface(): Surface {
   function bounds(): ZoomBounds {
     const c = ctx;
     const epoch = c?.calendar()?.epochYear ?? c?.plugin.settings.calendar.epochYear ?? 1;
-    return { min: epoch - BOUNDS_BEFORE, max: epoch + BOUNDS_AFTER };
+    return worldBounds(epoch, eras());
+  }
+
+  /** The world's eras — what widens `bounds()` and what the Era preset frames. */
+  function eras(): ReadonlyArray<{ from: number; to?: number; enabled?: boolean }> {
+    return ctx?.store.get().world.eras ?? [];
   }
 
   function seasons(): ReadonlyArray<{ name: string; from: number }> {
@@ -200,10 +248,10 @@ export function createHeaderSurface(): Surface {
     if (key === memoKey) return memo;
 
     const issues = issuesFor({ zone, eras: state.world.eras, seasons: seasonList, moons, readOnlyCalendar });
-    let koppen: string | null = null;
+    let koppen: KoppenResult | null = null;
     if (!validateProfile(zone).some((i) => i.level === "error")) {
       try {
-        koppen = koppenOfClimate(resolveProfile(zone).climate).code;
+        koppen = koppenOfClimate(resolveProfile(zone).climate);
       } catch {
         // A draft the resolver rejects has no class to show; the red LED says so.
         koppen = null;
@@ -222,6 +270,10 @@ export function createHeaderSurface(): Surface {
     const state = c.store.get();
     const dirty = c.store.dirtyZones();
     const menu = new Menu();
+    menu.setNoIcon();
+    // The prototype's dropdown opens with a dim `ZONES · N` caption over the
+    // rows (`0025-header.html`); Obsidian's label item is the same affordance.
+    menu.addItem((item) => item.setTitle(`ZONES · ${c.plugin.settings.zones.length}`).setIsLabel(true));
     for (const zone of c.plugin.settings.zones) {
       const draft = state.zones[zone.id] ?? zone;
       const mark = dirty.has(zone.id) ? "●" : "✓";
@@ -337,15 +389,25 @@ export function createHeaderSurface(): Surface {
     const zone = zoneOf(state);
     const { koppen, issues } = derive(state);
 
-    zoneButton?.setText(zone === null ? "No zone ▾" : `${zone.name} ▾`);
+    zoneName?.setText(zone === null ? "No zone" : zone.name);
 
-    koppenLed?.update({ on: true, level: zone !== null && koppen === null ? "error" : "ok" });
-    koppenChip?.update({ label: koppen ?? "—" });
+    // The prototype's header carries no LED (gap-shell §1): a green dot beside
+    // a badge that is *already* the readout says nothing. It stays in the DOM,
+    // carrying `data-level` for anything reading the class, and surfaces only
+    // when the draft has no class to show.
+    const koppenBad = zone !== null && koppen === null;
+    koppenLed?.update({ on: true, level: koppenBad ? "error" : "ok" });
+    koppenLed?.el.toggleClass("is-hidden", !koppenBad);
+    koppenChip?.update({ label: koppen?.code ?? "—" });
+    koppenChip?.el.setCssProps({ "--wadjet-studio-koppen-color": koppen === null ? "var(--wadjet-studio-text-dim)" : koppenColour(koppen.group) });
+    koppenDesc?.setText(koppen === null ? "" : `· ${koppen.description}`);
+
     // The badges shrink and ellipsize when the header runs out of room
     // (styles.css, `.wadjet-studio-header-badges`), so the full station line
     // has to stay reachable without reading the pixels.
     const src = zone === null ? "SRC —" : srcLabel(zone);
     srcChip?.update({ label: src });
+    if (srcChip !== null) paintSrcLabel(srcChip, zone === null ? "—" : srcBody(zone));
     srcChip?.el.setAttrs({ title: src, "aria-label": src });
 
     // The flag is set in the Atlas; the header shows it, clears it, and — as
@@ -362,23 +424,25 @@ export function createHeaderSurface(): Surface {
     const offered = zone !== null && (flipped || straddlesEquator(zone, PRESETS));
     const flip = zone === null ? "off" : flipState(zone, effectiveCalendar);
     flipChip?.el.toggleClass("is-hidden", !offered);
-    const flipLabel = flip === "off" ? "seasons not flipped" : "seasons flipped";
-    flipChip?.update({ label: flipLabel, hint: hintAttr("zone.flip", flipHint(flip)) });
+    // The prototype's two states (`1397-logic…:1384`): the chip always says
+    // the record's seasons were flipped — what changes is whether the tag
+    // gates were remapped with them. There is never a "not flipped" chip.
+    const flipLabel = flip === "off" ? "seasons flipped · tags NOT remapped" : "seasons flipped · tags remapped";
+    flipChip?.update({ label: flipLabel, color: flip === "off" ? "var(--wadjet-studio-temp)" : "var(--wadjet-studio-gold)", hint: hintAttr("zone.flip", flipHint(flip)) });
     // Below a 1300 px studio the chip collapses to its ⇅ glyph (styles.css),
     // so the words have to live somewhere a pointer and a screen reader can
     // still reach — the hint bar already carries the longer explanation.
     flipChip?.el.setAttrs({ title: flipLabel, "aria-label": flipLabel });
-    flipLed?.el.toggleClass("is-hidden", !flipped);
+    // Same rule as the Köppen LED: shown only when it has something to warn
+    // about (an opaque or season-less calendar), never as decoration.
+    flipLed?.el.toggleClass("is-hidden", !flipped || flip === "on");
     flipLed?.update({ on: true, level: flip === "on" ? "ok" : "warn" });
 
     const w = state.view.window;
-    readoutLabel?.setText(PRESET_LABEL[zoomLabel(w)]);
     readoutRange?.setText(formatWindow(w, description));
     presets?.update({ value: zoomLabel(w) });
 
     if (jsonButton) jsonButton.toggleClass("is-on", state.view.jsonOpen);
-    if (undoButton) setDisabled(undoButton, !c.store.canUndo());
-    if (redoButton) setDisabled(redoButton, !c.store.canRedo());
 
     if (saveButton) {
       if (saving) {
@@ -409,10 +473,16 @@ export function createHeaderSurface(): Surface {
       ctx = next;
       const { shell } = next;
 
+      // The wordmark (SPEC §9's own glyph): decorative, so `aria-hidden`, but
+      // the `title` names the codepoint the way the prototype's does.
+      shell.headerZone.createSpan({ cls: "wadjet-studio-header-mark", text: WORDMARK, attr: { title: "U+13080", "aria-hidden": "true" } });
+
       zoneButton = shell.headerZone.createDiv({
         cls: "wadjet-studio-header-zonebtn",
         attr: { role: "button", tabindex: "0", "aria-haspopup": "menu", "data-hint": hintAttr("zone.menu") },
       });
+      zoneName = zoneButton.createSpan({ cls: "wadjet-studio-header-zonename" });
+      zoneButton.createSpan({ cls: "wadjet-studio-header-caret", text: "▾", attr: { "aria-hidden": "true" } });
       zoneButton.addEventListener("click", openZoneMenu);
       zoneButton.addEventListener("keydown", (ev) => {
         if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -423,9 +493,17 @@ export function createHeaderSurface(): Surface {
       const badges = shell.headerZone.createDiv({ cls: "wadjet-studio-header-badges" });
       koppenLed = createLed(badges, { on: true, level: "ok", scope: "device", hint: hintAttr("zone.koppen") });
       koppenChip = createChip(badges, { label: "—", hint: hintAttr("zone.koppen") });
+      koppenChip.el.addClass("wadjet-studio-header-koppen");
+      // The two-part pill: the code in its class colour, the human reading a
+      // shade dimmer (`Cfb · temperate oceanic`). The description lives beside
+      // the chip's own label, never inside it — the label is the code, and the
+      // e2e walk reads exactly that.
+      koppenDesc = koppenChip.el.createSpan({ cls: "wadjet-studio-header-koppen-desc" });
       srcChip = createChip(badges, { label: "SRC —", hint: hintAttr("zone.src"), onClick: () => next.windows.open(ATLAS_WINDOW) });
+      srcChip.el.addClass("wadjet-studio-header-src");
+      srcChip.el.createSpan({ cls: "wadjet-studio-header-caret", text: "▾", attr: { "aria-hidden": "true" } });
       flipLed = createLed(badges, { on: true, level: "warn", scope: "device", hint: hintAttr("zone.flip") });
-      flipChip = createChip(badges, { label: "seasons flipped", icon: "⇅", color: "var(--wadjet-studio-gold)", hint: hintAttr("zone.flip"), onClick: toggleFlip });
+      flipChip = createChip(badges, { label: "seasons flipped · tags remapped", icon: "⇅", color: "var(--wadjet-studio-gold)", hint: hintAttr("zone.flip"), onClick: toggleFlip });
       // Stable hooks for the e2e walk; the classes themselves are shared by
       // every chip and LED in the studio.
       koppenLed.el.setAttr("data-part", "koppen-led");
@@ -434,8 +512,9 @@ export function createHeaderSurface(): Surface {
       flipLed.el.setAttr("data-part", "flip-led");
       flipChip.el.setAttr("data-part", "flip");
 
+      // One dark inset pill, no zoom-name prefix: the presets to its right
+      // already say which scale this is (gap-shell §1).
       const readout = shell.headerTools.createDiv({ cls: "wadjet-studio-header-readout", attr: { "data-hint": hintAttr("transport.readout") } });
-      readoutLabel = readout.createSpan({ cls: "wadjet-studio-header-readout-label" });
       readoutRange = readout.createSpan({ cls: "wadjet-studio-header-readout-range" });
 
       const transport = shell.headerTools.createDiv({ cls: "wadjet-studio-header-transport" });
@@ -447,7 +526,7 @@ export function createHeaderSurface(): Surface {
       presets = createSegmented(shell.headerTools, {
         options: PRESET_OPTIONS.map((p) => ({ value: p.value, label: p.label, hint: p.hint })),
         value: zoomLabel(currentWindow()),
-        onChange: (value) => setWindow(presetWindow(value as ZoomPreset, currentWindow(), bounds(), seasons())),
+        onChange: (value) => setWindow(presetWindow(value as ZoomPreset, currentWindow(), bounds(), seasons(), eras())),
       });
 
       jsonButton = headerButton(shell.headerTools, {
@@ -462,8 +541,6 @@ export function createHeaderSurface(): Surface {
         },
       });
 
-      undoButton = headerButton(shell.headerTools, { text: "↶", label: "Undo", hint: hintAttr("header.undo"), onClick: () => next.store.undo() });
-      redoButton = headerButton(shell.headerTools, { text: "↷", label: "Redo", hint: hintAttr("header.redo"), onClick: () => next.store.redo() });
       saveButton = headerButton(shell.headerTools, { text: "Save ●", label: "Save", hint: hintAttr("header.save"), cls: "wadjet-studio-header-save", onClick: () => void commit() });
     },
 
@@ -480,7 +557,7 @@ export function createHeaderSurface(): Surface {
       presets?.destroy();
       koppenLed = koppenChip = srcChip = flipLed = flipChip = null;
       presets = null;
-      zoneButton = readoutLabel = readoutRange = jsonButton = undoButton = redoButton = saveButton = null;
+      zoneButton = zoneName = koppenDesc = readoutRange = jsonButton = saveButton = null;
       memoKey = "";
       memo = { koppen: null, issues: [] };
       saving = false;

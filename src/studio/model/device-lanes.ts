@@ -6,9 +6,11 @@
  *
  * Three questions, three functions:
  *
- *  - **`hasLane(m)`** — does this modifier carry time? SPEC §4 gives no lane to
- *    `always`, `chance` or `regime`, and none to a tag another modifier sets
- *    (`spell:x`, a hand-written label): those are mixer chips, not timelines.
+ *  - **`hasLane(m, eras)`** — does this modifier carry time? SPEC §4 gives no
+ *    lane to `always`, `chance` or `regime`, and none to a tag another modifier
+ *    sets (`spell:x`, a hand-written label): those are mixer chips, not
+ *    timelines. Nor to an `era:` tag naming an era the world does not have —
+ *    that device fires on no day, so it has no timeline to draw.
  *    A `custom` device is not exempt — the studio cannot *edit* its predicate,
  *    but `spans.ts` can still read `all`/`any`/`not` over timed leaves, so a
  *    custom device with time in it gets a read-only lane like any other.
@@ -28,9 +30,11 @@
  *
  * Pure: no DOM, no Obsidian, no roll (PLAN D3).
  */
+import { ERA_TAG_PREFIX } from "../../core/eras";
 import { canonicalJson } from "../../core/profile";
 import type { Era, Modifier, Predicate } from "../../core/types";
-import { displayName } from "./devices";
+import { displayName as tagName } from "./copy";
+import { displayName, type Device } from "./devices";
 import type { Span } from "./lanes";
 import { spansFor, spellRuns, type SpanCalendar } from "./spans";
 import type { Window } from "./zoom";
@@ -72,13 +76,20 @@ const wrap1 = (x: number): number => {
  * lane), and a bare `tag` only counts when it is one of the two the calendar
  * can place — `season:` or `era:`.
  */
-function timedPredicate(p: Predicate | undefined): boolean {
+function timedPredicate(p: Predicate | undefined, eras: readonly Era[]): boolean {
   if (!p) return false;
-  if ("all" in p) return p.all.some(timedPredicate);
-  if ("any" in p) return p.any.some(timedPredicate);
-  if ("not" in p) return timedPredicate(p.not);
+  if ("all" in p) return p.all.some((x) => timedPredicate(x, eras));
+  if ("any" in p) return p.any.some((x) => timedPredicate(x, eras));
+  if ("not" in p) return timedPredicate(p.not, eras);
   if ("moon" in p || "yearPhase" in p || "dayOfYear" in p) return true;
-  if ("tag" in p) return p.tag.startsWith("season:") || p.tag.startsWith("era:");
+  if ("tag" in p) {
+    if (p.tag.startsWith("season:")) return true;
+    // An `era:` tag only places a device in time when the world HAS that era.
+    // Neverain is gated on `era:Drought` in a world whose eras are Ice Age,
+    // Thaw and Long Summer: it fires on no day, so it is a mixer unit and
+    // nothing else — an always-empty lane is noise, not information.
+    if (p.tag.startsWith("era:")) return eras.some((e) => e.enabled !== false && ERA_TAG_PREFIX + e.name === p.tag);
+  }
   return false; // regime (roll time only) and chance (a mixer chip, SPEC §4)
 }
 
@@ -88,8 +99,8 @@ function timedPredicate(p: Predicate | undefined): boolean {
  * day of the year, so "always + spell" draws its runs with no dashed window
  * around them rather than vanishing from the playlist.
  */
-export function hasLane(m: Modifier): boolean {
-  return timedPredicate(m.when) || m.spell !== undefined;
+export function hasLane(m: Modifier, eras: readonly Era[]): boolean {
+  return timedPredicate(m.when, eras) || m.spell !== undefined;
 }
 
 /** The SPEC §4 row `p` belongs to, before any window is known. */
@@ -118,7 +129,7 @@ function structuralKind(p: Predicate | undefined): LaneKind {
  */
 export function laneSpec(m: Modifier, cal: SpanCalendar, window: Window, activeDays?: ReadonlyArray<{ dayOrdinal: number; active: boolean }>): LaneSpec {
   const label = displayName(m);
-  if (!hasLane(m)) return { spans: [], editable: false, kind: "none", label };
+  if (!hasLane(m, cal.eras)) return { spans: [], editable: false, kind: "none", label };
 
   const gates = m.mods ?? [];
   const when = spansFor(m.when, m.spell, cal, { window, ...(gates.length > 0 ? { gates } : {}) });
@@ -130,6 +141,78 @@ export function laneSpec(m: Modifier, cal: SpanCalendar, window: Window, activeD
   const kind: LaneKind = m.spell !== undefined ? "window" : ((drawn as LaneKind | undefined) ?? structuralKind(m.when));
 
   return { spans, editable: spans.some((s) => s.editable), kind, label };
+}
+
+/**
+ * The lane label's second line (SPEC §3.2's two-line lane label): what this
+ * device's row is *showing*, in one short phrase, from the same predicate the
+ * spans came from.
+ *
+ *  - a moon lane says which cycle its pulses follow (`active days · ↻ 29.53 d`)
+ *  - a per-year clip or a spell window says the days it covers and that it
+ *    repeats (`clip d223–d263 · yearly`)
+ *  - a season or era lane simply names the tag it is gated on
+ *
+ * Days are day-of-year numbers, which are calendar-invariant, so nothing here
+ * needs `format.ts`.
+ */
+export function laneSub(m: Modifier, cal: SpanCalendar): string {
+  const leaf = firstTimed(m.when);
+  if (leaf === null) return m.spell === undefined ? "active days" : `spell · ${round10(m.spell.meanDurationDays)} d runs`;
+  if ("moon" in leaf) {
+    const cycle = cal.moons.find((x) => x.name === leaf.moon.name)?.cycleDays;
+    return cycle === undefined ? "active days" : `active days · ↻ ${round10(cycle)} d`;
+  }
+  if ("tag" in leaf) return leaf.tag;
+  // The clip is the same every year, so it is read off the PREDICATE rather
+  // than off the spans on screen: zoomed into a month the window shows no
+  // clip at all, and the label still has to say which days it covers.
+  const [from, to] = "yearPhase" in leaf ? [Math.round(leaf.yearPhase[0] * cal.yearLength), Math.round(leaf.yearPhase[1] * cal.yearLength)] : leaf.dayOfYear;
+  // `d223–263`, not `d223–d263`: the label column is 136 px and the second
+  // `d` is the character that pushes this line into an ellipsis.
+  return `clip d${from}–${to} · yearly`;
+}
+
+/**
+ * The caption a MOON lane prints inside itself, at its left edge (the
+ * prototype's `sable full ↻ 29.5 d · gated by Harvest`) — three facts a row
+ * of pulses cannot say on its own: which moon and which phase the pulses are,
+ * how long its cycle is, and which tag dims it.
+ *
+ * `""` for every other lane shape: a clip already says its days in the caption
+ * `ui/rows/device-rows.ts` prints beside it, and a band or a bar is named by
+ * the calendar underneath it.
+ */
+export function laneCaption(d: Device, cal: SpanCalendar): string {
+  const w = d.when;
+  if (w.kind !== "moon") return "";
+  // Lowercase throughout: this is a caption, in the same voice as the day
+  // card's tag chips (`season:Harvest`, `sable 22 %`), not a heading.
+  const phases = w.phases.join(", ").toLowerCase();
+  const head = `${w.moon.toLowerCase()}${phases === "" ? "" : ` ${phases}`}`;
+  const cycle = cal.moons.find((x) => x.name === w.moon)?.cycleDays;
+  const gates = d.mods.filter((g) => g.amount > 0).map((g) => tagName(g.source));
+  const left = cycle === undefined ? head : `${head} ↻ ${trim1(cycle)} d`;
+  return gates.length === 0 ? left : `${left} · gated by ${gates.join(", ")}`;
+}
+
+/** `29.53 → 29.5`, `30 → 30`: the caption's own rounding, one decimal at most. */
+function trim1(x: number): string {
+  return String(Math.round(x * 10) / 10);
+}
+
+/** A predicate leaf that places the device in time. */
+type TimedLeaf = { moon: { name: string; phase: [number, number] } } | { yearPhase: [number, number] } | { dayOfYear: [number, number] } | { tag: string };
+
+/** The first leaf of `p` that places the device in time, or `null`. */
+function firstTimed(p: Predicate | undefined): TimedLeaf | null {
+  if (!p) return null;
+  if ("all" in p) return p.all.map(firstTimed).find((x) => x !== null) ?? null;
+  if ("any" in p) return p.any.map(firstTimed).find((x) => x !== null) ?? null;
+  if ("not" in p) return firstTimed(p.not);
+  if ("moon" in p || "yearPhase" in p || "dayOfYear" in p) return p;
+  if ("tag" in p && (p.tag.startsWith("season:") || p.tag.startsWith("era:"))) return p;
+  return null;
 }
 
 /**

@@ -158,7 +158,8 @@ interface StudioProbe {
   lanes: number;
   /** the playlist's row stack; a row draws with a Lane or a Chart, depending on the bead that owns it */
   rows: number;
-  writes: string;
+  /** the audition's seed pill — `YR <year> · SEED <8>`, the strip's own writes readout */
+  seed: string;
   deferred: boolean;
 }
 
@@ -181,7 +182,7 @@ async function probeStudio(): Promise<StudioProbe[]> {
           racks: count(".wadjet-studio-rack-unit"),
           lanes: count(".wadjet-studio-lane"),
           rows: count(".wadjet-studio-row"),
-          writes: text(".wadjet-studio-writes-body"),
+          seed: text('[data-part="audition-seed"]'),
           deferred: leaf.isDeferred === true,
         };
       }),
@@ -209,16 +210,46 @@ async function clickPreset(value: string): Promise<void> {
 }
 
 /**
- * `presetWindow("era", …)` in `src/studio/model/zoom.ts`: 1000 years around the
- * current centre, translated (never shrunk) into `[epochYear − 100, + 1100]`.
+ * `presetWindow("era", …)` in `src/studio/model/zoom.ts`.
+ *
+ * The Era preset FRAMES THE WORLD'S ERAS now (F3): `eraFrame` is the span of
+ * every enabled era with 100 years of air in front and at least 1000 years
+ * wide — the prototype's `1100 – 2100`. A world with no era falls back to the
+ * old reading, 1000 years around the current centre. Either way the result is
+ * translated (never shrunk) into the world's pannable extent, which is itself
+ * widened to hold the eras (`worldBounds`), so an era seeded past the epoch's
+ * own reach is not simply unreachable.
+ *
+ * The eras are read off the LEAF'S DRAFT rather than the saved settings: every
+ * era step in this file works on the draft, and it is the draft the header's
+ * preset button reads.
  */
 async function expectedEraWindow(before: { a: number; b: number }): Promise<{ a: number; b: number }> {
-  const epochYear: number = await withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.calendar.epochYear as number);
-  const min = epochYear - 100;
-  const max = epochYear + 1100;
+  const world = await withApp(ob.page, (app, type: string) => {
+    const epochYear = app.plugins.plugins.wadjet.settings.calendar.epochYear as number;
+    const leaf = app.workspace.getLeavesOfType(type)[0];
+    const eras = ((leaf?.view?.store.get().world.eras ?? []) as Array<{ from: number; to?: number; enabled?: boolean }>)
+      .filter((e) => e.enabled !== false)
+      .map((e) => ({ from: e.from, to: e.to ?? null }));
+    return { epochYear, eras };
+  }, VIEW_TYPE);
+
+  // `zoom.ts eraFrame`, spelled out.
+  let frame: { a: number; b: number } | null = null;
+  if (world.eras.length > 0) {
+    const from = Math.min(...world.eras.map((e) => e.from));
+    const to = Math.max(...world.eras.map((e) => e.to ?? -Infinity));
+    const a = from - 100;
+    frame = { a, b: Math.max(a + 1000, to + 100) };
+  }
+
+  // `zoom.ts worldBounds`, likewise.
+  const min = frame === null ? world.epochYear - 100 : Math.min(world.epochYear - 100, frame.a);
+  const max = frame === null ? world.epochYear + 1100 : Math.max(world.epochYear + 1100, frame.b);
+
   const centre = (before.a + before.b) / 2;
-  let a = centre - 500;
-  let b = centre + 500;
+  let a = frame === null ? centre - 500 : frame.a;
+  let b = frame === null ? centre + 500 : frame.b;
   if (a < min) {
     b += min - a;
     a = min;
@@ -388,9 +419,10 @@ describe("climate studio · leaf shell", () => {
     // and the lane beads added the real data rows: the row stack is what is
     // fixed here, not which part of the bin each row happens to draw with.
     expect(opened.rows).toBeGreaterThanOrEqual(4);
-    // The audition's Writes footer is real from the first paint (bead
-    // wadjet-9f9.38): `audition · Y <year> · seed <8> · salt <n>`.
-    expect(opened.writes).toMatch(/^audition · Y /);
+    // The audition names its own roll from the first paint (bead wadjet-9f9.38).
+    // The strip's Writes footer became the head's seed pill in the fidelity
+    // rebuild (F5): `YR <year> · SEED <8 chars>`, plus ` · SALT <n>` once salted.
+    expect(opened.seed).toMatch(/^YR \d+ · SEED \S+/);
 
     // The vault's workspace.json survives between e2e runs, so the window this
     // step starts from is whatever the last run left. Land on Year first, so
@@ -405,7 +437,7 @@ describe("climate studio · leaf shell", () => {
     // pannable extent (`model/zoom.ts` clampWindow, bounds from the epoch).
     expect(after.window!.b - after.window!.a).toBeCloseTo(1000, 6);
     expect(after.window).toEqual(await expectedEraWindow(before.window!));
-    console.log(`  · zoom Era: window ${JSON.stringify(before.window)} → ${JSON.stringify(after.window)}; ${opened.racks} racks, 4 lanes, writes footer present`);
+    console.log(`  · zoom Era: window ${JSON.stringify(before.window)} → ${JSON.stringify(after.window)}; ${opened.racks} racks, 4 lanes, seed "${opened.seed}"`);
   });
 
   test("step 4: the studio leaf comes back with the same zone after a restart", async () => {
@@ -633,6 +665,13 @@ async function revealStudio(): Promise<void> {
 /** The zone steps 7–9 drive; step 6 switches to it, so the switch itself is observable. */
 let headerZone: { id: string; name: string };
 
+/**
+ * One end of the header readout's year span, spelled the way
+ * `model/format.ts windowLabel` spells it: rounded, with the studio's real
+ * minus (U+2212) rather than an ASCII hyphen.
+ */
+const spanYear = (year: number): string => String(Math.round(year)).replace("-", "−");
+
 describe("climate studio · header and hint bar", () => {
   test("step 5: the hint bar follows the pointer", async () => {
     await revealStudio();
@@ -721,8 +760,23 @@ describe("climate studio · header and hint bar", () => {
 
     const before = (await probeStudio())[0]!;
     expect(before.window!.b - before.window!.a).toBeCloseTo(1000, 6);
-    const readoutAtEra = (await probeHeader()).readout;
-    expect(readoutAtEra.toUpperCase().startsWith("ERA")).toBe(true);
+    // The readout is one dark inset pill with no zoom-name prefix any more
+    // (F6 / gap-shell §1): the presets beside it already say which scale this
+    // is, so at Era zoom it reads the year span itself — `−99 – 901` on this
+    // fixture world, with `format.ts`'s real minus (U+2212), never an ASCII one.
+    //
+    // Polled, not read once: `clickPreset` gates on the Segmented's own
+    // `aria-checked`, which the component flips on the click, while the
+    // readout is repainted by the header on the store's next batched frame.
+    // One tap in three caught the pill still showing the year it came from
+    // (H-1392: wait for the reaction, do not assume it already happened).
+    const expectedReadout = `${spanYear(before.window!.a)} – ${spanYear(before.window!.b)}`;
+    let readoutAtEra = (await probeHeader()).readout;
+    for (let i = 0; i < 40 && readoutAtEra !== expectedReadout; i++) {
+      await ob.page.waitForTimeout(100);
+      readoutAtEra = (await probeHeader()).readout;
+    }
+    expect(readoutAtEra).toBe(expectedReadout);
 
     const forward = ob.page.locator('.wadjet-studio-header-btn[aria-label="Pan forward"]');
     await forward.click();
@@ -905,7 +959,9 @@ async function probePlaylist(): Promise<PlaylistProbe> {
         tickLabels: all(".wadjet-studio-tick")
           .map(text)
           .filter((t) => t !== ""),
-        bandLabels: all(".wadjet-studio-ruler-band").map(text),
+        // The ruler draws its tints and its names on two rows now (F2): the
+        // band is the colour, `-band-label` the season (or era) it stands for.
+        bandLabels: all(".wadjet-studio-ruler-band-label").map(text),
         rulerLabel: text(el.querySelector(".wadjet-studio-ruler-label") ?? el),
         rows: all(".wadjet-studio-row").length,
         hiddenRows: all(".wadjet-studio-row.is-hidden").length,
@@ -1046,18 +1102,21 @@ describe("climate studio · playlist ruler and zoom", () => {
     // ~1.1 px per day, so a three-year window is the honest "Year" case.
     await seedWindow({ a: year, b: year + 3 });
     const wide = await probePlaylist();
-    expect(wide.tickLabels).toContain(`Y ${year}`);
+    // The prototype's compact tick forms (F2): a bare year, no `Y` prefix.
+    expect(wide.tickLabels).toContain(String(year));
     expect(wide.dayCardHidden).toBe(true);
     expect(wide.hiddenRows).toBe(0);
 
-    // Day zoom (≤ 7.5 days): day ticks, rows give way to the day card.
+    // Day zoom (≤ 7.5 days): day ticks (`d0`, 0-based in its year), and the
+    // day card takes the reading — but the lane stack STAYS under it now
+    // (F3): the card sits over the playlist rather than replacing it.
     await seedWindow({ a: year, b: year + 3 / 365 });
     const day = await probePlaylist();
     expect(day.tickLabels.length).toBeGreaterThan(0);
-    for (const label of day.tickLabels) expect(label).toMatch(/^d \d+$/);
+    for (const label of day.tickLabels) expect(label).toMatch(/^d\d+$/);
     expect(day.dayCardHidden).toBe(false);
-    expect(day.hiddenRows).toBe(day.rows);
-    console.log(`  · Year zoom ticks ${JSON.stringify(wide.tickLabels.slice(0, 4))}; Day zoom ticks ${JSON.stringify(day.tickLabels.slice(0, 4))}, ${day.hiddenRows}/${day.rows} rows hidden`);
+    expect(day.hiddenRows).toBe(0);
+    console.log(`  · Year zoom ticks ${JSON.stringify(wide.tickLabels.slice(0, 4))}; Day zoom ticks ${JSON.stringify(day.tickLabels.slice(0, 4))}, ${day.hiddenRows}/${day.rows} rows hidden, card shown`);
   });
 
   test("step 15: season bands show at Year zoom and give way at Era zoom", async () => {
@@ -1334,8 +1393,11 @@ interface MixerUnitProbe {
 interface MixerChainProbe {
   chain: string;
   title: string;
+  /** the fixed strip's two lines, name and summary split into their own spans (F4) */
   regimes: string;
+  regimesSum: string;
   forcings: string;
+  forcingsSum: string;
   forcingsShown: boolean;
   empty: boolean;
   units: MixerUnitProbe[];
@@ -1358,7 +1420,9 @@ async function probeMixer(): Promise<MixerChainProbe[]> {
         chain: b.getAttribute("data-chain") ?? "",
         title: text(b, ".wadjet-studio-mixer-title"),
         regimes: text(b, '[data-part="regimes-name"]'),
+        regimesSum: text(b, '[data-part="regimes-sum"]'),
         forcings: text(b, '[data-part="forcings-name"]'),
+        forcingsSum: text(b, '[data-part="forcings-sum"]'),
         forcingsShown: shown(b, '[data-part="forcings-name"]'),
         empty: shown(b, ".wadjet-studio-mixer-empty"),
         units: Array.from(b.querySelectorAll(".wadjet-studio-mixer-rack .wadjet-studio-rack-unit")).map((u) => ({
@@ -1424,24 +1488,34 @@ describe("climate studio · mixer", () => {
     expect(rail.slice(0, 4).map((c) => c.title)).toEqual(["TEMP", "PRECIP", "WIND", "SKY"]);
     expect(rail[4]!.title).toBe("MASTER");
 
-    // Regimes are in all four chains and read the zone's own state count.
+    // Regimes are in all four chains and read the zone's own state count. The
+    // strip splits the name from its summary into two spans now (F4), so the
+    // bright half is clickable on its own and the dim half is the value.
     const n = draft.regimes.length;
-    const expected = `Regimes ${n} ${n === 1 ? "state" : "states"}`;
-    for (const c of rail.slice(0, 4)) expect(c.regimes).toBe(expected);
+    const expected = `${n} ${n === 1 ? "state" : "states"}`;
+    for (const c of rail.slice(0, 4)) {
+      expect(c.regimes).toBe("Regimes");
+      expect(c.regimesSum).toBe(expected);
+    }
 
     // Forcings only in TEMP and PRECIP (SPEC §3.3).
     expect(rail[0]!.forcingsShown).toBe(true);
     expect(rail[1]!.forcingsShown).toBe(true);
     expect(rail[2]!.forcingsShown).toBe(false);
     expect(rail[3]!.forcingsShown).toBe(false);
-    expect(rail[0]!.forcings).toMatch(/^Forcings [+−]\d/);
-    expect(rail[1]!.forcings).toMatch(/^Forcings ×\d/);
+    expect(rail[0]!.forcings).toBe("Forcings");
+    expect(rail[1]!.forcings).toBe("Forcings");
+    // `0.0 °C` into TEMP (signed once it leaves neutral), `×1.00` into PRECIP.
+    expect(rail[0]!.forcingsSum).toMatch(/^[+−]?\d+(\.\d+)? °[CF]$/);
+    expect(rail[1]!.forcingsSum).toMatch(/^×\d/);
 
     // MASTER carries the two zone totals.
     expect(rail[4]!.masterChips.length).toBe(2);
     expect(rail[4]!.masterChips[0]!.startsWith("warmth ")).toBe(true);
     expect(rail[4]!.masterChips[1]!.startsWith("wetness ×")).toBe(true);
-    console.log(`  · rail ${JSON.stringify(rail.map((c) => c.title))}; strip "${rail[0]!.regimes} · ${rail[0]!.forcings}"; master ${JSON.stringify(rail[4]!.masterChips)}`);
+    console.log(
+      `  · rail ${JSON.stringify(rail.map((c) => c.title))}; strip "${rail[0]!.regimes} ${rail[0]!.regimesSum} · ${rail[0]!.forcings} ${rail[0]!.forcingsSum}"; master ${JSON.stringify(rail[4]!.masterChips)}`,
+    );
   });
 
   test("step 41: the Regimes LED in TEMP mutes the temperature regime ops only", async () => {
@@ -1487,9 +1561,10 @@ describe("climate studio · mixer", () => {
     }
     expect(temperatureOps).toBeGreaterThan(0);
     expect(precipitationOps).toBeGreaterThan(0);
-    // PRECIP's own strip never moved.
+    // PRECIP's own strip never moved: same states, and its LED is still lit.
     const rail = await probeMixer();
-    expect(rail[1]!.regimes).toBe(rail[0]!.regimes);
+    expect(rail[1]!.regimesSum).toBe(rail[0]!.regimesSum);
+    expect(await mixerChain("precipitation").locator('[data-part="regimes-led"]').getAttribute("aria-pressed")).toBe("true");
 
     await led.click();
     await waitForRegimesLed("temperature", true);
@@ -1531,12 +1606,16 @@ describe("climate studio · mixer", () => {
     expect(wind.chain).toBe("wind");
     expect(wind.units.map((u) => u.id)).toEqual(["test-dev"]);
     expect(wind.units[0]!.slot).toBe("01");
-    expect(wind.units[0]!.name).toBe("test-dev");
-    // No `when` and no spell: the studio reads that as a TRIM device.
-    expect(wind.units[0]!.kind).toBe("TRIM");
+    // Product copy, not the engine id (F1/F4): a slug reads as a name.
+    expect(wind.units[0]!.name).toBe("Test Dev");
+    // No `when` and no spell: the studio reads that as a trim device. The kind
+    // pill is a lowercase word now, not a shouted abbreviation.
+    expect(wind.units[0]!.kind).toBe("trim");
     expect(wind.units[0]!.linked).toBe(false);
     expect(wind.units[0]!.world).toBe("");
-    expect(wind.units[0]!.chips).toEqual(["always", "wind.speed ×1.2"]);
+    // The when chip, then the apply chip in the short apply-target vocabulary
+    // with its unit attached (`model/copy.ts describeOp`).
+    expect(wind.units[0]!.chips).toEqual(["always", "wind ×1.20"]);
     expect(wind.empty).toBe(false);
     // One device, one chain: nowhere else on the rail.
     for (const other of [rail[0]!, rail[1]!, rail[3]!]) expect(other.units.map((u) => u.id)).not.toContain("test-dev");
@@ -1576,9 +1655,12 @@ describe("climate studio · mixer", () => {
     const rail = await waitForMixer((r) => r[0]!.units.some((u) => u.id === "era:E2E Era"));
     const era = rail[0]!.units.find((u) => u.id === "era:E2E Era")!;
     expect(era.name).toBe("E2E Era");
-    expect(era.kind).toBe("ERA");
+    expect(era.kind).toBe("era");
+    // Eras share one marker instead of a slot number: they are world-scoped
+    // and cannot be dragged (SPEC §3.3).
+    expect(era.slot).toBe("E");
     expect(era.world).toBe(`world · ${before.zoneCount} zones`);
-    expect(era.chips).toEqual(["years 1–2", "temperature.mean −1.5"]);
+    expect(era.chips).toEqual(["1 – 2", "temp −1.5 °C"]);
     // A world era never appears in a chain it does not write to.
     for (const other of [rail[1]!, rail[2]!, rail[3]!]) expect(other.units.map((u) => u.id)).not.toContain("era:E2E Era");
     console.log(`  · era unit "${era.name}" in TEMP: slot ${era.slot}, badge "${era.world}", chips ${JSON.stringify(era.chips)}`);
@@ -1648,6 +1730,8 @@ interface CycleProbe {
   rows: string[];
   period: string;
   epoch: string;
+  /** the disc's own phase readout — `disc preview · phase 0.00 · d0.0 of the cycle` */
+  preview: string;
   editIn: string;
   writes: string;
   actions: number;
@@ -1672,8 +1756,10 @@ async function probeCycle(): Promise<CycleProbe> {
         handles: all(".wadjet-studio-cycle-handle").length,
         labels: all(".wadjet-studio-cycle-label").map((n) => (n.textContent ?? "").trim()),
         rows: all('[data-part="cycle-row"]').map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim()),
-        period: text(panel, '[data-part="cycle-period"] .wadjet-studio-knob-value'),
-        epoch: text(panel, '[data-part="cycle-epoch"] .wadjet-studio-knob-value'),
+        // Plain readout spans now (F8), not knobs: `↻ 29.53 d`, `epoch 0.000`.
+        period: text(panel, '[data-part="cycle-period"]'),
+        epoch: text(panel, '[data-part="cycle-epoch"]'),
+        preview: text(panel, '[data-part="cycle-preview"]'),
         editIn: text(panel, '[data-part="cycle-editin"]'),
         writes: text(panel, ".wadjet-studio-writes-body"),
         actions: all(".wadjet-studio-cycle-btn:not(.is-hidden)").length,
@@ -1773,8 +1859,9 @@ describe("climate studio · cycle window", () => {
     expect(probe.handles).toBe(5);
     expect([...probe.labels].sort()).toEqual(["Crescent", "Full", "Gibbous", "Half", "New"]);
     expect(probe.rows.length).toBe(5);
-    expect(probe.period).toContain("29.53");
-    expect(probe.epoch).toBe("0.000");
+    expect(probe.period).toBe("↻ 29.53 d");
+    expect(probe.epoch).toBe("epoch 0.000");
+    expect(probe.preview).toContain("phase");
     expect(probe.editIn).toBe("");
     expect(probe.writes).toContain("calendar.moons[");
     console.log(`  · ${CYCLE_WINDOW}: ${probe.arcs} arcs / ${probe.handles} handles, period "${probe.period}", ${probe.world}, writes "${probe.writes}"`);
@@ -1952,27 +2039,33 @@ describe("climate studio · cycle window", () => {
     await revealStudio();
     await reopenCycle();
 
-    const mirrored = await probeCycle();
-    expect(mirrored.source).toBe("Fake calendar · read-only");
-    expect(mirrored.handles).toBe(0);
-    expect(mirrored.arcs).toBe(2);
-    expect([...mirrored.labels].sort()).toEqual(["Bright", "Dark"]);
-    expect(mirrored.actions).toBe(0);
-    expect(mirrored.editIn).toBe("edit in Fake calendar");
-    expect(mirrored.period).toContain("40.00");
-    expect(mirrored.writes).toContain("Fake calendar");
-    console.log(`  · read-only mirror: source "${mirrored.source}", ${mirrored.arcs} arcs, ${mirrored.handles} handles, "${mirrored.editIn}", period "${mirrored.period}"`);
-
-    // Restore: back to the internal calendar, then drop the fake adapter.
-    await openWadjetSettings();
-    await settingsZoneRow("Calendar source").waitFor({ state: "visible", timeout: 10_000 });
-    await settingsZoneRow("Calendar source").locator("select:not(.is-measuring)").selectOption("internal");
-    await ob.page.waitForTimeout(500);
-    await withApp(ob.page, (app) => app.setting.close());
-    await withApp(ob.page, () => {
-      (window as unknown as { __wadjetCycleUnregister?: () => void }).__wadjetCycleUnregister?.();
-    });
-    await ob.page.waitForTimeout(500);
+    try {
+      const mirrored = await probeCycle();
+      expect(mirrored.source).toBe("Fake calendar · read-only");
+      expect(mirrored.handles).toBe(0);
+      expect(mirrored.arcs).toBe(2);
+      expect([...mirrored.labels].sort()).toEqual(["Bright", "Dark"]);
+      expect(mirrored.actions).toBe(0);
+      expect(mirrored.editIn).toBe("edit in Fake calendar");
+      expect(mirrored.period).toBe("↻ 40.00 d");
+      expect(mirrored.writes).toContain("Fake calendar");
+      console.log(`  · read-only mirror: source "${mirrored.source}", ${mirrored.arcs} arcs, ${mirrored.handles} handles, "${mirrored.editIn}", period "${mirrored.period}"`);
+    } finally {
+      // Restore: back to the internal calendar, then drop the fake adapter.
+      // In a `finally` (the seasons walk's own step 44 does the same): a
+      // failed assertion above used to leave a two-season, read-only, 400-day
+      // calendar ACTIVE for the rest of the file, and the four describes after
+      // it then failed on a world none of them had asked for.
+      await openWadjetSettings();
+      await settingsZoneRow("Calendar source").waitFor({ state: "visible", timeout: 10_000 });
+      await settingsZoneRow("Calendar source").locator("select:not(.is-measuring)").selectOption("internal");
+      await ob.page.waitForTimeout(500);
+      await withApp(ob.page, (app) => app.setting.close());
+      await withApp(ob.page, () => {
+        (window as unknown as { __wadjetCycleUnregister?: () => void }).__wadjetCycleUnregister?.();
+      });
+      await ob.page.waitForTimeout(500);
+    }
     await revealStudio();
     await reopenCycle();
 
@@ -1992,7 +2085,11 @@ const AUDITION_YEAR = 1962;
 
 interface AuditionProbe {
   cells: number;
-  writes: string;
+  /**
+   * The strip's seed pill (F5). The Writes footer under the strip is gone;
+   * the head names the roll instead — `YR 1962 · SEED greywold · SALT 1`.
+   */
+  seed: string;
   /** gold ▼ markers over the cells */
   pins: number;
   /** PINS chips in the controls row */
@@ -2014,7 +2111,7 @@ async function probeAudition(): Promise<AuditionProbe> {
       const text = (sel: string) => (el?.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim();
       return {
         cells: cells.length,
-        writes: text(".wadjet-studio-audition-foot .wadjet-studio-writes-body"),
+        seed: text('[data-part="audition-seed"]'),
         pins: el?.querySelectorAll(".wadjet-studio-pin").length ?? 0,
         chips: el?.querySelectorAll('[data-part="pin-chip"]').length ?? 0,
         classes: cells.map((c) => c.className),
@@ -2072,32 +2169,37 @@ let auditionOn: { id: string; name: string };
 let pinnedOrdinal = -1;
 
 describe("climate studio · audition", () => {
-  test("step 21: one seeded year of cells, and a footer that names it", async () => {
+  test("step 21: one seeded year of cells, and a seed pill that names it", async () => {
     await revealStudio();
     await seedWindow({ a: AUDITION_YEAR, b: AUDITION_YEAR + 1 });
     auditionOn = await auditionZoneOf();
 
-    // 365 days at ≥ 3 px each, or one column per bucket below that — either
-    // way a year's worth of columns, never a placeholder.
+    // 365 days at ≥ 10 px each, or one column per bucket below that (F5 raised
+    // `MIN_CELL_PX` from 3 to 10, so a year buckets to ~148 columns at studio
+    // width) — either way a year's worth of columns, never a placeholder.
     await waitForAuditionCells(52);
     await ob.page.waitForFunction(
       (x: { type: string; year: string }) => {
         const el = (window as any).app.workspace.getLeavesOfType(x.type)[0]?.view?.containerEl as HTMLElement | undefined;
-        return (el?.querySelector(".wadjet-studio-audition-foot .wadjet-studio-writes-body")?.textContent ?? "").includes(x.year);
+        return (el?.querySelector('[data-part="audition-seed"]')?.textContent ?? "").includes(x.year);
       },
-      { type: VIEW_TYPE, year: `Y ${AUDITION_YEAR}` },
+      { type: VIEW_TYPE, year: `YR ${AUDITION_YEAR}` },
       { timeout: 15_000 },
     );
 
     const strip = await probeAudition();
     expect(strip.cells).toBeGreaterThanOrEqual(52);
     expect(strip.cells).toBeLessThanOrEqual(400);
-    expect(strip.writes).toContain(`Y ${AUDITION_YEAR}`);
-    expect(strip.writes).toMatch(/^audition · Y \d+ · seed \S{1,8} · salt \d+$/);
+    expect(strip.seed).toContain(`YR ${AUDITION_YEAR}`);
+    // `SALT n` only shows once the strip has been re-rolled: salt 0 IS the
+    // vault's own weather, and a permanent `SALT 0` would say otherwise.
+    expect(strip.seed).toMatch(/^YR \d+ · SEED \S{1,8}( · SALT \d+)?$/);
     // Every column carries a precipitation class and a temperature band.
     expect(strip.classes.every((c) => /is-(dry|drizzle|rain|sleet|snow)/.test(c) && /is-t\d/.test(c))).toBe(true);
+    // …and the drawn kind the legend names (F5).
+    expect(strip.classes.every((c) => /is-k-(dry|warm|ash|wet1|wet2|wet3|snow)/.test(c))).toBe(true);
     expect(Number(strip.rollMs)).toBeGreaterThan(0);
-    console.log(`  · audition: ${strip.cells} cells for "${auditionOn.name}", footer "${strip.writes}", roll ${strip.rollMs} ms`);
+    console.log(`  · audition: ${strip.cells} cells for "${auditionOn.name}", seed "${strip.seed}", roll ${strip.rollMs} ms`);
   });
 
   test("step 22: hovering a cell puts the day tip, regime included, in the hint bar", async () => {
@@ -2119,7 +2221,14 @@ describe("climate studio · audition", () => {
     await revealStudio();
     await waitForAuditionCells(52);
 
-    const cell = ob.page.locator(".wadjet-studio-audition-cell").nth(130);
+    // A day well inside the year. `MIN_CELL_PX` rose from 3 to 10 (F5), so a
+    // year buckets to roughly 148 columns instead of drawing all 365 — how
+    // many exactly depends on how wide the leaf is, so the index is taken from
+    // the strip that was actually drawn rather than assumed.
+    const cells = ob.page.locator(".wadjet-studio-audition-cell");
+    const drawn = await cells.count();
+    expect(drawn).toBeGreaterThanOrEqual(52);
+    const cell = cells.nth(Math.floor(drawn * 0.36));
     await cell.waitFor({ state: "visible", timeout: 10_000 });
     pinnedOrdinal = Number(await cell.getAttribute("data-day-ordinal"));
     expect(Number.isInteger(pinnedOrdinal)).toBe(true);
@@ -2222,13 +2331,14 @@ describe("climate studio · audition", () => {
     const moved = after.classes.filter((c, i) => c !== before.classes[i]).length;
     expect(moved).toBeGreaterThan(0);
     // The salt moved; the world seed did not, and the pin is untouched.
-    expect(after.writes).not.toBe(before.writes);
-    expect(after.writes).toContain(`Y ${AUDITION_YEAR}`);
+    expect(after.seed).not.toBe(before.seed);
+    expect(after.seed).toContain(`YR ${AUDITION_YEAR}`);
+    expect(after.seed).toMatch(/ · SALT \d+$/);
     expect(after.pins).toBe(before.pins);
     expect(after.chips).toBe(before.chips);
     const pins = await draftPinsFor(auditionOn.id);
     expect(pins.some((p) => p.dayOrdinal === pinnedOrdinal)).toBe(true);
-    console.log(`  · re-roll moved ${moved}/${after.classes.length} cells; footer "${after.writes}"; ${after.pins} pin(s) kept`);
+    console.log(`  · re-roll moved ${moved}/${after.classes.length} cells; seed "${after.seed}"; ${after.pins} pin(s) kept`);
   });
 
   test("step 25: a draft edit repaints the strip inside the 60 ms debounce budget", async () => {
@@ -2550,10 +2660,13 @@ describe("climate studio · regimes window", () => {
     );
     expect(probe.ops).toEqual(firstOps);
 
-    // SPEC law 5: the footer is the grammar this window writes.
-    expect(probe.writes.startsWith("[")).toBe(true);
+    // SPEC law 5: the footer is the grammar this window writes. It is authored
+    // grammar now rather than raw JSON (F7) — `regimes [ { <id> w <weight> ·
+    // <dwell> d · <op>[…] }, … ]` — so the field is named by its unit, not by
+    // its schema key.
+    expect(probe.writes.startsWith("regimes [")).toBe(true);
     expect(probe.writes).toContain(probe.rows[0]!);
-    expect(probe.writes).toContain("meanDurationDays");
+    expect(probe.writes).toMatch(/ w \d+\.\d+ · \d+ d/);
     // Two or more states, so × is live on every row (SPEC §3.4: at least one kept).
     if (probe.rows.length > 1) expect(probe.removeDisabled.every((d) => !d)).toBe(true);
     console.log(`  · Regimes · STATES: rows ${JSON.stringify(probe.rows)}; selected "${probe.selected}"; ops ${JSON.stringify(probe.ops)}; ${probe.segments.length} share segments`);
@@ -2619,9 +2732,24 @@ describe("climate studio · regimes window", () => {
       { timeout: 10_000 },
     );
 
-    const after = await probeRegimes();
     // `uniqueId` keeps ids unique, so the id the state actually got is the oracle.
-    const renamed = after.rows[after.rows.length - 1]!;
+    const rowsNow = (await probeRegimes()).rows;
+    const renamed = rowsNow[rowsNow.length - 1]!;
+    // The rows and the WRITES footer repaint on separate ticks (step 36 waits
+    // on the same seam), so a probe taken the instant the row disappears can
+    // still be reading the footer from before the rename. Wait for the footer
+    // to name the new state, then take one consistent probe (H-1392).
+    await ob.page.waitForFunction(
+      (a: { type: string; id: string }) => {
+        const el = (window as any).app.workspace.getLeavesOfType(a.type)[0]?.view?.containerEl as HTMLElement | undefined;
+        const panel = el?.querySelector(".wadjet-studio-regimes")?.closest(".wadjet-studio-window") ?? null;
+        return (panel?.querySelector(".wadjet-studio-writes-body")?.textContent ?? "").includes(a.id);
+      },
+      { type: VIEW_TYPE, id: renamed },
+      { timeout: 10_000 },
+    );
+
+    const after = await probeRegimes();
     expect(renamed.startsWith("storm")).toBe(true);
     expect(after.rows).not.toContain(target);
     expect(after.gatedOn).toBe(renamed);
@@ -2680,7 +2808,7 @@ describe("climate studio · regimes window", () => {
     expect(after.zoneRegimes.map((r) => r.id)).toEqual(after.rows);
     // The share bar is derived from the same list, so its segments follow.
     expect(after.segments).toEqual(after.rows);
-    expect(after.writes).not.toContain(`"${doomed}"`);
+    expect(after.writes).not.toContain(`{ ${doomed} w `);
 
     // Down to one, then the remove button on the survivor is dead (SPEC §3.4).
     for (let guard = 0; guard < 12; guard++) {
@@ -2733,7 +2861,11 @@ interface SeasonsProbe {
   segments: number;
   labels: string[];
   source: string;
-  world: string;
+  /**
+   * The caption that replaced the `world · N zones` chip (F7): the window
+   * still says it is world-level, in the prototype's own microcopy.
+   */
+  caption: string;
   flags: number;
   flagsDisabled: number;
   editLink: string;
@@ -2757,7 +2889,7 @@ async function probeSeasons(): Promise<SeasonsProbe> {
         segments: segIndices.size,
         labels,
         source: text('[data-part="source"] .wadjet-studio-chip-label'),
-        world: text('[data-part="world"] .wadjet-studio-chip-label'),
+        caption: text(".wadjet-studio-seasons-caption"),
         flags: flags.length,
         flagsDisabled: flags.filter((f) => f.getAttribute("aria-disabled") === "true").length,
         editLink: text(".wadjet-studio-seasons-editlink"),
@@ -2846,8 +2978,11 @@ describe("climate studio · seasons window", () => {
     expect(probe.segments).toBe(4);
     expect(probe.labels).toEqual(["Spring", "Summer", "Autumn", "Winter"]);
     expect(probe.source).toBe("internal calendar");
-    expect(probe.world).toMatch(/^world · \d+ zones$/);
-    console.log(`  · seasons window: ${probe.segments} segments ${JSON.stringify(probe.labels)}; source "${probe.source}"; ${probe.world}`);
+    // The `world · N zones` chip gave way to the caption that says what a
+    // season IS (F7) — the world scope is still stated, in product copy.
+    expect(probe.caption).toContain("Seasons");
+    expect(probe.caption).toContain("each stamps tag season:name");
+    console.log(`  · seasons window: ${probe.segments} segments ${JSON.stringify(probe.labels)}; source "${probe.source}"; caption "${probe.caption}"`);
   });
 
   test("step 41: the split-the-longest button adds a segment, behind the world-edit confirm", async () => {
@@ -3147,11 +3282,17 @@ describe("climate studio · era window", () => {
 
     const w = await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.get().view.window, VIEW_TYPE);
     // era.from = 1200, era.to = 1950 (step 47) → raw [1200, 1951], then
-    // `clampWindow` against [epochYear − 100, epochYear + 1100] (`model/zoom.ts`,
-    // mirroring `header.ts`'s own pan bounds). The span (751 y) always fits
-    // inside the 1200-year bounds window, so this is a translate, not a shrink.
-    const min = epochYear - 100;
-    const max = epochYear + 1100;
+    // `clampWindow` against the world's pannable extent (`model/zoom.ts`,
+    // mirroring `header.ts`'s own pan bounds). `worldBounds` is WIDENED to hold
+    // every era now (F3) — without that an era seeded at 1200 in a world whose
+    // epoch is year 1 could not be reached at all, and ⤢ would land the window
+    // eight centuries short of the era it was asked to frame. The span (751 y)
+    // always fits, so this is a translate, not a shrink.
+    const era = (await eraDraft(eraName))!;
+    const frameA = era.from - 100;
+    const frameB = Math.max(frameA + 1000, (era.to ?? frameA) + 100);
+    const min = Math.min(epochYear - 100, frameA);
+    const max = Math.max(epochYear + 1100, frameB);
     let a = 1200;
     let b = 1951;
     if (a < min) {
@@ -3304,9 +3445,11 @@ async function probeDevice(): Promise<DeviceProbe> {
       return {
         open: panel !== null,
         title: text(panel, ".wadjet-studio-window-title"),
+        // The panel's own name row and KIND pill moved into the window chrome
+        // (F11a): the badge IS the kind, and the title is the rename field.
         badge: text(panel, ".wadjet-studio-window-badge"),
-        kind: text(body, ".wadjet-studio-device-kind"),
-        name: (body?.querySelector(".wadjet-studio-device-name") as HTMLInputElement | null)?.value ?? "",
+        kind: text(panel, ".wadjet-studio-window-badge"),
+        name: panel?.querySelector(".wadjet-studio-window-title.is-editable") === null ? "" : text(panel, ".wadjet-studio-window-title"),
         whenKind: body?.querySelector('[data-part="when-kind"] [role=radio][aria-checked=true]')?.getAttribute("data-value") ?? "",
         chance: text(body, '[data-part="when-chance"] .wadjet-studio-knob-value'),
         applyKnobs: body === null ? 0 : body.querySelectorAll('[data-section="apply"] .wadjet-studio-knob').length,
@@ -3401,6 +3544,24 @@ async function openDeviceWindow(id: string): Promise<void> {
 /** The one open device panel's body, as a Playwright locator root. */
 const devicePanel = () => ob.page.locator(".wadjet-studio-window .wadjet-studio-device").first();
 
+/**
+ * The whole panel, chrome included. F11a moved the device's name field, KIND
+ * pill and preset control out of its body and into the shared window chrome,
+ * so the three controls those steps drive live here rather than under
+ * `.wadjet-studio-device`.
+ */
+const deviceWindow = () => ob.page.locator(".wadjet-studio-window", { has: ob.page.locator(".wadjet-studio-device") }).first();
+
+/** Rename through the chrome's click-to-edit title (`components/window.ts onRename`). */
+async function renameDeviceWindow(next: string): Promise<void> {
+  await deviceWindow().locator(".wadjet-studio-window-title.is-editable").click();
+  const input = deviceWindow().locator("input.wadjet-studio-window-title-input");
+  await input.waitFor({ state: "visible", timeout: 10_000 });
+  await input.fill(next);
+  await input.press("Enter");
+  await nextFrame();
+}
+
 /** Click a row in the Obsidian menu the panel just opened. */
 async function pickDeviceMenuItem(match: string | RegExp): Promise<void> {
   const menu = ob.page.locator(".menu").last();
@@ -3417,46 +3578,74 @@ describe("climate studio · device window", () => {
     const probe = await probeDevice();
     expect(probe.open).toBe(true);
     expect(probe.title).toBe(DEVICE_ID);
-    expect(probe.badge).toBe("DEVICE");
-    expect(probe.kind).toBe("CHANCE");
+    // One badge, and it names the KIND (F11a folded the panel's own name row
+    // and kind pill into the window chrome): `chance` reads as DICE, the
+    // prototype's own word for a device that rolls for it.
+    expect(probe.badge).toBe("DICE");
+    expect(probe.kind).toBe("DICE");
+    // The chrome title is the rename field, so the name is editable in place.
     expect(probe.name).toBe(DEVICE_ID);
     expect(probe.whenKind).toBe("chance");
     // `{ chance: 0.1 }` reads as a percentage, not a fraction (SPEC §3.4).
     expect(probe.chance).toBe("10 %");
     expect(probe.applyKnobs).toBe(1);
-    // Law 5: the footer is the exact modifier the window writes.
-    expect(JSON.parse(probe.writes)).toEqual({ id: DEVICE_ID, stage: "daily", when: { chance: 0.1 }, apply: [{ param: "wind.speed", op: "scale", value: 1.5 }] });
+    // Law 5: the footer is the exact modifier the window writes — as authored
+    // grammar now rather than the serialised object (F11a `deviceGrammar`),
+    // so the predicate and the apply are still both readable in it, in the
+    // engine's own paths.
+    expect(probe.writes).toMatch(/^modifiers\[\d+\] · when\.chance 0\.10 · apply wind\.speed ×1\.50$/);
+    // The store's copy is the oracle for the shape itself.
+    expect(await draftModifier(DEVICE_ID)).toEqual({ id: DEVICE_ID, stage: "daily", when: { chance: 0.1 }, apply: [{ param: "wind.speed", op: "scale", value: 1.5 }] });
     console.log(`  · device:${DEVICE_ID} → ${probe.badge} "${probe.title}" · ${probe.kind} · chance ${probe.chance} · ${probe.applyKnobs} apply knob; writes ${probe.writes}`);
   });
 
   test("step 53: the WHEN segmented switches to tag, and season chips write tag then any", async () => {
+    // `open` focuses the panel step 52 left up and rebuilds it if that step
+    // died and the shared afterEach closed it — one failure should not cascade
+    // into the five steps that follow it.
+    await openDeviceWindow(DEVICE_ID);
     await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=tag]').click();
     await nextFrame();
 
     const switched = await probeDevice();
     expect(switched.whenKind).toBe("tag");
     expect(switched.kind).toBe("TAG");
-    // `newDevice`'s default: the calendar's first season.
+    // `newDevice`'s default: the calendar's first season. The picker shows the
+    // SELECTED tags only now, each removable, with a `＋` that offers the rest
+    // in a menu — the prototype's compact control, not an inline list of every
+    // tag the world has ever heard of.
     expect(switched.selectedTags).toEqual(["season:Spring"]);
-    expect(switched.tagChips).toEqual(["season:Spring", "season:Summer", "season:Harvest", "season:Winter"]);
+    expect(switched.tagChips).toEqual(["season:Spring"]);
     expect((await draftModifier(DEVICE_ID)).when).toEqual({ tag: "season:Spring" });
 
-    // A second chip: several tags are `any` (SPEC §3.4).
-    await devicePanel().locator('[data-tag="season:Winter"]').click();
+    // The `＋` offers exactly the tags that are not on already — the four
+    // seasons the world has, minus the one this device is already gated on.
+    await devicePanel().locator(".wadjet-studio-device-when .wadjet-studio-device-add").first().click();
+    const menu = ob.page.locator(".menu").last();
+    await menu.waitFor({ state: "visible", timeout: 10_000 });
+    const offered = (await menu.locator(".menu-item-title").allTextContents()).map((t) => t.trim());
+    expect(offered.filter((t) => t.startsWith("season:"))).toEqual(["season:Summer", "season:Harvest", "season:Winter"]);
+    expect(offered).not.toContain("season:Spring");
+
+    // A second tag: several tags are `any` (SPEC §3.4).
+    await menu.locator(".menu-item", { hasText: "season:Winter" }).first().click();
     await nextFrame();
     expect((await draftModifier(DEVICE_ID)).when).toEqual({ any: [{ tag: "season:Spring" }, { tag: "season:Winter" }] });
+    expect((await probeDevice()).tagChips).toEqual(["season:Spring", "season:Winter"]);
 
-    // Back down to one, and the predicate collapses to a bare tag again.
+    // Back down to one — clicking a chip takes its tag off — and the predicate
+    // collapses to a bare tag again.
     await devicePanel().locator('[data-tag="season:Spring"]').click();
     await nextFrame();
     const one = await draftModifier(DEVICE_ID);
     expect(one.when).toEqual({ tag: "season:Winter" });
     const after = await probeDevice();
     expect(after.selectedTags).toEqual(["season:Winter"]);
-    console.log(`  · WHEN chance → tag; chips ${JSON.stringify(after.tagChips)}; when ${JSON.stringify(one.when)}`);
+    console.log(`  · WHEN chance → tag; chips ${JSON.stringify(after.tagChips)}; ＋ offered ${JSON.stringify(offered)}; when ${JSON.stringify(one.when)}`);
   });
 
   test("step 54: the SPELL lamp writes the real grammar with the shipped defaults", async () => {
+    await openDeviceWindow(DEVICE_ID);
     expect((await probeDevice()).spellOn).toBe(false);
     await devicePanel().locator('[data-part="spell-power"]').click();
     await nextFrame();
@@ -3472,6 +3661,7 @@ describe("climate studio · device window", () => {
   });
 
   test("step 55: a season gate lands in mods, and its dimmer knob drags to 0.5", async () => {
+    await openDeviceWindow(DEVICE_ID);
     // MOD is hidden until the device has a gate or an envelope (SPEC §3.4).
     await devicePanel().locator(".wadjet-studio-device-add-mod").click();
     await nextFrame();
@@ -3485,17 +3675,21 @@ describe("climate studio · device window", () => {
     // 150 px of drag is the knob's full [0, 1]; 75 px down halves it.
     await dragKnobDial('[data-part="gate-0"] .wadjet-studio-knob-dial', 75);
     const dimmed = await probeDevice();
-    expect(dimmed.gateAmount).toBe("0.50");
+    // The gate's readout is the prototype's percentage (F11a `gatePercent`),
+    // not the raw 0–1 amount the modifier stores.
+    expect(dimmed.gateAmount).toBe("50%");
     const draft = await draftModifier(DEVICE_ID);
     expect(draft.mods).toEqual([{ source: "season:Winter", amount: 0.5 }]);
     console.log(`  · ＋ gate season:Winter, dragged to ${dimmed.gateAmount} → mods ${JSON.stringify(draft.mods)}`);
   });
 
   test("step 56: save as preset writes the device's shape into the world draft", async () => {
+    await openDeviceWindow(DEVICE_ID);
     const before = (await draftPresets()).map((p) => p.name);
 
-    await devicePanel().locator(".wadjet-studio-device-preset").click();
-    await pickDeviceMenuItem(/save/);
+    // The preset control is the window chrome's now (F11a): a `▾` of the
+    // presets this kind offers, and a `＋` that saves the device as one.
+    await deviceWindow().locator(".wadjet-studio-window-preset-save").click();
 
     const modal = ob.page.locator(".modal-container .modal");
     await modal.waitFor({ state: "visible", timeout: 10_000 });
@@ -3514,24 +3708,18 @@ describe("climate studio · device window", () => {
     expect(saved.id).toBeUndefined();
     expect(saved.stage).toBeUndefined();
 
-    // The menu now offers it back, badged `yours`.
-    await devicePanel().locator(".wadjet-studio-device-preset").click();
-    const menu = ob.page.locator(".menu").last();
-    await menu.waitFor({ state: "visible", timeout: 10_000 });
-    const titles = (await menu.locator(".menu-item-title").allTextContents()).map((t) => t.replace(/\s+/g, " ").trim());
-    await ob.page.keyboard.press("Escape");
+    // The picker offers it back, badged `yours`.
+    const titles = (await deviceWindow().locator(".wadjet-studio-window-preset-pick option").allTextContents()).map((t) => t.replace(/\s+/g, " ").trim());
     expect(titles.some((t) => t.includes(`${saved.name} · yours`))).toBe(true);
-    console.log(`  · saved "${saved.name}" (was ${JSON.stringify(before)}); menu now ${JSON.stringify(titles)}`);
+    console.log(`  · saved "${saved.name}" (was ${JSON.stringify(before)}); picker now ${JSON.stringify(titles)}`);
   });
 
   test("step 57: renaming the device moves the modifier id and the window title follows", async () => {
-    // Escape closed the preset menu in step 56, and the panel with it (the
-    // window chrome closes on Escape, SPEC §3.4). `open` focuses an open panel
-    // and rebuilds a closed one, so the step starts from a known panel either way.
+    // `open` focuses an open panel and rebuilds a closed one, so the step
+    // starts from a known panel whatever step 56 left behind.
     await openDeviceWindow(DEVICE_ID);
-    const input = devicePanel().locator(".wadjet-studio-device-name");
-    await input.fill(DEVICE_RENAMED);
-    await input.press("Enter");
+    // The name field is the chrome's click-to-edit title now (F11a).
+    await renameDeviceWindow(DEVICE_RENAMED);
     await ob.page.waitForFunction(
       (a: { type: string; name: string }) => {
         const el = (window as any).app.workspace.getLeavesOfType(a.type)[0]?.view?.containerEl as HTMLElement | undefined;
@@ -3601,7 +3789,9 @@ interface ErasLaneSpan {
 interface ErasLaneProbe {
   /** false when the row is not in the playlist at all */
   present: boolean;
-  rowLabel: string;
+  /** the label's two lines, each on its own span (F2) */
+  rowName: string;
+  rowSub: string;
   spans: ErasLaneSpan[];
   /** the lane's own screen box, and the strip width the row's geometry is measured from */
   laneLeft: number;
@@ -3616,7 +3806,7 @@ async function probeErasLane(): Promise<ErasLaneProbe> {
     (app, type: string) => {
       const leaf = app.workspace.getLeavesOfType(type)[0];
       const el: HTMLElement = leaf.view.containerEl;
-      const row = Array.from(el.querySelectorAll(".wadjet-studio-row")).find((r) => (r.querySelector(".wadjet-studio-row-label")?.textContent ?? "").trim().startsWith("Eras")) as HTMLElement | undefined;
+      const row = Array.from(el.querySelectorAll(".wadjet-studio-row")).find((r) => (r.querySelector(".wadjet-studio-row-name")?.textContent ?? "").trim() === "Eras") as HTMLElement | undefined;
       const lane = row?.querySelector(".wadjet-studio-lane") ?? null;
       const nodes = lane === null ? [] : Array.from(lane.querySelectorAll(".wadjet-studio-span"));
       const box = lane === null ? null : lane.getBoundingClientRect();
@@ -3624,7 +3814,8 @@ async function probeErasLane(): Promise<ErasLaneProbe> {
       const num = (e: HTMLElement, name: string) => parseFloat(e.style.getPropertyValue(name) || "0");
       return {
         present: lane !== null,
-        rowLabel: (row?.querySelector(".wadjet-studio-row-label")?.textContent ?? "").trim(),
+        rowName: (row?.querySelector(".wadjet-studio-row-name")?.textContent ?? "").trim(),
+        rowSub: (row?.querySelector(".wadjet-studio-row-sub")?.textContent ?? "").replace(/\s+/g, " ").trim(),
         spans: nodes.map((n) => {
           const e = n as HTMLElement;
           return {
@@ -3842,7 +4033,15 @@ describe("climate studio · eras lane", () => {
 
     const probe = await probeErasLane();
     expect(probe.present).toBe(true);
-    expect(probe.rowLabel).toBe("Eras · world");
+    // The Era preset frames the world's eras now (F3) rather than dropping a
+    // fixed 1000 years around wherever the window happened to be: `eraFrame`
+    // is the enabled eras' span with 100 years of air in front, at least 1000
+    // wide — here [200, 900] → [100, 1100].
+    expect(probe.window).toEqual({ a: 100, b: 1100 });
+    // Both lines of the label are in the element's text now (F2), so the row's
+    // name is read on its own span and the sub-line says what it counts.
+    expect(probe.rowName).toBe("Eras");
+    expect(probe.rowSub).toBe("world · 3 eras");
     expect(probe.spans.length).toBe(3);
     expect(probe.spans.map((s) => s.kind)).toEqual(["clip", "clip", "clip"]);
     expect(probe.spans.every((s) => s.editable)).toBe(true);
@@ -3983,7 +4182,9 @@ interface RegimesLaneProbe {
   /** `blocks` | `share` | `empty`, off the lane's `data-mode` */
   mode: string;
   yearLength: number;
-  rowLabel: string;
+  /** the label's two lines, each on its own span (F2) */
+  rowName: string;
+  rowSub: string;
   spans: RegimeLaneSpanProbe[];
   /** the draft's states, in the order the zone lists them */
   regimes: string[];
@@ -4007,7 +4208,8 @@ async function probeRegimesRow(): Promise<RegimesLaneProbe> {
       return {
         mode: lane === null ? "none" : (lane.getAttribute("data-mode") ?? ""),
         yearLength: lane === null ? 0 : Number(lane.getAttribute("data-year-length") ?? "0"),
-        rowLabel: (row?.querySelector(".wadjet-studio-row-label")?.textContent ?? "").trim(),
+        rowName: (row?.querySelector(".wadjet-studio-row-name")?.textContent ?? "").trim(),
+        rowSub: (row?.querySelector(".wadjet-studio-row-sub")?.textContent ?? "").replace(/\s+/g, " ").trim(),
         spans: spans.map((n) => ({
           id: n.getAttribute("data-id") ?? "",
           regime: n.getAttribute("data-regime") ?? "",
@@ -4068,15 +4270,26 @@ async function closeStudioWindows(): Promise<void> {
  * 60 ms plus its own gap), so a freshly seeded window paints its geometry at
  * once and its blocks a beat later.
  */
-async function waitForRegimesLane(mode: string, minSpans: number): Promise<void> {
+async function waitForRegimesLane(mode: string, minSpans: number, year?: number): Promise<void> {
   await ob.page.waitForFunction(
-    (a: { type: string; lane: string; mode: string; min: number }) => {
+    (a: { type: string; lane: string; mode: string; min: number; year: number | null }) => {
       const el = (window as any).app.workspace.getLeavesOfType(a.type)[0]?.view?.containerEl as HTMLElement | undefined;
       const lane = el?.querySelector(a.lane) ?? null;
-      return lane !== null && lane.getAttribute("data-mode") === a.mode && lane.querySelectorAll(".wadjet-studio-span").length >= a.min;
+      if (lane === null || lane.getAttribute("data-mode") !== a.mode) return false;
+      const spans = Array.from(lane.querySelectorAll(".wadjet-studio-span"));
+      if (spans.length < a.min) return false;
+      // The row re-rolls on a debounce, and a pan or a zoom repaints the
+      // PREVIOUS roll's blocks under the new geometry while it waits. The mode
+      // and the count are true through all of that, so the gate is a property
+      // of the rolled DOM itself (H-1392): every block decorated, and the run
+      // that starts the strip inside the year the walk asked for.
+      if (spans.some((s) => (s.getAttribute("data-regime") ?? "") === "")) return false;
+      if (a.year === null) return true;
+      const from = Math.min(...spans.map((s) => Number(s.getAttribute("data-span-from") ?? NaN)));
+      return Number.isFinite(from) && from >= a.year && from < a.year + 1;
     },
-    { type: VIEW_TYPE, lane: REGIMES_LANE, mode, min: minSpans },
-    { timeout: 10_000 },
+    { type: VIEW_TYPE, lane: REGIMES_LANE, mode, min: minSpans, year: year ?? null },
+    { timeout: 15_000 },
   );
 }
 
@@ -4088,11 +4301,13 @@ describe("climate studio · regimes lane", () => {
     const year = epoch + 5;
     await seedWindow({ a: year, b: year + 1 });
     await nextFrame();
-    await waitForRegimesLane("blocks", 2);
+    await waitForRegimesLane("blocks", 2, year);
 
     const probe = await probeRegimesRow();
     expect(probe.mode).toBe("blocks");
-    expect(probe.rowLabel).toBe("Regimes");
+    expect(probe.rowName).toBe("Regimes");
+    // The sub-line is the share the states hold, biggest first (`laneSub`).
+    expect(probe.rowSub).toContain(`${probe.regimes.length} state`);
     expect(probe.yearLength).toBeGreaterThan(0);
     // SPEC §6: the roll keeps a state for a geometric run, so a year is many runs.
     expect(probe.spans.length).toBeGreaterThanOrEqual(2);
@@ -4119,11 +4334,27 @@ describe("climate studio · regimes lane", () => {
       worst = Math.max(worst, Math.abs(gap));
     }
 
-    // A block with room carries its state's id; the tip names it either way.
-    const { span } = widestRegimeSpan(probe);
-    expect(span.hint).toContain(`regime:${span.regime}`);
-    if (span.width >= 40) expect(span.label).toBe(span.regime);
-    console.log(`  · ${probe.spans.length} blocks over year ${year} (${probe.yearLength} d), states ${JSON.stringify([...new Set(probe.spans.map((s) => s.regime))])}; worst gap ${(worst * probe.yearLength).toFixed(3)} d`);
+    // The tip always names the state, at every zoom.
+    for (const s of probe.spans) expect(s.hint).toContain(`regime:${s.regime}`);
+
+    // A block with room carries its state's id — but "room" is now two
+    // conditions, not one (F2 / `regimes-row.ts`): `LABEL_MIN_PX` of block AND
+    // `LABEL_MIN_PX_PER_DAY` of zoom. A whole year across the playlist is
+    // under 2 px a day, so nothing is labelled here however wide the run is;
+    // the row's own sub-line carries the reading instead. Zoom into a season
+    // and the wide blocks say their name.
+    expect(probe.spans.every((s) => s.label === "")).toBe(true);
+    await seedWindow({ a: year + 0.25, b: year + 0.4 });
+    await nextFrame();
+    await waitForRegimesLane("blocks", 2, year);
+    const zoomed = await probeRegimesRow();
+    const { span } = widestRegimeSpan(zoomed);
+    expect(zoomed.spans.some((s) => s.label !== "")).toBe(true);
+    // …and a label, when it is drawn, is only ever the state's own id.
+    for (const s of zoomed.spans) expect(s.label === "" || s.label === s.regime).toBe(true);
+    console.log(
+      `  · ${probe.spans.length} blocks over year ${year} (${probe.yearLength} d), states ${JSON.stringify([...new Set(probe.spans.map((s) => s.regime))])}; worst gap ${(worst * probe.yearLength).toFixed(3)} d; zoomed in, "${span.label}" labels a ${Math.round(span.width)}px block`,
+    );
   });
 
   test("regimes lane: the share bar at Era zoom, one segment per state edge to edge", async () => {
@@ -4160,7 +4391,7 @@ describe("climate studio · regimes lane", () => {
     const year = epoch + 5;
     await seedWindow({ a: year, b: year + 1 });
     await nextFrame();
-    await waitForRegimesLane("blocks", 2);
+    await waitForRegimesLane("blocks", 2, year);
 
     const before = await probeRegimesRow();
     const { span, at } = widestRegimeSpan(before);
@@ -4186,7 +4417,7 @@ describe("climate studio · regimes lane", () => {
     const year = epoch + 5;
     await seedWindow({ a: year, b: year + 1 });
     await nextFrame();
-    await waitForRegimesLane("blocks", 2);
+    await waitForRegimesLane("blocks", 2, year);
 
     const before = await probeRegimesRow();
     const { span, at } = widestRegimeSpan(before);
@@ -4555,14 +4786,14 @@ async function auditionDayMean(): Promise<number> {
 /**
  * Wait until the strip's CELLS are the roll of `year`.
  *
- * The footer alone is not proof: `paintFooter` builds its text from the live
+ * The seed pill alone is not proof: `paintSeed` builds its text from the live
  * state (`inputFor(state).year`), so it names the seeded year the instant the
  * window moves — before the 60 ms-debounced re-roll has replaced a single
- * cell. Reading a mean off the footer's word therefore read the PREVIOUS
+ * cell. Reading a mean off the pill's word therefore read the PREVIOUS
  * year's roll, which is what made `forcings 3` produce −0.7 instead of +4 in
  * two crews' runs. Each cell carries its real `data-day-ordinal`, and the
  * active time adapter turns one into a year, so this waits on the roll itself
- * and only uses the footer as a second opinion (H-1392: assert the reaction
+ * and only uses the pill as a second opinion (H-1392: assert the reaction
  * happened, do not sleep a fixed amount and hope).
  */
 async function waitForAuditionYear(year: number): Promise<void> {
@@ -4570,18 +4801,18 @@ async function waitForAuditionYear(year: number): Promise<void> {
   await ob.page.waitForFunction(
     (a: { type: string; needle: string; year: number }) => {
       const el = (window as any).app.workspace.getLeavesOfType(a.type)[0]?.view?.containerEl as HTMLElement | undefined;
-      if (!(el?.querySelector(".wadjet-studio-audition-foot .wadjet-studio-writes-body")?.textContent ?? "").includes(a.needle)) return false;
+      if (!(el?.querySelector('[data-part="audition-seed"]')?.textContent ?? "").includes(a.needle)) return false;
       const ordinal = Number(el?.querySelector(".wadjet-studio-audition-cell")?.getAttribute("data-day-ordinal") ?? NaN);
       if (!Number.isFinite(ordinal)) return false;
       // `core/eras.ts yearOf`, evaluated through the adapter that rolled the cell.
       const t = (window as any).app.plugins.plugins.wadjet.time.active.toContext(ordinal);
       return (t.year ?? Math.floor(t.dayOrdinal / t.yearLength) + 1) === a.year;
     },
-    { type: VIEW_TYPE, needle: `Y ${year} `, year },
+    { type: VIEW_TYPE, needle: `YR ${year} ·`, year },
     { timeout: 20_000 },
   );
   await nextFrame();
-  console.log(`  · strip rolled Y ${year} after ${Date.now() - started} ms`);
+  console.log(`  · strip rolled YR ${year} after ${Date.now() - started} ms`);
 }
 
 /**
@@ -4645,6 +4876,12 @@ describe("climate studio · forcings", () => {
   test("forcings 2: the ∿ lane row zooms to Era and draws the zone's first frc.warmth lane", async () => {
     await revealStudio();
     await resetForcings();
+    // The Era preset frames the world's eras now (F3), and `ensureLane` anchors
+    // a fresh warmth lane on the EPOCH. An era an earlier describe left behind
+    // would therefore zoom the playlist a thousand years away from the lane it
+    // just created. Eras are not this walk's subject — the eras lane describe
+    // owns that reading — so start from a world without them.
+    await seedEras([]);
     const epoch = await epochYear();
     await seedWindow({ a: epoch, b: epoch + 1 });
     const expected = await expectedEraWindow({ a: epoch, b: epoch + 1 });
@@ -4699,6 +4936,7 @@ describe("climate studio · forcings", () => {
 
   test("forcings 4: right-click removes a point, and refuses the one that would leave a single point", async () => {
     await revealStudio();
+    await seedEras([]); // same reason as step 2: the Era window must hold the epoch-anchored lane
     const epoch = await epochYear();
     // Seeded rather than carried over from step 3, so this step stands alone.
     await withApp(
@@ -4751,6 +4989,12 @@ describe("climate studio · forcings", () => {
 /** The scratch note the day-card step renders a ```wadjet``` block into. */
 const CHANNEL_SCRATCH = "Wadjet Studio Day.md";
 
+/**
+ * Points in one composed channel curve: `COMPOSED_SAMPLES` (240, in
+ * `model/channel-series.ts`) intervals, so 241 samples counting both ends.
+ */
+const COMPOSED_POINTS = 241;
+
 interface ChannelRowProbe {
   /** the row is hidden (Day zoom hands the playlist over to the day card) */
   hidden: boolean;
@@ -4760,6 +5004,8 @@ interface ChannelRowProbe {
   ys: number[];
   /** the temperature band, drawn only at fine zoom */
   bandPaths: number;
+  /** SKY draws a shaded cell strip instead of a curve (F2) — this is how many */
+  cells: number;
   strokes: string[];
 }
 
@@ -4780,6 +5026,7 @@ async function channelRowProbe(channel: string): Promise<ChannelRowProbe> {
         points: pairs.length,
         ys: pairs.map((p) => Math.round(Number(p.split(",")[1]) * 100) / 100),
         bandPaths: band === null || band === undefined || band.hasClass("is-hidden") ? 0 : band.querySelectorAll("path.wadjet-studio-chart-band").length,
+        cells: plot?.querySelectorAll(".wadjet-studio-channel-cell").length ?? 0,
         strokes: Array.from(plot?.querySelectorAll("polyline.wadjet-studio-chart-line") ?? []).map((n) => n.getAttribute("stroke") ?? ""),
       };
     },
@@ -4810,7 +5057,14 @@ interface DayCardProbe {
   hidden: boolean;
   day: number | null;
   date: string;
-  headline: string;
+  /**
+   * The card's hero, split three ways by the rebuild (F3): the mean as a bare
+   * number with a degree sign and no scale letter, the condition phrase, and
+   * the aviation code pill. There is no single `headline` line any more.
+   */
+  temp: string;
+  cond: string;
+  code: string;
   cells: Record<string, string>;
   chips: string[];
   pinned: boolean;
@@ -4833,7 +5087,9 @@ async function dayCardProbe(): Promise<DayCardProbe> {
         hidden: card === null ? true : card.hasClass("is-hidden"),
         day: dayAttr === null ? null : Number(dayAttr),
         date: text(card?.querySelector(".wadjet-studio-daycard-date") ?? null),
-        headline: text(card?.querySelector(".wadjet-studio-daycard-headline") ?? null),
+        temp: text(card?.querySelector(".wadjet-studio-daycard-temp") ?? null),
+        cond: text(card?.querySelector(".wadjet-studio-daycard-cond") ?? null),
+        code: text(card?.querySelector(".wadjet-studio-daycard-code") ?? null),
         cells,
         chips: Array.from(card?.querySelectorAll(".wadjet-studio-daycard-chips .wadjet-studio-chip-label") ?? []).map((n) => text(n)),
         pinned: card?.querySelector(".wadjet-studio-daycard-pin.is-hidden") === null,
@@ -4925,19 +5181,28 @@ describe("climate studio · channel rows", () => {
 
     const temp = await channelRowProbe("temperature");
     expect(temp.hidden).toBe(false);
-    // SPEC §3.2: fine zoom is the composed daily curve. One point per rolled
-    // day is far past the 12 a ribbon would carry.
+    // SPEC §3.2: fine zoom is the COMPOSED curve — the resolved climate the
+    // mixer wrote, sampled `COMPOSED_SAMPLES` times across the window (F2),
+    // not a per-day roll. 240 samples inclusive of both ends is 241 points,
+    // far past the 12 a yearly ribbon would carry.
     expect(temp.points).toBeGreaterThanOrEqual(12);
-    expect(temp.points).toBeGreaterThan(300);
+    expect(temp.points).toBe(COMPOSED_POINTS);
     // The low/high band comes with it, and the mean line is the channel colour.
     expect(temp.bandPaths).toBe(1);
     expect(temp.strokes.some((s) => s.includes("--wadjet-studio-temp"))).toBe(true);
 
-    const others = await Promise.all(["precipitation", "wind", "sky"].map(channelRowProbe));
+    const others = await Promise.all(["precipitation", "wind"].map(channelRowProbe));
     for (const row of others) expect(row.points).toBeGreaterThanOrEqual(12);
+    // SKY is the one row the prototype does not draw as a curve (F2): a
+    // shaded cell per slice of the window, dark for a clear sky and pale for
+    // an overcast one. So it has no line at all — it has the strip.
+    const sky = await channelRowProbe("sky");
+    expect(sky.hidden).toBe(false);
+    expect(sky.points).toBe(0);
+    expect(sky.cells).toBeGreaterThanOrEqual(12);
     const probe = await probePlaylist();
     expect(probe.dayCardHidden).toBe(true);
-    console.log(`  · Year zoom: temperature ${temp.points} points + ${temp.bandPaths} band; precip/wind/sky ${others.map((o) => o.points).join("/")}; ${probe.charts} charts`);
+    console.log(`  · Year zoom: temperature ${temp.points} points + ${temp.bandPaths} band; precip/wind ${others.map((o) => o.points).join("/")}; sky ${sky.cells} cells; ${probe.charts} charts`);
   });
 
   test("channels 2: at Era zoom the rows flatten to one mean line, and the tick is quick", async () => {
@@ -4948,16 +5213,25 @@ describe("climate studio · channel rows", () => {
     const ms = await timedSeedWindow({ a: epoch, b: epoch + 1000 });
     const temp = await channelRowProbe("temperature");
     expect(temp.hidden).toBe(false);
-    // A thousand years is past the repeat threshold: one flat line at the
-    // ribbon's own mean, and no band.
+    // A thousand years is past the repeat threshold (`RIBBON_FLAT_YEARS`): the
+    // curve steps, one flat level per run of years the era set does not change
+    // in — with no era inside the window that is a single level, two points.
     expect(temp.points).toBe(2);
     expect(new Set(temp.ys).size).toBe(1);
-    expect(temp.bandPaths).toBe(0);
-    for (const channel of ["precipitation", "wind", "sky"]) {
+    // The spread band steps with it rather than dropping out (F2): the yearly
+    // ribbon carries the low/high pair the same way the composed curve does,
+    // so the row still reads as a range and not as a bare line.
+    expect(temp.bandPaths).toBe(1);
+    for (const channel of ["precipitation", "wind"]) {
       const row = await channelRowProbe(channel);
       expect(row.points, channel).toBe(2);
       expect(new Set(row.ys).size, channel).toBe(1);
     }
+    // SKY keeps its cell strip at every zoom (F2), shaded from the ribbon's
+    // own cloud level rather than the composed one.
+    const sky = await channelRowProbe("sky");
+    expect(sky.points).toBe(0);
+    expect(sky.cells).toBeGreaterThanOrEqual(12);
     // PLAN §7: the wide zoom must not cost a roll per year.
     expect(ms).toBeLessThan(500);
     console.log(`  · Era zoom (1000 y): flat line at y ${temp.ys[0]}, store tick + paint in ${ms.toFixed(1)} ms`);
@@ -4966,6 +5240,11 @@ describe("climate studio · channel rows", () => {
   test("channels 3: at Day zoom the card shows the same day a wadjet block does", async () => {
     await revealStudio();
     const zoneId = await resetDraftFromSettings();
+    // The card's `season:` chip comes off the day's own tags, which the active
+    // ADAPTER stamps from `settings.calendar` — not from the studio's world
+    // draft. Seed both, so the step stands on its own instead of on whichever
+    // describe last happened to leave seasons behind.
+    await seedChannelSeasons(CHANNEL_SEASONS);
     const epoch = await epochYear();
     // Three days wide (≤ 7.5), so the playlist hands over to the day card.
     const centre = epoch + 5 + 100 / 365;
@@ -4973,13 +5252,20 @@ describe("climate studio · channel rows", () => {
 
     const probe = await probePlaylist();
     expect(probe.dayCardHidden).toBe(false);
-    expect(probe.hiddenRows).toBeGreaterThanOrEqual(4);
+    // The card is an overlay over the lane stack now (F3), not a replacement
+    // for it: at Day zoom every row stays mounted and visible under the card,
+    // so the reader can still see the curves the day was drawn from.
+    expect(probe.hiddenRows).toBe(0);
 
     const card = await dayCardProbe();
     expect(card.hidden).toBe(false);
     expect(card.day).not.toBeNull();
-    expect(card.headline.length).toBeGreaterThan(0);
-    expect(card.date.length).toBeGreaterThan(0);
+    // The hero: a bare mean with a degree sign, the condition phrase and the
+    // aviation code (F3). `DAY 36 · YEAR 1600 · THAW` is the eyebrow above it.
+    expect(card.temp).toMatch(/^[−-]?\d+(\.\d+)?°$/);
+    expect(card.cond.length).toBeGreaterThan(0);
+    expect(card.code).toMatch(/^[+A-Z]{2,3}$/);
+    expect(card.date).toMatch(/^DAY \d+ · YEAR /);
     // SPEC §3.2: the tags the card carries.
     expect(card.chips.some((c) => c.startsWith("regime:"))).toBe(true);
     expect(card.chips.some((c) => c.startsWith("season:"))).toBe(true);
@@ -4988,15 +5274,19 @@ describe("climate studio · channel rows", () => {
     await closeScratch();
     await revealStudio();
 
-    // Real data only: the card and the block are the same report.
-    expect(block.summary).toBe(card.headline);
-    const cardTemps = numbersIn(card.cells["temperature"] ?? "");
+    // Real data only: the card and the block are the same report. The card's
+    // hero is the day's MEAN, so it has to sit inside the low–high range the
+    // block prints; humidity is a rounded percent on both, so it matches to
+    // the character. That pair is the cross-check the old
+    // `summary === headline` line made before the hero was split.
+    const heroTemp = numbersIn(card.temp)[0]!;
     const blockTemps = numbersIn(block.rows["Temperature"] ?? "");
-    expect(cardTemps.length).toBeGreaterThanOrEqual(2);
     expect(blockTemps.length).toBeGreaterThanOrEqual(2);
-    expect(cardTemps.slice(0, 2)).toEqual(blockTemps.slice(0, 2));
-    console.log(`  · day ${card.day} (${card.date}): card "${card.cells["temperature"]}" vs block "${block.rows["Temperature"]}"`);
-    console.log(`  · headline: "${card.headline}"`);
+    expect(heroTemp).toBeGreaterThanOrEqual(Math.floor(Math.min(...blockTemps.slice(0, 2))));
+    expect(heroTemp).toBeLessThanOrEqual(Math.ceil(Math.max(...blockTemps.slice(0, 2))));
+    expect(card.cells["humidity"]).toBe(block.rows["Humidity"]);
+    console.log(`  · day ${card.day} (${card.date}): card hero "${card.temp}" inside block "${block.rows["Temperature"]}"; humidity "${card.cells["humidity"]}"`);
+    console.log(`  · condition: "${card.cond}" ${card.code} — block summary "${block.summary}"`);
     console.log(`  · chips: ${card.chips.join(" | ")}`);
   });
 
@@ -5027,7 +5317,7 @@ describe("climate studio · channel rows", () => {
     const opened = await withApp(ob.page, (app, type: string) => (app.workspace.getLeavesOfType(type)[0].view.store.get().view.openWindows as string[]).filter((id) => id.startsWith("channel:")), VIEW_TYPE);
     expect(opened).toEqual(["channel:temperature"]);
     // The row is still drawing after both clicks.
-    expect((await channelRowProbe("temperature")).points).toBeGreaterThan(300);
+    expect((await channelRowProbe("temperature")).points).toBe(COMPOSED_POINTS);
     await closeStudioWindows();
     console.log("  · TEMP label and curve clicked: no throw, one channel:temperature panel");
   });
@@ -5048,6 +5338,8 @@ interface AtlasProbe {
   rebase: string;
   matchName: string;
   matchText: string;
+  /** the full `Closest match: …` sentence, which the card keeps on its `title` */
+  matchTitle: string;
   writes: string;
   /** the header's ⇅ chip, which only a hemisphere-straddling match raises */
   flipChip: boolean;
@@ -5073,6 +5365,7 @@ async function atlasProbe(): Promise<AtlasProbe> {
         rebase: text(panel, '[data-part="atlas-rebase"]'),
         matchName: text(panel, '[data-part="atlas-match-name"]'),
         matchText: text(panel, '[data-part="atlas-match-text"]'),
+        matchTitle: panel?.querySelector('[data-part="atlas-match-text"]')?.getAttribute("title") ?? "",
         writes: text(panel, ".wadjet-studio-window-foot"),
         flipChip: !(el?.querySelector('[data-part="flip"]')?.className ?? "is-hidden").includes("is-hidden"),
       };
@@ -5146,12 +5439,19 @@ async function atlasTypeKnob(part: string, value: string): Promise<void> {
   await nextFrame();
 }
 
-/** Search for a station and select its row. */
-async function atlasSelectStation(query: string, id: string): Promise<void> {
-  const search = atlasPanel().locator('[data-part="atlas-search"]');
-  await search.fill(query);
-  await nextFrame();
-  await atlasPanel().locator(`[data-part="atlas-station"][data-id="${id}"]`).click();
+/**
+ * Select a station's row in the list.
+ *
+ * The search box is gone (F9): the list is a short curated set of 26 places
+ * over a climate map, so the row is clicked directly. The `query` argument is
+ * kept as the place's own name so the call still reads as "pick Undoolya", and
+ * it is asserted against the row that gets clicked.
+ */
+async function atlasSelectStation(place: string, id: string): Promise<void> {
+  const row = atlasPanel().locator(`[data-part="atlas-station"][data-id="${id}"]`);
+  await row.waitFor({ state: "visible", timeout: 10_000 });
+  expect((await row.locator(".wadjet-studio-atlas-stationname").textContent())?.trim()).toBe(place);
+  await row.click();
   await nextFrame();
 }
 
@@ -5227,10 +5527,22 @@ describe("climate studio · atlas", () => {
     // The list is `PRESETS` minus the alternates — 26 today, asserted as a
     // floor so a curated addition never fails the walk.
     expect(opened.names.length).toBeGreaterThanOrEqual(20);
-    expect(opened.names).toContain("Fjord Coast");
+    // The rows name the PLACE the record came from, not the preset's title
+    // (F9): `fjord-coast` is the reading taken at Bergen.
+    expect(opened.names).toContain("Bergen");
+    // SPEC law 5, per mode: the footer says what THIS half of the panel
+    // writes (F9), rather than listing both keys under either. Station mode
+    // writes the preset; geography mode writes the place and the Tier A it
+    // implies. The mode is put back so the next step opens where it expects.
     expect(opened.writes).toContain("zone.preset");
-    expect(opened.writes).toContain("zone.geography");
-    console.log(`  · SRC chip → Atlas (${opened.badge}) listing ${opened.names.length} stations`);
+    expect(opened.writes).not.toContain("zone.geography");
+    await atlasSegment("atlas-mode", "geography");
+    const geoWrites = (await atlasProbe()).writes;
+    expect(geoWrites).toContain("zone.geography");
+    expect(geoWrites).toContain("Tier A");
+    await atlasSegment("atlas-mode", "station");
+    expect((await atlasProbe()).mode).toBe("station");
+    console.log(`  · SRC chip → Atlas (${opened.badge}) listing ${opened.names.length} stations; writes "${opened.writes}" / "${geoWrites}"`);
   });
 
   test("atlas 2: selecting Red Desert and re-basing swaps the station, keeps the modifiers and moves the Köppen badge", async () => {
@@ -5251,16 +5563,24 @@ describe("climate studio · atlas", () => {
     await nextFrame();
 
     // Start from a known station, so the badge has somewhere to move from.
-    await atlasSelectStation("Fjord", "fjord-coast");
-    await atlasPanel().locator('[data-part="atlas-rebase"]').click();
+    await atlasSelectStation("Bergen", "fjord-coast");
+    const rebase = atlasPanel().locator('[data-part="atlas-rebase"]');
+    if ((await rebase.getAttribute("aria-disabled")) === "true") {
+      // F9: re-basing onto the station the zone is ALREADY on is a no-op, so
+      // the button says so and goes inert instead of offering it.
+      expect(((await rebase.textContent()) ?? "").trim()).toBe("✓ current base");
+    } else {
+      await rebase.click();
+    }
     await atlasWaitForPreset("fjord-coast", "manual");
     const cold = await atlasDraft();
     expect(cold.koppen.length).toBeGreaterThan(0);
 
-    await atlasSelectStation("Red Desert", "red-desert");
+    await atlasSelectStation("Undoolya", "red-desert");
     const selected = await atlasProbe();
-    expect(selected.card).toBe("Red Desert");
-    expect(selected.rebase).toBe("Re-base zone → Red Desert");
+    // Card and button name the PLACE (F9), the same word the row does.
+    expect(selected.card).toBe("Undoolya");
+    expect(selected.rebase).toBe("Re-base zone → Undoolya");
 
     await atlasPanel().locator('[data-part="atlas-rebase"]').click();
     await atlasWaitForPreset("red-desert", "manual");
@@ -5270,7 +5590,7 @@ describe("climate studio · atlas", () => {
     expect(hot.geography).toBeNull();
     expect(hot.modifiers).toEqual(cold.modifiers);
     expect(hot.koppen).not.toBe(cold.koppen);
-    expect((await notices(ob.page)).some((t) => t.includes("Red Desert"))).toBe(true);
+    expect((await notices(ob.page)).some((t) => t.includes("Undoolya"))).toBe(true);
     console.log(`  · re-base: ${cold.presetId} (${cold.koppen}) → ${hot.presetId} (${hot.koppen}); modifiers kept`);
   });
 
@@ -5290,7 +5610,14 @@ describe("climate studio · atlas", () => {
 
     const preview = await atlasProbe();
     expect(preview.matchName.length).toBeGreaterThan(0);
-    expect(preview.matchText).toContain("Closest match:");
+    // The card's line is the Tier A clauses on their own now (F9) — `+2.1 °C
+    // for latitude · …`, or `no adjustment` — because the card already names
+    // the station above it. The full `Closest match: …` sentence lives on the
+    // element's `title` (and in the Notice the match raises).
+    expect(preview.matchText.length).toBeGreaterThan(0);
+    expect(preview.matchText).not.toContain("Closest match:");
+    expect(preview.matchTitle).toContain("Closest match:");
+    expect(preview.matchTitle).toContain(preview.matchName);
 
     await atlasPanel().locator('[data-part="atlas-matchbtn"]').click();
     await atlasWaitForPreset(null, "auto");
@@ -5351,7 +5678,9 @@ interface DeviceLaneSpanProbe {
 
 interface DeviceLaneProbe {
   present: boolean;
-  rowLabel: string;
+  /** the label's two lines, each on its own span (F2) */
+  rowName: string;
+  rowSub: string;
   /** the lane's own `data-kind` — the SPEC §4 shape the row settled on */
   kind: string;
   editable: boolean;
@@ -5385,7 +5714,8 @@ async function probeDeviceLane(id: string): Promise<DeviceLaneProbe> {
       const spans = lane === null ? [] : Array.from(lane.querySelectorAll(".wadjet-studio-span"));
       return {
         present: row !== null,
-        rowLabel: (row?.querySelector(".wadjet-studio-row-label")?.textContent ?? "").trim(),
+        rowName: (row?.querySelector(".wadjet-studio-row-name")?.textContent ?? "").trim(),
+        rowSub: (row?.querySelector(".wadjet-studio-row-sub")?.textContent ?? "").replace(/\s+/g, " ").trim(),
         kind: lane === null ? "" : (lane.getAttribute("data-kind") ?? ""),
         editable: lane !== null && lane.getAttribute("data-editable") === "true",
         labelHint: row?.querySelector(".wadjet-studio-row-label")?.getAttribute("data-hint") ?? "",
@@ -5535,7 +5865,10 @@ describe("climate studio · device lanes", () => {
 
     const probe = await probeDeviceLane("lane-clip");
     expect(probe.present).toBe(true);
-    expect(probe.rowLabel).toBe("lane-clip");
+    // Product copy, not the engine id (F1/F2): the slug reads as a name, and
+    // the sub-line says what the lane is — `clip d219–255 · yearly`.
+    expect(probe.rowName).toBe("Lane Clip");
+    expect(probe.rowSub).toContain("yearly");
     // SPEC 4: "in rack order, under the eras lane".
     expect(probe.erasIndex).toBeGreaterThanOrEqual(0);
     expect(probe.rowIndex).toBeGreaterThan(probe.erasIndex);
@@ -5746,16 +6079,19 @@ async function probeChannel(): Promise<ChannelProbe> {
         channel: panel?.querySelector(".wadjet-studio-channel-win")?.getAttribute("data-channel") ?? "",
         title: text(".wadjet-studio-window-title"),
         badge: text(".wadjet-studio-window-badge"),
-        seriesOptions: Array.from(panel?.querySelectorAll('[data-part="channel-series"] .wadjet-studio-segment') ?? []).map((s) => s.getAttribute("data-value") ?? ""),
-        series: panel?.querySelector('[data-part="channel-series"] .wadjet-studio-segment.is-selected')?.getAttribute("data-value") ?? "",
+        // The series picker is a chart LEGEND now, not a Segmented (F10b), and
+        // a channel with two plots draws one legend per plot — hence `All`.
+        seriesOptions: Array.from(panel?.querySelectorAll('[data-part="channel-series"] .wadjet-studio-channel-win-legend-item') ?? []).map((s) => s.getAttribute("data-value") ?? ""),
+        series: panel?.querySelector('[data-part="channel-series"] .wadjet-studio-channel-win-legend-item.is-selected')?.getAttribute("data-value") ?? "",
         rose: panel?.querySelector('[data-part="channel-rose"]')?.getAttribute("data-rose") ?? "",
         roseSectors: panel?.querySelectorAll('[data-part="channel-rose"] path.wadjet-studio-chart-sector').length ?? 0,
         reset: (panel?.querySelector('[data-part="channel-direction-reset"]') ?? null) !== null,
         domain: panel?.querySelector('[data-part="channel-chart"] .wadjet-studio-chart')?.getAttribute("data-domain") ?? "",
         points: points.length,
         pointYs: points.map((p) => Math.round(Number(p.getAttribute("cy")) * 100) / 100),
-        scopes: Array.from(panel?.querySelectorAll('[data-part="channel-scopes"] .wadjet-studio-segment') ?? []).map((s) => s.getAttribute("data-value") ?? ""),
-        scope: panel?.querySelector('[data-part="channel-scopes"] .wadjet-studio-segment.is-selected')?.getAttribute("data-value") ?? "",
+        // Scope chips, not segments (F10a): `All year · <seasons> · ☾ <moon>`.
+        scopes: Array.from(panel?.querySelectorAll('[data-part="channel-scopes"] .wadjet-studio-chip') ?? []).map((s) => s.getAttribute("data-value") ?? ""),
+        scope: panel?.querySelector('[data-part="channel-scopes"] .wadjet-studio-chip.is-selected')?.getAttribute("data-value") ?? "",
         stage: text('[data-part="channel-stage"]'),
         knobs: knobs.map((k) => (k.querySelector(".wadjet-studio-knob-label")?.textContent ?? "").trim()),
         knobValues: knobs.map((k) => (k.querySelector(".wadjet-studio-knob-value")?.textContent ?? "").trim()),
@@ -5826,6 +6162,20 @@ async function baseTemperatureKeyframes(): Promise<Array<{ at: number; value: nu
   );
 }
 
+/**
+ * Click a channel row's label — SPEC law 2's reach into the editor.
+ *
+ * The row labels are title case now (F2): `Temperature`, not the mixer's
+ * `TEMP`. The caps short forms are the signal path's vocabulary; the
+ * arrangement view is a different reading. The name has its own span inside
+ * the label (the sub-line shares the element), and the click handler is on the
+ * label, so the click bubbles up from the name.
+ */
+async function clickChannelRow(title: string): Promise<void> {
+  await ob.page.locator(`.wadjet-studio-row-name:text-is("${title}")`).first().click();
+  await nextFrame();
+}
+
 /** Open the editor by id, the way a writer row or a restored leaf does. */
 async function openChannelWindow(id: string = CHANNEL_WINDOW_ID): Promise<void> {
   await withApp(ob.page, (app, a: { type: string; id: string }) => app.workspace.getLeavesOfType(a.type)[0].view.windows.open(a.id), { type: VIEW_TYPE, id });
@@ -5870,7 +6220,7 @@ async function resetChannelWalk(): Promise<number> {
 
 /** Click a scope chip by its value (`all`, `season:Winter`, `moon:<X>`). */
 async function selectChannelScope(value: string): Promise<void> {
-  await ob.page.locator(`[data-part="channel-scopes"] .wadjet-studio-segment[data-value="${value}"]`).first().click();
+  await ob.page.locator(`[data-part="channel-scopes"] .wadjet-studio-chip[data-value="${value}"]`).first().click();
   await nextFrame();
 }
 
@@ -5938,6 +6288,23 @@ async function auditionMeanNearDay(dayOfYear: number): Promise<number> {
   );
 }
 
+/**
+ * One moon's cycle length, spelled the way `channel-edit.ts stageCaption`
+ * spells it (`round1`: one decimal, a trailing zero dropped).
+ */
+async function moonCycleDays(name: string): Promise<string> {
+  const days: number = await withApp(
+    ob.page,
+    (app, a: { type: string; name: string }) => {
+      const leaf = app.workspace.getLeavesOfType(a.type)[0];
+      const moon = (leaf.view.store.get().world.calendar.moons as Array<{ name: string; cycleDays: number }>).find((m) => m.name === a.name);
+      return moon?.cycleDays ?? 0;
+    },
+    { type: VIEW_TYPE, name },
+  );
+  return String(Math.round(days * 100) / 100);
+}
+
 /** The strip re-rolls on a debounce (H-1392): wait for the day's own number to move off `from`. */
 async function settledMeanNearDay(dayOfYear: number, from: number): Promise<number> {
   for (let i = 0; i < 60; i++) {
@@ -5952,7 +6319,7 @@ describe("climate studio · temperature editor", () => {
   test("temperature editor 1: the TEMP row label opens the panel with 12 keyframes and the writers stack", async () => {
     await resetChannelWalk();
 
-    await ob.page.locator('.wadjet-studio-row-label:text-is("TEMP")').first().click();
+    await clickChannelRow("Temperature");
     await nextFrame();
 
     const probe = await probeChannel();
@@ -5963,9 +6330,12 @@ describe("climate studio · temperature editor", () => {
     // SPEC §3.4: 12 monthly keyframes, and the all-year knob set.
     expect(probe.points).toBe(12);
     expect(probe.scope).toBe("all");
-    expect(probe.knobs).toEqual(["offset", "swing", "jitter"]);
+    // Knob labels are the prototype's words, not the model's ids (F10a).
+    expect(probe.knobs).toEqual(["offset", "seasonal swing", "day jitter σ"]);
     expect(probe.knobValues).toEqual(["+0.0 °C", "×1.00", "+0.0 °C"]);
-    expect(probe.stage).toBe("climate stage · applied once to the curves");
+    // The caption names the modifier it writes as well as the stage (F10a):
+    // SPEC law 5 read at the control rather than only in the footer.
+    expect(probe.stage).toBe("writes modifiers[layer:temperature.mean] · stage climate · unconditional, reshapes the baseline once");
 
     // SPEC §1: the station is the baseline, and the regimes write the channel too.
     expect(probe.writers.length).toBeGreaterThanOrEqual(2);
@@ -6053,7 +6423,7 @@ describe("climate studio · temperature editor", () => {
     const scoped = await probeChannel();
     expect(scoped.scope).toBe("season:Winter");
     expect(scoped.knobs).toEqual(["offset"]);
-    expect(scoped.stage).toBe("daily stage · when.tag season:Winter");
+    expect(scoped.stage).toBe("writes modifiers[layer:temperature.mean:season:Winter] · when.tag season:Winter");
 
     // 15 px down over the ±10 °C range is exactly −2.0 at step 0.1.
     await dragKnobDial('[data-part="channel-knob-offset"] .wadjet-studio-knob-dial', 15);
@@ -6079,9 +6449,13 @@ describe("climate studio · temperature editor", () => {
 
     const cycle = await probeChannel();
     expect(cycle.domain).toBe("cycle");
-    expect(cycle.knobs).toEqual(["depth"]);
-    expect(cycle.stage).toBe(`daily stage · when.moon ${moon} · envelope`);
-    expect(cycle.moonChip).toBe(`moon:${moon}`);
+    expect(cycle.knobs).toEqual(["curve depth"]);
+    // The caption names the layer, the predicate and — when the calendar knows
+    // it — the cycle length the drawn curve repeats over (F10a).
+    expect(cycle.stage).toBe(`writes modifiers[layer:temperature.mean:moon:${moon}] · when.moon ${moon} · the drawn curve is its envelope · repeats every ${await moonCycleDays(moon)} d`);
+    // The selected ☾ chip is the reach into the cycle editor, and it reads as
+    // the moon rather than as the scope id (F10a): `☾ Sable`.
+    expect(cycle.moonChip).toBe(`☾ ${moon}`);
     expect(cycle.points).toBeGreaterThanOrEqual(2);
 
     // −3 °C at full strength: 22.5 px down over ±10 °C at step 0.1.
@@ -6525,7 +6899,8 @@ describe("climate studio · insert picker", () => {
     const probe = await probeDevice();
     expect(probe.open).toBe(true);
     expect(probe.title).toBe("Chance");
-    expect(probe.kind).toBe("CHANCE");
+    // The chrome badge IS the kind (F11a); `chance` reads as DICE.
+    expect(probe.kind).toBe("DICE");
     console.log(`  · picked Chance → wind card slot ${card?.slot}; panel "${probe.title}" KIND ${probe.kind}; writes ${JSON.stringify(modifier.apply)}`);
   });
 
@@ -6999,7 +7374,7 @@ describe("climate studio · channel parity", () => {
     await waitForAuditionYear(AUDITION_YEAR);
     const wetBefore = await auditionWetCells();
 
-    await ob.page.locator('.wadjet-studio-row-label:text-is("PRECIP")').first().click();
+    await clickChannelRow("Precipitation");
     await nextFrame();
 
     const probe = await probeChannel();
@@ -7009,12 +7384,13 @@ describe("climate studio · channel parity", () => {
     expect(probe.badge).toBe("CHANNEL");
     expect(probe.domain).toBe("year");
     expect(probe.points).toBe(12);
-    // SPEC §8: the odds pair, one of the two editable at a time.
-    expect(probe.seriesOptions).toEqual(["precipitation.pww", "precipitation.pwd"]);
+    // SPEC §8: the odds pair, one of the two editable at a time. The picker is
+    // the plot's own legend now (F10b), in draw order — the primary first.
+    expect(probe.seriesOptions).toEqual(["precipitation.pwd", "precipitation.pww"]);
     expect(probe.series).toBe("precipitation.pwd");
-    expect(probe.knobs).toEqual(["stick", "chance", "amount"]);
+    expect(probe.knobs).toEqual(["stickiness", "rain chance", "wet-day amount"]);
     expect(probe.knobValues).toEqual(["×1.00", "×1.00", "×1.00"]);
-    expect(probe.stage).toBe("climate stage · applied once to the curves");
+    expect(probe.stage).toBe("writes modifiers[layer:precipitation.pwd] · stage climate · unconditional, reshapes the baseline once");
     expect(probe.writes).toContain("layer:precipitation.*");
 
     await setJsonOpen(true);
@@ -7052,7 +7428,7 @@ describe("climate studio · channel parity", () => {
     const cycle = await probeChannel();
     expect(cycle.domain).toBe("cycle");
     expect(cycle.knobs).toEqual(["depth"]);
-    expect(cycle.stage).toBe(`daily stage · when.moon ${moon} · envelope`);
+    expect(cycle.stage).toBe(`writes modifiers[layer:precipitation.pwd:moon:${moon}] · when.moon ${moon} · the drawn curve is its envelope · repeats every ${await moonCycleDays(moon)} d`);
     // The picker is gone: the envelope is the only curve a ☾ scope has.
     expect(cycle.seriesOptions).toEqual([]);
 
@@ -7070,8 +7446,11 @@ describe("climate studio · channel parity", () => {
 
   test("channel parity 3: WIND opens the speed chart and the rose, and +8 km/h reaches the day card", async () => {
     const epoch = await resetChannelWalk();
+    // The rose draws one wedge per SEASON now (F10b) — the prevailing bearing
+    // in each — so a world with no seasons has nothing to draw. Seed them.
+    await seedChannelSeasons(CHANNEL_SEASONS);
 
-    await ob.page.locator('.wadjet-studio-row-label:text-is("WIND")').first().click();
+    await clickChannelRow("Wind");
     await nextFrame();
 
     const probe = await probeChannel();
@@ -7082,14 +7461,16 @@ describe("climate studio · channel parity", () => {
     // One line, so no picker; the rose is the second plot.
     expect(probe.seriesOptions).toEqual([]);
     expect(probe.roseSectors).toBeGreaterThan(0);
-    expect(probe.knobs).toEqual(["wind", "gust", "calm"]);
+    expect(probe.knobs).toEqual(["wind", "gust spread", "calm days"]);
     expect(probe.knobValues).toEqual(["+0.0 km/h", "×1.00", "+0.00"]);
     expect(probe.writes).toContain("layer:wind.*");
 
     await seedDayZoom(epoch);
     const before = await dayCardNumbers("wind");
-    expect(before.length).toBeGreaterThanOrEqual(2);
-    const speedBefore = before[before.length - 1]!;
+    // `15 km/h SW` — one number and a compass point (F3), where the old card
+    // spelled the bearing out in degrees as well.
+    expect(before.length).toBe(1);
+    const speedBefore = before[0]!;
 
     await dragKnobDial(channelKnobDial("wind"), -knobDragPx(WIND_KNOB_RANGE, 8));
 
@@ -7099,7 +7480,7 @@ describe("climate studio · channel parity", () => {
     expect(offset.apply[0]).toEqual({ param: "wind.speed", op: "offset", value: 8 });
 
     const after = await settledDayCardNumbers("wind", before);
-    const speedAfter = after[after.length - 1]!;
+    const speedAfter = after[0]!;
     expect(speedAfter).toBeGreaterThan(speedBefore);
     console.log(`  · wind +8 km/h: the day card reads ${speedBefore} → ${speedAfter} km/h`);
   });
@@ -7117,7 +7498,7 @@ describe("climate studio · channel parity", () => {
     const scoped = await probeChannel();
     expect(scoped.scope).toBe("season:Winter");
     expect(scoped.knobs).toEqual(["wind", "direction"]);
-    expect(scoped.stage).toBe("daily stage · when.tag season:Winter");
+    expect(scoped.stage).toBe("writes modifiers[layer:wind.speed:season:Winter] · when.tag season:Winter");
     // Nothing written yet, so there is nothing to reset to.
     expect(scoped.reset).toBe(false);
 
@@ -7149,7 +7530,7 @@ describe("climate studio · channel parity", () => {
   test("channel parity 5: SKY's cloud knob writes both halves of the pair, and the day card's cloud rises", async () => {
     const epoch = await resetChannelWalk();
 
-    await ob.page.locator('.wadjet-studio-row-label:text-is("SKY")').first().click();
+    await clickChannelRow("Sky");
     await nextFrame();
 
     const probe = await probeChannel();
@@ -7159,18 +7540,18 @@ describe("climate studio · channel parity", () => {
     // SPEC §1: cloud and humidity are one channel, so both pairs are on the picker.
     expect(probe.seriesOptions).toEqual(["cloud.dry", "cloud.wet", "humidity.dry", "humidity.wet"]);
     expect(probe.series).toBe("cloud.dry");
-    expect(probe.knobs).toEqual(["cloud", "humidity"]);
+    expect(probe.knobs).toEqual(["cloud cover", "humidity"]);
     expect(probe.knobValues).toEqual(["+0.00", "+0.00"]);
     expect(probe.writes).toContain("layer:cloud.*");
     expect(probe.writes).toContain("layer:humidity.*");
 
     // The picker really swaps the editable line.
-    await ob.page.locator('[data-part="channel-series"] .wadjet-studio-segment[data-value="humidity.wet"]').first().click();
+    await ob.page.locator('[data-part="channel-series"] .wadjet-studio-channel-win-legend-item[data-value="humidity.wet"]').first().click();
     await nextFrame();
     const swapped = await probeChannel();
     expect(swapped.series).toBe("humidity.wet");
     expect(swapped.points).toBe(12);
-    await ob.page.locator('[data-part="channel-series"] .wadjet-studio-segment[data-value="cloud.dry"]').first().click();
+    await ob.page.locator('[data-part="channel-series"] .wadjet-studio-channel-win-legend-item[data-value="cloud.dry"]').first().click();
     await nextFrame();
 
     await seedDayZoom(epoch);
@@ -7323,14 +7704,19 @@ describe("climate studio · hemisphere", () => {
 
     const on = await probeFlip();
     expect(on.visible).toBe(true);
-    expect(on.label).toBe("seasons flipped");
+    // The chip always says the STATION's record was flipped to reach this
+    // hemisphere — that is a fact about the data, not a setting (F6, matching
+    // the prototype). What the toggle changes is whether the zone's own
+    // `season:` tag gates were remapped with it, so that is what the label
+    // reads out. There is no "not flipped" chip.
+    expect(on.label).toBe("seasons flipped · tags remapped");
 
     await clickFlipChip();
     const off = await probeFlip();
     // Still offered: the geography and the matched station still straddle the
     // equator (PLAN §0.1) — only flipSeasons itself came off.
     expect(off.visible).toBe(true);
-    expect(off.label).toBe("seasons not flipped");
+    expect(off.label).toBe("seasons flipped · tags NOT remapped");
     expect((await atlasDraft()).flipSeasons).toBeNull();
     console.log(`  · geography match → ⇅ chip on ("${on.label}"); click off → still offered ("${off.label}")`);
   });
@@ -7360,7 +7746,7 @@ describe("climate studio · hemisphere", () => {
   test("hemisphere 3: toggling the chip on shifts the band half a year and swaps which day is warmed", async () => {
     await revealStudio();
     await clickFlipChip();
-    expect((await probeFlip()).label).toBe("seasons flipped");
+    expect((await probeFlip()).label).toBe("seasons flipped · tags remapped");
     expect((await atlasDraft()).flipSeasons).toBe(true);
 
     await waitForDeviceLane(HEMI_DEVICE, 1);
@@ -7592,7 +7978,7 @@ async function waitForSaved(): Promise<void> {
 }
 
 describe("climate studio · units", () => {
-  test("units 1: under imperial the day card, the Forcings trim knob and the MASTER warmth chip all read °F/mph; metric returns them", async () => {
+  test("units 1: under imperial the day card reads mph/in and the Forcings trim knob and MASTER warmth chip read °F; metric returns them", async () => {
     await revealStudio();
     await switchZoneViaMenu(zone.id, zone.name);
     await resetForcings();
@@ -7607,9 +7993,13 @@ describe("climate studio · units", () => {
       await seedWindow({ a: centre - 1.5 / 365, b: centre + 1.5 / 365 });
       const card = await dayCardProbe();
       expect(card.hidden).toBe(false);
-      expect(card.cells["temperature"]).toContain("°F");
+      // The hero is a bare degree number with no scale letter (F3) — the
+      // stats under it are where the card names its units, so that is where
+      // the imperial reading is read: `mph`, and `in` for anything that fell.
+      expect(card.temp).toMatch(/^[−-]?\d+(\.\d+)?°$/);
+      expect(card.cells["wind"]).toMatch(/mph|calm/);
       expect(card.cells["precipitation"]).toMatch(/dry|in/);
-      console.log(`  · imperial day card: temperature "${card.cells["temperature"]}", precipitation "${card.cells["precipitation"]}", wind "${card.cells["wind"]}"`);
+      console.log(`  · imperial day card: hero "${card.temp}", precipitation "${card.cells["precipitation"]}", wind "${card.cells["wind"]}"`);
 
       // The Forcings trim knob.
       await openForcingsFromMixer();
@@ -7710,17 +8100,21 @@ describe("climate studio · units", () => {
     await seedWindow({ a: centre - 1.5 / 365, b: centre + 1.5 / 365 });
     const card = await dayCardProbe();
     expect(card.hidden).toBe(false);
-    expect(card.cells["temperature"]).toContain("°C");
-    expect(card.cells["temperature"]).not.toContain("°F");
+    // The mirror of units 1: the card's units live on the stats, and back on
+    // metric the wind is km/h and anything that fell is mm.
+    expect(card.cells["wind"]).toMatch(/km\/h|calm/);
+    expect(card.cells["wind"]).not.toContain("mph");
+    expect(card.cells["precipitation"]).toMatch(/dry|mm/);
 
     await openForcingsFromMixer();
     const forcings = await probeForcings();
     expect(forcings.trim).toContain("°C");
+    expect(forcings.trim).not.toContain("°F");
 
     const rail = await probeMixer();
     const master = rail.find((c) => c.chain === "master");
     expect(master?.masterChips[0]).toContain("°C");
-    console.log(`  · metric: day card "${card.cells["temperature"]}", trim "${forcings.trim}", MASTER "${master?.masterChips[0]}"`);
+    console.log(`  · metric: day card wind "${card.cells["wind"]}", precip "${card.cells["precipitation"]}", trim "${forcings.trim}", MASTER "${master?.masterChips[0]}"`);
   });
 });
 

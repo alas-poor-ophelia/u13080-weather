@@ -1076,6 +1076,7 @@
     "license": "U.S. Public Domain (https://www.usa.gov/publicdomain/label/1.0/)",
     "ghcnId": "RSM00027625",
     "stationName": "Kolomna",
+    "place": "Kolomna",
     "country": "Russia",
     "latitude": 55.1,
     "longitude": 38.7,

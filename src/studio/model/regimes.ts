@@ -25,9 +25,12 @@
  * Pure: no Obsidian imports, no DOM (PLAN D3).
  */
 import type { ModifierOp, Predicate, ZoneProfile } from "../../core/types";
+import type { Units } from "../../core/units";
 import { uniqueId } from "../../plugin/zones";
 import { shareOfYear } from "./audition";
 import { channelOrNull, type Channel } from "./compile";
+import { applyPhrase, describeOp, paramName } from "./copy";
+import { tabular } from "./format";
 import { cycleAt, REGIME_CYCLE } from "./palette";
 
 /**
@@ -37,6 +40,19 @@ import { cycleAt, REGIME_CYCLE } from "./palette";
  * that do something, so this is a different order from the band cycle.
  */
 export const REGIME_COLOURS: readonly string[] = REGIME_CYCLE;
+
+/**
+ * The Regimes lane's second label line (SPEC §3.2): how many states there are
+ * and how much of the year each one holds — the same shares the Era-zoom
+ * collapse draws as a bar. The label column ellipsizes it, so the most
+ * important reading (the count, then the biggest share) comes first.
+ */
+export function laneSub(zone: Pick<ZoneProfile, "regimes">): string {
+  const regimes = zone.regimes;
+  if (regimes.length === 0) return "no states";
+  const shares = shareOfYear(regimes).map((s) => `${s.id} ${Math.round(s.share * 100)}%`);
+  return `${regimes.length} states · ${shares.join(" · ")}`;
+}
 
 /** The state a new `＋ state` lands on: rare-ish and short, so it never silently reshapes the year. */
 const NEW_STATE_WEIGHT = 0.1;
@@ -186,4 +202,65 @@ export function setApplyChainMute(z: ZoneProfile, id: string, chain: Channel, mu
  */
 export function shareBar(z: ZoneProfile, view?: number[]): Array<{ id: string; share: number; colour: string }> {
   return shareOfYear(z.regimes).map((s, i) => ({ id: s.id, share: s.share, colour: colourOf(i, view) }));
+}
+
+/**
+ * A state's apply knobs wear their OWN short names, not the shared `target`
+ * vocabulary (`model/copy.ts`). The prototype keeps two lists for a reason:
+ * a device's precipitation knob is "precip" because the device already says
+ * what it does, but a state's two precipitation knobs are the transition
+ * probabilities and have to be told apart — `wet→wet` (a wet day follows a
+ * wet one) and `dry→wet` (a wet day follows a dry one) read as behaviour,
+ * where "precip · precip" reads as a bug. Anything not in this table falls
+ * back to the shared name.
+ */
+const REGIME_TARGET_NAMES: Record<string, string> = {
+  "precipitation.pww": "wet→wet",
+  "precipitation.pwd": "dry→wet",
+  "temperature.mean": "temp",
+  "temperature.diurnalRange": "day swing",
+  "temperature.diurnal": "day swing",
+  "wind.speed": "wind",
+  "cloud.dry": "sky",
+  "cloud.wet": "sky",
+};
+
+/** The apply knob's label — `wet→wet`, `day swing`, `sky`. */
+export function regimeTargetName(param: string): string {
+  return REGIME_TARGET_NAMES[param] ?? paramName(param);
+}
+
+/** One op as a state reads it: `wet→wet ×1.25`. `describeOp`'s value, this file's name. */
+export function regimeApplyText(op: ModifierOp, units: Units = "metric"): string {
+  const described = describeOp(op, { units });
+  const generic = paramName(op.param);
+  return described.startsWith(`${generic} `) ? `${regimeTargetName(op.param)}${described.slice(generic.length)}` : described;
+}
+
+/**
+ * The line under a state's name: what it does to the baseline while it runs,
+ * or the prototype's `— no apply · baseline as-is` when it does nothing. A
+ * state with no apply is not broken — it IS the ordinary weather (SPEC §6) —
+ * so it says so rather than showing an empty row.
+ */
+export function applySummary(z: ZoneProfile, id: string, units: Units = "metric"): string {
+  const ops = applyFor(z, id);
+  if (ops.length === 0) return "— no apply · baseline as-is";
+  return ops.map((op) => regimeApplyText(op, units)).join(" · ");
+}
+
+/**
+ * The WRITES footer's grammar (SPEC law 5): one line of `regimes[]` in the
+ * engine's own vocabulary — param paths intact, values formatted — not
+ * `JSON.stringify`, which is what sized this panel at 1500 px.
+ *
+ *   regimes [ { normal w 0.70 · 12 d }, { wet-spell w 0.15 · 6 d · scale[precipitation.pww ×1.25] } ]
+ */
+export function regimesWrites(z: ZoneProfile): string {
+  const states = z.regimes.map((r) => {
+    const head = `${r.id} w ${tabular(r.weight, 2)} · ${tabular(Math.round(r.meanDurationDays), 0)} d`;
+    const ops = (r.apply ?? []).map((op) => `${op.op}[${applyPhrase(op).replace(/^apply /, "")}]`);
+    return `{ ${ops.length === 0 ? head : `${head} · ${ops.join(" ")}`} }`;
+  });
+  return `regimes [ ${states.join(", ")} ]`;
 }

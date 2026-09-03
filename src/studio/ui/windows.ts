@@ -45,7 +45,20 @@ export interface WindowBuild {
   level?: (byUnit: ReadonlyMap<string, StudioIssue[]>) => LedLevel;
   /** short kind badge — DEVICE, ERA, STATES … a function re-reads it every render (e.g. Atlas's mode, a device's KIND) */
   badge?: string | (() => string);
+  /** the kind pill's colour; defaults to the badge's own kind hue (`model/copy.ts`'s `kindColor`) */
+  badgeColor?: string;
+  /** the dim caption after the kind pill — the unit's place in the signal path (`slot 00 · every chain`) */
+  caption?: string;
+  /**
+   * The panel's width in px, from the prototype. Set at open and never
+   * re-read: a panel's width is a design constant, not a function of its
+   * content. Omitting it lets the widest child size the panel, which is the
+   * defect the F1 pass exists to close — every window should name one.
+   */
+  width?: number;
   preset?: WindowPreset;
+  /** makes the title bar's name inline-editable (SPEC §3.4: one title row, no boxed input in the body) */
+  onRename?: (name: string) => void;
   /** the `WRITES` footer, re-read every render (SPEC law 5) */
   writes?: () => string;
   /** the issue line under the footer, re-read every render (SPEC §3.9) */
@@ -83,6 +96,8 @@ interface OpenWindow {
   issues: string;
   level: LedLevel | undefined;
   badge: string;
+  /** the preset control's option names, joined — a panel that SAVES one has to offer it back */
+  presetKey: string;
 }
 
 const issueLevel = (level: StudioIssue["level"]): WindowIssue["level"] => (level === "error" ? "error" : "warn");
@@ -162,6 +177,22 @@ export function createWindowManager(): WindowManager {
         entry.component.update({ badge });
       }
     }
+    // The preset `▾` is built once, so a preset SAVED from the panel used to
+    // stay out of its own picker until the window was closed and reopened. A
+    // reader (`options: () => …`) plus this re-pull puts it back on the tick
+    // the save lands, and the list is rebuilt only when it actually changed.
+    if (entry.build.preset !== undefined) {
+      const key = presetKeyOf(entry.build.preset);
+      if (key !== entry.presetKey) {
+        entry.presetKey = key;
+        entry.component.update({ preset: entry.build.preset });
+      }
+    }
+  }
+
+  /** The preset control's offered names, joined, so a repaint is one string compare. */
+  function presetKeyOf(preset: WindowPreset): string {
+    return (typeof preset.options === "function" ? preset.options() : preset.options).join(" | ");
   }
 
   const manager: WindowManager = {
@@ -199,7 +230,11 @@ export function createWindowManager(): WindowManager {
         title: built.title,
         ...(led !== undefined ? { led } : {}),
         ...(badge !== undefined ? { badge } : {}),
+        ...(built.badgeColor !== undefined ? { badgeColor: built.badgeColor } : {}),
+        ...(built.caption !== undefined ? { caption: built.caption } : {}),
+        ...(built.width !== undefined ? { width: built.width } : {}),
         ...(built.preset !== undefined ? { preset: built.preset } : {}),
+        ...(built.onRename !== undefined ? { onRename: built.onRename } : {}),
         x: pos.x,
         y: pos.y,
         z: pos.z,
@@ -214,7 +249,7 @@ export function createWindowManager(): WindowManager {
         },
       });
 
-      const entry: OpenWindow = { build: built, component, writes: built.writes?.() ?? "", issues: "", level, badge: badge ?? "" };
+      const entry: OpenWindow = { build: built, component, writes: built.writes?.() ?? "", issues: "", level, badge: badge ?? "", presetKey: built.preset === undefined ? "" : presetKeyOf(built.preset) };
       open.set(id, entry);
       persist(id, pos, true);
       paint(id, entry, byUnit);

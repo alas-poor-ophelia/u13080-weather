@@ -7,7 +7,9 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { Modifier } from "../src/core/types";
-import { dragToWhen, hasLane, laneSpec, spellRunsKey } from "../src/studio/model/device-lanes";
+import { dragToWhen, hasLane, laneCaption, laneSpec, laneSub, spellRunsKey } from "../src/studio/model/device-lanes";
+import { toDevice } from "../src/studio/model/devices";
+import type { CalendarDescription } from "../src/plugin/time/adapter";
 import { DEVICE_LANE_HINTS, DEVICE_LANE_HINT_KEYS, deviceLaneHint, deviceLaneTip, deviceSpanHintKey } from "../src/studio/model/hints-device-lanes";
 import { HINT_SEPARATOR, parseHint } from "../src/studio/model/hints";
 import type { Span } from "../src/studio/model/lanes";
@@ -36,29 +38,39 @@ const YEAR_3 = { a: 3, b: 4 };
 
 describe("device lanes · hasLane", () => {
   test("a timed predicate earns a lane", () => {
-    expect(hasLane(device("a", { when: { yearPhase: [0.6, 0.7] } }))).toBe(true);
-    expect(hasLane(device("a", { when: { dayOfYear: [10, 20] } }))).toBe(true);
-    expect(hasLane(device("a", { when: { moon: { name: "Sable", phase: [0, 0.1] } } }))).toBe(true);
-    expect(hasLane(device("a", { when: { tag: "season:Winter" } }))).toBe(true);
-    expect(hasLane(device("a", { when: { tag: "era:Ice Age" } }))).toBe(true);
+    expect(hasLane(device("a", { when: { yearPhase: [0.6, 0.7] } }), CAL.eras)).toBe(true);
+    expect(hasLane(device("a", { when: { dayOfYear: [10, 20] } }), CAL.eras)).toBe(true);
+    expect(hasLane(device("a", { when: { moon: { name: "Sable", phase: [0, 0.1] } } }), CAL.eras)).toBe(true);
+    expect(hasLane(device("a", { when: { tag: "season:Winter" } }), CAL.eras)).toBe(true);
+    expect(hasLane(device("a", { when: { tag: "era:Ice Age" } }), CAL.eras)).toBe(true);
   });
 
   test("always, chance, regime and a foreign tag get no lane (SPEC §4)", () => {
-    expect(hasLane(device("a"))).toBe(false);
-    expect(hasLane(device("a", { when: { chance: 0.2 } }))).toBe(false);
-    expect(hasLane(device("a", { when: { regime: "Storm" } }))).toBe(false);
-    expect(hasLane(device("a", { when: { tag: "spell:ashfall" } }))).toBe(false);
+    expect(hasLane(device("a"), CAL.eras)).toBe(false);
+    expect(hasLane(device("a", { when: { chance: 0.2 } }), CAL.eras)).toBe(false);
+    expect(hasLane(device("a", { when: { regime: "Storm" } }), CAL.eras)).toBe(false);
+    expect(hasLane(device("a", { when: { tag: "spell:ashfall" } }), CAL.eras)).toBe(false);
   });
 
   test("a composite is timed when ANY leaf is — an untimed leaf is ignored, not fatal", () => {
-    expect(hasLane(device("a", { when: { all: [{ tag: "season:Winter" }, { chance: 0.2 }] } }))).toBe(true);
-    expect(hasLane(device("a", { when: { any: [{ chance: 0.2 }, { regime: "Storm" }] } }))).toBe(false);
-    expect(hasLane(device("a", { when: { not: { moon: { name: "Sable", phase: [0, 0.1] } } } }))).toBe(true);
-    expect(hasLane(device("a", { when: { not: { chance: 0.2 } } }))).toBe(false);
+    expect(hasLane(device("a", { when: { all: [{ tag: "season:Winter" }, { chance: 0.2 }] } }), CAL.eras)).toBe(true);
+    expect(hasLane(device("a", { when: { any: [{ chance: 0.2 }, { regime: "Storm" }] } }), CAL.eras)).toBe(false);
+    expect(hasLane(device("a", { when: { not: { moon: { name: "Sable", phase: [0, 0.1] } } } }), CAL.eras)).toBe(true);
+    expect(hasLane(device("a", { when: { not: { chance: 0.2 } } }), CAL.eras)).toBe(false);
+  });
+
+  test("an `era:` tag naming an era the world does not have earns NO lane (Neverain)", () => {
+    const neverain = device("neverain", { when: { tag: "era:Drought" }, enabled: false });
+    expect(hasLane(neverain, CAL.eras)).toBe(false);
+    // The same device in a world that HAS the era is a bar like any other.
+    expect(hasLane(neverain, [{ name: "Drought", from: 4, to: 9 }])).toBe(true);
+    // A disabled era tags nothing, so it places nothing either.
+    expect(hasLane(neverain, [{ name: "Drought", from: 4, to: 9, enabled: false }])).toBe(false);
+    expect(laneSpec(neverain, CAL, YEAR_3)).toEqual({ spans: [], editable: false, kind: "none", label: "neverain" });
   });
 
   test("a spell is a timeline even with no when", () => {
-    expect(hasLane(device("a", { spell: { meanStartsPerYear: 2, meanDurationDays: 5 } }))).toBe(true);
+    expect(hasLane(device("a", { spell: { meanStartsPerYear: 2, meanDurationDays: 5 } }), CAL.eras)).toBe(true);
   });
 });
 
@@ -283,5 +295,85 @@ describe("spellRunsKey", () => {
       spellRunsKey({ ...base, years: 2 }),
     ]);
     expect(keys.size).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The lane label's second line (bead wadjet-6rw.2)
+// ---------------------------------------------------------------------------
+
+describe("device lanes · laneCaption", () => {
+  const DESCRIBED: CalendarDescription = {
+    label: "Test",
+    readOnly: false,
+    yearLength: 360,
+    epochYear: 1,
+    seasons: CAL.seasons.map((s) => ({ ...s })),
+    moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0, phases: [{ name: "Full", at: 0.86 }, { name: "New", at: 0 }] }],
+  };
+  const cal = { ...CAL, moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] };
+  const caption = (m: Modifier): string => laneCaption(toDevice(m, DESCRIBED), cal);
+
+  test("a moon lane says which moon, which phase and how long the cycle is", () => {
+    expect(caption(device("m", { when: { moon: { name: "Sable", phase: [0.86, 1] } } }))).toBe("sable full ↻ 29.5 d");
+  });
+
+  test("a mod gate is named in the caption, in product copy", () => {
+    const m = device("m", { when: { moon: { name: "Sable", phase: [0.86, 1] } }, mods: [{ source: "season:Harvest", amount: 1 }] });
+    expect(caption(m)).toBe("sable full ↻ 29.5 d · gated by Harvest");
+  });
+
+  test("a muted gate (amount 0) is not claimed as a gate", () => {
+    const m = device("m", { when: { moon: { name: "Sable", phase: [0.86, 1] } }, mods: [{ source: "season:Harvest", amount: 0 }] });
+    expect(caption(m)).toBe("sable full ↻ 29.5 d");
+  });
+
+  test("every other lane shape has no caption of its own", () => {
+    expect(caption(device("c", { when: { dayOfYear: [223, 263] } }))).toBe("");
+    expect(caption(device("t", { when: { tag: "era:Ice Age" } }))).toBe("");
+    expect(caption(device("a"))).toBe("");
+  });
+});
+
+describe("device lanes · laneSub", () => {
+  test("a moon lane names the cycle its pulses follow", () => {
+    expect(laneSub(device("m", { when: { moon: { name: "Sable", phase: [0.8, 1] } } }), CAL)).toBe("active days · ↻ 30 d");
+  });
+
+  test("a moon the calendar does not describe still says what the lane IS", () => {
+    expect(laneSub(device("m", { when: { moon: { name: "Ghost", phase: [0, 0.2] } } }), CAL)).toBe("active days");
+  });
+
+  test("a yearly clip says which days it covers, and that it repeats", () => {
+    expect(laneSub(device("c", { when: { dayOfYear: [223, 263] } }), CAL)).toBe("clip d223–263 · yearly");
+  });
+
+  test("a yearPhase clip is read in days, on the calendar's own year length", () => {
+    expect(laneSub(device("c", { when: { yearPhase: [0.5, 0.75] } }), CAL)).toBe("clip d180–270 · yearly");
+  });
+
+  test("it reads the PREDICATE, not the spans, so it is the same at every zoom", () => {
+    const m = device("c", { when: { dayOfYear: [223, 263] } });
+    expect(laneSub(m, CAL)).toBe(laneSub(m, CAL));
+    // A month-wide window shows no clip at all; the label still names one.
+    expect(laneSpec(m, CAL, { a: 3.05, b: 3.13 }).spans.some((s) => s.kind === "clip")).toBe(false);
+    expect(laneSub(m, CAL)).toBe("clip d223–263 · yearly");
+  });
+
+  test("a season or era lane names the tag it is gated on", () => {
+    expect(laneSub(device("t", { when: { tag: "season:Harvest" } }), CAL)).toBe("season:Harvest");
+    expect(laneSub(device("t", { when: { tag: "era:Ice Age" } }), CAL)).toBe("era:Ice Age");
+  });
+
+  test("a composite reads its first TIMED leaf, ignoring the untimed ones", () => {
+    expect(laneSub(device("g", { when: { all: [{ chance: 0.2 }, { dayOfYear: [10, 20] }] } }), CAL)).toBe("clip d10–20 · yearly");
+  });
+
+  test("a spell with no time in its `when` says what its runs are", () => {
+    expect(laneSub(device("s", { spell: { meanStartsPerYear: 0.6, meanDurationDays: 18 } }), CAL)).toBe("spell · 18 d runs");
+  });
+
+  test("a device with neither says only that the lane is active days", () => {
+    expect(laneSub(device("x"), CAL)).toBe("active days");
   });
 });

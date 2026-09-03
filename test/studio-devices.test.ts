@@ -7,19 +7,27 @@ import { MODIFIER_EXAMPLES } from "../src/plugin/modifier-examples";
 import { zoneFromPreset } from "../src/plugin/zones";
 import {
   DEFAULT_MOON_PHASES,
+  ENVELOPE_SHAPES,
   type Device,
   type DeviceKind,
   defaultApplyFor,
+  deviceGrammar,
   displayName,
+  envelopeShape,
+  envelopeShapeName,
+  gatePercent,
   kindOf,
   knobSpecFor,
   moonRange,
   newDevice,
+  opValueText,
   phasesFor,
   toDevice,
   toModifier,
   uniqueDeviceId,
+  whenPhrase,
   whenSummary,
+  yearWindowsOf,
 } from "../src/studio/model/devices";
 import { SHIPPED_PRESETS, deviceToPreset, presetToDevice } from "../src/studio/model/presets";
 
@@ -222,19 +230,19 @@ describe("whenSummary chips", () => {
     expect(chip({ kind: "moon", moon: "Sable", phases: ["Gibbous", "Full"], range: [0.68, 0] })).toBe("moon:Sable · Gibbous, Full");
     expect(chip({ kind: "tag", tags: ["season:Harvest"] })).toBe("season:Harvest");
     expect(chip({ kind: "tag", tags: ["season:Harvest", "era:Drought"] })).toBe("season:Harvest or era:Drought");
-    expect(chip({ kind: "yearWindow", start: 0.55, length: 0.12 })).toBe("days 200–243");
+    expect(chip({ kind: "yearWindow", start: 0.55, length: 0.12 })).toBe("days 201–245");
     expect(chip({ kind: "chance", p: 0.06 })).toBe("6 % of days");
     expect(chip({ kind: "chance", p: 0.025 })).toBe("2.5 % of days");
   });
 
   test("a spell is appended to whatever window carries it", () => {
-    expect(chip({ kind: "yearWindow", start: 0.55, length: 0.12 }, { meanStartsPerYear: 0.6, meanDurationDays: 14 })).toBe("days 200–243 · + spell 0.6/yr · 14 d");
+    expect(chip({ kind: "yearWindow", start: 0.55, length: 0.12 }, { meanStartsPerYear: 0.6, meanDurationDays: 14 })).toBe("days 201–245 · + spell 0.6/yr · 14 d");
     expect(chip({ kind: "always" }, { meanStartsPerYear: 3, meanDurationDays: 6 })).toBe("always · + spell 3/yr · 6 d");
   });
 
   test("the year window is read in the calendar's own days", () => {
-    expect(chip({ kind: "yearWindow", start: 0.5, length: 0.1 })).toBe("days 182–218");
-    expect(whenSummary({ ...ROUND_TRIP_DEVICES[0]!, when: { kind: "yearWindow", start: 0.5, length: 0.1 } }, 100)).toBe("days 50–59");
+    expect(chip({ kind: "yearWindow", start: 0.5, length: 0.1 })).toBe("days 183–219");
+    expect(whenSummary({ ...ROUND_TRIP_DEVICES[0]!, when: { kind: "yearWindow", start: 0.5, length: 0.1 } }, 100)).toBe("days 50–60");
   });
 });
 
@@ -404,5 +412,92 @@ describe("shipped device presets", () => {
       apply: [{ param: "precipitation.pwd", op: "scale", value: 1.4, envelope: [[0, 0], [0.5, 1]] }],
       mods: [{ source: "season:Harvest", amount: 0.5 }],
     });
+  });
+});
+
+describe("year windows (`＋ add window`)", () => {
+  const many: Device = {
+    ...ROUND_TRIP_DEVICES[2]!,
+    when: { kind: "yearWindow", start: 0.61, length: 0.11, extra: [{ start: 0.8, length: 0.05 }] },
+  };
+
+  test("one clip compiles to a bare yearPhase, several to an any of them", () => {
+    expect(toModifier(ROUND_TRIP_DEVICES[2]!).when).toEqual({ yearPhase: [0.61, 0.72] });
+    expect(toModifier(many).when).toEqual({
+      any: [{ yearPhase: [0.61, 0.72] }, { yearPhase: [0.8, 0.85] }],
+    });
+  });
+
+  test("an any of yearPhase decompiles back to the same clip list", () => {
+    const round = toDevice(toModifier(many), calendar);
+    expect(round.kind).toBe("spell");
+    expect(round.when).toEqual(many.when);
+    expect(yearWindowsOf(round.when)).toEqual([
+      { start: 0.61, length: 0.11 },
+      { start: 0.8, length: 0.05 },
+    ]);
+  });
+
+  test("a mixed any is still a custom device", () => {
+    const mixed = toDevice({ id: "m", apply: [], when: { any: [{ yearPhase: [0, 0.1] }, { tag: "era:Drought" }] } }, calendar);
+    expect(mixed.custom).toBe(true);
+  });
+
+  test("several clips read as a count, one reads as its days", () => {
+    expect(whenSummary(many)).toBe("2 windows · + spell 0.6/yr · 18 d");
+    expect(whenSummary(ROUND_TRIP_DEVICES[2]!)).toBe("days 223–263 · + spell 0.6/yr · 18 d");
+  });
+
+  test("yearWindowsOf is empty for every other kind", () => {
+    expect(yearWindowsOf({ kind: "always" })).toEqual([]);
+    expect(yearWindowsOf({ kind: "chance", p: 0.1 })).toEqual([]);
+  });
+});
+
+describe("onset envelopes", () => {
+  test("a named shape round-trips through its own points", () => {
+    for (const shape of ENVELOPE_SHAPES) expect(envelopeShapeName(envelopeShape(shape.name))).toBe(shape.name);
+  });
+
+  test("no envelope reads as none, a drawn one as custom", () => {
+    expect(envelopeShapeName(undefined)).toBe("none");
+    expect(envelopeShapeName([])).toBe("none");
+    expect(envelopeShapeName([[0.1, 0], [0.4, 1]])).toBe("custom");
+  });
+
+  test("an unknown shape name falls back rather than throwing", () => {
+    expect(envelopeShapeName(envelopeShape("nope"))).toBe("Ease in");
+  });
+});
+
+describe("apply copy and the WRITES grammar", () => {
+  test("a value reads with its consequence, never its name", () => {
+    expect(opValueText({ param: "precipitation.pwd", op: "set", value: 0 })).toBe("0 — no rain");
+    expect(opValueText({ param: "cloud.dry", op: "set", value: 0.95 })).toBe("0.95 — ash-dark");
+    expect(opValueText({ param: "precipitation.pwd", op: "scale", value: 1.5 })).toBe("×1.50");
+    expect(opValueText({ param: "wind.speed", op: "offset", value: 12 })).toBe("+12 km/h");
+  });
+
+  test("gate amounts read as whole percents", () => {
+    expect(gatePercent(0.72)).toBe("72%");
+    expect(gatePercent(1)).toBe("100%");
+  });
+
+  test("the footer is the authored grammar, not the serialised object", () => {
+    expect(deviceGrammar(ROUND_TRIP_DEVICES[1]!, 0)).toBe("modifiers[0] · when.moon Sable [0.86, 0.00] · apply precipitation.pwd ×1.40 · mods 1 · envelope 1");
+    expect(deviceGrammar(ROUND_TRIP_DEVICES[2]!, 1)).toBe("modifiers[1] · off · when.yearPhase [0.61, 0.72] · spell 0.6/yr 18 d · apply cloud.dry = 0.95");
+    expect(deviceGrammar(ROUND_TRIP_DEVICES[0]!, 2)).toBe("modifiers[2] · stage climate · apply temperature.mean +1.5");
+  });
+
+  test("a device with nothing to apply says so rather than trailing off", () => {
+    expect(deviceGrammar({ ...ROUND_TRIP_DEVICES[0]!, apply: [] }, 0)).toBe("modifiers[0] · stage climate · no apply");
+  });
+
+  test("whenPhrase covers every kind the segmented offers", () => {
+    const at = (when: Device["when"]): string => whenPhrase({ ...ROUND_TRIP_DEVICES[0]!, when });
+    expect(at({ kind: "always" })).toBe("stage climate");
+    expect(at({ kind: "tag", tags: ["era:Drought"] })).toBe("when.tag era:Drought");
+    expect(at({ kind: "tag", tags: ["season:Thaw", "era:Drought"] })).toBe("when.any tag season:Thaw, tag era:Drought");
+    expect(at({ kind: "chance", p: 0.06 })).toBe("when.chance 0.06");
   });
 });

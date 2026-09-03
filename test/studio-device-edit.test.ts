@@ -18,6 +18,7 @@ import {
   WHEN_KINDS,
   addGate,
   addOp,
+  addYearWindow,
   defaultSpell,
   defaultWhenFor,
   deviceOf,
@@ -29,6 +30,7 @@ import {
   removeDevice,
   removeGate,
   removeOp,
+  removeYearWindow,
   renameDevice,
   restage,
   saveAsPreset,
@@ -39,6 +41,7 @@ import {
   setOpValue,
   setSpell,
   setWhen,
+  setYearWindow,
   updateDevice,
 } from "../src/studio/model/device-edit";
 import { toDevice, toModifier, type Device } from "../src/studio/model/devices";
@@ -400,6 +403,33 @@ describe("device-edit · the shipped world stays legal", () => {
     // one unconditional while they are attached (see `restage`).
     expect(z.modifiers[0]!.stage).toBe("daily");
     expect(z.modifiers[0]!.when).toBeUndefined();
+  });
+
+  test("＋ add window lands a second clip after the first, and both compile legally", () => {
+    const z = zoneWith([{ id: "Ash", stage: "daily", when: { yearPhase: [0.61, 0.72] }, apply: [{ param: "cloud.dry", op: "set", value: 0.9 }] }]);
+    updateDevice(z, "Ash", (d) => void addYearWindow(d), calendar);
+    const when = z.modifiers[0]!.when as { any: Array<{ yearPhase: [number, number] }> };
+    expect(when.any).toHaveLength(2);
+    expect(when.any[0]!.yearPhase).toEqual([0.61, 0.72]);
+    // Just after the first clip, never overlapping it.
+    expect(when.any[1]!.yearPhase[0]).toBeGreaterThan(0.72);
+    expectValid(z);
+  });
+
+  test("a clip moves by index, and the last one standing cannot be removed", () => {
+    const z = zoneWith([{ id: "Ash", stage: "daily", when: { yearPhase: [0.61, 0.72] }, apply: [{ param: "cloud.dry", op: "set", value: 0.9 }] }]);
+    updateDevice(z, "Ash", (d) => void addYearWindow(d), calendar);
+    updateDevice(z, "Ash", (d) => setYearWindow(d, 1, { start: 0.2, length: 0.05 }), calendar);
+    updateDevice(z, "Ash", (d) => void removeYearWindow(d, 0), calendar);
+    expect(z.modifiers[0]!.when).toEqual({ yearPhase: [0.2, 0.25] });
+    expect(updateDevice(z, "Ash", (d) => expect(removeYearWindow(d, 0)).toBe(false), calendar)).toBe(true);
+    expectValid(z);
+  });
+
+  test("a clip index the device does not have is ignored rather than appended", () => {
+    const z = zoneWith([{ id: "Ash", stage: "daily", when: { yearPhase: [0.61, 0.72] }, apply: [{ param: "cloud.dry", op: "set", value: 0.9 }] }]);
+    updateDevice(z, "Ash", (d) => setYearWindow(d, 3, { start: 0.1, length: 0.1 }), calendar);
+    expect(z.modifiers[0]!.when).toEqual({ yearPhase: [0.61, 0.72] });
   });
 
   test("a preset saved from that device is loadable and legal", () => {

@@ -15,16 +15,16 @@ import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 export const ATLAS_HINTS: Record<string, Hint> = {
   // --- shared chrome ---
   "atlas.mode": ["Mode", "pick a station by hand, or describe the place and let Tier A match it"],
+  "atlas.map": ["Climate space", "every station by its own temperature and rainfall — drag the zone ↕ latitude · ↔ terrain"],
+  "atlas.close": ["Close", "shuts the panel — nothing is written"],
 
   // --- station mode (SPEC §3.4) ---
-  "atlas.search": ["Search", "filter the stations by name, country or Köppen class"],
   "atlas.station": ["Station", "a real station the plugin ships — select it to see its record"],
-  "atlas.card": ["Station record", "the source behind the numbers — dataset station, country, years of record"],
-  "atlas.spark": ["Spark", "the station's year of temperature against this zone's own"],
+  "atlas.card": ["Station record", "the source behind the numbers — station, country, class, years of record"],
+  "atlas.spark": ["Spark", "the selected station's year of temperature against the zone's current base"],
   "atlas.rebase": ["Re-base zone", "copies the station's climate and regimes in — writes zone.preset, matched manual"],
 
   // --- geography mode (SPEC §3.4) ---
-  "atlas.map": ["Place", "drag the zone ↕ latitude and ↔ terrain"],
   "atlas.latitude": ["Latitude", "degrees, negative south of the equator — steers the match and the temperature"],
   "atlas.altitude": ["Altitude", "metres above sea level — cools the match by the lapse rate"],
   "atlas.swing": ["Seasonal swing", "keep the matched station's own swing, or scale it by continentality"],
@@ -43,12 +43,12 @@ export const ATLAS_HINTS: Record<string, Hint> = {
  */
 export const ATLAS_HINT_KEYS: readonly string[] = [
   "atlas.mode",
-  "atlas.search",
+  "atlas.map",
+  "atlas.close",
   "atlas.station",
   "atlas.card",
   "atlas.spark",
   "atlas.rebase",
-  "atlas.map",
   "atlas.latitude",
   "atlas.altitude",
   "atlas.swing",

@@ -8,12 +8,15 @@
  */
 import { describe, expect, test } from "bun:test";
 import { evalCurve, monthCentrePhase } from "../src/core/curve";
+import { isCurvePath } from "../src/core/curve-ops";
 import { validateProfile } from "../src/core/profile";
 import type { Era, Modifier, Preset, ZoneProfile } from "../src/core/types";
 import {
   addEnvelopePoint,
   addKeyframe,
   ALL_SCOPE,
+  channelStat,
+  chartPlots,
   chartSeries,
   clearDirection,
   companionSeries,
@@ -33,19 +36,27 @@ import {
   read,
   removeEnvelopePoint,
   removeKeyframe,
+  pointWhen,
   scopeChips,
+  seasonBands,
+  seasonDirections,
   seasonMarkers,
   seasonScope,
+  spreadPoints,
   setEnvelopePoint,
   setKeyframe,
   stageCaption,
   stationPoints,
   swungPoints,
+  wetDayPoints,
   write,
   writers,
+  writtenLayers,
   type KnobId,
 } from "../src/studio/model/channel-edit";
 import { effectiveBase, getAllYear, getCycle, getSeasonOffset, getSwing, setSwing, type Channel } from "../src/studio/model/compile";
+import { rollYear } from "../src/studio/model/audition";
+import { InternalCalendar } from "../src/plugin/time/internal";
 
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 
@@ -112,10 +123,14 @@ describe("scopes", () => {
     expect(ids.indexOf("season:Monsoon")).toBeGreaterThan(ids.indexOf("moon:Sable"));
   });
 
-  test("stageCaption names the stage and the predicate", () => {
-    expect(stageCaption(ALL_SCOPE)).toBe("climate stage · applied once to the curves");
-    expect(stageCaption(seasonScope("Winter"))).toBe("daily stage · when.tag season:Winter");
-    expect(stageCaption(moonScope("Sable"))).toBe("daily stage · when.moon Sable · envelope");
+  test("stageCaption names the modifier it writes, the stage and the predicate", () => {
+    expect(stageCaption("temperature.mean", ALL_SCOPE)).toBe("writes modifiers[layer:temperature.mean] · stage climate · unconditional, reshapes the baseline once");
+    expect(stageCaption("temperature.mean", seasonScope("Winter"))).toBe("writes modifiers[layer:temperature.mean:season:Winter] · when.tag season:Winter");
+    expect(stageCaption("temperature.mean", moonScope("Sable"))).toBe("writes modifiers[layer:temperature.mean:moon:Sable] · when.moon Sable · the drawn curve is its envelope");
+    // the cycle length is real calendar data, so it is only named when known
+    expect(stageCaption("temperature.mean", moonScope("Sable"), 29.53)).toBe("writes modifiers[layer:temperature.mean:moon:Sable] · when.moon Sable · the drawn curve is its envelope · repeats every 29.53 d");
+    // a paired channel's caption follows the picker, not the channel
+    expect(stageCaption("precipitation.pww", ALL_SCOPE)).toContain("modifiers[layer:precipitation.pww]");
   });
 
   test("knobsFor follows the scope (SPEC §3.4)", () => {
@@ -290,6 +305,91 @@ describe("the drawn curve", () => {
       { x: 0.75, label: "Winter" },
     ]);
     expect(seasonMarkers(moonScope("Sable"), CALENDAR)).toEqual([]);
+  });
+
+  test("seasonBands cover the whole year, in list order, wrapping past the end", () => {
+    const bands = seasonBands(ALL_SCOPE, CALENDAR);
+    expect(bands.map((b) => b.name)).toEqual(["Spring", "Summer", "Autumn", "Winter"]);
+    expect(bands.map((b) => [b.from, b.to])).toEqual([
+      [0, 0.25],
+      [0.25, 0.5],
+      [0.5, 0.75],
+      [0.75, 1],
+    ]);
+    // the index is the season's own list position, so the caller can look up its palette entry
+    expect(bands.map((b) => b.index)).toEqual([0, 1, 2, 3]);
+  });
+
+  test("a year that does not start on a season boundary still has no bare gap", () => {
+    const bands = seasonBands(ALL_SCOPE, { seasons: [{ name: "Wet", from: 0.2 }, { name: "Dry", from: 0.6 }], moons: [] });
+    expect(bands.map((b) => [b.from, b.to])).toEqual([
+      [0.2, 0.6],
+      [0.6, 1.2],
+    ]);
+  });
+
+  test("a cycle scope bands the moon's own named phases, and nothing when it has none", () => {
+    const moons = [{ name: "Sable", phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] }];
+    expect(seasonBands(moonScope("Sable"), { seasons: CALENDAR.seasons, moons }).map((b) => b.name)).toEqual(["New", "Full"]);
+    expect(seasonBands(moonScope("Umber"), { seasons: CALENDAR.seasons, moons })).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("the chart's reference marks", () => {
+  test("the spread ribbon is the channel's own companion curve, halved where it is a full range", () => {
+    const z = zone();
+    const drawn = curvePoints(z, TEMP, ALL_SCOPE);
+    const spread = spreadPoints(z, TEMP, ALL_SCOPE);
+    expect(spread).toHaveLength(drawn.length);
+    expect(spread.every((p) => p[1] >= 0)).toBe(true);
+    // half of temperature.diurnalRange, at the same phase
+    expect(spread[0]?.[1]).toBeCloseTo(evalCurve(z.climate.temperature.diurnalRange, drawn[0]![0]) / 2, 10);
+    // a fraction-valued parameter has no spread curve, and a cycle scope draws no ribbon
+    expect(spreadPoints(z, "precipitation.pwd", ALL_SCOPE)).toEqual([]);
+    expect(spreadPoints(z, TEMP, moonScope("Sable"))).toEqual([]);
+  });
+
+  test("the wet-day ghost is the drawn curve plus temperature.wetDayOffset, and absent when that is flat zero", () => {
+    const z = zone();
+    const drawn = curvePoints(z, TEMP, ALL_SCOPE);
+    const ghost = wetDayPoints(z, TEMP, ALL_SCOPE);
+    if (ghost.length > 0) {
+      expect(ghost[0]?.[1]).toBeCloseTo(drawn[0]![1] + evalCurve(z.climate.temperature.wetDayOffset, drawn[0]![0]), 10);
+    }
+    const flat = zone();
+    flat.climate.temperature.wetDayOffset = 0;
+    expect(wetDayPoints(flat, TEMP, ALL_SCOPE)).toEqual([]);
+    expect(wetDayPoints(z, "precipitation.pwd", ALL_SCOPE)).toEqual([]);
+  });
+
+  test("pointWhen reads a phase as a calendar day, or as a place in the cycle", () => {
+    expect(pointWhen(ALL_SCOPE, 0.5375, { yearLength: 365 })).toBe("day 196 · 54% of year");
+    expect(pointWhen(seasonScope("Winter"), 0, { yearLength: 400 })).toBe("day 0 · 0% of year");
+    expect(pointWhen(moonScope("Sable"), 0.55, { yearLength: 365, cycleDays: 29.53 })).toBe("cycle d16.2 · phase 0.55");
+    // an opaque calendar describes no cycle length, so the readout drops that half
+    expect(pointWhen(moonScope("Sable"), 0.55, { yearLength: 365 })).toBe("phase 0.55");
+  });
+
+  test("channelStat reports the drawn range and the two scalars behind the curve", () => {
+    const z = zone();
+    const stat = channelStat(z, TEMP, ALL_SCOPE);
+    const ys = curvePoints(z, TEMP, ALL_SCOPE).map((p) => p[1]);
+    expect(stat.range).toEqual([Math.min(...ys), Math.max(...ys)]);
+    expect(stat.persistence).toBe(z.climate.temperature.persistence);
+    // a channel with no wet-day curve of its own reports null rather than inventing one
+    expect(channelStat(z, "precipitation.pwd", ALL_SCOPE).wetDayOffset).toBeNull();
+    expect(channelStat(z, "precipitation.pwd", ALL_SCOPE).persistence).toBeNull();
+  });
+
+  test("writtenLayers names only this channel's layer ids, in modifiers[] order", () => {
+    const z = zone();
+    expect(writtenLayers(z, TEMP_CHANNEL)).toEqual([]);
+    write(z, TEMP_CHANNEL, ALL_SCOPE, "offset", 2);
+    write(z, "precipitation", ALL_SCOPE, "chance", 1.5);
+    expect(writtenLayers(z, TEMP_CHANNEL)).toEqual(["layer:temperature.mean"]);
+    expect(writtenLayers(z, "precipitation").every((id) => id.startsWith("layer:precipitation."))).toBe(true);
   });
 });
 
@@ -565,21 +665,38 @@ describe("wind direction", () => {
 });
 
 describe("the drawn series", () => {
-  test("a paired channel offers both lines and names the one the moon scope rides", () => {
-    expect(chartSeries("temperature")).toEqual(["temperature.mean"]);
-    expect(chartSeries("precipitation")).toEqual(["precipitation.pww", "precipitation.pwd"]);
-    expect(chartSeries("wind")).toEqual(["wind.speed"]);
-    expect(chartSeries("sky")).toEqual(["cloud.dry", "cloud.wet", "humidity.dry", "humidity.wet"]);
+  test("every channel stacks its plots, a pair to an axis, and names the line the moon scope rides", () => {
+    expect(chartPlots("temperature")).toEqual([["temperature.mean"]]);
+    // The Markov pair shares one 0-1 axis; millimetres get an axis of their own.
+    expect(chartPlots("precipitation")).toEqual([["precipitation.pwd", "precipitation.pww"], ["precipitation.scale"]]);
+    expect(chartPlots("wind")).toEqual([["wind.speed"], ["wind.calmFraction"]]);
+    expect(chartPlots("sky")).toEqual([
+      ["cloud.dry", "cloud.wet"],
+      ["humidity.dry", "humidity.wet"],
+    ]);
+
+    // `chartSeries` is the same list, flattened — every line the panel draws.
+    for (const channel of ["temperature", "precipitation", "wind", "sky"] as const) {
+      expect(chartSeries(channel), channel).toEqual(chartPlots(channel).flat());
+      // Nothing is drawn twice, and every line is a real curve path.
+      expect(new Set(chartSeries(channel)).size, channel).toBe(chartSeries(channel).length);
+      for (const param of chartSeries(channel)) expect(isCurvePath(param), param).toBe(true);
+      // The moon scope's series is always one of the drawn ones.
+      expect(chartSeries(channel), channel).toContain(primarySeries(channel));
+    }
 
     expect(primarySeries("precipitation")).toBe("precipitation.pwd");
     expect(primarySeries("sky")).toBe("cloud.dry");
     expect(primarySeries("wind")).toBe("wind.speed");
   });
 
-  test("a companion is the other half of the same section, and nothing else", () => {
+  test("a companion is the other line on the same plot, and nothing else", () => {
     expect(companionSeries("precipitation", "precipitation.pwd")).toEqual(["precipitation.pww"]);
+    // The mm curve is on its own axis, so it is nobody's companion.
+    expect(companionSeries("precipitation", "precipitation.scale")).toEqual([]);
     expect(companionSeries("sky", "cloud.dry")).toEqual(["cloud.wet"]);
     expect(companionSeries("sky", "humidity.wet")).toEqual(["humidity.dry"]);
+    expect(companionSeries("wind", "wind.speed")).toEqual([]);
     expect(companionSeries("temperature", "temperature.mean")).toEqual([]);
   });
 
@@ -624,5 +741,157 @@ describe("the WRITES footer", () => {
   test("a stray layer is still listed under its channel — the footer states the file, not the intent", () => {
     const z = zone([{ id: "layer:wind.speed:nonsense", apply: [{ param: "wind.speed", op: "offset", value: 2 }] }]);
     expect(writesText(z, "wind")).toContain("layer:wind.speed:nonsense");
+  });
+});
+
+describe("the rose, by season", () => {
+  test("one wedge per season, at the bearing it blows from, with its compass point", () => {
+    const z = zone();
+    const dirs = seasonDirections(z, CALENDAR);
+    expect(dirs.map((d) => d.name)).toEqual(["Spring", "Summer", "Autumn", "Winter"]);
+    expect(dirs.map((d) => d.index)).toEqual([0, 1, 2, 3]);
+    // Nothing is set yet, so every wedge is the station's own bearing.
+    expect(dirs.every((d) => !d.own)).toBe(true);
+    for (const d of dirs) {
+      expect(d.degrees >= 0 && d.degrees < 360, d.name).toBe(true);
+      // The compass point is the bearing, not a separate opinion about it.
+      expect(d.compass, d.name).toBe(["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"][Math.round(d.degrees / 22.5) % 16]!);
+    }
+  });
+
+  test("a season with its own bearing sits on it and says so; the reset puts it back", () => {
+    const z = zone();
+    write(z, "wind", seasonScope("Summer"), "direction", 100);
+    const set = seasonDirections(z, CALENDAR).find((d) => d.name === "Summer")!;
+    expect(set.degrees).toBeCloseTo(100, 9);
+    expect(set.compass).toBe("E");
+    expect(set.own).toBe(true);
+    // The others are untouched and still read off the station's curve.
+    expect(seasonDirections(z, CALENDAR).filter((d) => d.own).map((d) => d.name)).toEqual(["Summer"]);
+
+    clearDirection(z, "Summer");
+    expect(seasonDirections(z, CALENDAR).some((d) => d.own)).toBe(false);
+  });
+
+  test("a calendar with no seasons has no wedges — the histogram is what degrades, not this", () => {
+    expect(seasonDirections(zone(), { seasons: [] })).toEqual([]);
+    expect(directionRose(zone(), { seasons: [] }).length).toBe(ROSE_SECTORS);
+  });
+});
+
+describe("the per-channel stat card (SPEC §8)", () => {
+  test("PRECIP reports the share the Markov pair settles at, plus the amount and its scalars", () => {
+    const z = zone();
+    const stat = channelStat(z, "precipitation.pwd", ALL_SCOPE);
+    // The stationary share sits between the two odds it is derived from.
+    const pwd = curvePoints(z, "precipitation.pwd", ALL_SCOPE).map((p) => p[1]);
+    const pww = curvePoints(z, "precipitation.pww", ALL_SCOPE).map((p) => p[1]);
+    expect(stat.wetShare).not.toBeNull();
+    expect(stat.wetShare!).toBeGreaterThan(Math.min(...pwd));
+    expect(stat.wetShare!).toBeLessThan(Math.max(...pww));
+    expect(stat.wetRunPeak).toBeCloseTo(Math.max(...pww), 9);
+    // The mean fall is the gamma mean, k x theta, at every phase.
+    const shape = curvePoints(z, "precipitation.shape", ALL_SCOPE).map((p) => p[1]);
+    const scale = curvePoints(z, "precipitation.scale", ALL_SCOPE).map((p) => p[1]);
+    expect(stat.amountMm).toBeCloseTo(shape.reduce((a, k, i) => a + k * scale[i]!, 0) / shape.length, 9);
+    expect(stat.freezingPoint).toBe(z.climate.precipitation.freezingPoint);
+    expect(stat.gammaShape).toBeCloseTo(shape.reduce((a, v) => a + v, 0) / shape.length, 9);
+    // …and none of temperature's or sky's lines leak onto it.
+    expect(stat.persistence).toBeNull();
+    expect(stat.daySigma).toBeNull();
+    expect(stat.mean).toBeNull();
+  });
+
+  test("the wet share follows the knobs: more chance is wetter, more stickiness is wetter", () => {
+    const base = channelStat(zone(), "precipitation.pwd", ALL_SCOPE).wetShare!;
+    const wetter = zone();
+    write(wetter, "precipitation", ALL_SCOPE, "chance", 1.5);
+    expect(channelStat(wetter, "precipitation.pwd", ALL_SCOPE).wetShare!).toBeGreaterThan(base);
+    const stickier = zone();
+    write(stickier, "precipitation", ALL_SCOPE, "stick", 1.2);
+    expect(channelStat(stickier, "precipitation.pwd", ALL_SCOPE).wetShare!).toBeGreaterThan(base);
+  });
+
+  test("WIND reports the calm share and the wet-day multiplier, and follows the calm knob", () => {
+    const z = zone();
+    const stat = channelStat(z, "wind.speed", ALL_SCOPE);
+    const calm = curvePoints(z, "wind.calmFraction", ALL_SCOPE).map((p) => p[1]);
+    expect(stat.calmShare).toBeCloseTo(calm.reduce((a, v) => a + v, 0) / calm.length, 9);
+    expect(stat.wetDayScale).toBe(z.climate.wind.wetDayScale);
+    expect(stat.wetShare).toBeNull();
+
+    write(z, "wind", ALL_SCOPE, "calm", 0.1);
+    expect(channelStat(z, "wind.speed", ALL_SCOPE).calmShare!).toBeCloseTo(stat.calmShare! + 0.1, 6);
+  });
+
+  test("SKY reports the pair dry-then-wet whichever half the handles are on, and the day-to-day sigma", () => {
+    const z = zone();
+    const onDry = channelStat(z, "cloud.dry", ALL_SCOPE);
+    const onWet = channelStat(z, "cloud.wet", ALL_SCOPE);
+    expect(onDry.mean).not.toBeNull();
+    expect(onDry.mean).toBeCloseTo(onWet.mean!, 12);
+    expect(onDry.companionMean).toBeCloseTo(onWet.companionMean!, 12);
+    // A wet day is cloudier than a dry one, and the pair is reported in that order.
+    expect(onDry.companionMean!).toBeGreaterThan(onDry.mean!);
+    expect(onDry.daySigma).toBe(z.climate.cloud.sd);
+    expect(channelStat(z, "humidity.dry", ALL_SCOPE).daySigma).toBe(z.climate.humidity.sd);
+    // The cloud knob moves both halves, so both means move with it.
+    write(z, "sky", ALL_SCOPE, "cloud", 0.05);
+    const after = channelStat(z, "cloud.dry", ALL_SCOPE);
+    expect(after.mean!).toBeCloseTo(onDry.mean! + 0.05, 6);
+    expect(after.companionMean!).toBeCloseTo(onDry.companionMean! + 0.05, 6);
+  });
+
+  test("TEMPERATURE keeps its own two lines and grows none of the others", () => {
+    const stat = channelStat(zone(), TEMP, ALL_SCOPE);
+    expect(stat.persistence).toBe(fjord.climate.temperature.persistence);
+    expect(stat.wetDayOffset).not.toBeNull();
+    expect([stat.wetShare, stat.amountMm, stat.calmShare, stat.mean, stat.daySigma]).toEqual([null, null, null, null, null]);
+  });
+});
+
+describe("a wind edit reaches the audition (SPEC §8)", () => {
+  const cal = new InternalCalendar({ yearLength: 360, epochYear: 1, moons: [], seasons: [] }, () => 0);
+  const roll = (z: ZoneProfile) => rollYear({ zone: z, eras: [] as Era[], seed: "world-seed", adapter: cal, year: 1, salt: 0 });
+
+  test("the speed knob moves the rolled wind, not just the drawn curve", () => {
+    const before = roll(zone());
+    const z = zone();
+    write(z, "wind", ALL_SCOPE, "wind", 8);
+    const after = roll(z);
+    expect(after.days.length).toBe(before.days.length);
+    expect(after.issues.filter((i) => i.level === "error")).toEqual([]);
+    // Every non-calm day is faster by the offset the knob wrote.
+    const moved = after.days.filter((d, i) => !d.record.calm && !before.days[i]!.record.calm);
+    expect(moved.length).toBeGreaterThan(0);
+    for (const d of moved) {
+      const was = before.days.find((b) => b.dayOrdinal === d.dayOrdinal)!;
+      expect(d.record.windSpeedKph).toBeGreaterThan(was.record.windSpeedKph);
+    }
+  });
+
+  test("a season bearing and the calm knob both reach the roll too", () => {
+    const before = roll(zone());
+    const z = zone();
+    write(z, "wind", ALL_SCOPE, "calm", 0.3);
+    const calmer = roll(z);
+    expect(calmer.days.filter((d) => d.record.calm).length).toBeGreaterThan(before.days.filter((d) => d.record.calm).length);
+
+    // The bearing is season-gated, so it needs a calendar that has seasons.
+    const seasonal = new InternalCalendar({ yearLength: 360, epochYear: 1, moons: [], seasons: [{ name: "Thaw", from: 0 }, { name: "Deepcold", from: 0.5 }] }, () => 0);
+    const b = zone();
+    write(b, "wind", seasonScope("Thaw"), "direction", 270);
+    const turned = rollYear({ zone: b, eras: [] as Era[], seed: "world-seed", adapter: seasonal, year: 1, salt: 0 });
+    const thawDays = turned.days.filter((d) => (d.time.tags ?? []).includes("season:Thaw"));
+    expect(thawDays.length).toBeGreaterThan(0);
+    // A `set` bearing is the prevailing direction; the roll scatters around it,
+    // so the mean sits on it rather than every day landing exactly on it. The
+    // mean has to be circular — a bearing wraps, and 359 deg and 1 deg do not
+    // average to 180.
+    const rad = (deg: number): number => (deg * Math.PI) / 180;
+    const sin = thawDays.reduce((a, d) => a + Math.sin(rad(d.record.windDirectionDeg)), 0);
+    const cos = thawDays.reduce((a, d) => a + Math.cos(rad(d.record.windDirectionDeg)), 0);
+    const mean = (((Math.atan2(sin, cos) * 180) / Math.PI) % 360 + 360) % 360;
+    expect(Math.abs(mean - 270)).toBeLessThan(20);
   });
 });

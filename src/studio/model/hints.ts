@@ -22,12 +22,19 @@ export const DEFAULT_HINT: Hint = ["Climate studio", "hover anything for what it
 /** The separator between the two halves inside a `data-hint` attribute. */
 export const HINT_SEPARATOR = " — ";
 
+/**
+ * The zoom presets all share one hint: the prototype names the *control*
+ * ("zoom preset") and spends the detail on what the pointer can do, rather
+ * than describing the view the button lands on (gap-shell §2).
+ */
+const ZOOM_HINT: Hint = ["Zoom preset", "wheel = zoom under cursor · shift+wheel = pan"];
+
 export const HINTS: Record<string, Hint> = {
   // --- header · zone side (SPEC §3.1) ---
-  "zone.menu": ["Zone", "switch zone or add one — ● unsaved, ✓ saved"],
+  "zone.menu": ["Zone", "this studio edits one zone · switch zones here · eras, calendar and moons are world-level and shared"],
   "zone.koppen": ["Köppen", "the class the compiled climate resolves to — diagnostic only"],
   "zone.src": ["Source station", "the real station this zone was copied from — opens the atlas"],
-  "zone.flip": ["Seasons flipped", "reads season tags half a year away; the curves are unchanged"],
+  "zone.flip": ["Opposite hemisphere", "the record's curves are shifted half a year here · on: season tag gates remap to this zone's seasons · off: tags read the world calendar"],
 
   // --- header · tools (SPEC §3.1) ---
   "transport.readout": ["Window", "the span the playlist is showing"],
@@ -35,14 +42,12 @@ export const HINTS: Record<string, Hint> = {
   "transport.forward": ["Forward", "pan a quarter window later"],
   "transport.out": ["Zoom out", "widen the window around its centre"],
   "transport.in": ["Zoom in", "narrow the window around its centre"],
-  "zoom.day": ["Day", "three days — the day card"],
-  "zoom.month": ["Month", "thirty days — composed curves"],
-  "zoom.season": ["Season", "the season under the centre"],
-  "zoom.year": ["Year", "one calendar year — season bands"],
-  "zoom.era": ["Era", "a thousand years — era clips"],
-  "header.json": ["JSON", "show the file this studio writes"],
-  "header.undo": ["Undo", "step back one edit"],
-  "header.redo": ["Redo", "step forward one edit"],
+  "zoom.day": ZOOM_HINT,
+  "zoom.month": ZOOM_HINT,
+  "zoom.season": ZOOM_HINT,
+  "zoom.year": ZOOM_HINT,
+  "zoom.era": ZOOM_HINT,
+  "header.json": ["Zone file", "the live JSON everything here writes"],
   "header.save": ["Save", "write the drafts into the world"],
 };
 
@@ -68,8 +73,6 @@ export const HEADER_HINT_KEYS: readonly string[] = [
   "zoom.year",
   "zoom.era",
   "header.json",
-  "header.undo",
-  "header.redo",
   "header.save",
 ];
 

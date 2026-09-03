@@ -1,7 +1,13 @@
 /**
- * LED — a 10 px lamp. Three scopes (device · chain · op) and three levels
- * (ok · warn · error); colour comes from the palette, never from the caller.
- * When `onToggle` is given the lamp is the unit's power switch (SPEC §3.3).
+ * LED — a lamp, sized by what it belongs to: 10 px on a rack unit
+ * (`device`), 8 px on the mixer's fixed strip (`chain`), 7 px beside an op
+ * (`op`), 9 px in a window title bar. Three levels (ok · warn · error);
+ * colour comes from the palette, never from the caller. When `onToggle` is
+ * given the lamp is the unit's power switch (SPEC §3.3).
+ *
+ * `muted` is the third state between on and off: the unit is enabled but
+ * something upstream is holding it back (a chain mute, a disabled op), so the
+ * lamp keeps its colour and loses its glow.
  */
 export type LedLevel = "ok" | "warn" | "error";
 export type LedScope = "device" | "chain" | "op";
@@ -12,6 +18,16 @@ export interface LedProps {
   scope?: LedScope;
   onToggle?: (on: boolean) => void;
   hint?: string;
+  /** Lit but held back upstream — colour without glow. */
+  muted?: boolean;
+  /**
+   * Override the lamp's hue with a palette colour — the ONE case where a
+   * caller picks it: a channel window's title lamp carries the channel's own
+   * identity (temp orange, precip blue, wind green, sky pale), not the generic
+   * ok-green. A `warn`/`error` level still wins, because a validation state
+   * must never be hidden behind an identity colour.
+   */
+  color?: string;
 }
 
 export interface LedComponent {
@@ -48,10 +64,15 @@ export function createLed(parent: HTMLElement, initial: LedProps): LedComponent 
     const scope = props.scope ?? "device";
     if (!props.on) return `${scope} power: off`;
     const level = props.level ?? "ok";
-    return level === "ok" ? `${scope} power: on` : `${scope} power: on, ${level}`;
+    const muted = props.muted === true ? ", muted" : "";
+    return level === "ok" ? `${scope} power: on${muted}` : `${scope} power: on, ${level}${muted}`;
   }
 
   function paint(): void {
+    const level = props.level ?? "ok";
+    // An identity colour only applies to the healthy state; warn/error keep
+    // the palette hue their level owns.
+    el.setCssProps({ "--wadjet-studio-led-color": props.color !== undefined && level === "ok" ? props.color : "var(--wadjet-studio-wind)" });
     // Obsidian's setAttr drops an attribute when handed `false`, so booleans go in as strings.
     el.setAttrs({
       "data-level": props.level ?? "ok",
@@ -60,6 +81,7 @@ export function createLed(parent: HTMLElement, initial: LedProps): LedComponent 
       "aria-label": accessibleLabel(),
     });
     el.toggleClass("is-on", props.on);
+    el.toggleClass("is-muted", props.muted === true);
     if (props.onToggle) {
       el.setAttrs({ role: "button", tabindex: "0" });
     } else {

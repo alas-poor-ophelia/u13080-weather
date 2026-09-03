@@ -27,10 +27,10 @@
  * status as the header's transport buttons and a floating window's ×.
  */
 import type { CalendarDescription } from "../../plugin/time/adapter";
-import { dayLabel, yearLabel } from "../model/format";
+import { tabular } from "../model/format";
 import { playlistHint } from "../model/hints-playlist";
 import { spanToPx } from "../model/lanes";
-import { cycleColour } from "../model/palette";
+import { cycleColour, ERA_CYCLE, SEASON_CYCLE } from "../model/palette";
 import type { StudioState } from "../model/state";
 import { spansFor, type SpanCalendar } from "../model/spans";
 import { panByDrag, ticks, yearToPx, zoomLabel, type Window, type ZoomBounds } from "../model/zoom";
@@ -49,20 +49,82 @@ export const SEASONS_WINDOW = "seasons";
 /** Year length to label with when the active adapter does not describe itself. */
 const DEFAULT_YEAR_LENGTH = 365;
 
-/** A band is a tint behind the ticks, never a fill: 8 % of the palette hue. */
-const BAND_ALPHA = "8%";
+/** The ruler's own band, under the season name and behind the tick labels. */
+const RULER_BAND_ALPHA = "18%";
+
+/** The tint the same band takes when it is painted the full height of a chart. */
+const CHART_BAND_ALPHA = "5%";
+
+/** A band narrower than this has no room for its name (SPEC §3.2: no collisions). */
+const NAME_MIN_PX = 44;
 
 /** Lane width to assume before the leaf has been laid out (clientWidth 0). */
 const FALLBACK_WIDTH = 800;
 
 /**
- * `index` into `model/palette.ts`'s band cycle, at band alpha. Seasons and eras
- * walk the same six hues — they can never be on screen together (bands are Year
- * and tighter, the era tint is Era), and the cycle starting on calendar gold is
- * what makes both read as *calendar*, not as data.
+ * `index` into `cycle`, at `alpha`.
+ *
+ * Seasons and eras walk DIFFERENT six-hue lists. An era band leads on precip
+ * blue (`ERA_CYCLE`, `model/palette.ts`) — the same per-era tint the eras
+ * row's Era-zoom clip and the mixer's era chip use — because an era band is a
+ * *specific era* being tinted, not the calendar itself; a season band leads
+ * on `SEASON_CYCLE`, because the world's four shipped seasons read Thaw green
+ * · High Sun gold · Harvest orange · Deepcold blue and the Seasons window
+ * already paints them that way. The two can never be on screen together
+ * (bands are Year and tighter, the era tint is Era), so nothing collides.
  */
-function tint(index: number): string {
-  return `color-mix(in srgb, ${cycleColour(index)} ${BAND_ALPHA}, transparent)`;
+function tint(index: number, alpha: string, cycle?: readonly string[]): string {
+  return `color-mix(in srgb, ${cycleColour(index, cycle)} ${alpha}, transparent)`;
+}
+
+/** One calendar band on screen: where it is, what it is called and its hue. */
+export interface CalendarBand {
+  left: number;
+  width: number;
+  /** the centre of the band CLIPPED to the window — where a centred name belongs */
+  mid: number;
+  name: string;
+  /** the band's own palette colour, as a `var()` */
+  colour: string;
+  /** the same colour at chart-tint alpha */
+  tint: string;
+}
+
+/**
+ * The season bands at Year zoom and tighter, the era bands at Era zoom — the
+ * one derivation the ruler and every channel row share, so a tint behind a
+ * curve lands on exactly the pixels the ruler's own band does.
+ */
+export function calendarBands(ctx: SurfaceContext, state: StudioState, geo: RowGeometry): CalendarBand[] {
+  const cal = spanCalendarFor(ctx, state);
+  if (cal === null) return [];
+  const out: CalendarBand[] = [];
+  const push = (tag: string, fallback: string, index: number, cycle?: readonly string[]): void => {
+    for (const s of spansFor({ tag }, undefined, cal, { window: geo.window })) {
+      if (s.id === "many") continue; // the overflow bar is not a tint
+      const { left, width } = spanToPx(s, geo.lane);
+      out.push({
+        left,
+        width: Math.max(1, width),
+        mid: (Math.max(0, left) + Math.min(geo.widthPx, left + width)) / 2,
+        name: s.label ?? fallback,
+        colour: cycleColour(index, cycle),
+        tint: tint(index, CHART_BAND_ALPHA, cycle),
+      });
+    }
+  };
+  if (zoomLabel(geo.window) === "era") {
+    cal.eras.forEach((era, i) => {
+      if (era.enabled === false) return;
+      push(`era:${era.name}`, era.name, state.view.colours.eras[i] ?? i, ERA_CYCLE);
+    });
+    return out;
+  }
+  if (!geo.morph.showBands) return [];
+  cal.seasons.forEach((season, i) => {
+    push(`season:${season.name}`, season.name, state.view.colours.seasons[i] ?? i, SEASON_CYCLE);
+  });
+  return out;
 }
 
 /**
@@ -90,6 +152,22 @@ export function spanCalendarFor(ctx: SurfaceContext, state: StudioState): SpanCa
   };
 }
 
+/**
+ * A day tick's label: `d0`, 0-based within its year, as the prototype's ruler
+ * writes it. Deliberately NOT `format.ts`'s `dayLabel` — that one is the
+ * 1-based `d 130` the header readout and the day card speak, and a tick has
+ * 24 px to fit a number into.
+ */
+function tickDay(dayIndex: number, yearLength: number): string {
+  const n = Math.max(1, Math.round(yearLength));
+  return `d${((dayIndex % n) + n) % n}`;
+}
+
+/** A year tick's label: the bare year, no `Y` prefix (SPEC §3.2's `1100 1200 …`). */
+function tickYear(year: number): string {
+  return tabular(year, 0);
+}
+
 export interface RulerProps {
   ctx: SurfaceContext;
   /** the world's pannable extent; the playlist owns the one definition */
@@ -111,7 +189,7 @@ export function createRuler(props: RulerProps): RulerComponent {
   let cancelDrag: (() => void) | null = null;
 
   label.empty();
-  label.setText("Calendar ⚑");
+  label.createSpan({ cls: "wadjet-studio-ruler-label-text", text: "Calendar ⚑" });
   label.addClass("wadjet-studio-ruler-label-btn");
   label.setAttrs({ role: "button", tabindex: "0", "aria-label": "Open the seasons window", "data-hint": playlistHint("ruler.calendar") });
 
@@ -119,6 +197,7 @@ export function createRuler(props: RulerProps): RulerComponent {
   ticksEl.setAttr("data-hint", playlistHint("ruler.ticks"));
   markDragTarget(ticksEl);
   const bandsEl = ticksEl.createDiv({ cls: "wadjet-studio-ruler-bands" });
+  const namesEl = ticksEl.createDiv({ cls: "wadjet-studio-ruler-names" });
   const stripEl = ticksEl.createDiv({ cls: "wadjet-studio-ruler-strip" });
 
   function openSeasons(): void {
@@ -157,51 +236,43 @@ export function createRuler(props: RulerProps): RulerComponent {
   label.addEventListener("keydown", onLabelKey);
   ticksEl.addEventListener("pointerdown", onPointerDown);
 
+  /**
+   * The band strip along the bottom of the ruler, with each band's name
+   * centred over its own span on the row ABOVE the tick labels (SPEC §3.2) —
+   * the two rows are what keeps `Thaw` from landing on top of `d0`. A band
+   * too narrow to hold its name gets the tint and no text.
+   */
   function paintBands(state: StudioState, geo: RowGeometry): void {
     bandsEl.empty();
-    const cal = spanCalendarFor(props.ctx, state);
-    if (cal === null) return;
-    const w = geo.window;
-
-    const draw = (name: string, tag: string, index: number): void => {
-      const spans = spansFor({ tag }, undefined, cal, { window: w });
-      for (const s of spans) {
-        if (s.id === "many") continue; // the overflow bar is not a tint
-        const { left, width } = spanToPx(s, geo.lane);
-        const el = bandsEl.createDiv({ cls: "wadjet-studio-ruler-band" });
-        el.setCssProps({
-          "--wadjet-studio-ruler-band-left": `${left}px`,
-          "--wadjet-studio-ruler-band-width": `${Math.max(1, width)}px`,
-          "--wadjet-studio-ruler-band-color": tint(index),
-        });
-        el.createSpan({ cls: "wadjet-studio-ruler-band-label", text: s.label ?? name });
-      }
-    };
-
-    if (zoomLabel(w) === "era") {
-      cal.eras.forEach((era, i) => {
-        if (era.enabled === false) return;
-        draw(era.name, `era:${era.name}`, state.view.colours.eras[i] ?? i);
+    namesEl.empty();
+    for (const band of calendarBands(props.ctx, state, geo)) {
+      const el = bandsEl.createDiv({ cls: "wadjet-studio-ruler-band" });
+      el.setCssProps({
+        "--wadjet-studio-ruler-band-left": `${band.left}px`,
+        "--wadjet-studio-ruler-band-width": `${band.width}px`,
+        "--wadjet-studio-ruler-band-color": `color-mix(in srgb, ${band.colour} ${RULER_BAND_ALPHA}, transparent)`,
       });
-      return;
+      if (band.width < NAME_MIN_PX) continue;
+      const name = namesEl.createDiv({ cls: "wadjet-studio-ruler-band-label", text: band.name });
+      name.setCssProps({ "--wadjet-studio-ruler-band-left": `${band.mid}px`, "--wadjet-studio-ruler-name-color": band.colour });
     }
-    if (!geo.morph.showBands) return;
-    cal.seasons.forEach((season, i) => {
-      draw(season.name, `season:${season.name}`, state.view.colours.seasons[i] ?? i);
-    });
   }
 
+  /**
+   * The tick row. The prototype labels and nothing else — no cell dividers, so
+   * the ruler reads as a scale rather than as a table. Labels are the
+   * prototype's own compact forms (`d0`, `1200`), not the header's readout
+   * grammar, because a tick has 24 px to say a number in.
+   */
   function paintTicks(state: StudioState, geo: RowGeometry): void {
     stripEl.empty();
     const yearLength = spanCalendarFor(props.ctx, state)?.yearLength ?? DEFAULT_YEAR_LENGTH;
-    // `ticks()` hands the day tick a 0-based index within its year; `dayLabel`
-    // wants the 1-based day the readout and the day card use.
-    const plan = ticks(geo.window, geo.widthPx, { year: yearLabel, day: (_year, dayIndex) => dayLabel(dayIndex + 1, yearLength) });
+    const plan = ticks(geo.window, geo.widthPx, { year: tickYear, day: (_year, dayIndex) => tickDay(dayIndex, yearLength) });
     for (const t of plan) {
       const el = stripEl.createDiv({ cls: "wadjet-studio-tick wadjet-studio-ruler-tick" });
       el.toggleClass("is-major", t.major);
       el.setCssProps({ "--wadjet-studio-ruler-tick-left": `${yearToPx(t.year, geo.window, geo.widthPx)}px` });
-      if (t.label !== "") el.createSpan({ cls: "wadjet-studio-ruler-tick-label", text: t.label });
+      if (t.label !== "") el.createSpan({ cls: "wadjet-studio-ruler-tick-label wadjet-studio-num", text: t.label });
     }
   }
 

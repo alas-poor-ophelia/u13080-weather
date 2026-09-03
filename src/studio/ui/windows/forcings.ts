@@ -3,23 +3,28 @@
  *
  * The zone master: everything the whole zone's temperature and precipitation
  * pass through after the devices and before the eras (SPEC §1). It is one
- * panel with two stacks —
+ * panel with two **offset stacks**, each laid out knob-left / rows-right the
+ * way the prototype's `vst-macro` is —
  *
- *   TEMPERATURE   ∿ lane · FRC · warmth   the drawn offset at the centre year
- *                 ＋ trim                  a constant on top of it
- *                 = total into TEMP        what the chain actually receives
- *   PRECIPITATION wetness ×                both wet-day probabilities, scaled
+ *   TEMPERATURE   trim knob   ∿ lane · FRC · warmth   the drawn offset here
+ *                             ＋ trim · constant       a constant on top of it
+ *                             = into TEMP chain        what the chain receives
+ *   PRECIPITATION wetness     × scale · constant       both wet-day odds, scaled
  *
  * — and nothing else. SPEC §3.4 is explicit: "No placeholder controls."
  *
- * Two things worth knowing before editing this file:
+ * Three things worth knowing before editing this file:
  *
+ *  - **The knob and its row are the same value seen twice.** The knob is the
+ *    control; the row beneath the lane is that control's line in the stack,
+ *    so the sum reads as arithmetic (`∿` then `＋` then `=`) rather than as a
+ *    knob with a caption. Both repaint from the same `getTrim`.
  *  - **The lane row is a *link*, not an editor.** SPEC §3.2 draws the warmth
  *    lane on the playlist, where years are the axis; this panel only reads it
- *    (`laneValue` at the window's centre year) and, when clicked, zooms the
- *    playlist to Era so the lane is worth looking at — creating the lane
- *    first if the zone has none. That is SPEC law 2 in one gesture: the row
- *    stands for the lane, so it opens the lane.
+ *    (`laneValue` at the window's centre year — the `at playhead` readout)
+ *    and, when clicked, zooms the playlist to Era so the lane is worth
+ *    looking at — creating the lane first if the zone has none. That is SPEC
+ *    law 2 in one gesture: the row stands for the lane, so it opens the lane.
  *  - **The chrome LED and the mixer's Forcings LED read the same bucket.**
  *    Both call `ledLevel(byUnit.get(unitKey({ kind: "forcings" })))` — this
  *    panel's `level` getter re-reads it every tick (`windows.ts`, wadjet-9f9.35),
@@ -30,12 +35,13 @@ import type { ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
 import { ensureLane } from "../../model/automation-edit";
 import { getTrim, getWarmthLane, getWetness, setTrim, setWetness, TRIM_ID, WARMTH_LANE_ID, WETNESS_ID } from "../../model/compile";
+import { factorText, grammar } from "../../model/copy";
 import { format } from "../../model/format";
 import { forcingsHint } from "../../model/hints-forcings";
 import { parseDisplay } from "../../model/knob-units";
 import type { StudioState } from "../../model/state";
 import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
-import { presetWindow, type Window, type ZoomBounds } from "../../model/zoom";
+import { presetWindow, worldBounds, type Window, type ZoomBounds } from "../../model/zoom";
 import { createKnob, type KnobComponent } from "../components";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
@@ -48,20 +54,42 @@ const TRIM_SPEC = { min: -8, max: 8, step: 0.1, neutral: 0 } as const;
 /** Wetness scales both wet-day probabilities; ×1 is "no forcing". */
 const WETNESS_SPEC = { min: 0.5, max: 1.5, step: 0.01, neutral: 1 } as const;
 
-/** Mirrors `header.ts` / `windows/era.ts`: 100 years before the epoch, 1100 after. */
-const PLAYLIST_BOUNDS_BEFORE = 100;
-const PLAYLIST_BOUNDS_AFTER = 1100;
-
 /** `+2.0 °C` / `−1.5 °C` — a temperature *delta*, so no +32 offset in imperial. */
 function warmthText(v: number, units: Units): string {
   const f = format(v, "temperatureDelta", units, { signed: true });
   return `${f.text} ${f.unit}`;
 }
 
-/** `×1.25` — the unit *is* the multiplication sign (the mixer's own readout). */
-function wetnessText(k: number, units: Units): string {
-  const f = format(k, "factor", units);
-  return `${f.unit}${f.text}`;
+/** One line of an offset stack: `<op> <label> …… <note> <value>`. */
+interface StackRow {
+  el: HTMLElement;
+  value: HTMLElement;
+}
+
+function stackRow(
+  parent: HTMLElement,
+  o: { op: string; label: string; note?: string; noteBefore?: boolean; glyph?: string; kind?: string; attr?: Record<string, string> },
+): StackRow {
+  const el = parent.createDiv({ cls: `wadjet-studio-forcings-row${o.kind === undefined ? "" : ` is-${o.kind}`}`, attr: o.attr ?? {} });
+  el.createSpan({ cls: "wadjet-studio-forcings-op", text: o.op, attr: { "aria-hidden": "true" } });
+  el.createSpan({ cls: "wadjet-studio-forcings-label", text: o.label });
+  const note = (): void => {
+    if (o.note !== undefined) el.createSpan({ cls: "wadjet-studio-forcings-note", text: o.note });
+  };
+  // `at playhead` qualifies the number it follows; `into PRECIP chain` names
+  // the destination the number is heading for, so it leads. Prototype order.
+  if (o.noteBefore === true) note();
+  const value = el.createSpan({ cls: "wadjet-studio-forcings-value wadjet-studio-num" });
+  if (o.noteBefore !== true) note();
+  if (o.glyph !== undefined) el.createSpan({ cls: "wadjet-studio-forcings-glyph", text: o.glyph, attr: { "aria-hidden": "true" } });
+  return { el, value };
+}
+
+/** The dim small-caps caption over a stack: a channel swatch, then what the stack writes. */
+function sectionHead(parent: HTMLElement, text: string): void {
+  const head = parent.createDiv({ cls: "wadjet-studio-forcings-head" });
+  head.createSpan({ cls: "wadjet-studio-forcings-swatch", attr: { "aria-hidden": "true" } });
+  head.createSpan({ cls: "wadjet-studio-forcings-headtext", text });
 }
 
 export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuild => {
@@ -98,22 +126,16 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
 
   const root = createDiv({ cls: "wadjet-studio-forcings" });
 
-  const tempSection = root.createDiv({ cls: "wadjet-studio-forcings-section" });
-  tempSection.createDiv({ cls: "wadjet-studio-forcings-head", text: "Temperature" });
-  const stack = tempSection.createDiv({ cls: "wadjet-studio-forcings-stack" });
+  // TEMPERATURE — the offset stack: a drawn lane, a constant, and their sum.
+  const tempSection = root.createDiv({ cls: "wadjet-studio-forcings-section", attr: { "data-channel": "temperature" } });
+  sectionHead(tempSection, "TEMPERATURE · offset stack → temperature.mean");
+  const tempBody = tempSection.createDiv({ cls: "wadjet-studio-forcings-body" });
 
-  const laneRow = stack.createDiv({
-    cls: "wadjet-studio-forcings-row wadjet-studio-forcings-lane",
-    attr: { role: "button", tabindex: "0", "aria-label": "Zoom the playlist to the warmth lane", "data-hint": forcingsHint("forcings.lane"), "data-part": "forcings-lane" },
-  });
-  laneRow.createSpan({ cls: "wadjet-studio-forcings-label", text: "∿ lane · FRC · warmth" });
-  const laneValueEl = laneRow.createSpan({ cls: "wadjet-studio-forcings-value", attr: { "data-part": "forcings-lane-value" } });
-
-  const trimRow = stack.createDiv({ cls: "wadjet-studio-forcings-row wadjet-studio-forcings-knobrow" });
-  const trim: KnobComponent = createKnob(trimRow, {
+  const trim: KnobComponent = createKnob(tempBody, {
     spec: TRIM_SPEC,
     value: 0,
-    label: "＋ trim",
+    label: "trim",
+    size: "lg",
     color: "var(--wadjet-studio-temp)",
     hint: forcingsHint("forcings.trim"),
     fmt: (v) => warmthText(v, ctx.units()),
@@ -125,26 +147,44 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
   });
   trim.el.setAttr("data-part", "forcings-trim");
 
-  const totalRow = stack.createDiv({ cls: "wadjet-studio-forcings-row wadjet-studio-forcings-total", attr: { "data-hint": forcingsHint("forcings.total") } });
-  totalRow.createSpan({ cls: "wadjet-studio-forcings-label", text: "= total into TEMP" });
-  const totalValueEl = totalRow.createSpan({ cls: "wadjet-studio-forcings-value", attr: { "data-part": "forcings-total" } });
+  const tempStack = tempBody.createDiv({ cls: "wadjet-studio-forcings-stack" });
+  const laneRow = stackRow(tempStack, {
+    op: "∿",
+    label: "lane · FRC · warmth",
+    note: "at playhead",
+    glyph: "⤢",
+    kind: "boxed",
+    attr: { role: "button", tabindex: "0", "aria-label": "Zoom the playlist to the warmth lane", "data-hint": forcingsHint("forcings.lane"), "data-part": "forcings-lane" },
+  });
+  laneRow.el.addClass("wadjet-studio-forcings-lane");
+  laneRow.value.setAttr("data-part", "forcings-lane-value");
 
-  const precipSection = root.createDiv({ cls: "wadjet-studio-forcings-section" });
-  precipSection.createDiv({ cls: "wadjet-studio-forcings-head", text: "Precipitation" });
-  const wetRow = precipSection.createDiv({ cls: "wadjet-studio-forcings-row wadjet-studio-forcings-knobrow" });
-  const wetness: KnobComponent = createKnob(wetRow, {
+  const trimRow = stackRow(tempStack, { op: "＋", label: "trim · constant", kind: "boxed", attr: { "data-hint": forcingsHint("forcings.trim") } });
+  const totalRow = stackRow(tempStack, { op: "=", label: "into TEMP chain", kind: "total", attr: { "data-hint": forcingsHint("forcings.total") } });
+  totalRow.value.setAttr("data-part", "forcings-total");
+
+  // PRECIPITATION — one scale, on both wet-day probabilities.
+  const precipSection = root.createDiv({ cls: "wadjet-studio-forcings-section", attr: { "data-channel": "precipitation" } });
+  sectionHead(precipSection, "PRECIPITATION · scale → precipitation.pww / pwd");
+  const precipBody = precipSection.createDiv({ cls: "wadjet-studio-forcings-body" });
+
+  const wetness: KnobComponent = createKnob(precipBody, {
     spec: WETNESS_SPEC,
     value: 1,
-    label: "wetness ×",
+    label: "wetness",
+    size: "lg",
     color: "var(--wadjet-studio-precip)",
     hint: forcingsHint("forcings.wetness"),
-    fmt: (k) => wetnessText(k, ctx.units()),
+    fmt: (k) => factorText(k),
     onChange: (value, phase) => {
       editZone((z) => setWetness(z, value));
       if (phase !== "drag") ctx.store.snapshot();
     },
   });
   wetness.el.setAttr("data-part", "forcings-wetness");
+
+  const precipStack = precipBody.createDiv({ cls: "wadjet-studio-forcings-stack" });
+  const wetRow = stackRow(precipStack, { op: "×", label: "scale · constant", note: "into PRECIP chain", noteBefore: true, kind: "boxed", attr: { "data-hint": forcingsHint("forcings.wetness") } });
 
   // --- the lane row's one gesture -------------------------------------------
 
@@ -158,17 +198,17 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
     editZone((z) => {
       ensureLane(z, epoch);
     }, true);
-    const bounds: ZoomBounds = { min: epoch - PLAYLIST_BOUNDS_BEFORE, max: epoch + PLAYLIST_BOUNDS_AFTER };
+    const bounds: ZoomBounds = worldBounds(epoch, ctx.store.get().world.eras);
     const seasons = ctx.calendar()?.seasons ?? ctx.store.get().world.calendar.seasons;
-    const next: Window = presetWindow("era", ctx.store.get().view.window, bounds, seasons);
+    const next: Window = presetWindow("era", ctx.store.get().view.window, bounds, seasons, ctx.store.get().world.eras);
     ctx.store.update((s) => {
       s.view.window = next;
     });
     ctx.view.app.workspace.requestSaveLayout();
   }
 
-  laneRow.addEventListener("click", openLane);
-  laneRow.addEventListener("keydown", (ev) => {
+  laneRow.el.addEventListener("click", openLane);
+  laneRow.el.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter" && ev.key !== " ") return;
     ev.preventDefault();
     openLane();
@@ -188,8 +228,10 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
     if (!force && key === signature) return;
     signature = key;
 
-    laneValueEl.setText(warmthText(lane, u));
-    totalValueEl.setText(warmthText(t + lane, u));
+    laneRow.value.setText(warmthText(lane, u));
+    trimRow.value.setText(warmthText(t, u));
+    totalRow.value.setText(warmthText(t + lane, u));
+    wetRow.value.setText(factorText(wet));
     trim.update({ value: t });
     wetness.update({ value: wet });
   }
@@ -208,18 +250,22 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
     return issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar }).filter((i) => unitKey(i.unit) === mine);
   }
 
-  /** The exact grammar this panel produces (SPEC law 5): two modifiers and one lane. */
+  /**
+   * The grammar this panel produces (SPEC law 5): one automation lane and two
+   * modifiers. The shape shows even at neutral — a stack that currently sums
+   * to zero still says what it would write.
+   */
   function writes(): string {
     const z = zone();
-    if (z === null) return "modifiers[forcings:*] · automation[frc.warmth]";
-    const parts: string[] = [];
-    for (const id of [TRIM_ID, WETNESS_ID]) {
-      const at = z.modifiers.findIndex((m) => m.id === id);
-      if (at >= 0) parts.push(`modifiers[${at}] · ${JSON.stringify(z.modifiers[at])}`);
-    }
-    const lane = z.automation?.findIndex((l) => l.id === WARMTH_LANE_ID) ?? -1;
-    if (lane >= 0) parts.push(`automation[${lane}] · ${JSON.stringify(z.automation?.[lane])}`);
-    return parts.length === 0 ? "modifiers[forcings:*] · automation[frc.warmth] — neutral, nothing written" : parts.join("  ");
+    const u = ctx.units();
+    const t = z === null ? 0 : getTrim(z);
+    const wet = z === null ? 1 : getWetness(z);
+    const points = z === null ? 0 : getWarmthLane(z).points.length;
+    return grammar(
+      `automation[${WARMTH_LANE_ID} · ${points} pts → temperature.mean]`,
+      `modifiers[${TRIM_ID} offset ${warmthText(t, u)} · ${WETNESS_ID} scale ${factorText(wet)}]`,
+      "climate stage",
+    );
   }
 
   unsubscribe = ctx.store.subscribe(() => repaint(false));
@@ -227,6 +273,8 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
 
   return {
     title: "Forcings",
+    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
+    width: 390,
     badge: "ZONE",
     body: root,
     led: { on: true, scope: "chain" },

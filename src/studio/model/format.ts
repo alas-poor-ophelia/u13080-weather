@@ -217,45 +217,23 @@ export function yearLabel(year: number): string {
   return `Y ${tabular(year, 0)}`;
 }
 
-interface YearDay {
-  year: number;
-  /** last 1-based day *included* in the window at this point (the point itself is exclusive at a year boundary) */
-  day: number;
-}
-
-/** Resolve a fractional-year point to the year/day it sits in, treating the point as the exclusive end of a half-open window. */
-function endPoint(t: number, yearLength: number): YearDay {
-  const year = Math.floor(t);
-  const frac = t - year;
-  if (frac === 0) return { year: year - 1, day: yearLength };
-  return { year, day: Math.min(yearLength, Math.round(frac * yearLength)) };
-}
-
-/** Resolve a fractional-year point to the year/day it sits in as the inclusive start of a window. */
-function startPoint(t: number, yearLength: number): YearDay {
-  const year = Math.floor(t);
-  const frac = t - year;
-  return { year, day: Math.min(yearLength, Math.floor(frac * yearLength) + 1) };
-}
-
 /**
- * A zoom window `[a, b)` in fractional years as a label, sentence case with
- * an en dash for ranges:
- *   - a whole year (or years): "Y 1962 · d 1–365" for exactly one year,
- *     "Y 1962 – 1963" once it spans more than one — day precision stops
- *     meaning much at that scale, so it drops.
- *   - a window inside a single year: "d 130–132 · Y 1962" (day leads,
- *     because at this zoom the day is what the Guildmaster is looking at).
+ * A zoom window `[a, b)` in fractional years as the header readout's range
+ * (bead wadjet-6rw.6 — the prototype's `windowLabel`, `0025-header.html`):
+ *
+ *   - **2.5 years or wider** — bare years, no `Y` prefix: `1862 – 2862`. The
+ *     zoom presets already say which scale this is; the prefix was noise.
+ *   - **8 days or narrower** — the one day under the centre: `day 36 · 1962`.
+ *   - **anything between** — days within the year, then the year:
+ *     `d0 – d365 · 1962`. Days are counted from 0 at the year boundary, so a
+ *     whole year reads `d0 – d365` rather than `d 1–365`.
  */
 export function windowLabel(a: number, b: number, yearLength: number): string {
-  const start = startPoint(a, yearLength);
-  const end = endPoint(b, yearLength);
-
-  if (start.year !== end.year) {
-    return `Y ${tabular(start.year, 0)} – ${tabular(end.year, 0)}`;
-  }
-  if (start.day === 1 && end.day === yearLength) {
-    return `Y ${tabular(start.year, 0)} · d 1–${yearLength}`;
-  }
-  return `d ${start.day}–${end.day} · Y ${tabular(start.year, 0)}`;
+  const widthYears = b - a;
+  const mid = (a + b) / 2;
+  const midYear = Math.floor(mid);
+  if (widthYears >= 2.5) return `${tabular(Math.round(a), 0)} – ${tabular(Math.round(b), 0)}`;
+  if (widthYears * yearLength <= 8) return `day ${Math.round((mid - midYear) * yearLength)} · ${tabular(midYear, 0)}`;
+  const from = Math.round((a - Math.floor(a)) * yearLength);
+  return `d${from} – d${from + Math.round(widthYears * yearLength)} · ${tabular(midYear, 0)}`;
 }

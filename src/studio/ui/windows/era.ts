@@ -3,7 +3,7 @@
  *
  * One panel per era, id `era:<name>`. Everything it writes lands in
  * `world.eras[i]` (`model/era-edit.ts`), which is world scope: the panel
- * carries a `world · N zones` badge and every edit here goes through the
+ * carries a `world · N zones` chip and every edit here goes through the
  * session's one world-edit confirm (`model/world-confirm.ts`) — the same
  * gate the CYCLE window uses for moons.
  *
@@ -16,19 +16,23 @@
  *    carrying its remembered position across — the same reason
  *    `registerEraWindows` re-registers every open tick, so a lane clip or a
  *    mixer unit can always `ctx.windows.open("era:" + currentName)`.
- *  - **The power switch lives in the body, not the chrome.** The chrome LED
- *    (`WindowBuild.level`, wadjet-9f9.35) is a passive validation lamp with no
- *    `onToggle` — it cannot be the era's enable switch, which needs a click
- *    handler and the world-confirm gate. That switch, the inline name, the
- *    `world · N zones` chip and delete therefore live in the body instead — the
- *    row SPEC §3.4 describes as the window's "title" — where this file's own
- *    subscription keeps it live; the chrome LED repaints alongside it from the
- *    same `issues()`.
+ *  - **The one title row is drawn in the body, chrome supplies only the ×.**
+ *    The prototype's row (LED · name · ERA · world · N zones · delete · ×) is
+ *    fully interactive — a live power LED and a click-to-edit name — and the
+ *    chrome's own LED/title/badge (`components/window.ts`) are static: `led`
+ *    is captured once at open and never re-reads `on`, and `title`/`badge`
+ *    are plain text. So this file paints the whole row itself, full-bleed
+ *    across the body's own padding, and still hands the chrome `title`/
+ *    `badge` the same strings (`name`/`"ERA"`) so the e2e's chrome probes and
+ *    a screen reader's dialog label stay correct — the era section of
+ *    `styles.css` hides those two chrome nodes visually, keeping only the
+ *    close × and a slim drag strip above the real row.
  */
 import { Menu } from "obsidian";
 import { ERA_TAG_PREFIX } from "../../../core/eras";
 import type { Era, ModifierOp, ZoneProfile } from "../../../core/types";
-import type { Channel } from "../../model/compile";
+import { channelOf, type Channel } from "../../model/compile";
+import { paramName, opGloss } from "../../model/copy";
 import { knobSpecFor } from "../../model/devices";
 import { addOp, removeEra, removeOp, renameEra, setEnabled, setOpEnabled, setOpValue, setSpan } from "../../model/era-edit";
 import { eraHint } from "../../model/hints-era";
@@ -36,7 +40,7 @@ import { opFmt, opQuantity, parseDisplay } from "../../model/knob-units";
 import type { StudioState } from "../../model/state";
 import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
 import { needsWorldConfirm } from "../../model/world-confirm";
-import { clampWindow, type Window, type ZoomBounds } from "../../model/zoom";
+import { clampWindow, worldBounds, type Window, type ZoomBounds } from "../../model/zoom";
 import { createChip, createKnob, createLed, type ChipComponent, type KnobComponent, type LedComponent } from "../components";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
@@ -49,37 +53,43 @@ export function eraWindowId(name: string): string {
   return `${ERA_WINDOW_PREFIX}${name}`;
 }
 
-/** Mirrors `header.ts`'s own pan/zoom bounds (SPEC §3.1): 100 years before the epoch, 1100 after. */
-const PLAYLIST_BOUNDS_BEFORE = 100;
-const PLAYLIST_BOUNDS_AFTER = 1100;
 /** `⤢ playlist`'s open-ended span: a century past `from` when `to` is unset. */
 const OPEN_ENDED_SPAN_YEARS = 100;
 
-interface OpChoice {
-  channel: Channel;
-  label: string;
+/** The channel colour an apply knob's arc/value takes on (SPEC §9 "colour reserved for data"). */
+const CHANNEL_COLOR: Record<Channel, string> = {
+  temperature: "var(--wadjet-studio-temp)",
+  precipitation: "var(--wadjet-studio-precip)",
+  wind: "var(--wadjet-studio-wind)",
+  sky: "var(--wadjet-studio-sky)",
+};
+
+interface EraApplyChoice {
+  param: string;
   make(): ModifierOp;
 }
 
-/** One offset/scale param per row of the "＋" menu, grouped by channel (SPEC §3.4 "Menu of curve params by channel"). */
-const OP_CHOICES: readonly OpChoice[] = [
-  { channel: "temperature", label: "Temperature · mean", make: () => ({ param: "temperature.mean", op: "offset", value: 0 }) },
-  { channel: "temperature", label: "Temperature · diurnal range", make: () => ({ param: "temperature.diurnalRange", op: "offset", value: 0 }) },
-  { channel: "temperature", label: "Temperature · day-to-day SD", make: () => ({ param: "temperature.sd", op: "offset", value: 0 }) },
-  { channel: "precipitation", label: "Precipitation · wet after dry", make: () => ({ param: "precipitation.pwd", op: "scale", value: 1 }) },
-  { channel: "precipitation", label: "Precipitation · wet after wet", make: () => ({ param: "precipitation.pww", op: "scale", value: 1 }) },
-  { channel: "precipitation", label: "Precipitation · amount", make: () => ({ param: "precipitation.scale", op: "scale", value: 1 }) },
-  { channel: "wind", label: "Wind · speed", make: () => ({ param: "wind.speed", op: "scale", value: 1 }) },
-  { channel: "wind", label: "Wind · direction", make: () => ({ param: "wind.direction", op: "offset", value: 0 }) },
-  { channel: "sky", label: "Sky · cloud (dry days)", make: () => ({ param: "cloud.dry", op: "offset", value: 0 }) },
-  { channel: "sky", label: "Sky · cloud (wet days)", make: () => ({ param: "cloud.wet", op: "offset", value: 0 }) },
+/**
+ * The curated "＋" menu (prototype `Component.ERA_TARGETS`): one param per
+ * channel, not the whole `paramsByChannel` picker a device gets — an era's
+ * apply list is meant to stay short. Defaults match the prototype's own.
+ */
+const ERA_APPLY_CHOICES: readonly EraApplyChoice[] = [
+  { param: "temperature.mean", make: () => ({ param: "temperature.mean", op: "offset", value: -4 }) },
+  { param: "precipitation.pwd", make: () => ({ param: "precipitation.pwd", op: "scale", value: 0.7 }) },
+  { param: "wind.speed", make: () => ({ param: "wind.speed", op: "scale", value: 1.3 }) },
+  { param: "cloud.dry", make: () => ({ param: "cloud.dry", op: "offset", value: 0.1 }) },
 ];
-
-const CHANNEL_LABEL: Record<Channel, string> = { temperature: "TEMP", precipitation: "PRECIP", wind: "WIND", sky: "SKY" };
 
 /** `set`/`offset`/`scale` carry a plain numeric `value`; a `clamp` op has none and reads as 0. */
 function opValue(op: ModifierOp): number {
   return "value" in op && typeof op.value === "number" ? op.value : 0;
+}
+
+/** `701 yr`, or `open-ended · since 1200` when `to` is unset (prototype `eraSelYears`). */
+function spanYears(era: Era): string {
+  if (era.to === undefined) return `open-ended · since ${era.from}`;
+  return `${era.to - era.from + 1} yr`;
 }
 
 /**
@@ -96,7 +106,7 @@ export function buildEraWindow(name: string): WindowBuilder {
 
     const root = createDiv({ cls: "wadjet-studio-era" });
 
-    // --- the "title" row SPEC §3.4 describes: LED · name · world · N zones · delete ---
+    // --- the ONE title row (SPEC §3.4): LED · name · ERA · world · N zones · delete ---
     const head = root.createDiv({ cls: "wadjet-studio-era-head" });
     const enabledLed: LedComponent = createLed(head, {
       on: true,
@@ -105,37 +115,45 @@ export function buildEraWindow(name: string): WindowBuilder {
       hint: eraHint("era.enabled"),
       onToggle: (on) => guarded(() => ctx.store.update((s) => setEnabled(s.world, name, on), { history: true })),
     });
-    const nameInput = head.createEl("input", { cls: "wadjet-studio-era-name", type: "text", attr: { "data-hint": eraHint("era.name"), "data-part": "era-name" } });
-    const worldChip: ChipComponent = createChip(head, { label: "world · 0 zones", color: "var(--wadjet-studio-gold)", hint: eraHint("era.world") });
+    const nameInput = head.createEl("input", { cls: "wadjet-studio-era-name", type: "text", attr: { spellcheck: "false", "data-hint": eraHint("era.name"), "data-part": "era-name" } });
+    head.createSpan({ cls: "wadjet-studio-era-badge", text: "ERA" });
+    const worldChip: ChipComponent = createChip(head, { label: "world · 0 zones", hint: eraHint("era.world") });
     const deleteButton = head.createDiv({
       cls: "wadjet-studio-era-btn",
-      text: "Delete",
+      text: "delete",
       attr: { role: "button", tabindex: "0", "aria-label": "Delete era", "data-hint": eraHint("era.delete"), "data-part": "era-delete" },
     });
     enabledLed.el.setAttr("data-part", "era-led");
     worldChip.el.setAttr("data-part", "era-world");
 
-    // --- SPAN row ---
+    // --- SPAN section ---
+    root.createDiv({ cls: "wadjet-studio-era-span-caption", text: "SPAN · calendar years, inclusive" });
     const spanRow = root.createDiv({ cls: "wadjet-studio-era-span" });
-    spanRow.createSpan({ cls: "wadjet-studio-era-span-label", text: "SPAN" });
-    const fromInput = spanRow.createEl("input", { cls: "wadjet-studio-era-span-from", type: "number", attr: { "data-hint": eraHint("era.from"), "data-part": "era-from" } });
+    const fromInput = spanRow.createEl("input", { cls: "wadjet-studio-era-span-from wadjet-studio-num", type: "number", attr: { "data-hint": eraHint("era.from"), "data-part": "era-from" } });
     spanRow.createSpan({ cls: "wadjet-studio-era-span-dash", text: "–" });
-    const toInput = spanRow.createEl("input", { cls: "wadjet-studio-era-span-to", type: "number", attr: { placeholder: "∞", "data-hint": eraHint("era.to"), "data-part": "era-to" } });
+    const toInput = spanRow.createEl("input", { cls: "wadjet-studio-era-span-to wadjet-studio-num", type: "number", attr: { placeholder: "∞", "data-hint": eraHint("era.to"), "data-part": "era-to" } });
+    const yearsReadout = spanRow.createSpan({ cls: "wadjet-studio-era-span-years" });
+    spanRow.createDiv({ cls: "wadjet-studio-era-span-spacer" });
     const playlistButton = spanRow.createDiv({
       cls: "wadjet-studio-era-btn",
       text: "⤢ playlist",
       attr: { role: "button", tabindex: "0", "aria-label": "Zoom the playlist to this era", "data-hint": eraHint("era.playlist"), "data-part": "era-playlist" },
     });
 
+    // --- the always-on "every day carries era:<name>" readout ---
+    const carries = root.createDiv({ cls: "wadjet-studio-era-carries" });
+    carries.createSpan({ text: "every day carries " });
+    const carriesTag = carries.createSpan({ cls: "wadjet-studio-era-carries-tag" });
+
     // --- APPLY section ---
-    const applyHead = root.createDiv({ cls: "wadjet-studio-era-apply-head" });
-    applyHead.createSpan({ cls: "wadjet-studio-era-apply-label", text: "APPLY" });
-    const addOpButton = applyHead.createDiv({
-      cls: "wadjet-studio-era-btn",
-      text: "＋",
-      attr: { role: "button", tabindex: "0", "aria-haspopup": "menu", "aria-label": "Add an op", "data-hint": eraHint("era.opAdd"), "data-part": "era-op-add" },
-    });
+    root.createDiv({ cls: "wadjet-studio-era-apply-caption", text: "APPLY · every zone, after its own devices" });
     const opsList = root.createDiv({ cls: "wadjet-studio-era-ops", attr: { "data-part": "era-ops" } });
+    const addOpButton = opsList.createDiv({
+      cls: "wadjet-studio-era-op-add",
+      attr: { role: "button", tabindex: "0", "aria-haspopup": "menu", "aria-label": "Add an apply target", "data-hint": eraHint("era.opAdd") },
+    });
+    addOpButton.createSpan({ cls: "wadjet-studio-era-op-add-glyph", text: "＋" });
+    addOpButton.createSpan({ cls: "wadjet-studio-era-op-add-label", text: "apply" });
     const note = root.createDiv({ cls: "wadjet-studio-era-note", attr: { "data-part": "era-note" } });
 
     // --- state readers -------------------------------------------------------
@@ -230,7 +248,7 @@ export function buildEraWindow(name: string): WindowBuilder {
       const era = currentEra();
       if (era === undefined) return;
       const epoch = ctx.calendar()?.epochYear ?? ctx.plugin.settings.calendar.epochYear ?? 1;
-      const bounds: ZoomBounds = { min: epoch - PLAYLIST_BOUNDS_BEFORE, max: epoch + PLAYLIST_BOUNDS_AFTER };
+      const bounds: ZoomBounds = worldBounds(epoch, ctx.store.get().world.eras);
       const b = (era.to ?? era.from + OPEN_ENDED_SPAN_YEARS) + 1;
       const w: Window = clampWindow({ a: era.from, b }, bounds);
       ctx.store.update((s) => {
@@ -240,13 +258,14 @@ export function buildEraWindow(name: string): WindowBuilder {
     }
 
     function openAddOpMenu(ev: MouseEvent): void {
+      const era = currentEra();
+      const applied = new Set((era?.apply ?? []).map((op) => op.param));
+      const choices = ERA_APPLY_CHOICES.filter((c) => !applied.has(c.param));
+      if (choices.length === 0) return;
       const menu = new Menu();
-      let lastChannel: Channel | null = null;
-      for (const choice of OP_CHOICES) {
-        if (lastChannel !== null && choice.channel !== lastChannel) menu.addSeparator();
-        lastChannel = choice.channel;
+      for (const choice of choices) {
         menu.addItem((item) =>
-          item.setTitle(`${CHANNEL_LABEL[choice.channel]} · ${choice.label}`).onClick(() => {
+          item.setTitle(paramName(choice.param)).onClick(() => {
             const op = choice.make();
             guarded(() => ctx.store.update((s) => addOp(s.world, name, op), { history: true }));
           }),
@@ -263,26 +282,28 @@ export function buildEraWindow(name: string): WindowBuilder {
         row.knob.destroy();
       }
       opRows = [];
-      opsList.empty();
+      opsList.querySelectorAll(".wadjet-studio-era-op").forEach((el) => el.remove());
       const apply = era?.apply ?? [];
       apply.forEach((op, i) => {
-        const row = opsList.createDiv({ cls: "wadjet-studio-era-op", attr: { "data-index": String(i), "data-part": "era-op" } });
-        const led = createLed(row, {
-          on: op.enabled !== false,
-          level: "ok",
-          scope: "op",
-          hint: eraHint("era.opLed"),
-          onToggle: (on) => guarded(() => ctx.store.update((s) => setOpEnabled(s.world, name, i, on), { history: true })),
+        const col = createDiv({ cls: "wadjet-studio-era-op", attr: { "data-index": String(i), "data-part": "era-op" } });
+        opsList.insertBefore(col, addOpButton);
+        const remove = col.createDiv({
+          cls: "wadjet-studio-era-op-x",
+          text: "×",
+          attr: { role: "button", tabindex: "0", "aria-label": `Remove ${paramName(op.param)}`, "data-hint": eraHint("era.opRemove"), "data-part": "era-op-remove" },
         });
         const spec = knobSpecFor(op);
         const opSpec = { min: spec.min, max: spec.max, neutral: spec.neutral, step: spec.step };
         const isOffset = op.op === "offset";
         const q = opQuantity(op.param, isOffset);
-        const knob = createKnob(row, {
+        const color = CHANNEL_COLOR[channelOf(op.param)];
+        const knob = createKnob(col, {
           spec: opSpec,
           value: opValue(op),
-          label: op.param,
+          label: paramName(op.param),
           fmt: opFmt(op.param, isOffset, ctx.units(), spec.fmt),
+          color,
+          size: "lg",
           hint: eraHint("era.op"),
           ...(q !== null ? { parse: (text: string) => parseDisplay(opSpec, q, ctx.units())(text) } : {}),
           onChange: (value, phase) =>
@@ -291,11 +312,15 @@ export function buildEraWindow(name: string): WindowBuilder {
               if (phase !== "drag") ctx.store.snapshot();
             }),
         });
-        const remove = row.createDiv({
-          cls: "wadjet-studio-era-op-x",
-          text: "×",
-          attr: { role: "button", tabindex: "0", "aria-label": `Remove ${op.param}`, "data-hint": eraHint("era.opRemove"), "data-part": "era-op-remove" },
+        const glossRow = col.createDiv({ cls: "wadjet-studio-era-op-gloss" });
+        const led = createLed(glossRow, {
+          on: op.enabled !== false,
+          level: "ok",
+          scope: "op",
+          hint: eraHint("era.opLed"),
+          onToggle: (on) => guarded(() => ctx.store.update((s) => setOpEnabled(s.world, name, i, on), { history: true })),
         });
+        glossRow.createSpan({ cls: "wadjet-studio-era-op-gloss-text", text: opGloss(op) });
         const fireRemove = (): void => guarded(() => ctx.store.update((s) => removeOp(s.world, name, i), { history: true }));
         remove.addEventListener("click", fireRemove);
         remove.addEventListener("keydown", (ev) => {
@@ -307,7 +332,7 @@ export function buildEraWindow(name: string): WindowBuilder {
         knob.el.setAttr("data-part", "era-op-knob");
         opRows.push({ led, knob });
       });
-      note.setText(apply.length === 0 ? `tag only — this era adds ${ERA_TAG_PREFIX}${name} to every day and changes nothing else` : "");
+      note.setText(apply.length === 0 ? `tag only · zone devices gate on ${ERA_TAG_PREFIX}${name}` : "");
       note.toggleClass("is-hidden", apply.length > 0);
     }
 
@@ -317,6 +342,7 @@ export function buildEraWindow(name: string): WindowBuilder {
       if (era === undefined) return;
       if (document.activeElement !== fromInput) fromInput.value = String(era.from);
       if (document.activeElement !== toInput) toInput.value = era.to === undefined ? "" : String(era.to);
+      yearsReadout.setText(spanYears(era));
     }
 
     function issues(): StudioIssue[] {
@@ -343,6 +369,7 @@ export function buildEraWindow(name: string): WindowBuilder {
       if (document.activeElement !== nameInput) nameInput.value = era?.name ?? name;
       enabledLed.update({ on: era?.enabled !== false, level: ledLevel(issues()) });
       worldChip.update({ label: `world · ${zones} ${zones === 1 ? "zone" : "zones"}` });
+      carriesTag.setText(`${ERA_TAG_PREFIX}${era?.name ?? name}`);
       paintSpan(era);
       drawOps(era);
     }
@@ -404,19 +431,32 @@ export function buildEraWindow(name: string): WindowBuilder {
 
     // --- pull-based readouts ----------------------------------------------
 
+    /** One op as the prototype's authored WRITES clause: `offset[temperature.mean −8.0 °C]`. */
+    function eraOpToken(op: ModifierOp): string {
+      const spec = knobSpecFor(op);
+      const isOffset = op.op === "offset";
+      const fmt = opFmt(op.param, isOffset, ctx.units(), spec.fmt);
+      return `${op.op}[${op.param} ${fmt(opValue(op))}]`;
+    }
+
     function writes(): string {
       const state = ctx.store.get();
       const at = state.world.eras.findIndex((e) => e.name === name);
       if (at < 0) return `world.eras — no era named "${name}"`;
-      return `world.eras[${at}] · ${JSON.stringify(state.world.eras[at])}`;
+      const era = state.world.eras[at]!;
+      const apply = era.apply ?? [];
+      const fields = [`"name": "${era.name}"`, `"from": ${era.from}`];
+      if (era.to !== undefined) fields.push(`"to": ${era.to}`);
+      if (apply.length > 0) fields.push(`"apply": [ ${apply.map(eraOpToken).join(", ")} ]`);
+      return `world.eras[${at}] { ${fields.join(", ")} }`;
     }
 
     return {
       title: name,
+      // Prototype width (`proto-markup/`): a design constant, not a function of the content.
+      width: 352,
       badge: "ERA",
       body: root,
-      led: { on: true, scope: "device" },
-      level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "era", name }))),
       writes,
       issues,
       onClose: () => {

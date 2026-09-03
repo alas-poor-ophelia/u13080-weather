@@ -17,19 +17,20 @@ import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 export const DEVICE_HINTS: Record<string, Hint> = {
   // --- title row (SPEC §3.4 shared chrome) ---
   "device.power": ["Power", "enabled: false skips the device at both stages"],
-  "device.name": ["Name", "the modifier id this device is written under"],
-  "device.preset": ["Preset", "save this device's shape, or load one of the same kind"],
 
   // --- WHEN ---
   "device.when": ["When", "which days the device is active — the modifier's predicate"],
   "device.when.moon": ["Carrier moon", "opens the cycle editor for this moon"],
   "device.when.moonPick": ["Moon", "which moon carries the device"],
   "device.when.phase": ["Phase", "selected phases compile to one [a, b) window"],
+  "device.when.gate": ["Moon gate", "drag either handle to set the phase window"],
   "device.when.tag": ["Tag", "a day carrying the tag matches; several tags are any"],
-  "device.when.tagAdd": ["Add a tag", "type a tag the calendar or a plugin puts on the day"],
+  "device.when.tagAdd": ["Add a tag", "gate the device on another season or era"],
   "device.when.lane": ["Year window", "the days of the year the device covers"],
   "device.when.start": ["Start", "first day of the window, as a year phase"],
   "device.when.length": ["Length", "how many days the window covers"],
+  "device.when.window.add": ["Add a window", "a second clip, repeating every year"],
+  "device.when.window.remove": ["Remove window", "drops this clip from the year"],
   "device.when.chance": ["Chance", "the share of days the device fires on"],
 
   // --- SPELL ---
@@ -45,12 +46,14 @@ export const DEVICE_HINTS: Record<string, Hint> = {
 
   // --- MOD ---
   "device.mod": ["Mod", "gates and onset envelopes — daily stage only"],
+  "device.mod.carrier": ["Carrier", "the cycle this device's onset rides — click to edit it"],
+  "device.mod.mode": ["Cycle mode", "curve follows the drawn envelope; phases is on or off per phase"],
   "device.gate.source": ["Gate", "the tag that dims this device"],
   "device.gate.amount": ["Amount", "a dimmer: 1 is full strength, 0 mutes"],
   "device.gate.remove": ["Remove gate", "the device runs at full strength again"],
   "device.gate.add": ["Add a gate", "pick a season or era to dim the device on"],
   "device.envelope": ["Envelope", "drag the onset shape across the moon cycle"],
-  "device.envelope.add": ["Add an envelope", "shape an op's onset over the cycle"],
+  "device.envelope.shape": ["Onset shape", "a named curve, or the points you drew"],
   "device.envelope.remove": ["Remove envelope", "the op returns to full strength"],
 
   // --- footer ---

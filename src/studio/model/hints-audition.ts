@@ -23,6 +23,8 @@ export const AUDITION_HINTS: Record<string, Hint> = {
   "audition.reroll": ["Re-roll", "draw another preview year — the world seed never changes and pins are kept"],
   "audition.legend": ["Legend", "what a cell's colour means"],
   "audition.pin": ["Pinned day", "an override fixes this day's weather — × removes it"],
+  "audition.pins": ["Pins", "the days this zone has fixed by hand"],
+  "audition.seed": ["Audition year", "the year and world seed this roll used — a re-roll salts the preview, never the seed"],
 };
 
 /**
@@ -31,7 +33,7 @@ export const AUDITION_HINTS: Record<string, Hint> = {
  * control added without a hint fails the unit gate instead of printing a raw
  * key into the hint bar.
  */
-export const AUDITION_HINT_KEYS: readonly string[] = ["audition.strip", "audition.seasons", "audition.moon", "audition.reroll", "audition.legend", "audition.pin"];
+export const AUDITION_HINT_KEYS: readonly string[] = ["audition.strip", "audition.seasons", "audition.moon", "audition.reroll", "audition.legend", "audition.pin", "audition.pins", "audition.seed"];
 
 /** The `data-hint` attribute value for `key`; an unknown key falls back to the key itself, as `hintAttr` does. */
 export const auditionHint: HintLookup = makeHintLookup(AUDITION_HINTS);

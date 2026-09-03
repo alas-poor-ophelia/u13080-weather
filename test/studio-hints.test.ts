@@ -34,9 +34,12 @@ describe("studio hints", () => {
   });
 
   test("the header covers every control SPEC 3.1 lists", () => {
-    // zone menu · koppen · src · flip · readout · transport ×4 · presets ×5 · json · undo · redo · save
-    expect(HEADER_HINT_KEYS.length).toBe(18);
-    for (const key of ["zone.menu", "zone.koppen", "zone.src", "zone.flip", "transport.readout", "header.json", "header.undo", "header.redo", "header.save"]) {
+    // zone menu · koppen · src · flip · readout · transport ×4 · presets ×5 · json · save.
+    // No undo/redo: the prototype has no history buttons in the header and
+    // SPEC §3.1 does not list them; the leaf's own Mod+Z scope keeps the
+    // feature reachable (bead wadjet-6rw.6).
+    expect(HEADER_HINT_KEYS.length).toBe(16);
+    for (const key of ["zone.menu", "zone.koppen", "zone.src", "zone.flip", "transport.readout", "header.json", "header.save"]) {
       expect(HEADER_HINT_KEYS).toContain(key);
     }
     for (const t of ["back", "forward", "out", "in"]) expect(HEADER_HINT_KEYS).toContain(`transport.${t}`);

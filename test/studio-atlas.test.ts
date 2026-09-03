@@ -15,10 +15,36 @@
  */
 import { describe, expect, test } from "bun:test";
 import { validateProfile } from "../src/core/profile";
-import { applyTierA, describeTierA, rankPresets, tierAAdjustment } from "../src/core/tier-a";
+import { applyTierA, describeTierA, latitudeBaselineC, rankPresets, tierAAdjustment, tierAParts } from "../src/core/tier-a";
 import type { Geography, Modifier, Preset, ZoneProfile } from "../src/core/types";
 import { PRESETS } from "../src/generated/presets";
-import { candidatesFor, matchByGeography, presetOf, previewMatch, rebase, searchStations, SPARK_SAMPLES, sparkOf, stationOf, stations, zoneKoppen } from "../src/studio/model/atlas";
+import {
+  adjustedSpark,
+  annualOf,
+  candidatesFor,
+  CLIMATE_BLOBS,
+  climateSpace,
+  koppenGroup,
+  latitudeForBaselineC,
+  matchByGeography,
+  matchParts,
+  presetOf,
+  previewMatch,
+  rebase,
+  searchStations,
+  SPACE_H,
+  SPACE_W,
+  SPARK_SAMPLES,
+  sparkOf,
+  spaceX,
+  spaceXForTerrain,
+  spaceY,
+  stationOf,
+  stations,
+  terrainForSpaceX,
+  zoneKoppen,
+  zonePoint,
+} from "../src/studio/model/atlas";
 
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 
@@ -55,7 +81,10 @@ describe("studio atlas · stations", () => {
 
     const bergen = list.find((s) => s.id === "fjord-coast");
     expect(bergen).toBeDefined();
-    expect(bergen!.name).toBe(fjord.name);
+    // The list names the PLACE, not the preset title and not the GHCN record.
+    expect(bergen!.name).toBe("Bergen");
+    expect(bergen!.name).toBe(fjord.source.place);
+    expect(bergen!.presetName).toBe(fjord.name);
     expect(bergen!.koppen).toBe(fjord.match.koppen);
     expect(bergen!.character).toBe(fjord.character);
     expect(bergen!.sourceName).toBe(fjord.source.stationName);
@@ -75,13 +104,14 @@ describe("studio atlas · stations", () => {
     expect(searchStations("").length).toBe(stations().length);
     expect(searchStations("   ").length).toBe(stations().length);
     expect(searchStations("fjord").map((s) => s.id)).toEqual(["fjord-coast"]);
+    expect(searchStations("undoolya").map((s) => s.id)).toEqual(["red-desert"]);
     expect(searchStations("BERGEN").map((s) => s.id)).toEqual(["fjord-coast"]);
     expect(searchStations("norway").map((s) => s.id)).toContain("fjord-coast");
     expect(searchStations("no such place")).toEqual([]);
   });
 
   test("stationOf and presetOf answer only for stations that ship", () => {
-    expect(stationOf("fjord-coast")?.name).toBe(fjord.name);
+    expect(stationOf("fjord-coast")?.name).toBe(fjord.source.place);
     expect(stationOf("atlantis")).toBeNull();
     expect(presetOf("atlantis")).toBeNull();
   });
@@ -222,5 +252,140 @@ describe("studio atlas · sparks and Köppen", () => {
     expect(zoneKoppen(zone({ modifiers: [] }))).toBe(fjord.match.koppen);
     const broken = zone({ modifiers: [{ id: "layer:temperature.mean:curve", stage: "climate", apply: [{ param: "not.a.path", op: "offset", value: 1 }] }] });
     expect(zoneKoppen(broken)).toBeNull();
+  });
+});
+
+describe("studio atlas · the climate space", () => {
+  test("a station's year is the same aggregation core/koppen.ts classifies on", () => {
+    const bergen = stationOf("fjord-coast")!;
+    const year = annualOf(fjord);
+    expect(bergen.meanC).toBeCloseTo(year.meanC, 9);
+    expect(bergen.minC).toBeCloseTo(year.minC, 9);
+    expect(bergen.maxC).toBeCloseTo(year.maxC, 9);
+    // The record says "wet 230 days a year"; the curves say 223. Real data, not the blurb.
+    expect(bergen.wetDays).toBeGreaterThan(200);
+    expect(bergen.wetDays).toBeLessThan(250);
+    expect(bergen.rainMm).toBeGreaterThan(1500);
+    // The min/max pair is the coldest and warmest of the twelve samples.
+    const samples = sparkOf(fjord);
+    expect(bergen.minC).toBeCloseTo(Math.min(...samples), 9);
+    expect(bergen.maxC).toBeCloseTo(Math.max(...samples), 9);
+  });
+
+  test("the axes run warm-to-cold down and dry-to-wet across", () => {
+    expect(spaceY(27)).toBeLessThan(spaceY(0));
+    expect(spaceY(0)).toBeLessThan(spaceY(-20));
+    expect(spaceX(200)).toBeLessThan(spaceX(900));
+    expect(spaceX(900)).toBeLessThan(spaceX(2500));
+    // Both axes are clamped inside the map, whatever they are handed.
+    for (const v of [-500, 500]) {
+      expect(spaceY(v)).toBeGreaterThanOrEqual(0);
+      expect(spaceY(v)).toBeLessThanOrEqual(SPACE_H);
+    }
+    for (const v of [0, 1, 100000]) {
+      expect(spaceX(v)).toBeGreaterThanOrEqual(0);
+      expect(spaceX(v)).toBeLessThanOrEqual(SPACE_W);
+    }
+  });
+
+  test("terrain is the same axis: leeward dry, windward wet, and it round-trips", () => {
+    expect(spaceXForTerrain("leeward")).toBeLessThan(spaceXForTerrain("none"));
+    expect(spaceXForTerrain("none")).toBeLessThan(spaceXForTerrain("windward"));
+    for (const o of ["leeward", "none", "windward"] as const) expect(terrainForSpaceX(spaceXForTerrain(o))).toBe(o);
+  });
+
+  test("every station is placed, inside the map, with a de-collided label", () => {
+    const points = climateSpace();
+    expect(points.map((p) => p.id)).toEqual(stations().map((s) => s.id));
+    for (const p of points) {
+      expect(p.x).toBeGreaterThan(0);
+      expect(p.x).toBeLessThan(SPACE_W);
+      expect(p.y).toBeGreaterThan(0);
+      expect(p.y).toBeLessThan(SPACE_H);
+      expect(p.name.length).toBeGreaterThan(0);
+      expect(Math.abs(p.labelX - p.x)).toBeCloseTo(9, 6);
+      expect(["start", "end"]).toContain(p.anchor);
+    }
+    // Deterministic: the same set of stations always draws the same map.
+    expect(climateSpace()).toEqual(points);
+  });
+
+  test("stations land in the blob their Köppen group names", () => {
+    const blob = (g: string) => CLIMATE_BLOBS.find((b) => b.group === g)!;
+    const inside = (p: { x: number; y: number }, g: string): boolean => {
+      const b = blob(g);
+      return ((p.x - b.cx) / b.rx) ** 2 + ((p.y - b.cy) / b.ry) ** 2 <= 1;
+    };
+    const by = new Map(climateSpace().map((p) => [p.id, p]));
+    // One representative per group, checked against its own ellipse.
+    expect(inside(by.get("equatorial-rainforest")!, "A")).toBe(true);
+    expect(inside(by.get("savanna")!, "A")).toBe(true);
+    expect(inside(by.get("red-desert")!, "B")).toBe(true);
+    expect(inside(by.get("silk-road-basin")!, "B")).toBe(true);
+    expect(inside(by.get("fjord-coast")!, "C")).toBe(true);
+    expect(inside(by.get("atlantic-green")!, "C")).toBe(true);
+    expect(inside(by.get("taiga")!, "D-E")).toBe(true);
+    expect(inside(by.get("tundra")!, "D-E")).toBe(true);
+  });
+
+  test("koppenGroup is the class's first letter, and anything odd reads as temperate", () => {
+    expect(koppenGroup("Af")).toBe("A");
+    expect(koppenGroup("BWh")).toBe("B");
+    expect(koppenGroup("Cfb")).toBe("C");
+    expect(koppenGroup("Dfc")).toBe("D");
+    expect(koppenGroup("ET")).toBe("E");
+    expect(koppenGroup("")).toBe("C");
+    expect(koppenGroup("??")).toBe("C");
+  });
+});
+
+describe("studio atlas · geography on the map", () => {
+  test("latitudeForBaselineC inverts the core baseline, in the hemisphere it was given", () => {
+    for (const lat of [0, 12, 35.5, 60.38, 89]) {
+      expect(latitudeForBaselineC(latitudeBaselineC(lat), false)).toBeCloseTo(lat, 4);
+      expect(latitudeForBaselineC(latitudeBaselineC(-lat), true)).toBeCloseTo(-lat, 4);
+    }
+    expect(latitudeForBaselineC(latitudeBaselineC(-42), true)).toBeLessThan(0);
+    expect(latitudeForBaselineC(latitudeBaselineC(42), false)).toBeGreaterThan(0);
+  });
+
+  test("the zone dot keeps the match's rainfall and moves only by Tier A's temperature", () => {
+    const bergen = stationOf("fjord-coast")!;
+    const home = zonePoint({ latitude: bergen.latitude, altitude: bergen.altitude, orographic: bergen.orographic })!;
+    expect(home.matchId).toBe("fjord-coast");
+    // Its own geography: the dot sits on the record it matched.
+    expect(home.y).toBeCloseTo(home.matchY, 6);
+    expect(home.x).toBe(spaceXForTerrain(bergen.orographic));
+
+    // A kilometre higher is colder, so the dot drops.
+    const high = zonePoint({ latitude: bergen.latitude, altitude: bergen.altitude + 1000, orographic: bergen.orographic })!;
+    const highStation = stationOf(high.matchId)!;
+    expect(high.y).toBeGreaterThan(spaceY(highStation.meanC));
+    // Tier A adjusts temperature only, so x is always the match's own rainfall column.
+    expect(high.matchX).toBe(spaceX(highStation.rainMm));
+  });
+
+  test("matchParts is exactly what describeTierA joins, and the sparks bracket the adjustment", () => {
+    const place = { latitude: -35, altitude: 1200, orographic: "none" } as const;
+    const candidate = candidatesFor(place, 1)[0]!;
+    const adj = tierAAdjustment(place, candidate.preset.match);
+    expect(matchParts(place)).toEqual(tierAParts(adj));
+    expect(previewMatch(place)!.provenance).toContain(matchParts(place)[0]!);
+
+    const record = sparkOf(candidate.preset);
+    const adjusted = adjustedSpark(candidate.preset, adj);
+    expect(adjusted.length).toBe(SPARK_SAMPLES);
+    // Tier A moves the YEAR'S MEAN by exactly latitude + altitude; the swing
+    // scale and the hemisphere shift both leave the mean where it was.
+    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(adjusted) - mean(record)).toBeCloseTo(adj.latitudeDeltaC + adj.altitudeDeltaC, 3);
+    expect(Math.abs(adj.altitudeDeltaC)).toBeGreaterThan(0.05);
+    // The record itself is untouched.
+    expect(sparkOf(candidate.preset)).toEqual(record);
+  });
+
+  test("a place with no adjustment to make reports no parts at all", () => {
+    const bergen = stationOf("fjord-coast")!;
+    expect(matchParts({ latitude: bergen.latitude, altitude: bergen.altitude, orographic: bergen.orographic })).toEqual([]);
   });
 });

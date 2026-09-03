@@ -23,8 +23,9 @@ export function createHintBarSurface(): Surface {
     if (c === null) return;
     const el = target instanceof Element ? target.closest("[data-hint]") : null;
     const attr = el?.getAttribute("data-hint");
-    const [name, detail] = attr === null || attr === undefined || attr === "" ? DEFAULT_HINT : parseHint(attr);
-    setHint(c.shell, name, detail);
+    const live = attr !== null && attr !== undefined && attr !== "";
+    const [name, detail] = live ? parseHint(attr) : DEFAULT_HINT;
+    setHint(c.shell, name, detail, live);
   }
 
   const onOver = (ev: Event): void => show(ev.target);

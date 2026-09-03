@@ -21,29 +21,33 @@ import { sections, zoneFileText, type JsonSection } from "../model/json-view";
 import type { StudioState } from "../model/state";
 import type { Surface, SurfaceContext } from "./surfaces";
 
-/** Sentence-case label for each key `json-view.ts:sections` can emit. `climate` is special-cased. */
-const LABEL: Record<string, string> = {
-  id: "Id",
-  name: "Name",
-  preset: "Preset",
-  geography: "Geography",
-  flipSeasons: "Flip seasons",
-  climate: "Climate",
-  regimes: "Regimes",
-  modifiers: "Modifiers",
-  automation: "Automation",
-  overrides: "Overrides",
-  eras: "Eras",
-  "calendar.seasons": "Calendar seasons",
-  "calendar.moons": "Calendar moons",
-  devicePresets: "Device presets",
-};
+/**
+ * A section's heading is the **literal JSON key**, quoted, not a prettified
+ * title (SPEC law 5, gap-shell §18: "the exact JSON grammar it produces").
+ *
+ * A one-line value (`"id"`, `"name"`, `"flipSeasons"`) is written straight
+ * into the heading, so the drawer reads as the file rather than as a key on
+ * one line and its value on the next; anything with a newline keeps its own
+ * `<pre>` below. `"climate":` folded still says how much is behind the fold.
+ */
+function summaryFor(key: string, text: string, folded: boolean): string {
+  if (folded) return `"${key}": { … 5 sections }`;
+  return text.includes("\n") ? `"${key}":` : `"${key}": ${text}`;
+}
 
-/** `ClimateParams` has five channels (SPEC §1): temperature, precipitation, humidity, cloud, wind. */
-const CLIMATE_SUMMARY = "Climate · 5 sections";
+/** True when a section's value is short enough to sit on the heading line. */
+function isInline(text: string): boolean {
+  return !text.includes("\n");
+}
+
+/** The zone keys the drawer's breadcrumb names, in the order §3.7 lists them. */
+const ZONE_CRUMBS = "climate · regimes · modifiers · overrides";
+/** The world keys the same breadcrumb names. */
+const WORLD_CRUMBS = "eras · calendar";
 
 interface SectionEls {
   details: HTMLDetailsElement;
+  summary: HTMLElement;
   pre: HTMLElement;
 }
 
@@ -87,16 +91,26 @@ function paintColumn(col: Column, entries: readonly JsonSection[]): void {
     for (const entry of entries) {
       const details = col.list.createEl("details", { cls: "wadjet-studio-json-section", attr: { "data-key": entry.key } });
       details.open = entry.key !== "climate";
-      const summary = details.createEl("summary", { text: entry.key === "climate" ? CLIMATE_SUMMARY : (LABEL[entry.key] ?? entry.key) });
-      if (entry.key === "climate") summary.setAttr("data-hint", jsonHint("json.climate.fold"));
+      const summary = details.createEl("summary", { text: summaryFor(entry.key, entry.text, entry.key === "climate") });
+      if (entry.key === "climate") {
+        summary.setAttr("data-hint", jsonHint("json.climate.fold"));
+        // The heading is the JSON line itself, so it has to change with the fold.
+        details.addEventListener("toggle", () => summary.setText(summaryFor("climate", "{\n", !details.open)));
+      }
       const pre = details.createEl("pre", { cls: "wadjet-json" });
-      col.els.set(entry.key, { details, pre });
+      col.els.set(entry.key, { details, summary, pre });
     }
     col.keys = keys;
   }
   for (const entry of entries) {
     if (col.textCache.get(entry.key) === entry.text) continue;
-    col.els.get(entry.key)?.pre.setText(entry.text);
+    const els = col.els.get(entry.key);
+    if (els !== undefined) {
+      // An inline value lives in the heading and leaves the `<pre>` empty
+      // (`styles.css` collapses it); `climate` keeps its fold-aware heading.
+      els.pre.setText(isInline(entry.text) ? "" : entry.text);
+      if (entry.key !== "climate") els.summary.setText(summaryFor(entry.key, entry.text, false));
+    }
     col.textCache.set(entry.key, entry.text);
   }
 }
@@ -121,6 +135,7 @@ function copyToClipboard(text: string): void {
 
 export function createJsonDrawerSurface(): Surface {
   let ctx: SurfaceContext | null = null;
+  let crumb: HTMLElement | null = null;
   let zoneCol: Column | null = null;
   let worldCol: Column | null = null;
   let currentZoneText = "";
@@ -130,8 +145,15 @@ export function createJsonDrawerSurface(): Surface {
     mount(next: SurfaceContext) {
       ctx = next;
       next.shell.json.empty();
-      zoneCol = buildColumn(next.shell.json, "zone", () => copyToClipboard(currentZoneText));
-      worldCol = buildColumn(next.shell.json, "world", () => copyToClipboard(currentWorldText));
+      // `ZONE FILE · LIVE` and the key breadcrumb (SPEC §3.7 "header labels
+      // which keys are zone vs world"): one caption over one document, the
+      // way the prototype's drawer opens.
+      const head = next.shell.json.createDiv({ cls: "wadjet-studio-json-bar" });
+      head.createSpan({ cls: "wadjet-studio-json-bar-label", text: "zone file · live" });
+      crumb = head.createSpan({ cls: "wadjet-studio-json-bar-crumb" });
+      const body = next.shell.json.createDiv({ cls: "wadjet-studio-json-body" });
+      zoneCol = buildColumn(body, "zone", () => copyToClipboard(currentZoneText));
+      worldCol = buildColumn(body, "world", () => copyToClipboard(currentWorldText));
     },
 
     render(state: StudioState) {
@@ -144,6 +166,7 @@ export function createJsonDrawerSurface(): Surface {
 
       zoneCol.title.setText(zone === undefined ? "Zone file" : `Zone file · ${zone.name}`);
       worldCol.title.setText("World");
+      crumb?.setText(`zones[${zone?.name ?? "—"}] → ${ZONE_CRUMBS}  |  world → ${WORLD_CRUMBS}`);
 
       if (zone === undefined) {
         clearColumn(zoneCol);
@@ -168,6 +191,7 @@ export function createJsonDrawerSurface(): Surface {
 
     destroy() {
       ctx?.shell.json.empty();
+      crumb = null;
       zoneCol = null;
       worldCol = null;
       currentZoneText = "";

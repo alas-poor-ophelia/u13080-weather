@@ -34,7 +34,7 @@ const DESCRIPTIONS: Record<string, string> = {
   Cwb: "subtropical highland",
   Cwc: "cold subtropical highland",
   Cfa: "humid subtropical",
-  Cfb: "oceanic",
+  Cfb: "temperate oceanic",
   Cfc: "subpolar oceanic",
   Dsa: "hot-summer Mediterranean continental",
   Dsb: "warm-summer Mediterranean continental",
@@ -51,6 +51,11 @@ const DESCRIPTIONS: Record<string, string> = {
   ET: "tundra",
   EF: "ice cap",
 };
+
+/** The class in words — `Cfb` → `oceanic`. The code itself when it is not one of the thirty. */
+export function describeKoppen(code: string): string {
+  return DESCRIPTIONS[code] ?? code;
+}
 
 /**
  * Köppen readout of a zone's resolved climate (DESIGN-v1.md §2): the

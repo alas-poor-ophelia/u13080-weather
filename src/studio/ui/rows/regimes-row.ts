@@ -38,7 +38,7 @@ import { validateProfile } from "../../../core/profile";
 import { auditionKey, isRolled, rollCached, shareOfYear, type AuditionInput, type AuditionYear } from "../../model/audition";
 import { regimeBlockTip, regimeShareTip, rowHint } from "../../model/hints-rows";
 import { hitTest, pxToYear, type LaneGeometry, type Span } from "../../model/lanes";
-import { colourOf } from "../../model/regimes";
+import { colourOf, laneSub } from "../../model/regimes";
 import type { StudioState } from "../../model/state";
 import { ROLL_DEBOUNCE_MS } from "../audition";
 import { createLane, type LaneComponent } from "../components";
@@ -57,8 +57,18 @@ export const MAX_ROLL_YEARS = 6;
  */
 export const ROLL_GAP_MS = 30;
 
-/** A block narrower than this has no room for its state's id; the tip still names it. */
-const LABEL_MIN_PX = 40;
+/**
+ * A block narrower than this has no room for its state's id; the tip still
+ * names it. The prototype's own threshold, and it is a *width* rather than a
+ * zoom so a long run at Year zoom still reads.
+ */
+const LABEL_MIN_PX = 54;
+
+/** Below this the run is a few pixels wide and a name inside it is noise, however long the run. */
+const LABEL_MIN_PX_PER_DAY = 3;
+
+/** The lane's drawn height — the thin arrangement lane the whole device stack shares. */
+const ROW_HEIGHT = 20;
 
 /** The row's three shapes, so the DOM says which one it is drawing. */
 export type RowMode = "blocks" | "share" | "empty";
@@ -73,7 +83,18 @@ interface RegimeSpan {
   days: number;
   /** the state's share of the year; only meaningful on a share-bar segment */
   share: number;
+  /**
+   * How loudly the block reads (SPEC §9: "colour reserved for data"). A state
+   * that writes nothing is the quiet background weather and sits at a fifth of
+   * full; one that applies something is the event you are looking for.
+   */
+  alpha: number;
 }
+
+/** The prototype's three weights: a spell that writes, one that does not, and the selected one. */
+const ALPHA_PLAIN = 0.22;
+const ALPHA_APPLIES = 0.55;
+const ALPHA_SHARE = 0.45;
 
 /**
  * The studio's shared `rollCached`, or `null` when the adapter cannot reach the
@@ -182,7 +203,7 @@ export function createRegimesRow(): PlaylistRow {
   }
 
   /** The rolled runs of every year the window touches, as tinted blocks. */
-  function blocks(state: StudioState, geo: RowGeometry, index: Map<string, number>): RegimeSpan[] {
+  function blocks(state: StudioState, geo: RowGeometry, index: Map<string, number>, writes: Set<string>): RegimeSpan[] {
     const out: RegimeSpan[] = [];
     for (const year of yearsIn(geo.window.a, geo.window.b)) {
       const input = inputFor(state, year);
@@ -197,7 +218,8 @@ export function createRegimesRow(): PlaylistRow {
         const to = year + (run.to + 1) / yearLength;
         const days = run.to - run.from + 1;
         const at = index.get(run.regime);
-        const label = (to - from) * geo.pxPerYear >= LABEL_MIN_PX ? run.regime : null;
+        const wide = (to - from) * geo.pxPerYear >= LABEL_MIN_PX && geo.morph.pxPerDay >= LABEL_MIN_PX_PER_DAY;
+        const label = wide ? run.regime : null;
         out.push({
           span: {
             id: `regime:${year}:${run.from}:${run.regime}`,
@@ -212,6 +234,7 @@ export function createRegimesRow(): PlaylistRow {
           colour: colourOf(at ?? 0, state.view.colours.regimes),
           days,
           share: 0,
+          alpha: writes.has(run.regime) ? ALPHA_APPLIES : ALPHA_PLAIN,
         });
       }
     }
@@ -224,16 +247,16 @@ export function createRegimesRow(): PlaylistRow {
     const zone = id === null ? undefined : state.zones[id];
     if (zone === undefined) return [];
     const shares = shareOfYear(zone.regimes);
-    return shareSegments(zone.regimes, geo.window.a, geo.window.b, shares).map((seg, i) => {
-      const label = (seg.to - seg.from) * geo.pxPerYear >= LABEL_MIN_PX ? seg.id : null;
-      return {
-        span: { id: `share:${seg.id}`, from: seg.from, to: seg.to, kind: "bar" as const, editable: false, ...(label === null ? {} : { label }) },
-        regime: seg.id,
-        colour: colourOf(i, state.view.colours.regimes),
-        days: 0,
-        share: seg.share,
-      };
-    });
+    // No labels: the collapse is a proportion bar, and the sub-label above it
+    // already spells every share out (SPEC §3.2 "collapses to the share bar").
+    return shareSegments(zone.regimes, geo.window.a, geo.window.b, shares).map((seg, i) => ({
+      span: { id: `share:${seg.id}`, from: seg.from, to: seg.to, kind: "bar" as const, editable: false },
+      regime: seg.id,
+      colour: colourOf(i, state.view.colours.regimes),
+      days: 0,
+      share: seg.share,
+      alpha: ALPHA_SHARE,
+    }));
   }
 
   // --- painting ------------------------------------------------------------
@@ -258,7 +281,7 @@ export function createRegimesRow(): PlaylistRow {
       const item = id === null ? undefined : byId.get(id);
       if (id === null || item === undefined) continue;
       nodes.set(id, node);
-      node.setCssProps({ "--wadjet-studio-span-color": item.colour });
+      node.setCssProps({ "--wadjet-studio-span-color": item.colour, "--wadjet-studio-span-alpha": String(item.alpha) });
       node.setAttr("data-span-from", String(item.span.from));
       node.setAttr("data-span-to", String(item.span.to));
       node.setAttr("data-regime", item.regime);
@@ -366,13 +389,16 @@ export function createRegimesRow(): PlaylistRow {
     memo = p.key;
 
     yearLength = Math.max(1, p.cal?.yearLength ?? 1);
-    const index = new Map((p.zone?.regimes ?? []).map((r, i) => [r.id, i]));
-    items = p.mode === "blocks" ? blocks(state, geo, index) : p.mode === "share" ? shareBar(state, geo) : [];
+    const regimes = p.zone?.regimes ?? [];
+    const index = new Map(regimes.map((r, i) => [r.id, i]));
+    const writes = new Set(regimes.filter((r) => (r.apply ?? []).length > 0).map((r) => r.id));
+    items = p.mode === "blocks" ? blocks(state, geo, index, writes) : p.mode === "share" ? shareBar(state, geo) : [];
     spans = items.map((i) => i.span);
     byId = new Map(items.map((i) => [i.span.id, i]));
 
     const hint = rowHint(p.broken ? "row.regimes.issues" : p.mode === "share" ? "row.regimes.share" : "row.regimes");
-    h.label.setText(p.broken ? "regimes · fix issues" : "Regimes");
+    h.name.setText(p.broken ? "regimes · fix issues" : "Regimes");
+    h.sub.setText(p.broken || p.zone === undefined ? "the draft has errors" : laneSub(p.zone));
     h.label.setAttr("data-hint", hint);
     h.body.setAttr("data-hint", hint);
 
@@ -394,9 +420,11 @@ export function createRegimesRow(): PlaylistRow {
       host = next;
       next.label.setAttr("data-hint", rowHint("row.regimes"));
       next.body.setAttr("data-hint", rowHint("row.regimes"));
+      next.dot.setCssProps({ "--wadjet-studio-row-dot-color": "var(--wadjet-studio-text-mute)" });
       lane = createLane(next.body, {
         geometry: { x0: 0, pxPerYear: 1, windowFrom: 0, edgePx: 4 },
         spans: [],
+        height: ROW_HEIGHT,
         color: "var(--wadjet-studio-moon)",
         onOpen,
       });
@@ -422,6 +450,13 @@ export function createRegimesRow(): PlaylistRow {
       // front of the audition's own debounce.
       if (p.mode === "blocks" && !warm(state, geo)) {
         l.update({ geometry: geo.lane });
+        // `Lane.paint` rebuilds every span element from scratch, so the
+        // per-span tint, `data-span-*` and tip this row adds on top are gone
+        // the moment the geometry moves. Re-decorate: until the debounced roll
+        // lands the blocks are the PREVIOUS roll's, and they should read as
+        // themselves — a stripped, uncoloured, untipped lane is not a truer
+        // picture of "still rolling", it is just a broken one.
+        decorate();
         geometry = geo.lane;
         schedule();
         return;

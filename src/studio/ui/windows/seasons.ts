@@ -2,35 +2,44 @@
  * Seasons · CALENDAR window (SPEC §3.4 "Seasons · CALENDAR", PLAN §0.1,
  * bead wadjet-9f9.27).
  *
- * A horizontal bar of the year (0 → 1), one tinted segment per season, with
- * draggable ⚑ flags at every boundary. All the boundary maths — drag, split,
- * split-the-longest, merge, rename — is `model/boundaries.ts`; this file is
- * only the DOM, the pointer wiring and the world-scoped write.
+ * The prototype's shape, top to bottom: a 16 px colour ribbon of the year
+ * with a ⚑ handle standing on every movable boundary, the per-season
+ * durations under it, then the four-row list — `swatch · name · from dN ·
+ * N d · ×` — and `＋ split the longest season` closing it. All the boundary
+ * maths — drag, split, split-the-longest, merge, rename — is
+ * `model/boundaries.ts`; this file is only the DOM, the pointer wiring and
+ * the world-scoped write.
  *
- * Two things worth knowing before editing this file:
+ * Four things worth knowing before editing this file:
  *
  *  - **This is a window body, not a surface.** `WindowManager.renderAll`
  *    only re-reads `writes()`/`issues()`/`level()` (pull-based, SPEC law 5).
- *    Everything else drawn here — the bar, the chips, the read-only line —
- *    repaints only because this file subscribes to the store itself and
- *    unsubscribes in `onClose` (the manager calls `onClose` once, on × or
- *    `close(id)`).
+ *    Everything else drawn here repaints only because this file subscribes to
+ *    the store itself and unsubscribes in `onClose`.
  *  - **Seasons live in `state.world.calendar.seasons` under an *editable*
  *    calendar** (SPEC §2: world scope, `settings.calendar.seasons`, internal
  *    adapter only). Under a describing adapter that reports `readOnly`, the
  *    adapter's own description is the truth to mirror and every edit
  *    affordance is hidden (SPEC §3.4, §8; PLAN §3).
+ *  - **The bar is a ribbon, the list is the editor.** The names, the start
+ *    days and the × live in the list rows (`.wadjet-studio-seasons-segment`),
+ *    never inside the coloured band — that is the prototype's split, and it
+ *    is what lets the ribbon stay 16 px tall.
+ *  - **Season colour is `SEASON_CYCLE`, not `DATA_CYCLE`.** Gold leads the
+ *    data cycle so an *era* band reads as calendar; leading the seasons with
+ *    it rotates all four of the shipped names onto the wrong hue.
  *
  * `state.world.calendar.seasons` is kept normalised (ascending `at`, wrapped
  * into [0,1)) by every write this file makes, so `Mark[]` index and
  * `segments()` output index always agree (`boundaries.ts`'s own contract for
  * callers — see its file doc).
  */
-import { dayLabel } from "../../model/format";
+import { dayLabel, tabular } from "../../model/format";
 import { seasonsHint } from "../../model/hints-seasons";
-import { cycleColour } from "../../model/palette";
+import { cycleColour, SEASON_CYCLE } from "../../model/palette";
 import type { StudioState } from "../../model/state";
 import { dragMark, fromSeasons, merge, normalise, rename, SEASON_LIMITS, segments, split, splitLongest, toSeasons, type Mark, type Segment } from "../../model/boundaries";
+import { grammar } from "../../model/copy";
 import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
 import { needsWorldConfirm } from "../../model/world-confirm";
 import { createChip, type ChipComponent } from "../components";
@@ -45,9 +54,19 @@ export const SEASONS_WINDOW = "seasons";
 /** Year length to assume when the active adapter does not describe itself. */
 const DEFAULT_YEAR_LENGTH = 365;
 
-/** A segment's fill: `model/palette.ts`'s band cycle at 30 %, over the panel. */
+/** The season's own hue, full strength — the ⚑, the stem and the duration label. */
+function seasonColour(index: number): string {
+  return cycleColour(index, SEASON_CYCLE);
+}
+
+/**
+ * A band's fill. The prototype composites the hue at `55` (a third), which is
+ * why its ribbon reads as four dark bands rather than four bright blocks —
+ * `color-mix(… , transparent)` is the same compositing, over whatever the
+ * panel happens to be.
+ */
 function tint(index: number): string {
-  return `color-mix(in srgb, ${cycleColour(index)} 30%, var(--wadjet-studio-panel))`;
+  return `color-mix(in srgb, ${seasonColour(index)} 33%, transparent)`;
 }
 
 function setDisabled(el: HTMLElement, disabled: boolean): void {
@@ -97,6 +116,17 @@ function seasonsIssues(ctx: SurfaceContext, state: StudioState, view: CalendarVi
 }
 
 /**
+ * The WRITES grammar (SPEC law 5) — the prototype's compact `name@fraction`
+ * list, plus the tag the calendar stamps. One line, never JSON.
+ */
+function seasonsGrammar(view: CalendarView): string {
+  const list = normalise(fromSeasons(view.seasons))
+    .map((m) => `${m.name}@${tabular(m.at, 2)}`)
+    .join(", ");
+  return grammar(`calendar.seasons [${list}]`, "tags season:*");
+}
+
+/**
  * Gate a world mutation behind the session's one confirm (SPEC §2). When a
  * confirm is not needed (already given this session), `run` fires immediately.
  */
@@ -106,20 +136,31 @@ function withWorldConfirm(ctx: SurfaceContext, run: () => void): void {
 
 export const buildSeasonsWindow: WindowBuilder = (ctx) => {
   const body = createDiv({ cls: "wadjet-studio-seasons" });
-  const topRow = body.createDiv({ cls: "wadjet-studio-seasons-top" });
-  const sourceChip: ChipComponent = createChip(topRow, { label: "internal calendar", hint: seasonsHint("seasons.source") });
-  const worldChip: ChipComponent = createChip(topRow, { label: "world · 0 zones", hint: seasonsHint("seasons.world") });
+
+  // The source badge belongs in the title bar's right end (SPEC §3.4), which
+  // the Window component has no slot for yet — so it is positioned there from
+  // this section's CSS. Swap it for a real chrome slot when one lands.
+  const sourceChip: ChipComponent = createChip(body, { label: "internal calendar", hint: seasonsHint("seasons.source"), dot: false });
+  sourceChip.el.addClass("wadjet-studio-seasons-source");
   sourceChip.el.setAttr("data-part", "source");
-  worldChip.el.setAttr("data-part", "world");
 
-  const bar = body.createDiv({ cls: "wadjet-studio-seasons-bar", attr: { "data-hint": seasonsHint("seasons.bar") } });
+  const barWrap = body.createDiv({ cls: "wadjet-studio-seasons-barwrap" });
+  const bar = barWrap.createDiv({ cls: "wadjet-studio-seasons-bar", attr: { "data-hint": seasonsHint("seasons.bar") } });
   markDragTarget(bar);
-  const daysEl = body.createDiv({ cls: "wadjet-studio-seasons-days" });
+  const flagsEl = barWrap.createDiv({ cls: "wadjet-studio-seasons-flags" });
+  const daysEl = body.createDiv({ cls: "wadjet-studio-seasons-durations" });
 
-  const actions = body.createDiv({ cls: "wadjet-studio-seasons-actions" });
-  const splitBtn = actions.createDiv({
+  // Small-caps head, lower-case tail — the tail is the only statement of the
+  // season → tag relationship anywhere in the studio.
+  const caption = body.createDiv({ cls: "wadjet-studio-seasons-caption", attr: { "data-hint": seasonsHint("seasons.world") } });
+  caption.createSpan({ cls: "wadjet-studio-seasons-caption-text", text: "Seasons" });
+  caption.createSpan({ cls: "wadjet-studio-seasons-caption-tail", text: "· each stamps tag season:name" });
+
+  const list = body.createDiv({ cls: "wadjet-studio-seasons-list" });
+  const rowsEl = list.createDiv({ cls: "wadjet-studio-seasons-rows" });
+  const splitBtn = list.createDiv({
     cls: "wadjet-studio-seasons-split",
-    text: "＋ split the longest",
+    text: "＋ split the longest season",
     attr: { role: "button", tabindex: "0", "data-hint": seasonsHint("seasons.split") },
   });
 
@@ -217,39 +258,109 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
     return currentMarks(calendarView(ctx, state));
   }
 
-  /** The primary piece of a (possibly wrap-split) segment carries the label, rename and ×; the wrapped tail is a plain tint. */
-  function renderSegmentPiece(container: HTMLElement, seg: Segment, index: number, from: number, to: number, view: CalendarView, marksLength: number, primary: boolean): void {
-    const width = Math.max(0, to - from);
-    const el = container.createDiv({ cls: "wadjet-studio-seasons-segment", attr: { "data-index": String(index) } });
-    el.setCssProps({ "--wadjet-studio-seasons-left": `${from * 100}%`, "--wadjet-studio-seasons-width": `${width * 100}%`, "--wadjet-studio-seasons-tint": tint(index) });
-    if (!primary) return;
-
-    const label = el.createSpan({ cls: "wadjet-studio-seasons-segment-label", text: seg.name, attr: { "data-hint": seasonsHint("seasons.rename") } });
-    if (!view.readOnly) {
-      label.addEventListener("dblclick", (ev) => {
-        ev.stopPropagation();
-        openRenameInput(el, label, index);
-      });
-    }
-
-    if (!view.readOnly) {
-      const remove = el.createSpan({ cls: "wadjet-studio-seasons-segment-remove", text: "×", attr: { role: "button", tabindex: "0", "aria-label": `Merge ${seg.name}`, "data-hint": seasonsHint("seasons.merge") } });
-      setDisabled(remove, marksLength <= SEASON_LIMITS.min);
-      remove.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (remove.hasClass("is-disabled")) return;
-        tryMerge(freshMarks(), index);
-      });
-    }
+  /** One coloured piece of the ribbon. A season that wraps past the year boundary draws two. */
+  function renderBand(index: number, from: number, to: number): void {
+    const band = bar.createDiv({ cls: "wadjet-studio-seasons-band" });
+    band.setCssProps({
+      "--wadjet-studio-seasons-left": `${from * 100}%`,
+      "--wadjet-studio-seasons-width": `${Math.max(0, to - from) * 100}%`,
+      "--wadjet-studio-seasons-tint": tint(index),
+    });
   }
 
-  function openRenameInput(segEl: HTMLElement, label: HTMLElement, index: number): void {
-    if (segEl.find(".wadjet-studio-seasons-segment-input")) return;
+  function renderRibbon(segs: Segment[]): void {
+    bar.empty();
+    segs.forEach((seg, index) => {
+      if (seg.from === seg.to) {
+        // Single mark: the whole circle, possibly seamed at phase 0.
+        renderBand(index, seg.from, 1);
+        if (seg.from > 0) renderBand(index, 0, seg.from);
+      } else if (seg.to > seg.from) {
+        renderBand(index, seg.from, seg.to);
+      } else {
+        // Wraps past the year boundary: a tail at the right edge, a head at the left.
+        renderBand(index, seg.from, 1);
+        renderBand(index, 0, seg.to);
+      }
+    });
+  }
+
+  /**
+   * A ⚑ on every boundary that can actually move. A mark sitting exactly on
+   * phase 0 is the ribbon's left edge — the prototype draws no handle there,
+   * and dragging it would only ever push it right off its own year start.
+   */
+  function renderFlags(view: CalendarView, marks: Mark[]): void {
+    flagsEl.empty();
+    marks.forEach((m, index) => {
+      if (m.at === 0) return;
+      const flag = flagsEl.createDiv({ cls: "wadjet-studio-seasons-flag", attr: { role: "button", "data-hint": seasonsHint("seasons.flag"), "aria-label": `${m.name} boundary` } });
+      flag.setCssProps({ "--wadjet-studio-seasons-left": `${m.at * 100}%`, "--wadjet-studio-seasons-colour": seasonColour(index) });
+      flag.createSpan({ cls: "wadjet-studio-seasons-flag-glyph", text: "⚑" });
+      flag.createDiv({ cls: "wadjet-studio-seasons-flag-stem" });
+      markDragTarget(flag);
+      setDisabled(flag, view.readOnly);
+      flag.addEventListener("dblclick", (ev) => ev.stopPropagation());
+      flag.addEventListener("pointerdown", (ev) => onFlagPointerDown(ev, index, view));
+    });
+  }
+
+  /** `Thaw 73d` under each band, the name in the season's own colour. */
+  function renderDurations(view: CalendarView, segs: Segment[]): void {
+    daysEl.empty();
+    segs.forEach((seg, index) => {
+      const cell = daysEl.createDiv({ cls: "wadjet-studio-seasons-duration", text: `${seg.name} ` });
+      cell.setCssProps({ "--wadjet-studio-seasons-width": `${seg.length * 100}%`, "--wadjet-studio-seasons-colour": seasonColour(index) });
+      cell.createSpan({ cls: "wadjet-studio-seasons-duration-days", text: `${tabular(Math.round(seg.length * view.yearLength), 0)}d` });
+    });
+  }
+
+  /** `▪ Thaw …… from d 1   73 d   ×` — the row that owns the name, the rename and the merge. */
+  function renderRows(view: CalendarView, marks: Mark[], segs: Segment[]): void {
+    rowsEl.empty();
+    marks.forEach((m, index) => {
+      const seg = segs[index];
+      const row = rowsEl.createDiv({ cls: "wadjet-studio-seasons-segment", attr: { "data-index": String(index) } });
+      const swatch = row.createDiv({ cls: "wadjet-studio-seasons-swatch", attr: { role: "img", "aria-label": `${m.name} colour` } });
+      swatch.setCssProps({ "--wadjet-studio-seasons-colour": seasonColour(index) });
+
+      const label = row.createSpan({ cls: "wadjet-studio-seasons-segment-label", text: m.name, attr: { "data-hint": seasonsHint("seasons.rename") } });
+      if (!view.readOnly) {
+        label.addEventListener("dblclick", (ev) => {
+          ev.stopPropagation();
+          openRenameInput(row, label, index);
+        });
+      }
+
+      row.createSpan({ cls: "wadjet-studio-seasons-from", text: `from ${dayLabel(Math.round(m.at * view.yearLength) + 1, view.yearLength)}`, attr: { "data-hint": seasonsHint("seasons.day") } });
+      row.createSpan({ cls: "wadjet-studio-seasons-days", text: `${tabular(Math.round((seg?.length ?? 0) * view.yearLength), 0)} d` });
+
+      if (!view.readOnly) {
+        const remove = row.createSpan({ cls: "wadjet-studio-seasons-segment-remove", text: "×", attr: { role: "button", tabindex: "0", "aria-label": `Merge ${m.name}`, "data-hint": seasonsHint("seasons.merge") } });
+        setDisabled(remove, marks.length <= SEASON_LIMITS.min);
+        remove.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (remove.hasClass("is-disabled")) return;
+          tryMerge(freshMarks(), index);
+        });
+      }
+    });
+  }
+
+  function openRenameInput(rowEl: HTMLElement, label: HTMLElement, index: number): void {
+    if (rowEl.find(".wadjet-studio-seasons-segment-input")) return;
     label.addClass("is-hidden");
-    const input = segEl.createEl("input", { cls: "wadjet-studio-seasons-segment-input", type: "text", value: label.getText() });
+    const input = rowEl.createEl("input", { cls: "wadjet-studio-seasons-segment-input", type: "text", value: label.getText() });
     input.focus();
     input.select();
+    // Enter closes the field, and taking the focus off it fires the blur
+    // handler below — so `close` has to be idempotent (the CYCLE and STATES
+    // renames already are) or the rename is applied twice and the second
+    // `input.remove()` throws on a node that has already gone.
+    let closed = false;
     const close = (apply: boolean): void => {
+      if (closed) return;
+      closed = true;
       if (apply) tryRename(freshMarks(), index, input.value);
       input.remove();
       label.removeClass("is-hidden");
@@ -270,43 +381,20 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
   }
 
   function renderBar(view: CalendarView): void {
-    bar.empty();
-    daysEl.empty();
     const marks = currentMarks(view);
-
     if (marks.length === 0) {
+      bar.empty();
+      flagsEl.empty();
+      daysEl.empty();
+      rowsEl.empty();
       bar.createSpan({ cls: "wadjet-studio-seasons-empty", text: "no seasons yet" });
       return;
     }
-
     const segs = segments(marks);
-    segs.forEach((seg, index) => {
-      if (seg.from === seg.to) {
-        // Single mark: the whole circle, possibly seamed at phase 0.
-        renderSegmentPiece(bar, seg, index, seg.from, 1, view, marks.length, true);
-        if (seg.from > 0) renderSegmentPiece(bar, seg, index, 0, seg.from, view, marks.length, false);
-      } else if (seg.to > seg.from) {
-        // Normal (non-wrapping) segment.
-        renderSegmentPiece(bar, seg, index, seg.from, seg.to, view, marks.length, true);
-      } else {
-        // Wraps past the year boundary: draw the tail at the right edge and
-        // the head at the left edge; the label/× live on the (larger) tail.
-        renderSegmentPiece(bar, seg, index, seg.from, 1, view, marks.length, true);
-        renderSegmentPiece(bar, seg, index, 0, seg.to, view, marks.length, false);
-      }
-    });
-
-    marks.forEach((m, index) => {
-      const flag = bar.createDiv({ cls: "wadjet-studio-seasons-flag", text: "⚑", attr: { role: "button", "data-hint": seasonsHint("seasons.flag"), "aria-label": `${m.name} boundary` } });
-      flag.setCssProps({ "--wadjet-studio-seasons-left": `${m.at * 100}%` });
-      markDragTarget(flag);
-      setDisabled(flag, view.readOnly);
-      flag.addEventListener("dblclick", (ev) => ev.stopPropagation());
-      flag.addEventListener("pointerdown", (ev) => onFlagPointerDown(ev, index, view));
-
-      const day = daysEl.createSpan({ cls: "wadjet-studio-seasons-day", text: dayLabel(Math.round(m.at * view.yearLength) + 1, view.yearLength), attr: { "data-hint": seasonsHint("seasons.day") } });
-      day.setCssProps({ "--wadjet-studio-seasons-left": `${m.at * 100}%` });
-    });
+    renderRibbon(segs);
+    renderFlags(view, marks);
+    renderDurations(view, segs);
+    renderRows(view, marks, segs);
   }
 
   function onBarDblClick(ev: MouseEvent): void {
@@ -337,10 +425,8 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
   function paint(): void {
     const state = ctx.store.get();
     const view = calendarView(ctx, state);
-    const n = Object.keys(state.zones).length;
 
     sourceChip.update({ label: view.readOnly ? `${view.label} · read-only` : view.label });
-    worldChip.update({ label: `world · ${n} zones` });
 
     renderBar(view);
 
@@ -358,11 +444,14 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
 
   const build: WindowBuild = {
     title: "Seasons",
+    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
+    width: 380,
     badge: "CALENDAR",
+    badgeColor: "var(--wadjet-studio-gold)",
     body,
     led: { on: true, scope: "device" },
     level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "seasons" }))),
-    writes: () => `calendar.seasons ${JSON.stringify(calendarView(ctx, ctx.store.get()).seasons)}`,
+    writes: () => seasonsGrammar(calendarView(ctx, ctx.store.get())),
     issues: () => {
       const state = ctx.store.get();
       return seasonsIssues(ctx, state, calendarView(ctx, state));

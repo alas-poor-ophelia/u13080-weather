@@ -28,10 +28,25 @@ import { newDevice, toModifier, type DeviceKind } from "./devices";
 import { presetToDevice, SHIPPED_PRESETS } from "./presets";
 import type { WorldDraft } from "./state";
 
-/** One row of the popover's KINDS list: label + one-line hint (SPEC §3.6). */
+/**
+ * One row of the popover's KINDS list (SPEC §3.6).
+ *
+ * Three strings, three registers, on purpose (bead wadjet-6rw.6):
+ *  - `label` is the product name the row wears (`Moon-bound`);
+ *  - `badge` is the kind pill the rack unit wears too, so the picker's rows
+ *    and the cards they create read as the same vocabulary — its colour comes
+ *    from `copy.ts:kindColor(badge)`;
+ *  - `sub` is the grammar the row *writes*, in the register SPEC law 5 asks a
+ *    WRITES footer for (`when.moon · phase window`);
+ *  - `hint` is the teaching, and only ever reaches the hint bar (SPEC §9).
+ */
 export interface InsertKindOption {
   kind: DeviceKind;
   label: string;
+  /** the kind pill: TRIM · MOON · SPELL · TAG · DICE */
+  badge: string;
+  /** the row's trailing mono grammar — what picking it writes */
+  sub: string;
   hint: string;
 }
 
@@ -40,12 +55,17 @@ export interface InsertKindOption {
  * in the WHEN segmented's own order (`device-edit.ts`'s `WHEN_KINDS`).
  */
 const INSERT_KINDS: readonly InsertKindOption[] = [
-  { kind: "trim", label: "Trim", hint: "always on — a constant offset or scale" },
-  { kind: "moon", label: "Moon-bound", hint: "gated to a named phase of a moon" },
-  { kind: "spell", label: "Spell", hint: "rolls its own runs inside a year window" },
-  { kind: "tag", label: "Tag-gated", hint: "on while a season or era tag is active" },
-  { kind: "chance", label: "Chance", hint: "a small chance on any day" },
+  { kind: "trim", label: "Trim", badge: "TRIM", sub: "always on · no when", hint: "always on — a constant offset or scale" },
+  { kind: "moon", label: "Moon-bound", badge: "MOON", sub: "when.moon · phase window", hint: "gated to a named phase of a moon" },
+  { kind: "spell", label: "Spell", badge: "SPELL", sub: "when.yearPhase + spell · random runs", hint: "rolls its own runs inside a year window" },
+  { kind: "tag", label: "Tag-gated", badge: "TAG", sub: "when.tag · season: / era:", hint: "on while a season or era tag is active" },
+  { kind: "chance", label: "Chance", badge: "DICE", sub: "when.chance · a share of days", hint: "a small chance on any day" },
 ];
+
+/** The kind pill a preset row wears — the same badge its kind's row carries. */
+export function badgeForKind(kind: DeviceKind): string {
+  return INSERT_KINDS.find((k) => k.kind === kind)?.badge ?? kind.toUpperCase();
+}
 
 /** The popover's KINDS list. A fresh array every call, so a caller may hold it without aliasing the source. */
 export function insertKinds(): InsertKindOption[] {

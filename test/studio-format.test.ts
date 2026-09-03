@@ -235,14 +235,18 @@ describe("dayLabel / yearLabel", () => {
 });
 
 describe("windowLabel", () => {
-  test("a single whole year", () => {
-    expect(windowLabel(1962, 1963, 365)).toBe("Y 1962 · d 1–365");
+  test("a single whole year counts days from the year boundary", () => {
+    expect(windowLabel(1962, 1963, 365)).toBe("d0 – d365 · 1962");
   });
-  test("spanning more than one year drops day precision", () => {
-    expect(windowLabel(1962, 1964, 365)).toBe("Y 1962 – 1963");
+  test("2.5 years and wider drops to bare years, with no Y prefix", () => {
+    expect(windowLabel(1962, 2962, 365)).toBe("1962 – 2962");
+    expect(windowLabel(-40, 1000, 365)).toBe(`${MINUS}40 – 1000`);
   });
-  test("a sub-month window within one year leads with the day", () => {
-    expect(windowLabel(1962 + 129 / 365, 1962 + 132 / 365, 365)).toBe("d 130–132 · Y 1962");
+  test("a sub-year window within one year leads with the day range", () => {
+    expect(windowLabel(1962 + 129 / 365, 1962 + 159 / 365, 365)).toBe("d129 – d159 · 1962");
+  });
+  test("eight days or fewer names the day under the centre", () => {
+    expect(windowLabel(1962 + 35 / 365, 1962 + 38 / 365, 365)).toBe("day 36 · 1962");
   });
 });
 

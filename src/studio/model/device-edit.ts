@@ -32,7 +32,7 @@ import type { ModifierOp, SpellSpec, ZoneProfile } from "../../core/types";
 import type { DevicePreset } from "../../plugin/settings";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import { type Channel, channelOrNull } from "./compile";
-import { type Device, type DeviceKind, type DeviceWhen, type WhenKind, defaultApplyFor, newDevice, toDevice, toModifier, uniqueDeviceId } from "./devices";
+import { type Device, type DeviceKind, type DeviceWhen, type WhenKind, defaultApplyFor, newDevice, toDevice, toModifier, uniqueDeviceId, yearWindowsOf } from "./devices";
 import { SHIPPED_PRESETS, deviceToPreset, presetToDevice } from "./presets";
 import type { WorldDraft } from "./state";
 
@@ -155,6 +155,49 @@ export function setWhen(d: Device, when: DeviceWhen): void {
   d.when = structuredClone(when);
   d.kind = WHEN_KINDS.find((k) => k.when === when.kind)?.kind ?? d.kind;
   restage(d);
+}
+
+/**
+ * Move one clip of a year-window `when` (`＋ add window`'s siblings included).
+ * Index 0 is the primary clip; anything past it lives in `extra`. Out-of-range
+ * indices are ignored rather than appended — an add is `addYearWindow`'s job.
+ */
+export function setYearWindow(d: Device, index: number, clip: { start: number; length: number }): void {
+  if (d.when.kind !== "yearWindow") return;
+  const clips = yearWindowsOf(d.when);
+  if (index < 0 || index >= clips.length) return;
+  clips[index] = { start: clip.start, length: clip.length };
+  writeYearWindows(d, clips);
+}
+
+/**
+ * A second (third, …) yearly clip. It lands just after the last one, a
+ * fortnight long, the way the prototype's `afAdd` does — never overlapping what
+ * is already there, and never past the end of the year.
+ */
+export function addYearWindow(d: Device): boolean {
+  if (d.when.kind !== "yearWindow") return false;
+  const clips = yearWindowsOf(d.when);
+  const last = clips[clips.length - 1] ?? { start: 0.2, length: 0.04 };
+  const start = Math.min(0.9, last.start + last.length + 0.06);
+  clips.push({ start, length: Math.min(0.6, 1 - start, 15 / 365) });
+  writeYearWindows(d, clips);
+  return true;
+}
+
+/** Drop one clip. The last one standing stays: a year window with no clip matches nothing. */
+export function removeYearWindow(d: Device, index: number): boolean {
+  if (d.when.kind !== "yearWindow") return false;
+  const clips = yearWindowsOf(d.when);
+  if (clips.length <= 1 || index < 0 || index >= clips.length) return false;
+  clips.splice(index, 1);
+  writeYearWindows(d, clips);
+  return true;
+}
+
+function writeYearWindows(d: Device, clips: Array<{ start: number; length: number }>): void {
+  const [first, ...rest] = clips as [{ start: number; length: number }, ...Array<{ start: number; length: number }>];
+  setWhen(d, { kind: "yearWindow", start: first.start, length: first.length, ...(rest.length > 0 ? { extra: rest } : {}) });
 }
 
 /** Switch the spell on (with `spell`) or off (`undefined`). */

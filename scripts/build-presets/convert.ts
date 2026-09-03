@@ -13,6 +13,8 @@ import { WIND_DIRS, type CligenStation } from "./cligen-parse";
 export interface StationSpec {
   slug: string;
   name: string;
+  /** the station's place name, for display — `Bergen`, not the GHCN `Bergen Florida` */
+  place: string;
   ghcnId: string;
   character: string;
   koppen: string;
@@ -337,6 +339,7 @@ export function buildPreset(spec: StationSpec, s: CligenStation, conv: Converted
       license: dataset.license,
       ghcnId: spec.ghcnId,
       stationName: s.name,
+      place: spec.place,
       country: s.country,
       latitude: s.latitude,
       longitude: s.longitude,

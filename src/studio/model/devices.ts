@@ -19,6 +19,7 @@
 import type { ModGate, Modifier, ModifierOp, Predicate, SpellSpec } from "../../core/types";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import type { Channel } from "./compile";
+import { applyPhrase, describeOp, grammar, paramName } from "./copy";
 
 /** One per `Predicate` shape the studio exposes; `trim` is "no when" (SPEC §3.6). Mirrors `DevicePreset["kind"]`. */
 export type DeviceKind = "trim" | "moon" | "spell" | "tag" | "chance";
@@ -39,7 +40,14 @@ export type DeviceWhen =
   | { kind: "always" }
   | { kind: "moon"; moon: string; phases: string[]; range: [number, number] }
   | { kind: "tag"; tags: string[] }
-  | { kind: "yearWindow"; start: number; length: number }
+  /**
+   * `start`/`length` is the first (and usually only) clip. `extra` carries the
+   * rest — the prototype's `＋ add window`, which the engine spells as
+   * `{ any: [{ yearPhase }, { yearPhase }] }`. Kept as an optional tail rather
+   * than a list so the single-window shape every other caller reads stays the
+   * one it already reads.
+   */
+  | { kind: "yearWindow"; start: number; length: number; extra?: Array<{ start: number; length: number }> }
   | { kind: "chance"; p: number };
 
 /**
@@ -174,6 +182,11 @@ function everyLeafIsTag(qs: readonly Predicate[]): boolean {
   return qs.every((q) => "tag" in q);
 }
 
+/** `{ any: [{ yearPhase }, …] }` — several yearly clips on one device (`＋ add window`). */
+function everyLeafIsYearPhase(qs: readonly Predicate[]): boolean {
+  return qs.length > 0 && qs.every((q) => "yearPhase" in q);
+}
+
 /** Which kind the rack shows for `m`, or `"custom"` when the predicate is outside the studio's five shapes. */
 export function kindOf(m: Modifier): DeviceKind | "custom" {
   const w = m.when;
@@ -183,6 +196,7 @@ export function kindOf(m: Modifier): DeviceKind | "custom" {
   if ("tag" in w) return "tag";
   if ("chance" in w) return "chance";
   if ("any" in w && everyLeafIsTag(w.any)) return "tag";
+  if ("any" in w && everyLeafIsYearPhase(w.any)) return "spell";
   return "custom";
 }
 
@@ -200,14 +214,33 @@ function whenOf(m: Modifier, calendar: CalendarDescription | null): DeviceWhen |
     const named = calendar?.moons.find((x) => x.name === w.moon.name)?.phases ?? [];
     return { kind: "moon", moon: w.moon.name, phases: phasesFor(named, range), range };
   }
-  if ("yearPhase" in w) {
-    const [a, b] = w.yearPhase;
-    return { kind: "yearWindow", start: a, length: round10(b >= a ? b - a : 1 - a + b) };
-  }
+  if ("yearPhase" in w) return { kind: "yearWindow", ...spanOf(w.yearPhase) };
   if ("tag" in w) return { kind: "tag", tags: [w.tag] };
   if ("chance" in w) return { kind: "chance", p: w.chance };
   if ("any" in w && everyLeafIsTag(w.any)) return { kind: "tag", tags: w.any.map((q) => (q as { tag: string }).tag) };
+  if ("any" in w && everyLeafIsYearPhase(w.any)) {
+    const spans = w.any.map((q) => spanOf((q as { yearPhase: [number, number] }).yearPhase));
+    const [first, ...rest] = spans as [{ start: number; length: number }, ...Array<{ start: number; length: number }>];
+    return { kind: "yearWindow", ...first, ...(rest.length > 0 ? { extra: rest } : {}) };
+  }
   return null;
+}
+
+/** `[a, b)` in year phase read back as the start + length the knobs edit, wrap included. */
+function spanOf([a, b]: readonly [number, number]): { start: number; length: number } {
+  return { start: a, length: round10(b >= a ? b - a : 1 - a + b) };
+}
+
+/** `[a, b)` for one clip, wrapped back into the year. */
+function phaseOf(w: { start: number; length: number }): [number, number] {
+  const end = round10(w.start + w.length);
+  return [w.start, end > 1 ? round10(end - 1) : end];
+}
+
+/** Every clip a year-window `when` carries, first one first — the mini-lane and the detail rows read this. */
+export function yearWindowsOf(w: DeviceWhen): Array<{ start: number; length: number }> {
+  if (w.kind !== "yearWindow") return [];
+  return [{ start: w.start, length: w.length }, ...(w.extra ?? []).map((e) => ({ start: e.start, length: e.length }))];
 }
 
 /** The predicate a `DeviceWhen` compiles to; `null` for "always" (the modifier gets no `when` key). */
@@ -220,8 +253,9 @@ function predicateOf(w: DeviceWhen): Predicate | null {
     case "tag":
       return w.tags.length === 1 ? { tag: w.tags[0]! } : { any: w.tags.map((t) => ({ tag: t })) };
     case "yearWindow": {
-      const end = round10(w.start + w.length);
-      return { yearPhase: [w.start, end > 1 ? round10(end - 1) : end] };
+      const clips = yearWindowsOf(w);
+      if (clips.length <= 1) return { yearPhase: phaseOf(w) };
+      return { any: clips.map((c) => ({ yearPhase: phaseOf(c) })) };
     }
     case "chance":
       return { chance: w.p };
@@ -422,9 +456,15 @@ export function whenSummary(d: Device, yearLength = 365): string {
       head = w.tags.length ? w.tags.join(" or ") : "no tag";
       break;
     case "yearWindow": {
-      const from = Math.floor(w.start * yearLength);
-      const to = Math.floor((w.start + w.length) * yearLength) - 1;
-      head = `days ${from}–${to}`;
+      const clips = yearWindowsOf(w);
+      if (clips.length > 1) {
+        head = `${clips.length} windows`;
+        break;
+      }
+      // The clip's own detail row reads `d223 – d263`; the summary rounds the
+      // same way so the two never disagree about which day a window starts on
+      // (`gap-device-windows.md` "day range off by one").
+      head = `days ${Math.round(w.start * yearLength)}–${Math.round((w.start + w.length) * yearLength)}`;
       break;
     }
     case "chance":
@@ -525,4 +565,147 @@ export function knobSpecFor(op: ModifierOp): KnobSpecFor {
   if (op.op === "offset") return { min: -shape.offset, max: shape.offset, neutral: 0, step: shape.step, fmt: signed(shape.unit, decimals) };
   // set / clamp: the parameter's own domain, neutral at the low end (there is no "no-op" value to return to).
   return { min: shape.domain[0], max: shape.domain[1], neutral: shape.domain[0], step: shape.step, fmt: plain(shape.unit, decimals) };
+}
+
+// ---------------------------------------------------------------------------
+// MOD — onset envelopes (SPEC §3.4 "the onset envelope editor", §7 `envelope`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The named onset shapes the prototype offers on a moon-bound target
+ * (`Component.ENVS`). Phases are the moon cycle's, so `Sharp` is a spike just
+ * before full and `Ease in` is a slow build into it. A hand-drawn envelope
+ * matches none of them and reads as `custom`.
+ *
+ * The prototype's shapes end at phase 1; phases live in [0, 1) here (1 wraps to
+ * 0, `device-edit.ts`'s `wrapPhase`), so each last point sits one thousandth
+ * short of the wrap.
+ */
+export const ENVELOPE_SHAPES: ReadonlyArray<{ name: string; points: ReadonlyArray<readonly [number, number]> }> = [
+  {
+    name: "Sharp",
+    points: [
+      [0.88, 0],
+      [0.885, 1],
+      [0.995, 1],
+      [0.999, 0],
+    ],
+  },
+  {
+    name: "Ease in",
+    points: [
+      [0.78, 0],
+      [0.88, 0.5],
+      [0.94, 1],
+      [0.999, 1],
+    ],
+  },
+  {
+    name: "Swell",
+    points: [
+      [0.8, 0],
+      [0.9, 0.85],
+      [0.94, 1],
+      [0.98, 0.85],
+      [0.999, 0],
+    ],
+  },
+  {
+    name: "Pulse",
+    points: [
+      [0.92, 0],
+      [0.94, 1],
+      [0.96, 0],
+    ],
+  },
+  {
+    name: "Ramp out",
+    points: [
+      [0.88, 1],
+      [0.96, 0.4],
+      [0.999, 0],
+    ],
+  },
+];
+
+/** Authored phases carry three decimals at most; comparing at that precision is what makes a preset recognisable. */
+const SAME_POINT = 1e-3;
+
+/** The shape chip's text for one envelope — a preset's name, or `custom` for a drawn one. */
+export function envelopeShapeName(points: ReadonlyArray<readonly [number, number]> | undefined): string {
+  if (points === undefined || points.length === 0) return "none";
+  for (const shape of ENVELOPE_SHAPES) {
+    if (shape.points.length !== points.length) continue;
+    if (shape.points.every((p, i) => Math.abs(p[0] - points[i]![0]) < SAME_POINT && Math.abs(p[1] - points[i]![1]) < SAME_POINT)) return shape.name;
+  }
+  return "custom";
+}
+
+/** A named shape's points, as a fresh mutable envelope; an unknown name falls back to `Ease in`. */
+export function envelopeShape(name: string): Array<[number, number]> {
+  const found = ENVELOPE_SHAPES.find((s) => s.name === name) ?? ENVELOPE_SHAPES[1]!;
+  return found.points.map(([p, s]): [number, number] => [p, s]);
+}
+
+// ---------------------------------------------------------------------------
+// APPLY copy and the WRITES grammar (SPEC law 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * What an apply knob reads *under* its name: the value and its consequence,
+ * with the friendly name stripped off `describeOp` so the two can never drift —
+ * `0 — no rain`, `0.95 — ash-dark`, `×1.50`, `+12 km/h`.
+ */
+export function opValueText(op: ModifierOp, units?: "metric" | "imperial"): string {
+  const name = paramName(op.param);
+  const full = describeOp(op, units === undefined ? {} : { units });
+  return full.startsWith(`${name} `) ? full.slice(name.length + 1) : full;
+}
+
+/** The `when` clause of the WRITES grammar — engine grammar, product numbers. */
+export function whenPhrase(d: Device): string {
+  const w = d.when;
+  switch (w.kind) {
+    case "always":
+      return d.spell ? "" : "stage climate";
+    case "moon":
+      return `when.moon ${w.moon} [${w.range[0].toFixed(2)}, ${w.range[1].toFixed(2)}]`;
+    case "tag":
+      return w.tags.length === 1 ? `when.tag ${w.tags[0]}` : `when.any ${w.tags.map((t) => `tag ${t}`).join(", ")}`;
+    case "yearWindow":
+      return `when.yearPhase ${yearWindowsOf(w)
+        .map((c) => `[${c.start.toFixed(2)}, ${Math.min(1, round10(c.start + c.length)).toFixed(2)}]`)
+        .join(" ")}`;
+    case "chance":
+      return `when.chance ${w.p.toFixed(2)}`;
+  }
+}
+
+/**
+ * The WRITES footer for one device (SPEC law 5): the authored grammar, never
+ * the serialised object —
+ *
+ *   modifiers[0] · when.moon Sable [0.86, 1.00] · apply precipitation.pwd ×1.50,
+ *   wind.speed +12 · mods 1
+ *
+ * `index` is the device's slot in `zone.modifiers`, which is the signal-path
+ * position the id alone does not carry.
+ */
+export function deviceGrammar(d: Device, index: number): string {
+  const ops = d.apply.map((op) => applyPhrase(op).replace(/^apply /, ""));
+  const envelopes = d.apply.filter((op) => op.envelope !== undefined).length;
+  return grammar(
+    `modifiers[${index}]`,
+    d.enabled ? "" : "off",
+    whenPhrase(d),
+    d.spell ? `spell ${num(d.spell.meanStartsPerYear)}/yr ${num(d.spell.meanDurationDays)} d` : "",
+    ops.length > 0 ? `apply ${ops.join(", ")}` : "no apply",
+    d.mods.length > 0 ? `mods ${d.mods.length}` : "",
+    envelopes > 0 ? `envelope ${envelopes}` : "",
+  );
+}
+
+/** A gate chip's amount, as the prototype writes it: `72%`. */
+export function gatePercent(amount: number): string {
+  return `${Math.round(amount * 100)}%`;
 }

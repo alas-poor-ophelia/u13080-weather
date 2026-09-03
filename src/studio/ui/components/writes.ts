@@ -4,6 +4,14 @@
  * copies it so it can be pasted into a zone file or a bug report.
  */
 export interface WritesProps {
+  /**
+   * A short authored grammar string — `modifiers[2] · when.moon Sable ·
+   * apply precipitation.pwd ×1.50`. Build it with `model/copy.ts`'s
+   * `grammar()` / `applyPhrase()`; never hand this a `JSON.stringify` dump.
+   * The bar truncates rather than wrapping, so a dump renders as one
+   * ellipsised line instead of growing the panel, but it still reads as
+   * machine spew — the window beads replace those.
+   */
   grammar: string;
 }
 
@@ -16,7 +24,9 @@ export interface WritesComponent {
 export function createWrites(parent: HTMLElement, initial: WritesProps): WritesComponent {
   let props = initial;
   const el = parent.createDiv({ cls: "wadjet-studio-writes" });
-  el.createSpan({ cls: "wadjet-studio-writes-label", text: "Writes →" });
+  // "WRITES", no arrow — the prototype's dim small-caps gutter tag beside a
+  // recessed bar, not a sentence pointing at one.
+  el.createSpan({ cls: "wadjet-studio-writes-label", text: "Writes" });
   // `wadjet-studio-num`: the grammar is mostly numbers (`Y 1962 · seed 8e2c…
   // · salt 0`, day ordinals, op values) and it repaints per frame, so the
   // digits must not jitter — the shared tabular-numerals utility, since the

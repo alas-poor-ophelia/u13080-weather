@@ -1,37 +1,42 @@
 /**
  * The moon **CYCLE** window (SPEC §3.4 "Sable · CYCLE").
  *
- * One panel per moon: a disc showing one full cycle as named phases, the
- * boundaries between them dragged around it, plus the moon's period and its
- * phase at the world's epoch. `MoonConfig.phases` is display metadata (PLAN
- * §2.2) — the engine never sees the names — so everything here writes
- * `settings.calendar.moons[i]` and nothing else.
+ * One panel per moon: a ring showing one full cycle as named phases, the
+ * boundaries between them dragged around it, and a lit-shape moon in the
+ * middle previewing the phase last touched. `MoonConfig.phases` is display
+ * metadata (PLAN §2.2) — the engine never sees the names — so everything here
+ * writes `settings.calendar.moons[i]` and nothing else.
  *
- * Three things worth knowing before editing this file:
+ * Four things worth knowing before editing this file:
  *
  *  - **Moons are world scope** (SPEC §2). Every edit here reaches every zone
  *    in the vault, so the panel wears a `world · N zones` badge and the first
  *    world edit of a session goes through the confirm in
  *    `model/world-confirm.ts`.
- *  - **A plugin calendar is a mirror, not an editor** (PLAN §3). When the
- *    active adapter describes itself as `readOnly`, the disc draws the
+ *  - **A plugin calendar is a mirror, not an editor** (SPEC §8). When the
+ *    active adapter describes itself as `readOnly`, the ring draws the
  *    *description's* phases, every edit affordance is gone, and the footer
  *    says where the calendar is actually edited.
+ *  - **The period and the epoch are readouts, not controls.** The prototype
+ *    exposes the period as a title chip and has no epoch control at all; both
+ *    are facts about the calendar, and under a plugin adapter they are not
+ *    ours to change. Editing them was the plugin's own invention.
  *  - **The disc is hand-drawn SVG, not the Chart.** `ChartKind: "disc"` draws
- *    boundary spokes and drag handles but no filled phase arcs and no labels,
- *    and this window needs both (plus double-click-an-arc-to-split). Rather
- *    than grow the shared Chart with a second disc dialect, the window owns
- *    its own `createSvg` disc — SPEC §3.4 allows either.
+ *    boundary spokes and drag handles but no ring arcs, no labels and no moon,
+ *    and this window needs all three (plus double-click-an-arc-to-split).
+ *    Rather than grow the shared Chart with a second disc dialect, the window
+ *    owns its own `createSvg` ring — SPEC §3.4 allows either.
  *
  * The boundary maths is entirely `model/boundaries.ts`, shared with the
- * Seasons window; nothing in this file computes a phase itself.
+ * Seasons window; nothing in this file computes a phase itself. The moon's
+ * lit shape is `model/moon-shape.ts`, shared with nothing yet — it is the one
+ * derivation the prototype has and the model layer did not.
  */
 import type { CalendarDescription } from "../../../plugin/time/adapter";
 import {
   PHASE_LIMITS,
   angleOf,
   dragMark,
-  evenMarks,
   fromPhases,
   merge,
   normalise,
@@ -43,13 +48,14 @@ import {
   toPhases,
   type Mark,
 } from "../../model/boundaries";
+import { grammar } from "../../model/copy";
 import { DEFAULT_MOON_PHASES } from "../../model/devices";
 import { cycleHint } from "../../model/hints-cycle";
-import type { KnobSpec } from "../../model/knob";
+import { litShapePath, phaseLabelTint, phaseTint } from "../../model/moon-shape";
 import type { StudioState } from "../../model/state";
 import { ledLevel, studioRules, unitKey, type StudioIssue } from "../../model/validation";
 import { needsWorldConfirm } from "../../model/world-confirm";
-import { createChip, createKnob, type ChipComponent, type KnobComponent } from "../components";
+import { createChip, type ChipComponent } from "../components";
 import { beginDrag, markDragTarget } from "../pointer";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
@@ -58,23 +64,23 @@ import { confirmWorldEdit } from "../world-confirm-modal";
 /** Window ids are `cycle:<moon name>` — one panel per moon, opened by name. */
 export const CYCLE_WINDOW_PREFIX = "cycle:";
 
-/** The disc's SVG user-space box; the element itself scales with the panel. */
-const SIZE = 240;
+/**
+ * The disc's SVG user-space box and the four radii on it, straight from the
+ * prototype's `vst-sablemoon` markup: a 212 px square, a 48 px moon in the
+ * middle, the phase ring at 78 and the phase names at 96.
+ */
+const SIZE = 212;
 const CENTRE = SIZE / 2;
-const DISC_R = 84;
-const LABEL_R = 106;
-const HANDLE_R = 5;
-
-/** Alternating arc tints, so neighbouring phases read apart without a second hue (SPEC §9). */
-const ARC_ALPHA = [0.42, 0.2];
+const MOON_R = 48;
+const RING_R = 78;
+const LABEL_R = 96;
+const HANDLE_R = 6;
 
 /** A whole-circle segment (one phase) cannot be drawn as an arc — it is the circle. */
 const FULL_CIRCLE = 0.999;
 
-/** SPEC §3.4: the period readout, in days. */
-const PERIOD_SPEC: KnobSpec = { min: 1, max: 1000, step: 0.01 };
-/** Where the moon stands on day 0 of the world, as a fraction of one cycle. */
-const EPOCH_SPEC: KnobSpec = { min: 0, max: 1, step: 0.001 };
+/** A segment narrower than this has no room for its name on the ring (prototype: 0.045). */
+const LABEL_MIN_LENGTH = 0.045;
 
 /** The default period a moon with no config would carry (`DEFAULT_SETTINGS.calendar.moons`). */
 const DEFAULT_CYCLE_DAYS = 29.53;
@@ -89,13 +95,13 @@ function polar(deg: number, r: number): { x: number; y: number } {
   return { x: CENTRE + r * Math.cos(rad), y: CENTRE + r * Math.sin(rad) };
 }
 
-/** A filled pie wedge from `fromDeg` to `toDeg`, clockwise. */
-function wedgePath(fromDeg: number, toDeg: number, r: number): string {
+/** A stroked arc along the ring from `fromDeg` to `toDeg`, clockwise. */
+function arcPath(fromDeg: number, toDeg: number, r: number): string {
   const a = polar(fromDeg, r);
   const b = polar(toDeg, r);
   const sweptDeg = ((toDeg - fromDeg) % 360 + 360) % 360;
   const large = sweptDeg > 180 ? 1 : 0;
-  return `M ${CENTRE} ${CENTRE} L ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)} Z`;
+  return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
 }
 
 /** A plain window button: a real button for the keyboard, hinted like everything else. */
@@ -134,25 +140,38 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     let signature = "";
     /** The list index whose name is being typed into; paint holds off while it is open. */
     let editing: number | null = null;
+    /**
+     * The phase the moon in the middle is drawn at — the prototype's
+     * `moonPreview`. Ephemeral view state, not the draft: hovering a phase or
+     * dragging a boundary moves it, and it falls back to the last boundary.
+     */
+    let preview: number | null = null;
 
     const root = createDiv({ cls: "wadjet-studio-cycle" });
-
-    // --- chrome ------------------------------------------------------------
-    const head = root.createDiv({ cls: "wadjet-studio-cycle-head" });
-    const sourceChip: ChipComponent = createChip(head, { label: "internal calendar", icon: "☾", color: "var(--wadjet-studio-moon)", hint: cycleHint("cycle.source") });
-    const worldChip: ChipComponent = createChip(head, { label: "world · 0 zones", color: "var(--wadjet-studio-gold)", hint: cycleHint("cycle.world") });
-    sourceChip.el.setAttr("data-part", "cycle-source");
-    worldChip.el.setAttr("data-part", "cycle-world");
 
     const main = root.createDiv({ cls: "wadjet-studio-cycle-main" });
     const discWrap = main.createDiv({ cls: "wadjet-studio-cycle-disc", attr: { "data-hint": cycleHint("cycle.disc"), "data-part": "cycle-disc" } });
     let svg = discWrap.createSvg("svg");
+    /** Redrawn in place while the pointer is over the ring, so hover never rips the disc out. */
+    let moonPath: SVGElement | null = null;
 
     const side = main.createDiv({ cls: "wadjet-studio-cycle-side" });
+
+    // The calendar the phases come from, and the reach of an edit to them.
+    const head = side.createDiv({ cls: "wadjet-studio-cycle-head" });
+    const sourceChip: ChipComponent = createChip(head, { label: "internal calendar", color: "var(--wadjet-studio-wind)", hint: cycleHint("cycle.source") });
+    const worldChip: ChipComponent = createChip(head, { label: "world · 0 zones", color: "var(--wadjet-studio-gold)", hint: cycleHint("cycle.world") });
+    sourceChip.el.addClass("is-source");
+    sourceChip.el.setAttr("data-part", "cycle-source");
+    worldChip.el.setAttr("data-part", "cycle-world");
+
+    const caption = side.createDiv({ cls: "wadjet-studio-cycle-caption" });
     const list = side.createDiv({ cls: "wadjet-studio-cycle-list", attr: { "data-part": "cycle-list" } });
     const actions = side.createDiv({ cls: "wadjet-studio-cycle-actions" });
-
-    const knobs = side.createDiv({ cls: "wadjet-studio-cycle-knobs" });
+    const previewLine = side.createDiv({ cls: "wadjet-studio-cycle-preview", attr: { "data-hint": cycleHint("cycle.preview"), "data-part": "cycle-preview" } });
+    const readouts = side.createDiv({ cls: "wadjet-studio-cycle-readouts" });
+    const periodOut = readouts.createSpan({ cls: "wadjet-studio-cycle-readout wadjet-studio-num", attr: { "data-hint": cycleHint("cycle.period"), "data-part": "cycle-period" } });
+    const epochOut = readouts.createSpan({ cls: "wadjet-studio-cycle-readout wadjet-studio-num", attr: { "data-hint": cycleHint("cycle.epoch"), "data-part": "cycle-epoch" } });
     const editLine = side.createDiv({ cls: "wadjet-studio-cycle-editin", attr: { "data-hint": cycleHint("cycle.edit"), "data-part": "cycle-editin" } });
 
     // --- state readers -----------------------------------------------------
@@ -172,10 +191,6 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     function draftMoon(state: StudioState): StudioState["world"]["calendar"]["moons"][number] | undefined {
       return state.world.calendar.moons.find((m) => m.name === moonName);
-    }
-
-    function draftIndex(state: StudioState): number {
-      return state.world.calendar.moons.findIndex((m) => m.name === moonName);
     }
 
     function mirrorMoon(): CalendarDescription["moons"][number] | undefined {
@@ -202,11 +217,17 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
       return draftMoon(ctx.store.get())?.phaseAtEpoch ?? 0;
     }
 
+    /** The previewed phase: whatever was last touched, else the last boundary. */
+    function previewPhase(list_: readonly Mark[]): number {
+      if (preview !== null) return preview;
+      return list_[list_.length - 1]?.at ?? 0;
+    }
+
     // --- writes ------------------------------------------------------------
 
     /** Run `apply`, behind the session's one world-edit confirm (SPEC §2). */
     function guarded(apply: () => void): void {
-      // A cancelled edit leaves a knob showing a value nobody committed.
+      // A cancelled edit leaves a control showing a value nobody committed.
       confirmWorldEdit(ctx.plugin.app, ctx, "moons", apply, () => repaint(true));
     }
 
@@ -226,6 +247,24 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     function applyMarks(next: readonly Mark[] | null): void {
       if (next === null) return;
       guarded(() => writeMarks(next, true));
+    }
+
+    // --- the moon in the middle --------------------------------------------
+
+    /**
+     * Repaint only the lit shape and its caption. Hover fires a lot and the
+     * ring must survive the pointer being on one of its own arcs, so this
+     * never touches the disc's structure.
+     */
+    function paintMoon(list_: readonly Mark[]): void {
+      const at = previewPhase(list_);
+      moonPath?.setAttr("d", litShapePath(at, CENTRE, CENTRE, MOON_R));
+      previewLine.setText(`disc preview · phase ${at.toFixed(2)} · d${(at * cycleDays()).toFixed(1)} of the cycle`);
+    }
+
+    function setPreview(at: number | null): void {
+      preview = at;
+      paintMoon(marks());
     }
 
     // --- disc --------------------------------------------------------------
@@ -254,7 +293,10 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
           const list_ = marks();
           const at = list_.findIndex((m) => m.name === name);
           if (at < 0) return;
-          writeMarks(dragMark(list_, at, phaseAt(move), PHASE_LIMITS), false);
+          const to = phaseAt(move);
+          // The prototype's `moonBoundDown`: the moon shows where the boundary is going.
+          preview = to;
+          writeMarks(dragMark(list_, at, to, PHASE_LIMITS), false);
         },
         onEnd: (_end, _dx, _dy, moved) => {
           cancelDrag = null;
@@ -267,29 +309,36 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     function drawDisc(list_: readonly Mark[]): void {
       svg.remove();
       svg = discWrap.createSvg("svg", { cls: "wadjet-studio-cycle-svg", attr: { viewBox: `0 0 ${SIZE} ${SIZE}`, role: "img", "aria-label": `${moonName} phases` } });
-      svg.createSvg("circle", { cls: "wadjet-studio-cycle-face", attr: { cx: CENTRE, cy: CENTRE, r: DISC_R } });
+      // The unlit disc, then the lit shape over it: together they are the moon.
+      svg.createSvg("circle", { cls: "wadjet-studio-cycle-face", attr: { cx: CENTRE, cy: CENTRE, r: MOON_R } });
+      moonPath = svg.createSvg("path", { cls: "wadjet-studio-cycle-moon", attr: { d: litShapePath(previewPhase(list_), CENTRE, CENTRE, MOON_R) } });
 
       const segs = segments(list_);
       segs.forEach((seg, i) => {
-        const alpha = ARC_ALPHA[i % ARC_ALPHA.length] ?? ARC_ALPHA[0]!;
-        const attrs = { fill: "var(--wadjet-studio-moon)", "fill-opacity": String(alpha), "data-index": String(i), "data-name": seg.name, "data-hint": cycleHint("cycle.arc") };
+        const mid = seg.from + seg.length / 2;
+        const attrs = { "data-index": String(i), "data-name": seg.name, "data-hint": cycleHint("cycle.arc") };
         const arc =
           seg.length >= FULL_CIRCLE
-            ? svg.createSvg("circle", { cls: "wadjet-studio-cycle-arc", attr: { ...attrs, cx: CENTRE, cy: CENTRE, r: DISC_R } })
-            : svg.createSvg("path", { cls: "wadjet-studio-cycle-arc", attr: { ...attrs, d: wedgePath(angleOf(seg.from), angleOf(seg.to), DISC_R) } });
+            ? svg.createSvg("circle", { cls: "wadjet-studio-cycle-arc", attr: { ...attrs, cx: CENTRE, cy: CENTRE, r: RING_R } })
+            : svg.createSvg("path", { cls: "wadjet-studio-cycle-arc", attr: { ...attrs, d: arcPath(angleOf(seg.from), angleOf(seg.to) - 0.5, RING_R) } });
+        // The ring lightens from new to full, the way the prototype's hsl ramp does.
+        arc.setCssProps({ "--wadjet-studio-cycle-tint": phaseTint(mid).toFixed(3) });
         arc.addEventListener("dblclick", (ev: MouseEvent) => {
           if (readOnly()) return;
           ev.preventDefault();
           ev.stopPropagation();
           applyMarks(split(marks(), phaseAt(ev), PHASE_LIMITS));
         });
+        arc.addEventListener("mouseenter", () => setPreview(mid));
 
-        // The name sits outside the disc, at the middle of its own arc.
-        const mid = polar(angleOf(seg.from) + (seg.length / 2) * 360, LABEL_R);
+        // The name sits outside the ring, at the middle of its own arc.
+        if (seg.length < LABEL_MIN_LENGTH) return;
+        const at = polar(angleOf(seg.from) + (seg.length / 2) * 360, LABEL_R);
         const label = svg.createSvg("text", {
           cls: "wadjet-studio-cycle-label",
-          attr: { x: mid.x.toFixed(2), y: mid.y.toFixed(2), "text-anchor": "middle", "dominant-baseline": "middle", "data-index": String(i), "data-name": seg.name, "data-hint": cycleHint("cycle.name") },
+          attr: { x: at.x.toFixed(2), y: at.y.toFixed(2), "text-anchor": "middle", "dominant-baseline": "middle", "data-index": String(i), "data-name": seg.name, "data-hint": cycleHint("cycle.name") },
         });
+        label.setCssProps({ "--wadjet-studio-cycle-tint": phaseLabelTint(mid).toFixed(3) });
         label.setText(seg.name);
         label.addEventListener("dblclick", (ev: MouseEvent) => {
           ev.preventDefault();
@@ -299,21 +348,23 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
         });
       });
 
-      // Boundary spokes and their handles. Under a read-only calendar the
-      // spokes stay (they are the data) and the handles go (they are the edit).
+      // Boundary handles ride *on* the ring. Under a read-only calendar they
+      // go — the arcs are the data, the handles are the edit.
+      if (readOnly()) return;
       list_.forEach((mark, i) => {
-        const deg = angleOf(mark.at);
-        const end = polar(deg, DISC_R);
-        svg.createSvg("line", { cls: "wadjet-studio-cycle-spoke", attr: { x1: CENTRE, y1: CENTRE, x2: end.x.toFixed(2), y2: end.y.toFixed(2) } });
-        if (readOnly()) return;
+        const end = polar(angleOf(mark.at), RING_R);
         const handle = svg.createSvg("circle", {
           cls: "wadjet-studio-cycle-handle",
           attr: { cx: end.x.toFixed(2), cy: end.y.toFixed(2), r: HANDLE_R, "data-index": String(i), "data-name": mark.name, "data-hint": cycleHint("cycle.handle") },
         });
         markDragTarget(handle);
         handle.addEventListener("pointerdown", (ev: PointerEvent) => startDrag(ev, mark.name, handle));
+        handle.addEventListener("mouseenter", () => setPreview(mark.at));
       });
     }
+
+    // The moon falls back to the last boundary once the pointer leaves the ring.
+    discWrap.addEventListener("mouseleave", () => setPreview(null));
 
     // --- the phase list ----------------------------------------------------
 
@@ -350,22 +401,32 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     function drawList(list_: readonly Mark[]): void {
       list.empty();
       const editable = !readOnly();
-      list_.forEach((mark, i) => {
-        const row = list.createDiv({ cls: "wadjet-studio-cycle-row", attr: { "data-index": String(i), "data-name": mark.name, "data-part": "cycle-row" } });
-        const name = row.createSpan({ cls: "wadjet-studio-cycle-rowname", text: mark.name, attr: { "data-hint": cycleHint("cycle.name"), "data-part": "cycle-name" } });
+      const segs = segments(list_);
+      const days = cycleDays();
+      segs.forEach((seg, i) => {
+        const row = list.createDiv({ cls: "wadjet-studio-cycle-row", attr: { "data-index": String(i), "data-name": seg.name, "data-part": "cycle-row" } });
+        const swatch = row.createSpan({ cls: "wadjet-studio-cycle-swatch", attr: { "aria-hidden": "true" } });
+        swatch.setCssProps({ "--wadjet-studio-cycle-tint": phaseTint(seg.from + seg.length / 2).toFixed(3) });
+        const name = row.createSpan({ cls: "wadjet-studio-cycle-rowname", text: seg.name, attr: { "data-hint": cycleHint("cycle.name"), "data-part": "cycle-name" } });
         if (editable) name.addEventListener("dblclick", () => beginRename(i, name));
-        row.createSpan({ cls: "wadjet-studio-cycle-rowat", text: `· ${mark.at.toFixed(3)}` });
-        if (!editable) return;
+        // The prototype's row readout: the span this phase covers, then its
+        // length in days. The last segment closes the cycle, so it ends at
+        // 1.00 rather than at the wrapped 0.00 `segments` reports.
+        const to = seg.to <= seg.from ? 1 : seg.to;
+        row.createSpan({ cls: "wadjet-studio-cycle-rowat wadjet-studio-num", text: `${seg.from.toFixed(2)} – ${to.toFixed(2)} · ${(seg.length * days).toFixed(1)} d` });
+        row.addEventListener("mouseenter", () => setPreview(seg.from + seg.length / 2));
+        // The origin phase has no ×: merging it would move the start of the cycle.
+        if (!editable || i === 0) return;
         const remove = row.createDiv({
           cls: "wadjet-studio-cycle-x",
           text: "×",
-          attr: { role: "button", tabindex: "0", "aria-label": `Remove ${mark.name}`, "data-hint": cycleHint("cycle.remove"), "data-part": "cycle-remove" },
+          attr: { role: "button", tabindex: "0", "aria-label": `Remove ${seg.name}`, "data-hint": cycleHint("cycle.remove"), "data-part": "cycle-remove" },
         });
         const fire = (): void => {
           if (remove.hasClass("is-disabled")) return;
           applyMarks(merge(marks(), i, PHASE_LIMITS));
         };
-        setDisabled(remove, list_.length <= PHASE_LIMITS.min);
+        setDisabled(remove, list_.length <= Math.max(2, PHASE_LIMITS.min));
         remove.addEventListener("click", fire);
         remove.addEventListener("keydown", (ev) => {
           if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -378,49 +439,12 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     // --- controls built once ----------------------------------------------
 
     const splitButton = cycleButton(actions, {
-      text: "＋ split the longest",
+      text: "＋ split phase",
       label: "Split the longest phase",
       hint: cycleHint("cycle.split"),
       part: "cycle-split",
       onClick: () => applyMarks(splitLongest(marks(), PHASE_LIMITS)),
     });
-    const evenButton = cycleButton(actions, {
-      text: "Evenly spaced",
-      label: "Space the phases evenly",
-      hint: cycleHint("cycle.even"),
-      part: "cycle-even",
-      onClick: () => applyMarks(evenMarks(marks().map((m) => m.name))),
-    });
-
-    function writeNumber(field: "cycleDays" | "phaseAtEpoch", value: number, commit: boolean): void {
-      ctx.store.update((s) => {
-        const moon = draftMoon(s);
-        if (moon === undefined) return;
-        moon[field] = value;
-      });
-      if (commit) ctx.store.snapshot();
-    }
-
-    const periodKnob: KnobComponent = createKnob(knobs, {
-      spec: PERIOD_SPEC,
-      value: DEFAULT_CYCLE_DAYS,
-      label: "Period",
-      fmt: (v) => `${v.toFixed(2)} d`,
-      color: "var(--wadjet-studio-moon)",
-      hint: cycleHint("cycle.period"),
-      onChange: (value, phase) => guarded(() => writeNumber("cycleDays", value, phase !== "drag")),
-    });
-    const epochKnob: KnobComponent = createKnob(knobs, {
-      spec: EPOCH_SPEC,
-      value: 0,
-      label: "At epoch",
-      fmt: (v) => v.toFixed(3),
-      color: "var(--wadjet-studio-moon)",
-      hint: cycleHint("cycle.epoch"),
-      onChange: (value, phase) => guarded(() => writeNumber("phaseAtEpoch", value, phase !== "drag")),
-    });
-    periodKnob.el.setAttr("data-part", "cycle-period");
-    epochKnob.el.setAttr("data-part", "cycle-epoch");
 
     // --- paint -------------------------------------------------------------
 
@@ -435,20 +459,20 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
       signature = key;
 
       root.toggleClass("is-readonly", ro);
-      sourceChip.update({ label: sourceLabel() });
+      sourceChip.update({ label: sourceLabel(), color: ro ? "var(--wadjet-studio-gold)" : "var(--wadjet-studio-wind)" });
       const zones = Object.keys(state.zones).length;
       worldChip.update({ label: `world · ${zones} zones` });
 
+      caption.setText(`PHASES · ${list_.length}`);
       drawDisc(list_);
       drawList(list_);
+      paintMoon(list_);
 
       splitButton.toggleClass("is-hidden", ro);
-      evenButton.toggleClass("is-hidden", ro);
       setDisabled(splitButton, list_.length >= PHASE_LIMITS.max);
-      setDisabled(evenButton, list_.length === 0);
 
-      periodKnob.update({ value: cycleDays(), disabled: ro });
-      epochKnob.update({ value: phaseAtEpoch(), disabled: ro });
+      periodOut.setText(`↻ ${cycleDays().toFixed(2)} d`);
+      epochOut.setText(`epoch ${phaseAtEpoch().toFixed(3)}`);
 
       const d = description();
       const hint = d !== null && d.readOnly ? (d.editHint ?? `edit in ${d.label}`) : "";
@@ -461,14 +485,15 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     // --- pull-based readouts ----------------------------------------------
 
+    /** The grammar this panel produces (SPEC law 5) — never raw JSON. */
     function writes(): string {
       const d = description();
       if (d !== null && d.readOnly) return `nothing — ${d.label} owns this calendar`;
       const state = ctx.store.get();
-      const at = draftIndex(state);
-      const moon = state.world.calendar.moons[at];
+      const moon = draftMoon(state);
       if (moon === undefined) return `calendar.moons — no moon named "${moonName}"`;
-      return `calendar.moons[${at}] · ${JSON.stringify(moon)}`;
+      const phases = marks().map((m) => `${m.name}@${m.at.toFixed(2)}`).join(", ");
+      return grammar(`calendar.moons[${moonName}]`, `period ${moon.cycleDays.toFixed(2)} d`, `phases [${phases}]`);
     }
 
     function issues(): StudioIssue[] {
@@ -491,7 +516,12 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     return {
       title: moonName,
+      // Prototype width (`proto-markup/`): a design constant, not a function of the content.
+      width: 452,
       badge: "CYCLE",
+      badgeColor: "var(--wadjet-studio-moon)",
+      // The prototype's `↻ 29.53 d` title readout — the period is a fact, not a control.
+      caption: `↻ ${cycleDays().toFixed(2)} d`,
       body: root,
       led: { on: true, scope: "device" },
       level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "moon", name: moonName }))),
@@ -502,8 +532,6 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
         cancelDrag = null;
         unsubscribe?.();
         unsubscribe = null;
-        periodKnob.destroy();
-        epochKnob.destroy();
         sourceChip.destroy();
         worldChip.destroy();
         root.remove();

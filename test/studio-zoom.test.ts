@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
+  BOUNDS_AFTER,
+  BOUNDS_BEFORE,
+  ERA_PAD,
+  ERA_SPAN,
   MAX_WINDOW_YEARS,
   MIN_WINDOW_DAYS,
   clampWindow,
+  eraFrame,
   morph,
   panBy,
   panByDrag,
@@ -12,6 +17,7 @@ import {
   ticks,
   wheelZoomFactor,
   width,
+  worldBounds,
   yearToPx,
   zoomAt,
   zoomLabel,
@@ -183,6 +189,50 @@ describe("zoom: presets", () => {
     const w = presetWindow("era", nearEdge, narrowBounds, []);
     expect(w.a).toBeCloseTo(1000, 9); // 505..1505 shifted up to the bound
     expect(w.b).toBeCloseTo(2000, 9);
+  });
+
+  test("era FRAMES the world's eras when it has any, wherever the reader was", () => {
+    // The audit world: Ice Age 1200–1900, Thaw 1901–1950, Long Summer 1951–∞.
+    const eras = [
+      { name: "Ice Age", from: 1200, to: 1900 },
+      { name: "Thaw", from: 1901, to: 1950 },
+      { name: "Long Summer", from: 1951 },
+    ];
+    const bounds = worldBounds(1, eras);
+    const w = presetWindow("era", { a: 0, b: 1 }, bounds, [], eras);
+    // The prototype's own `setWin(1100, 2100)`.
+    expect(w.a).toBeCloseTo(1100, 9);
+    expect(w.b).toBeCloseTo(2100, 9);
+  });
+
+  test("a disabled era is not framed, and a world with none keeps the centred window", () => {
+    expect(eraFrame([{ name: "Off", from: 1200, to: 1900, enabled: false }])).toBeNull();
+    expect(eraFrame([])).toBeNull();
+    const w = presetWindow("era", current, WIDE_BOUNDS, [], [{ name: "Off", from: 1200, enabled: false }]);
+    expect(w.a).toBeCloseTo(2005.6 - ERA_SPAN / 2, 6);
+  });
+
+  test("the frame grows past ERA_SPAN when the eras themselves are wider", () => {
+    expect(eraFrame([{ name: "Long", from: 200, to: 1800 }])).toEqual({ a: 100, b: 1900 });
+  });
+});
+
+describe("zoom: worldBounds", () => {
+  test("with no eras it is the epoch's own reach", () => {
+    expect(worldBounds(1)).toEqual({ min: 1 - BOUNDS_BEFORE, max: 1 + BOUNDS_AFTER });
+  });
+
+  test("an era past the epoch's reach widens it, so the era is reachable at all", () => {
+    // Without this the audit world's eras (1200–) sit outside `epoch + 1100`
+    // and the Eras lane reads empty at every zoom.
+    const b = worldBounds(1, [{ name: "Ice Age", from: 1200, to: 1900 }, { name: "Long Summer", from: 1951 }]);
+    expect(b.min).toBe(1 - BOUNDS_BEFORE);
+    expect(b.max).toBeGreaterThanOrEqual(2100);
+    expect(clampWindow({ a: 1100, b: 2100 }, b)).toEqual({ a: 1100, b: 2100 });
+  });
+
+  test("an era BEFORE the epoch widens the other end", () => {
+    expect(worldBounds(1000, [{ name: "Deep past", from: 10, to: 20 }]).min).toBe(10 - ERA_PAD);
   });
 });
 

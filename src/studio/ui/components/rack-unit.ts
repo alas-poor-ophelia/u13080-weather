@@ -14,9 +14,11 @@ export interface RackUnitProps {
   /** Two-digit slot number, in rack order. */
   slot: string;
   name: string;
-  /** Short kind badge — TRIM, MOON, SPELL … */
+  /** The kind pill's word — `moon`, `spell`, `era`, `states`, `master` … */
   kind: string;
   color: string;
+  /** Powered off: the whole card recedes rather than disappearing. */
+  dim?: boolean;
   /** Shows the ⧉ twin marker: this unit mirrors another surface. */
   linked?: boolean;
   /** Zone count for a world-scoped unit; renders the `world · N zones` badge. */
@@ -49,8 +51,11 @@ export function createRackUnit(parent: HTMLElement, initial: RackUnitProps): Rac
   const led: LedComponent = createLed(head, props.led);
   const nameEl = head.createSpan({ cls: "wadjet-studio-rack-name", attr: { role: "button", tabindex: "0" } });
   const kindEl = head.createSpan({ cls: "wadjet-studio-rack-kind" });
-  const linkEl = head.createSpan({ cls: "wadjet-studio-rack-link", text: "⧉", attr: { role: "img", "aria-label": "Linked to another surface" } });
   const worldEl = head.createSpan({ cls: "wadjet-studio-rack-world" });
+  // The twin glyph sits at the far right of the head row, clear of the pills
+  // (the prototype's `<div style="flex:1">` before it).
+  head.createDiv({ cls: "wadjet-studio-rack-gap" });
+  const linkEl = head.createSpan({ cls: "wadjet-studio-rack-link", text: "⧉", attr: { role: "img", "aria-label": "Linked to another surface" } });
   const chipRow = el.createDiv({ cls: "wadjet-studio-rack-chips" });
 
   function open(ev: Event): void {
@@ -89,10 +94,13 @@ export function createRackUnit(parent: HTMLElement, initial: RackUnitProps): Rac
     slotEl.setText(props.slot);
     nameEl.setText(props.name);
     kindEl.setText(props.kind);
+    kindEl.toggleClass("is-hidden", props.kind === "");
+    kindEl.setAttr("data-kind", props.kind);
     linkEl.toggleClass("is-hidden", props.linked !== true);
     worldEl.setText(props.world === undefined ? "" : `world · ${props.world} zones`);
     worldEl.toggleClass("is-hidden", props.world === undefined);
     grip.toggleClass("is-hidden", props.grip === false);
+    el.toggleClass("is-off", props.dim === true);
     led.update(props.led);
   }
 

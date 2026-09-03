@@ -4,6 +4,33 @@
  * whose points drag), rose (16 polar sectors, wind), disc (a circle whose
  * phase boundaries drag, the moon cycle). Nothing here interprets the data:
  * callers hand it points already in the units they want on screen.
+ *
+ * A plot can also be *read*, not just seen (bead wadjet-6rw.10). Four optional
+ * props turn the bare line into a chart with an axis, and all four are generic
+ * — every channel editor, and any future plot, composes them the same way:
+ *
+ *   `pad`      per-side plot inset. The left side is the tick gutter, so a
+ *              chart with `ticks` needs room there (the prototype's is 38 px).
+ *              `padX` is the shorthand for left+right alone — a playlist row
+ *              is measured against the ruler's tick strip, so it plots at
+ *              `padX: 0` and its curve lands on the ruler's own pixels.
+ *   `ticks`    y-axis tick labels, right-aligned in that gutter. The caller
+ *              picks the values, because only the caller knows the unit.
+ *   `bands`    x-domain tint rects behind everything — season bands on a year
+ *              domain, moon-phase bands on a cycle one. A band *is* the label:
+ *              the studio never prints a season name inside a plot.
+ *   `rules`    horizontal lines at a value. Solid, a rule is a grid line (a
+ *              playlist row's axis positions); dashed, a reference the reader
+ *              is meant to notice (0 °C freezing).
+ *   `envelope` a translucent ribbon between two series (mean ± spread).
+ *
+ * `selected` / `onSelect` give the `automation` kind a selected handle, so a
+ * panel can show a readout for the point under the finger.
+ *
+ * The `rose` kind has two forms. Without `wedges` it is the 16-bucket
+ * histogram `series[0]` describes; with them it is the direction rose —
+ * rings, the four cardinals, and one coloured sector per wedge on its own
+ * bearing (degrees clockwise from north).
  */
 import { beginDrag, markDragTarget, noteTouchPointer } from "../pointer";
 
@@ -15,11 +42,74 @@ export interface ChartSeries {
   points: Array<[number, number]>;
   color: string;
   fill?: boolean;
+  /** SVG `stroke-dasharray` — a reference or comparison line, drawn dashed. */
+  dash?: string;
+  /** Stroke width in px; defaults to the stylesheet's 1.6. */
+  width?: number;
 }
 
 export interface ChartMarker {
   x: number;
   label?: string;
+}
+
+/** A tint rect spanning `[from, to]` of the x domain, drawn behind every series. */
+export interface ChartBand {
+  from: number;
+  to: number;
+  color: string;
+}
+
+/** One y-axis tick: where it sits in data space, and what it reads. */
+export interface ChartTick {
+  value: number;
+  label: string;
+}
+
+/**
+ * A horizontal line at a y value in the series' own units. One object serves
+ * both readings: solid, it is a *grid* line (a playlist row's axis positions,
+ * which the ruler above already labels); dashed, it is a *reference* — a value
+ * that means something on its own, like SPEC §3.2's 0 °C freezing line.
+ */
+export interface ChartRule {
+  value: number;
+  /** SVG `stroke-dasharray`, as on a series. Set = a reference; unset = a grid line. */
+  dash?: string;
+  color?: string;
+  /** Printed just inside the plot's left edge, above the line. */
+  label?: string;
+}
+
+/** The translucent ribbon between two series (mean ± spread). */
+export interface ChartEnvelope {
+  lo: Array<[number, number]>;
+  hi: Array<[number, number]>;
+  color: string;
+}
+
+/**
+ * One wedge of the `rose` kind: a sector at a bearing, in its own colour.
+ *
+ * `angle` is degrees clockwise from north — the compass convention, not SVG's
+ * — and `radius` is a fraction of the rose, so a caller may make one wedge
+ * reach further than another without knowing the pixel size.
+ */
+export interface ChartWedge {
+  angle: number;
+  /** the sector's angular width, in degrees */
+  spread: number;
+  /** 0–1 of the rose radius */
+  radius: number;
+  color: string;
+}
+
+/** Plot inset, per side. Defaults to 6 px all round. */
+export interface ChartPad {
+  left?: number;
+  right?: number;
+  top?: number;
+  bottom?: number;
 }
 
 export interface ChartProps {
@@ -34,11 +124,39 @@ export interface ChartProps {
   onAdd?(x: number, y: number): void;
   onRemove?(index: number): void;
   markers?: ChartMarker[];
+  pad?: ChartPad;
+  /**
+   * Shorthand for `pad.left` and `pad.right` together, for the one case that
+   * only ever wants the horizontal inset changed: a playlist channel row is
+   * measured against the ruler's tick strip, so a curve inset by `PAD` would
+   * sit a few pixels left of the day it is drawn at. `pad` wins per side.
+   */
+  padX?: number;
+  bands?: ChartBand[];
+  ticks?: ChartTick[];
+  rules?: ChartRule[];
+  envelope?: ChartEnvelope | null;
+  /**
+   * `rose` only: one sector per wedge, at its own bearing, instead of the
+   * 16-bucket histogram `series[0]` draws. Supplying wedges also draws the
+   * rings and the N/E/S/W cardinals — a bearing is unreadable without them.
+   */
+  wedges?: ChartWedge[];
+  /** `rose` only: how many concentric rings sit behind the wedges. Default 3. */
+  rings?: number;
+  /** The highlighted `automation` handle — drawn larger, in `.is-selected`. */
+  selected?: number | null;
+  /** Fired on pointer-down over a handle, before the drag starts. */
+  onSelect?(index: number): void;
 }
 
 const PAD = 6;
 const ROSE_SECTORS = 16;
 const POINT_R = 4;
+/** The selected `automation` handle, in px — the prototype's 7 against 4.5. */
+const POINT_R_SELECTED = 6.5;
+/** Gap between a tick label's right edge and the plot's left edge. */
+const TICK_GAP = 6;
 
 export interface ChartComponent {
   el: HTMLElement;
@@ -73,24 +191,29 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     return lo === hi ? [lo - 1, lo + 1] : [lo, hi];
   }
 
-  const plotW = (): number => props.width - 2 * PAD;
-  const plotH = (): number => props.height - 2 * PAD;
+  const padL = (): number => props.pad?.left ?? props.padX ?? PAD;
+  const padR = (): number => props.pad?.right ?? props.padX ?? PAD;
+  const padT = (): number => props.pad?.top ?? PAD;
+  const padB = (): number => props.pad?.bottom ?? PAD;
+
+  const plotW = (): number => Math.max(1, props.width - padL() - padR());
+  const plotH = (): number => Math.max(1, props.height - padT() - padB());
 
   function sx(x: number): number {
     const [a, b] = xRange();
-    return PAD + ((x - a) / (b - a)) * plotW();
+    return padL() + ((x - a) / (b - a)) * plotW();
   }
   function sy(y: number): number {
     const [a, b] = yRange();
-    return PAD + (1 - (y - a) / (b - a)) * plotH();
+    return padT() + (1 - (y - a) / (b - a)) * plotH();
   }
   function invX(px: number): number {
     const [a, b] = xRange();
-    return a + ((px - PAD) / plotW()) * (b - a);
+    return a + ((px - padL()) / plotW()) * (b - a);
   }
   function invY(py: number): number {
     const [a, b] = yRange();
-    return a + (1 - (py - PAD) / plotH()) * (b - a);
+    return a + (1 - (py - padT()) / plotH()) * (b - a);
   }
 
   function localPoint(ev: MouseEvent): { x: number; y: number } {
@@ -111,11 +234,87 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     const last = s.points[s.points.length - 1];
     if (!first || !last) return;
     if (s.fill) {
-      const floor = (props.height - PAD).toFixed(2);
+      const floor = (props.height - padB()).toFixed(2);
       const d = `${pathOf(s.points)} L ${sx(last[0]).toFixed(2)} ${floor} L ${sx(first[0]).toFixed(2)} ${floor} Z`;
       svg.createSvg("path", { cls: "wadjet-studio-chart-fill", attr: { d, fill: s.color } });
     }
-    svg.createSvg("polyline", { cls: "wadjet-studio-chart-line", attr: { points: polyline(s.points), stroke: s.color } });
+    svg.createSvg("polyline", {
+      cls: "wadjet-studio-chart-line",
+      attr: {
+        points: polyline(s.points),
+        stroke: s.color,
+        ...(s.dash === undefined ? {} : { "stroke-dasharray": s.dash }),
+        ...(s.width === undefined ? {} : { "stroke-width": String(s.width) }),
+      },
+    });
+  }
+
+  /** Season / moon-phase tints, behind every mark. A band *is* the label (SPEC §9). */
+  function drawBands(): void {
+    for (const b of props.bands ?? []) {
+      const x0 = sx(Math.min(b.from, b.to));
+      const x1 = sx(Math.max(b.from, b.to));
+      if (x1 - x0 <= 0) continue;
+      svg.createSvg("rect", {
+        cls: "wadjet-studio-chart-tint",
+        attr: { x: x0.toFixed(2), y: padT().toFixed(2), width: (x1 - x0).toFixed(2), height: plotH().toFixed(2), fill: b.color },
+      });
+    }
+  }
+
+  /**
+   * Horizontal rules — a playlist row's grid positions, the 0 °C reference.
+   * Drawn UNDER the series so a curve is never crossed out, and clipped to the
+   * plot's own y extent so a rule never strays into the tick gutter. The hue
+   * comes from the attribute, as it does for a series line.
+   */
+  function drawRules(): void {
+    const [lo, hi] = yRange();
+    const slack = Math.abs(hi - lo) * 1e-6;
+    for (const r of props.rules ?? []) {
+      if (r.value < Math.min(lo, hi) - slack || r.value > Math.max(lo, hi) + slack) continue;
+      const y = sy(r.value).toFixed(2);
+      const line = svg.createSvg("line", {
+        cls: "wadjet-studio-chart-rule",
+        attr: {
+          x1: padL().toFixed(2),
+          x2: (props.width - padR()).toFixed(2),
+          y1: y,
+          y2: y,
+          stroke: r.color ?? "var(--wadjet-studio-text-mute)",
+          ...(r.dash === undefined ? {} : { "stroke-dasharray": r.dash }),
+        },
+      });
+      line.toggleClass("is-dashed", r.dash !== undefined);
+      if (r.label !== undefined) {
+        svg
+          .createSvg("text", { cls: "wadjet-studio-chart-rule-label", attr: { x: (padL() + TICK_GAP).toFixed(2), y: (sy(r.value) - 3).toFixed(2) } })
+          .setText(r.label);
+      }
+    }
+  }
+
+  /** The ± ribbon. `lo`/`hi` are two curves over the same domain, not a fill to the floor. */
+  function drawEnvelope(): void {
+    const e = props.envelope;
+    if (!e || e.lo.length === 0 || e.hi.length === 0) return;
+    const up = e.hi.map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const down = [...e.lo].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    svg.createSvg("path", { cls: "wadjet-studio-chart-band", attr: { d: `M ${up.join(" L ")} L ${down.join(" L ")} Z`, fill: e.color } });
+  }
+
+  /** Tick labels, right-aligned in the left gutter. Drawn last so no mark covers a number. */
+  function drawTicks(): void {
+    const [lo, hi] = yRange();
+    for (const t of props.ticks ?? []) {
+      if (t.value < Math.min(lo, hi) || t.value > Math.max(lo, hi)) continue;
+      svg
+        .createSvg("text", {
+          cls: "wadjet-studio-chart-tick",
+          attr: { x: (padL() - TICK_GAP).toFixed(2), y: (sy(t.value) + 3).toFixed(2), "text-anchor": "end" },
+        })
+        .setText(t.label);
+    }
   }
 
   function drawBand(): void {
@@ -130,10 +329,57 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     svg.createSvg("polyline", { cls: "wadjet-studio-chart-line", attr: { points: polyline(hi.points), stroke: hi.color } });
   }
 
+  /** Compass bearing (degrees clockwise from north) to a point on the rose. */
+  function bearing(cx: number, cy: number, deg: number, r: number): [number, number] {
+    const a = ((deg - 90) * Math.PI) / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+
+  /**
+   * The prototype's direction rose: rings, the four cardinals, then one
+   * coloured sector per wedge with a spoke and a dot on its bearing. A bearing
+   * cannot be read off a bare sector, so the spoke and the dot are part of the
+   * mark, not decoration.
+   */
+  function drawWedges(cx: number, cy: number, r: number, wedges: ChartWedge[]): void {
+    const rings = props.rings ?? 3;
+    svg.createSvg("circle", { cls: "wadjet-studio-chart-rose-face", attr: { cx, cy, r } });
+    for (let i = 1; i < rings; i++) svg.createSvg("circle", { cls: "wadjet-studio-chart-rose-ring", attr: { cx, cy, r: ((r * i) / rings).toFixed(2) } });
+    for (const [label, deg] of [
+      ["N", 0],
+      ["E", 90],
+      ["S", 180],
+      ["W", 270],
+    ] as Array<[string, number]>) {
+      const [x, y] = bearing(cx, cy, deg, r + 10);
+      svg.createSvg("text", { cls: "wadjet-studio-chart-cardinal", attr: { x: x.toFixed(2), y: (y + 3.5).toFixed(2), "text-anchor": "middle" } }).setText(label);
+    }
+    for (const w of wedges) {
+      const rr = Math.max(0, Math.min(1, w.radius)) * r;
+      const [ax, ay] = bearing(cx, cy, w.angle - w.spread / 2, rr);
+      const [bx, by] = bearing(cx, cy, w.angle + w.spread / 2, rr);
+      const [tx, ty] = bearing(cx, cy, w.angle, rr - 6);
+      svg.createSvg("path", {
+        // `is-wedge` keeps the histogram form's stylesheet stroke off this
+        // one: a wedge's rim is its own colour, and CSS beats the attribute.
+        cls: ["wadjet-studio-chart-sector", "is-wedge"],
+        attr: { d: `M ${cx} ${cy} L ${ax.toFixed(2)} ${ay.toFixed(2)} A ${rr.toFixed(2)} ${rr.toFixed(2)} 0 0 1 ${bx.toFixed(2)} ${by.toFixed(2)} Z`, fill: w.color, stroke: w.color },
+      });
+      svg.createSvg("line", { cls: "wadjet-studio-chart-spoke", attr: { x1: cx, y1: cy, x2: tx.toFixed(2), y2: ty.toFixed(2), stroke: w.color } });
+      svg.createSvg("circle", { cls: "wadjet-studio-chart-bearing", attr: { cx: tx.toFixed(2), cy: ty.toFixed(2), r: 6, stroke: w.color } });
+    }
+    svg.createSvg("circle", { cls: "wadjet-studio-chart-hub", attr: { cx, cy, r: 3.5 } });
+  }
+
   function drawRose(): void {
     const cx = props.width / 2;
     const cy = props.height / 2;
     const r = Math.min(props.width, props.height) / 2 - PAD;
+    const wedges = props.wedges;
+    if (wedges !== undefined) {
+      drawWedges(cx, cy, r - 12, wedges);
+      return;
+    }
     const s = props.series[0];
     if (!s) return;
     const max = Math.max(1, ...s.points.map((p) => p[1]));
@@ -166,15 +412,26 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     });
   }
 
+  /**
+   * The editable line last of all the lines, so the reference curves it is
+   * being compared against never paint over it — then the handles on top.
+   */
   function drawAutomation(): void {
     const s = props.series[0];
     if (!s) return;
+    props.series.slice(1).forEach(drawSeries);
     drawSeries(s);
     s.points.forEach((p, i) => {
-      const dot = svg.createSvg("circle", { cls: "wadjet-studio-chart-point", attr: { cx: sx(p[0]).toFixed(2), cy: sy(p[1]).toFixed(2), r: POINT_R, fill: s.color, "data-index": i } });
+      const on = props.selected === i;
+      const dot = svg.createSvg("circle", {
+        cls: "wadjet-studio-chart-point",
+        // A handle is a ring, not a disc: dark centre, series-coloured rim, so
+        // it stays legible where it sits on top of its own line.
+        attr: { cx: sx(p[0]).toFixed(2), cy: sy(p[1]).toFixed(2), r: on ? POINT_R_SELECTED : POINT_R, fill: "var(--wadjet-studio-bg-alt)", stroke: s.color, "data-index": i },
+      });
+      dot.toggleClass("is-selected", on);
       bindPoint(dot, i, false);
     });
-    props.series.slice(1).forEach(drawSeries);
   }
 
   /** Wire one draggable handle. `radial` means the value is an angle around the disc. */
@@ -184,6 +441,7 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     node.addEventListener("pointerdown", (ev: PointerEvent) => {
       if (ev.button !== 0) return;
       noteTouchPointer(ev, node);
+      props.onSelect?.(index);
       ev.preventDefault();
       ev.stopPropagation();
       const report = (move: MouseEvent, phase: ChartPhase): void => {
@@ -215,8 +473,8 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
   function drawMarkers(): void {
     for (const m of props.markers ?? []) {
       const x = sx(m.x).toFixed(2);
-      svg.createSvg("line", { cls: "wadjet-studio-chart-marker", attr: { x1: x, y1: PAD, x2: x, y2: props.height - PAD } });
-      if (m.label) svg.createSvg("text", { cls: "wadjet-studio-chart-marker-label", attr: { x, y: PAD + 9 } }).setText(m.label);
+      svg.createSvg("line", { cls: "wadjet-studio-chart-marker", attr: { x1: x, y1: padT(), x2: x, y2: props.height - padB() } });
+      if (m.label) svg.createSvg("text", { cls: "wadjet-studio-chart-marker-label", attr: { x, y: padT() + 9 } }).setText(m.label);
     }
   }
 
@@ -230,12 +488,22 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     el.setAttrs({ "data-kind": props.kind, "data-domain": props.domain });
     svg.remove();
     svg = el.createSvg("svg", { cls: "wadjet-studio-chart-svg", attr: { width: props.width, height: props.height, viewBox: `0 0 ${props.width} ${props.height}` } });
+    const cartesian = props.kind !== "rose" && props.kind !== "disc";
+    // Back to front: tints, rules, ribbon, lines, then the numbers on top.
+    if (cartesian) {
+      drawBands();
+      drawRules();
+      drawEnvelope();
+    }
     if (props.kind === "rose") drawRose();
     else if (props.kind === "disc") drawDisc();
     else if (props.kind === "band") drawBand();
     else if (props.kind === "automation") drawAutomation();
     else props.series.forEach(drawSeries);
-    if (props.kind !== "rose" && props.kind !== "disc") drawMarkers();
+    if (cartesian) {
+      drawMarkers();
+      drawTicks();
+    }
     svg.addEventListener("dblclick", onDblClick);
   }
 

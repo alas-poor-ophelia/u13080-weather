@@ -34,14 +34,16 @@ import { canonicalJson } from "../../core/profile";
 import type { ZoneProfile } from "../../core/types";
 import type { Units } from "../../core/units";
 import type { CalendarDescription } from "../../plugin/time/adapter";
-import { getWetness, totalWarmthAt } from "../model/compile";
+import { channelOrNull, getWetness, totalWarmthAt } from "../model/compile";
+import { describeOp } from "../model/copy";
 import { setEnabled } from "../model/era-edit";
 import { format } from "../model/format";
 import { mixerHint } from "../model/hints-mixer";
 import { CHAIN_COLOR_VAR, CHAIN_LABEL, CHAINS, eraNameOf, fixedStripFor, isEraUnit, reorderInChain, setChainMute, setForcingsChainMute, setRegimesChainMute, unitsFor, type Chain, type FixedStrip, type UnitCard } from "../model/mixer";
+import { cycleColour, REGIME_CYCLE } from "../model/palette";
 import type { StudioState } from "../model/state";
 import { issuesByUnit, issuesFor, ledLevel, unitKey, type StudioIssue } from "../model/validation";
-import { createLed, createRackUnit, type GripPhase, type LedComponent, type LedLevel, type RackUnitComponent } from "./components";
+import { createLed, createRackUnit, type ChipProps, type GripPhase, type LedComponent, type LedLevel, type RackUnitComponent } from "./components";
 import { openInsertPicker } from "./insert-picker";
 import type { Surface, SurfaceContext } from "./surfaces";
 import { buildForcingsWindow, FORCINGS_WINDOW } from "./windows/forcings";
@@ -53,12 +55,16 @@ export const DEVICE_WINDOW_PREFIX = "device:";
 
 /** The fixed slots at the top of a chain, outside the numbered rack (SPEC §3.3). */
 const REGIMES_SLOT = "00";
-const FORCINGS_SLOT = "FRC";
+const FORCINGS_SLOT = "M";
 const MASTER_SLOT = "M";
 
-/** `+1.4 °C` / `−0.5 °C` — the warmth readout, in the reader's units. */
+/**
+ * `+1.4 °C` / `−0.5 °C` / `0.0 °C` — the warmth readout, in the reader's
+ * units. A zero offset is **not** signed: `+0.0 °C` reads as a write the zone
+ * does not make (gap report §12).
+ */
 function warmthText(total: number, units: Units): string {
-  const f = format(total, "temperatureDelta", units, { signed: true });
+  const f = format(total, "temperatureDelta", units, { signed: total !== 0 });
   return `${f.text} ${f.unit}`;
 }
 
@@ -68,16 +74,16 @@ function wetnessText(k: number, units: Units): string {
   return `${f.unit}${f.text}`;
 }
 
-/** `Regimes 3 states`, singular when there is one. */
+/** `3 states`, singular when there is one — the strip's dim value half. */
 function regimesText(count: number): string {
-  return `Regimes ${count} ${count === 1 ? "state" : "states"}`;
+  return `${count} ${count === 1 ? "state" : "states"}`;
 }
 
-/** `Forcings +0.0 °C` in TEMP, `Forcings ×1.00` in PRECIP. */
+/** `0.0 °C` in TEMP, `×1.00` in PRECIP — the strip's dim value half. */
 function forcingsText(strip: FixedStrip, chain: Chain, units: Units): string {
   const f = strip.forcings;
-  if (f === null) return "Forcings";
-  return `Forcings ${chain === "temperature" ? warmthText(f.total, units) : wetnessText(f.total, units)}`;
+  if (f === null) return "";
+  return chain === "temperature" ? warmthText(f.total, units) : wetnessText(f.total, units);
 }
 
 /** A span that behaves like a button for the pointer and the keyboard alike. */
@@ -104,9 +110,11 @@ interface ChainBlock {
   stripRow: HTMLElement;
   regimesLed: LedComponent;
   regimesName: HTMLElement;
-  stripDot: HTMLElement;
+  regimesSum: HTMLElement;
+  forcingsItem: HTMLElement;
   forcingsLed: LedComponent;
   forcingsName: HTMLElement;
+  forcingsSum: HTMLElement;
   toggle: HTMLElement;
   fixedRack: HTMLElement;
   rack: HTMLElement;
@@ -142,6 +150,8 @@ export function createMixerSurface(): Surface {
   let ctx: SurfaceContext | null = null;
   let blocks: ChainBlock[] = [];
   let master: { el: HTMLElement; unit: RackUnitComponent; key: string } | null = null;
+  /** the rail's own header and the MASTER spacer — no state, but they must be unmounted */
+  let chrome: HTMLElement[] = [];
   let memoKey = "";
   let memo: Derived = { issues: [] };
   /** the one in-flight rack-unit drag, if any (see the file docstring) */
@@ -295,49 +305,75 @@ export function createMixerSurface(): Surface {
     const head = el.createDiv({ cls: "wadjet-studio-mixer-head", attr: { "data-hint": mixerHint("mixer.chain") } });
     head.createDiv({ cls: "wadjet-studio-mixer-bar" });
     head.createSpan({ cls: "wadjet-studio-mixer-title", text: CHAIN_LABEL[chain] });
+    head.createDiv({ cls: "wadjet-studio-mixer-rule" });
     const add = clickable(head.createDiv({ cls: "wadjet-studio-mixer-add", text: "＋" }), mixerHint("mixer.insert"), () => {
       if (ctx !== null) openInsertPicker(ctx, chain, add);
     });
     add.setAttrs({ "aria-label": "Insert a device", "data-part": "insert" });
 
     const strip = el.createDiv({ cls: "wadjet-studio-strip" });
-    const stripRow = strip.createDiv({ cls: "wadjet-studio-strip-row" });
-    const regimesLed = createLed(stripRow, { on: true, scope: "chain", hint: mixerHint("mixer.regimes.led"), onToggle: (on) => editZone((z) => setRegimesChainMute(z, chain, !on)) });
-    const regimesName = clickable(stripRow.createSpan({ cls: "wadjet-studio-strip-name" }), mixerHint("mixer.regimes.name"), () => openWindow(REGIMES_WINDOW));
-    const stripDot = stripRow.createSpan({ cls: "wadjet-studio-strip-dot", text: "·" });
-    const forcingsLed = createLed(stripRow, { on: true, scope: "chain", hint: mixerHint("mixer.forcings.led"), onToggle: (on) => editZone((z) => setForcingsChainMute(z, chain, !on)) });
-    const forcingsName = clickable(stripRow.createSpan({ cls: "wadjet-studio-strip-name" }), mixerHint("mixer.forcings.name"), () => openWindow(FORCINGS_WINDOW));
+    // The strip itself is the expander (SPEC §3.3 "strip click expands to full
+    // unit cards"); the LEDs and the names inside it stop propagation, so the
+    // two relational handles keep their own meaning.
+    const stripRow = strip.createDiv({ cls: "wadjet-studio-strip-row", attr: { "data-hint": mixerHint("mixer.strip") } });
+    // Pointer convenience only — the chevron below is the keyboard and
+    // assistive-tech handle, so the row itself never becomes a nested button.
+    stripRow.addEventListener("click", () => toggleFixed(chain));
+    const regimesItem = stripRow.createSpan({ cls: "wadjet-studio-strip-item" });
+    const regimesLed = createLed(regimesItem, { on: true, scope: "chain", hint: mixerHint("mixer.regimes.led"), onToggle: (on) => editZone((z) => setRegimesChainMute(z, chain, !on)) });
+    const regimesName = clickable(regimesItem.createSpan({ cls: "wadjet-studio-strip-name", text: "Regimes" }), mixerHint("mixer.regimes.name"), () => openWindow(REGIMES_WINDOW));
+    const regimesSum = regimesItem.createSpan({ cls: "wadjet-studio-strip-sum" });
+    const forcingsItem = stripRow.createSpan({ cls: "wadjet-studio-strip-item" });
+    const forcingsLed = createLed(forcingsItem, { on: true, scope: "chain", hint: mixerHint("mixer.forcings.led"), onToggle: (on) => editZone((z) => setForcingsChainMute(z, chain, !on)) });
+    const forcingsName = clickable(forcingsItem.createSpan({ cls: "wadjet-studio-strip-name", text: "Forcings" }), mixerHint("mixer.forcings.name"), () => openWindow(FORCINGS_WINDOW));
+    const forcingsSum = forcingsItem.createSpan({ cls: "wadjet-studio-strip-sum" });
+    stripRow.createDiv({ cls: "wadjet-studio-strip-gap" });
     const toggle = clickable(stripRow.createSpan({ cls: "wadjet-studio-strip-toggle", text: "▸" }), mixerHint("mixer.strip"), () => toggleFixed(chain));
 
     regimesLed.el.setAttr("data-part", "regimes-led");
     regimesName.setAttr("data-part", "regimes-name");
+    regimesSum.setAttr("data-part", "regimes-sum");
     forcingsLed.el.setAttr("data-part", "forcings-led");
     forcingsName.setAttr("data-part", "forcings-name");
+    forcingsSum.setAttr("data-part", "forcings-sum");
     toggle.setAttr("data-part", "strip-toggle");
 
     const fixedRack = strip.createDiv({ cls: "wadjet-studio-strip-open" });
     const rack = el.createDiv({ cls: "wadjet-studio-mixer-rack" });
     const empty = el.createDiv({ cls: "wadjet-studio-mixer-empty", text: "no inserts · ＋ to add a device", attr: { "data-hint": mixerHint("mixer.empty") } });
 
-    return { chain, el, strip, stripRow, regimesLed, regimesName, stripDot, forcingsLed, forcingsName, toggle, fixedRack, rack, empty, fixedUnits: [], units: [], cards: [], key: "" };
+    return { chain, el, strip, stripRow, regimesLed, regimesName, regimesSum, forcingsItem, forcingsLed, forcingsName, forcingsSum, toggle, fixedRack, rack, empty, fixedUnits: [], units: [], cards: [], key: "" };
   }
 
   // --- painting ------------------------------------------------------------
 
   /** The fixed units as rack cards, shown when the strip is expanded. */
-  function paintFixedRack(b: ChainBlock, zone: ZoneProfile, strip: FixedStrip, levels: { regimes: LedLevel; forcings: LedLevel }, u: Units): void {
+  function paintFixedRack(b: ChainBlock, zone: ZoneProfile, strip: FixedStrip, levels: { regimes: LedLevel; forcings: LedLevel }, u: Units, regimeColours: readonly number[]): void {
     for (const unit of b.fixedUnits) unit.destroy();
     b.fixedUnits = [];
     const color = CHAIN_COLOR_VAR[b.chain];
+
+    // One chip for the state count, then one per regime op that lands in this
+    // chain — the prototype's `<name> <target> <value>` (`Storm precip ×1.40`),
+    // in the regime's own swatch colour.
+    const regimeChips: ChipProps[] = [{ label: regimesText(strip.regimes.count), dot: true, hint: mixerHint("mixer.regimes.name") }];
+    zone.regimes.forEach((r, i) => {
+      for (const op of r.apply ?? []) {
+        if (channelOrNull(op.param) !== b.chain) continue;
+        regimeChips.push({ label: `${r.id} ${describeOp(op, { units: u })}`, color: cycleColour(regimeColours[i] ?? i, REGIME_CYCLE), hint: mixerHint("mixer.regimes.name") });
+      }
+    });
 
     b.fixedUnits.push(
       createRackUnit(b.fixedRack, {
         slot: REGIMES_SLOT,
         name: "Regimes",
-        kind: "STATES",
+        kind: "states",
         color,
         grip: false,
-        chips: zone.regimes.map((r) => ({ label: `${r.id} · ${r.meanDurationDays} d`, hint: mixerHint("mixer.regimes.name") })),
+        linked: true,
+        dim: strip.regimes.mutedInChain,
+        chips: regimeChips,
         led: { on: !strip.regimes.mutedInChain, level: levels.regimes, scope: "chain", hint: mixerHint("mixer.regimes.led"), onToggle: (on) => editZone((z) => setRegimesChainMute(z, b.chain, !on)) },
         onOpen: () => openWindow(REGIMES_WINDOW),
       }),
@@ -349,10 +385,12 @@ export function createMixerSurface(): Surface {
         createRackUnit(b.fixedRack, {
           slot: FORCINGS_SLOT,
           name: "Forcings",
-          kind: "ZONE",
+          kind: "master",
           color,
           grip: false,
-          chips: [{ label: `${b.chain === "temperature" ? "warmth" : "wetness"} ${readout}`, ...(strip.forcings.present ? { color } : {}), hint: mixerHint("mixer.forcings.name") }],
+          linked: true,
+          dim: strip.forcings.mutedInChain,
+          chips: [{ label: `${b.chain === "temperature" ? "warmth" : "wetness"} ${readout}`, ...(strip.forcings.present ? { color } : { dot: true }), hint: mixerHint("mixer.forcings.name") }],
           led: { on: !strip.forcings.mutedInChain, level: levels.forcings, scope: "chain", hint: mixerHint("mixer.forcings.led"), onToggle: (on) => editZone((z) => setForcingsChainMute(z, b.chain, !on)) },
           onOpen: () => openWindow(FORCINGS_WINDOW),
         }),
@@ -384,6 +422,7 @@ export function createMixerSurface(): Surface {
         linked: card.linked,
         ...(card.world === undefined ? {} : { world: card.world }),
         grip: card.reorderable,
+        dim: !on,
         chips: card.chips,
         led: era
           ? { on, level, scope: "device", hint: mixerHint("mixer.era.led"), onToggle: (next) => withWorldConfirm(() => ctx?.store.update((s) => setEnabled(s.world, eraNameOf(card), next), { history: true })) }
@@ -415,35 +454,33 @@ export function createMixerSurface(): Surface {
     const u = ctx?.units() ?? "metric";
     const w = state.view.window;
     const strip = fixedStripFor(zone, b.chain, (w.a + w.b) / 2);
-    const cards = unitsFor(zone, state.world.eras, b.chain, calendar, Object.keys(state.zones).length);
+    const cards = unitsFor(zone, state.world.eras, b.chain, calendar, Object.keys(state.zones).length, u, state.view.colours.eras);
     const open = state.view.fixedOpen[b.chain] === true;
     const levels = { regimes: ledLevel(byUnit.get(unitKey({ kind: "regimes" }))), forcings: ledLevel(byUnit.get(unitKey({ kind: "forcings" }))) };
 
+    // The strip line stays put when the rack opens under it (the prototype
+    // keeps both): its LED and name are the handles either way.
     b.strip.toggleClass("is-hidden", false);
     b.strip.toggleClass("is-open", open);
-    b.stripRow.toggleClass("is-open", open);
-    b.regimesLed.el.toggleClass("is-hidden", open);
-    b.regimesName.toggleClass("is-hidden", open);
-    b.stripDot.toggleClass("is-hidden", open || strip.forcings === null);
-    b.forcingsLed.el.toggleClass("is-hidden", open || strip.forcings === null);
-    b.forcingsName.toggleClass("is-hidden", open || strip.forcings === null);
+    b.forcingsItem.toggleClass("is-hidden", strip.forcings === null);
+    b.forcingsName.toggleClass("is-hidden", strip.forcings === null);
     b.fixedRack.toggleClass("is-hidden", !open);
     b.toggle.setText(open ? "▾" : "▸");
     b.toggle.setAttr("aria-expanded", open ? "true" : "false");
 
     b.regimesLed.update({ on: !strip.regimes.mutedInChain, level: levels.regimes });
-    b.regimesName.setText(regimesText(strip.regimes.count));
+    b.regimesSum.setText(regimesText(strip.regimes.count));
     b.forcingsLed.update({ on: strip.forcings === null || !strip.forcings.mutedInChain, level: levels.forcings });
-    b.forcingsName.setText(forcingsText(strip, b.chain, u));
+    b.forcingsSum.setText(forcingsText(strip, b.chain, u));
 
     b.rack.toggleClass("is-hidden", cards.length === 0);
     b.empty.toggleClass("is-hidden", cards.length > 0);
 
     // Rebuild the cards only when the model behind them actually moved.
-    const key = JSON.stringify({ open, strip, cards, levels, u, unitLevels: cards.map((card) => ledLevel(byUnit.get(isEraUnit(card) ? card.id : `device:${card.id}`))) });
+    const key = JSON.stringify({ open, strip, cards, levels, u, regimes: zone.regimes, colours: state.view.colours.regimes, unitLevels: cards.map((card) => ledLevel(byUnit.get(isEraUnit(card) ? card.id : `device:${card.id}`))) });
     if (key === b.key) return;
     b.key = key;
-    if (open) paintFixedRack(b, zone, strip, levels, u);
+    if (open) paintFixedRack(b, zone, strip, levels, u, state.view.colours.regimes);
     else {
       for (const unit of b.fixedUnits) unit.destroy();
       b.fixedUnits = [];
@@ -465,8 +502,8 @@ export function createMixerSurface(): Surface {
     m.unit.update({
       led: { on: zone !== null, level, scope: "device", hint: mixerHint("mixer.master.led") },
       chips: [
-        { label: `warmth ${warmthText(warmth, u)}`, color: "var(--wadjet-studio-gold)", hint: mixerHint("mixer.master.warmth") },
-        { label: `wetness ${wetnessText(wetness, u)}`, color: "var(--wadjet-studio-gold)", hint: mixerHint("mixer.master.wetness") },
+        { label: `warmth ${warmthText(warmth, u)}`, color: CHAIN_COLOR_VAR.temperature, hint: mixerHint("mixer.master.warmth") },
+        { label: `wetness ${wetnessText(wetness, u)}`, color: CHAIN_COLOR_VAR.precipitation, hint: mixerHint("mixer.master.wetness") },
       ],
     });
   }
@@ -482,17 +519,25 @@ export function createMixerSurface(): Surface {
       next.windows.register(REGIMES_WINDOW, buildRegimesWindow);
       next.windows.register(FORCINGS_WINDOW, buildForcingsWindow);
 
+      // The rail's own header: what the column is, and which way to read it.
+      const railHead = next.shell.mixer.createDiv({ cls: "wadjet-studio-mixer-railhead" });
+      chrome.push(railHead);
+      railHead.createSpan({ cls: "wadjet-studio-mixer-railtitle", text: "MIXER" });
+      railHead.createSpan({ cls: "wadjet-studio-mixer-railnote", text: "signal path ↓" });
+
       for (const chain of CHAINS) blocks.push(buildChain(next.shell.mixer, chain));
 
+      // The summing bus, not a fifth chain: a centred rule over one card,
+      // pushed to the foot of the rail by the spacer above it.
+      chrome.push(next.shell.mixer.createDiv({ cls: "wadjet-studio-mixer-tail" }));
       const el = next.shell.mixer.createDiv({ cls: "wadjet-studio-mixer-chain is-master", attr: { "data-chain": "master" } });
       el.setCssProps({ "--wadjet-studio-chain-color": "var(--wadjet-studio-gold)" });
       const head = el.createDiv({ cls: "wadjet-studio-mixer-head", attr: { "data-hint": mixerHint("mixer.master.led") } });
-      head.createDiv({ cls: "wadjet-studio-mixer-bar" });
       head.createSpan({ cls: "wadjet-studio-mixer-title", text: "MASTER" });
       const unit = createRackUnit(el, {
         slot: MASTER_SLOT,
-        name: "Forcings master",
-        kind: "FRC",
+        name: "Forcings",
+        kind: "master",
         color: "var(--wadjet-studio-gold)",
         grip: false,
         chips: [],
@@ -524,6 +569,8 @@ export function createMixerSurface(): Surface {
         b.el.remove();
       }
       blocks = [];
+      for (const el of chrome) el.remove();
+      chrome = [];
       master?.unit.destroy();
       master?.el.remove();
       master = null;

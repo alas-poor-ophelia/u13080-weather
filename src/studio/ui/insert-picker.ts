@@ -25,16 +25,18 @@
  *    next store tick, and the device this popover just created has no builder
  *    registered yet at the moment it closes.
  */
+import type { Units } from "../../core/units";
 import type { ZoneProfile } from "../../core/types";
 import type { CalendarDescription } from "../../plugin/time/adapter";
+import { describeOp, kindColor } from "../model/copy";
 import { mixerHint } from "../model/hints-mixer";
-import { insertDevice, insertPreset, insertKinds, presetsFor, type InsertPresetOption } from "../model/insert";
+import { badgeForKind, insertDevice, insertPreset, insertKinds, presetsFor, type InsertPresetOption } from "../model/insert";
 import { CHAIN_LABEL, type Chain } from "../model/mixer";
 import type { SurfaceContext } from "./surfaces";
 import { buildDeviceWindow, deviceWindowId } from "./windows/device";
 
-/** Gap between the anchor button's bottom edge and the popover, in px. */
-const OFFSET_Y = 4;
+/** Gap between the anchor row's bottom edge and the popover, in px. */
+const OFFSET_Y = 2;
 
 interface ActivePicker {
   el: HTMLElement;
@@ -51,19 +53,40 @@ function closeActive(): void {
   a.close();
 }
 
-/** Clamp the popover inside `root`'s box, anchored under `anchorEl` (SPEC §3.6). */
+/**
+ * Sit the popover exactly where the prototype's *inline* picker sits: the full
+ * width of the chain header it was opened from, its top edge on that header's
+ * bottom edge (`0556-mixer-rail.html`). It still floats — the rail owns its own
+ * layout and belongs to another surface — but it reads as the chain's own
+ * drawer rather than as an overlay dropped on the rack. Clamped to `root`.
+ */
 function place(el: HTMLElement, root: HTMLElement, anchorEl: HTMLElement): void {
   const rootRect = root.getBoundingClientRect();
-  const anchorRect = anchorEl.getBoundingClientRect();
+  // The chain header row, not the bare `＋`: the picker spans the chain.
+  const row = anchorEl.parentElement ?? anchorEl;
+  const rowRect = row.getBoundingClientRect();
+  el.setCssProps({ "--wadjet-studio-insert-w": `${Math.round(rowRect.width)}px` });
   const maxX = Math.max(0, rootRect.width - el.offsetWidth);
   const maxY = Math.max(0, rootRect.height - el.offsetHeight);
-  const x = Math.min(Math.max(0, anchorRect.left - rootRect.left), maxX);
-  const y = Math.min(Math.max(0, anchorRect.bottom - rootRect.top + OFFSET_Y), maxY);
+  const x = Math.min(Math.max(0, rowRect.left - rootRect.left), maxX);
+  const y = Math.min(Math.max(0, rowRect.bottom - rootRect.top + OFFSET_Y), maxY);
   el.setCssProps({ "--wadjet-studio-insert-x": `${x}px`, "--wadjet-studio-insert-y": `${y}px` });
 }
 
 function badgeText(source: InsertPresetOption["source"]): string {
   return source === "yours" ? "your saved preset" : "shipped preset";
+}
+
+/**
+ * `precip ×1.40 · wind ×1.25` — what a preset row writes, in product copy.
+ *
+ * Deduped: two ops can share one product name (`precipitation.pwd` and
+ * `.pww` are both `precip`), and `precip 0 — no rain · precip 0 — no rain`
+ * tells the reader nothing the first clause did not. The engine paths are
+ * still whole in the device window's WRITES footer.
+ */
+function presetSub(opt: InsertPresetOption, units: Units): string {
+  return [...new Set(opt.preset.apply.map((op) => describeOp(op, { units })))].join(" · ");
 }
 
 /**
@@ -79,7 +102,18 @@ export function openInsertPicker(ctx: SurfaceContext, chain: Chain, anchorEl: HT
   const calendar: CalendarDescription | null = ctx.calendar();
 
   const el = ctx.shell.root.createDiv({ cls: "wadjet-studio-insert", attr: { role: "menu", "aria-label": `New device → ${CHAIN_LABEL[chain]}` } });
-  el.createDiv({ cls: "wadjet-studio-insert-title", text: `NEW DEVICE → ${CHAIN_LABEL[chain]}` });
+  const bar = el.createDiv({ cls: "wadjet-studio-insert-bar" });
+  bar.createSpan({ cls: "wadjet-studio-insert-title", text: `NEW DEVICE → ${CHAIN_LABEL[chain]}` });
+  const closeBtn = bar.createSpan({ cls: "wadjet-studio-insert-close", text: "×", attr: { role: "button", tabindex: "0", "aria-label": "Close the insert picker" } });
+  closeBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeActive();
+  });
+  closeBtn.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    closeActive();
+  });
 
   /** Run `action` as one undoable edit, then close the picker and open the new device's window. */
   function insertAndOpen(action: (z: ZoneProfile) => string): void {
@@ -96,11 +130,21 @@ export function openInsertPicker(ctx: SurfaceContext, chain: Chain, anchorEl: HT
     if (newId !== null) ctx.windows.open(deviceWindowId(newId), buildDeviceWindow(newId));
   }
 
-  function row(label: string, hintKey: string, hintDetail: string, dataAttrs: Record<string, string>, onPick: () => void, badge?: string): void {
-    const r = el.createDiv({ cls: "wadjet-studio-insert-row", attr: { role: "menuitem", tabindex: "0", "data-hint": mixerHint(hintKey, hintDetail), ...dataAttrs } });
-    r.createSpan({ cls: "wadjet-studio-insert-row-label", text: label });
-    if (badge !== undefined) r.createSpan({ cls: "wadjet-studio-insert-badge", text: badge });
-    else r.createSpan({ cls: "wadjet-studio-insert-row-hint", text: hintDetail });
+  /**
+   * One picker row: kind pill · name · [`yours`] · the grammar it writes.
+   * The pill carries the colour (`copy.ts:kindColor`), the row stays neutral —
+   * SPEC §9 keeps colour off chrome.
+   */
+  function row(
+    o: { label: string; kindBadge: string; sub: string; hintKey: string; hintDetail: string; attrs: Record<string, string>; badge?: string | undefined; onPick: () => void },
+  ): void {
+    const r = el.createDiv({ cls: "wadjet-studio-insert-row", attr: { role: "menuitem", tabindex: "0", "data-hint": mixerHint(o.hintKey, o.hintDetail), ...o.attrs } });
+    const pill = r.createSpan({ cls: "wadjet-studio-insert-kind", text: o.kindBadge });
+    pill.setCssProps({ "--wadjet-studio-insert-kind-color": kindColor(o.kindBadge) });
+    r.createSpan({ cls: "wadjet-studio-insert-row-label", text: o.label });
+    if (o.badge !== undefined) r.createSpan({ cls: "wadjet-studio-insert-badge", text: o.badge });
+    r.createSpan({ cls: "wadjet-studio-insert-row-sub", text: o.sub });
+    const onPick = o.onPick;
     r.addEventListener("click", (ev) => {
       ev.stopPropagation();
       onPick();
@@ -113,14 +157,33 @@ export function openInsertPicker(ctx: SurfaceContext, chain: Chain, anchorEl: HT
     });
   }
 
+  const units: Units = ctx.plugin.settings.units;
+
   el.createDiv({ cls: "wadjet-studio-insert-section", text: "KINDS" });
   for (const k of insertKinds()) {
-    row(k.label, "insert.kind", k.hint, { "data-part": "kind", "data-kind": k.kind }, () => insertAndOpen((z) => insertDevice(z, k.kind, chain, calendar)));
+    row({
+      label: k.label,
+      kindBadge: k.badge,
+      sub: k.sub,
+      hintKey: "insert.kind",
+      hintDetail: k.hint,
+      attrs: { "data-part": "kind", "data-kind": k.kind },
+      onPick: () => insertAndOpen((z) => insertDevice(z, k.kind, chain, calendar)),
+    });
   }
 
   el.createDiv({ cls: "wadjet-studio-insert-section", text: "PRESETS" });
   for (const opt of presetsFor(state.world)) {
-    row(opt.name, "insert.preset", badgeText(opt.source), { "data-part": "preset", "data-preset": opt.name, "data-source": opt.source }, () => insertAndOpen((z) => insertPreset(z, opt.preset, chain, calendar)), opt.source === "yours" ? "yours" : undefined);
+    row({
+      label: opt.name,
+      kindBadge: badgeForKind(opt.kind),
+      sub: presetSub(opt, units),
+      hintKey: "insert.preset",
+      hintDetail: badgeText(opt.source),
+      attrs: { "data-part": "preset", "data-preset": opt.name, "data-source": opt.source },
+      badge: opt.source === "yours" ? "yours" : undefined,
+      onPick: () => insertAndOpen((z) => insertPreset(z, opt.preset, chain, calendar)),
+    });
   }
 
   function onOutsideClick(ev: MouseEvent): void {

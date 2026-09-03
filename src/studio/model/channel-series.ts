@@ -14,8 +14,16 @@
  *  - **the fine curve** (`fineSeries`) — the real roll: one point per rolled
  *    day off `rollYear`, never an average of days (SPEC law 4). x is a
  *    fractional year, the same axis `spans.ts` puts a lane on.
+ *  - **the composed curve** (`composedAcross`, and `steppedAcross` for a
+ *    window too wide to draw a year into) — what the channel ROWS actually
+ *    draw. Same resolved climate, read at the year phase each sample falls
+ *    on, with the world's eras folded in per sample: an era is a step on the
+ *    absolute timeline, so a year inside the Ice Age plots eight degrees
+ *    colder, exactly as a rolled day inside it does. The op semantics are
+ *    `core/ops.ts`'s `applyDayOps` and the choice of live ops is
+ *    `core/eras.ts`'s `eraOpsAt`; neither is restated here.
  *
- * Both come back as `ChannelSeries[]` in *plot* units — what the row's y axis
+ * All of them come back as `ChannelSeries[]` in *plot* units — what the row's y axis
  * is in — and `yRangeFor` gives that axis its extent. The one projection this
  * module makes is precipitation's ribbon `scale` (mm) onto the 0–1
  * probability axis `pwd`/`pww` live on: a 48 px row has one y axis, and
@@ -26,8 +34,11 @@
  * row never rebuilds an SVG for a window it has already drawn (PLAN §7).
  */
 import { sampleCurve } from "../../core/curve";
+import { eraOpsAt } from "../../core/eras";
+import { evaluateDayParams } from "../../core/generator";
+import { applyDayOps, type DayParams } from "../../core/ops";
 import { profileHash, resolveProfile } from "../../core/profile";
-import type { ClimateParams, Curve, ZoneProfile } from "../../core/types";
+import type { ClimateParams, Curve, Era, ZoneProfile } from "../../core/types";
 import type { AuditionDay } from "./audition";
 import type { Channel } from "./compile";
 import { fractionalYear, type SpanCalendar } from "./spans";
@@ -265,6 +276,226 @@ export function flatMean(series: readonly ChannelSeries[]): ChannelSeries[] {
 }
 
 // ---------------------------------------------------------------------------
+// The composed curve (SPEC §3.2 "fine zoom → composed curves")
+// ---------------------------------------------------------------------------
+
+/**
+ * Samples a composed curve is drawn with across the whole window. The shape
+ * is the resolved climate's, so the cost is `evalCurve` per sample per role —
+ * a few hundred evaluations, not a roll.
+ */
+export const COMPOSED_SAMPLES = 240;
+
+/** The wet-day fraction a two-state chain settles at: `pwd / (1 + pwd − pww)`. */
+export function wetFraction(pwd: number, pww: number): number {
+  const denom = 1 + pwd - pww;
+  return denom <= 0 ? clamp01(pww) : clamp01(pwd / denom);
+}
+
+/**
+ * One plotted role and how to read it off ONE day's evaluated parameters.
+ *
+ * Readers take `DayParams` rather than a curve and a phase so the era layer
+ * can sit between the two: `evaluateDayParams` gives the climate at a phase,
+ * `applyDayOps` folds the active eras' ops into it (the engine's own op
+ * semantics, `core/ops.ts`), and the reader reads whatever came out. A step
+ * through the Ice Age is therefore the same −8 °C a rolled day inside it gets.
+ */
+type Reader = { role: SeriesRole; at: (p: DayParams) => number };
+
+function readersFor(channel: Channel): Reader[] {
+  switch (channel) {
+    case "temperature":
+      // SPEC §3.2's spread band: the day's low and high around the mean, which
+      // is what `diurnalRange` (Tmax − Tmin) is defined as.
+      return [
+        { role: "low", at: (p) => p["temperature.mean"] - p["temperature.diurnalRange"] / 2 },
+        { role: "high", at: (p) => p["temperature.mean"] + p["temperature.diurnalRange"] / 2 },
+        { role: "mean", at: (p) => p["temperature.mean"] },
+      ];
+    case "precipitation":
+      // The headline is the wet-day fraction, not a probability: it is the one
+      // number the row's readout says out loud (`wet 61 % of days`).
+      return [
+        { role: "amount", at: (p) => wetFraction(p["precipitation.pwd"], p["precipitation.pww"]) },
+        { role: "pww", at: (p) => p["precipitation.pww"] },
+      ];
+    case "wind":
+      return [
+        { role: "low", at: (p) => Math.max(0, p["wind.speed"] - p["wind.speedSd"]) },
+        { role: "high", at: (p) => p["wind.speed"] + p["wind.speedSd"] },
+        { role: "speed", at: (p) => p["wind.speed"] },
+      ];
+    case "sky":
+      // Cloud is the wet/dry pair mixed by how often it is actually wet — the
+      // single "what the sky looks like" number the Sky strip shades with.
+      return [
+        {
+          role: "cloud",
+          at: (p) => {
+            const f = wetFraction(p["precipitation.pwd"], p["precipitation.pww"]);
+            return p["cloud.dry"] * (1 - f) + p["cloud.wet"] * f;
+          },
+        },
+      ];
+  }
+}
+
+/**
+ * The climate at year phase `phase` of calendar year `year`, with every era
+ * covering that year applied. `eras` empty is the plain resolved climate, so
+ * the era layer costs nothing in a world that has none.
+ */
+function paramsAt(climate: ClimateParams, phase: number, year: number, eras: readonly Era[]): DayParams {
+  const base = evaluateDayParams(climate, phase);
+  if (eras.length === 0) return base;
+  const ops = eraOpsAt(eras, year);
+  return ops.length === 0 ? base : applyDayOps(base, ops);
+}
+
+/** `t`'s position within its calendar year, in [0,1). */
+function yearPhase(t: number): number {
+  const p = t - Math.floor(t);
+  return p < 0 ? p + 1 : p;
+}
+
+/**
+ * The composed climate sampled evenly across `[a, b]`, x already rescaled to
+ * the window's own [0,1] — the Chart's `"year"` domain.
+ *
+ * This is the shape SPEC §3.2 calls a composed curve: the *resolved* climate
+ * (every climate-stage layer the mixer wrote is already in it) read at the
+ * year phase each sample falls on, so a window that spans a year boundary
+ * simply wraps and a window a month wide is drawn at the same resolution as
+ * one a year wide. Nothing here rolls a day.
+ */
+export function composedAcross(zone: ZoneProfile, channel: Channel, a: number, b: number, samples: number = COMPOSED_SAMPLES, eras: readonly Era[] = []): ChannelSeries[] {
+  const climate = resolvedClimate(zone);
+  if (climate === null || b <= a) return [];
+  const n = Math.max(2, Math.floor(samples));
+  const readers = readersFor(channel);
+  const at: DayParams[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = a + (b - a) * (i / n);
+    at.push(paramsAt(climate, yearPhase(t), Math.floor(t), eras));
+  }
+  return readers.map((r) => ({ role: r.role, points: at.map((p, i) => [i / n, r.at(p)] as [number, number]) }));
+}
+
+/**
+ * The composed climate for a window too wide to draw a year into
+ * (`RIBBON_FLAT_YEARS`): one flat level per era segment, so the curve is the
+ * prototype's Era-zoom STEP rather than a single mean line that hides the
+ * −8 °C an Ice Age is.
+ *
+ * A segment is a run of years over which the active era set does not change,
+ * clipped to `[a, b]`; its level is the year's twelve `RIBBON_SAMPLES` phases
+ * averaged, which is what the yearly shape collapses to once a year is a few
+ * pixels wide. Two points per segment, so the joins draw as vertical steps.
+ * x comes back rescaled to the window's own [0,1], like `composedAcross`.
+ */
+export function steppedAcross(zone: ZoneProfile, channel: Channel, a: number, b: number, eras: readonly Era[] = []): ChannelSeries[] {
+  const climate = resolvedClimate(zone);
+  if (climate === null || b <= a) return [];
+  const readers = readersFor(channel);
+
+  // Era edges inside the window: a span starts at `from` and ends after `to`.
+  const cuts = new Set<number>([a, b]);
+  for (const e of eras) {
+    if (e.enabled === false) continue;
+    for (const y of [e.from, e.to === undefined ? null : e.to + 1]) {
+      if (y !== null && y > a && y < b) cuts.add(y);
+    }
+  }
+  const edges = [...cuts].sort((x, y) => x - y);
+
+  const out = readers.map((r) => ({ role: r.role, points: [] as Array<[number, number]> }));
+  const span = b - a;
+  for (let i = 0; i < edges.length - 1; i++) {
+    const from = edges[i]!;
+    const to = edges[i + 1]!;
+    // The era set is constant across the segment, so any year inside it reads
+    // the same; the segment's own start is the cheapest one to ask about.
+    const year = Math.floor(from);
+    const sums = readers.map(() => 0);
+    for (let k = 0; k < RIBBON_SAMPLES; k++) {
+      const p = paramsAt(climate, k / RIBBON_SAMPLES, year, eras);
+      readers.forEach((r, ri) => {
+        sums[ri]! += r.at(p);
+      });
+    }
+    readers.forEach((_, ri) => {
+      const level = sums[ri]! / RIBBON_SAMPLES;
+      out[ri]!.points.push([(from - a) / span, level], [(to - a) / span, level]);
+    });
+  }
+  return out;
+}
+
+/** min / max / mean of one role's plotted values, or `null` when it is not drawn. */
+export function statsOf(series: readonly ChannelSeries[], role: SeriesRole): { min: number; max: number; mean: number } | null {
+  const s = series.find((x) => x.role === role);
+  if (s === undefined || s.points.length === 0) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+  for (const [, y] of s.points) {
+    if (y < min) min = y;
+    if (y > max) max = y;
+    sum += y;
+  }
+  return { min, max, mean: sum / s.points.length };
+}
+
+/** The role whose numbers a channel's row readout speaks for. */
+export const HEADLINE_ROLE: Record<Channel, SeriesRole> = {
+  temperature: "mean",
+  precipitation: "amount",
+  wind: "speed",
+  sky: "cloud",
+};
+
+/**
+ * The values a channel's y axis is labelled at, inside `[lo, hi]`.
+ * Temperature steps 2 / 5 / 10 °C by how much range there is (the
+ * prototype's own ladder); precipitation always marks the half; wind marks
+ * every 6 km/h. Fractions never exceed the axis, so a flat row still gets a
+ * line to read against.
+ */
+export function axisTicks(channel: Channel, lo: number, hi: number): number[] {
+  const span = hi - lo;
+  if (!(span > 0)) return [];
+  const every = (step: number, cap: number): number[] => {
+    const out: number[] = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9 && out.length < cap; v += step) out.push(Math.round(v / step) * step);
+    return out;
+  };
+  switch (channel) {
+    case "temperature":
+      return every(span > 24 ? 10 : span > 12 ? 5 : 2, 5);
+    case "precipitation":
+      return [0.25, 0.5, 0.75].filter((v) => v > lo && v < hi);
+    case "wind":
+      return every(6, 4).filter((v) => v > lo && v < hi);
+    case "sky":
+      return [];
+  }
+}
+
+/**
+ * Which of `axisTicks`' values are worth *printing*. Every tick gets a grid
+ * line; only temperature gets a printed value at each, because °C is the one
+ * axis a reader converts in their head. The open-ended fractions and speeds
+ * label their middle tick and let the grid carry the rest — a column of four
+ * numbers beside a 100 px row is noise, not information.
+ */
+export function axisLabelled(channel: Channel, ticks: readonly number[]): number[] {
+  if (ticks.length === 0) return [];
+  if (channel === "temperature") return [...ticks];
+  return [ticks[Math.floor((ticks.length - 1) / 2)]!];
+}
+
+// ---------------------------------------------------------------------------
 // The rolled years the fine curve reads
 // ---------------------------------------------------------------------------
 
@@ -283,6 +514,6 @@ function roundKey(x: number): string {
  * data's own identity (the roll keys at fine zoom, the profile hash at wide
  * zoom), the window and the measured width. Nothing else can change a pixel.
  */
-export function seriesKey(parts: { mode: "fine" | "ribbon" | "flat" | "empty"; source: string; a: number; b: number; widthPx: number }): string {
+export function seriesKey(parts: { mode: "composed" | "fine" | "ribbon" | "flat" | "empty"; source: string; a: number; b: number; widthPx: number }): string {
   return `${parts.mode}|${parts.source}|${roundKey(parts.a)}|${roundKey(parts.b)}|${Math.round(parts.widthPx)}`;
 }
