@@ -27,6 +27,8 @@ export const DEVICE_HINTS: Record<string, Hint> = {
   "device.when.gate": ["Moon gate", "drag either handle to set the phase window"],
   "device.when.tag": ["Tag", "a day carrying the tag matches; several tags are any"],
   "device.when.tagAdd": ["Add a tag", "gate the device on another season or era"],
+  "device.when.tagSummary": ["Summary", "what this device writes, and the tags it is gated on"],
+  "device.when.tagApply": ["Apply", "show or hide the tags and the apply grid"],
   "device.when.lane": ["Year window", "the days of the year the device covers"],
   "device.when.start": ["Start", "first day of the window, as a year phase"],
   "device.when.length": ["Length", "how many days the window covers"],

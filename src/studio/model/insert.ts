@@ -42,29 +42,47 @@ import type { WorldDraft } from "./state";
  */
 export interface InsertKindOption {
   kind: DeviceKind;
+  /**
+   * The row's own value, and its `data-kind`. It is the `kind` for every row
+   * but `Curse`, which is a *flagged* tag device and so shares `kind: "tag"`
+   * with the row above it (PLAN D17) — two rows, one `DeviceKind`.
+   */
+  value: string;
   label: string;
-  /** the kind pill: TRIM · MOON · SPELL · TAG · DICE */
+  /** the kind pill: TRIM · MOON · SPELL · TAG · CURSE · DICE */
   badge: string;
   /** the row's trailing mono grammar — what picking it writes */
   sub: string;
   hint: string;
+  /** the display flag the row writes onto the modifier (`Modifier.badge`); absent = none */
+  flag?: "curse";
 }
 
 /**
- * The five kinds the picker offers, one per `Predicate` shape (SPEC §3.6),
- * in the WHEN segmented's own order (`device-edit.ts`'s `WHEN_KINDS`).
+ * The kinds the picker offers, one per `Predicate` shape (SPEC §3.6), in the
+ * WHEN segmented's own order (`device-edit.ts`'s `WHEN_KINDS`) — plus `Curse`,
+ * which is not a sixth shape but the tag row again, wearing the word and the
+ * hue its author picked for it (PLAN D17). The choice is made HERE and nowhere
+ * else: the device window has no toggle, because the badge is a name, not a
+ * setting.
  */
 const INSERT_KINDS: readonly InsertKindOption[] = [
-  { kind: "trim", label: "Trim", badge: "TRIM", sub: "always on · no when", hint: "always on — a constant offset or scale" },
-  { kind: "moon", label: "Moon-bound", badge: "MOON", sub: "when.moon · phase window", hint: "gated to a named phase of a moon" },
-  { kind: "spell", label: "Spell", badge: "SPELL", sub: "when.yearPhase + spell · random runs", hint: "rolls its own runs inside a year window" },
-  { kind: "tag", label: "Tag-gated", badge: "TAG", sub: "when.tag · season: / era:", hint: "on while a season or era tag is active" },
-  { kind: "chance", label: "Chance", badge: "DICE", sub: "when.chance · a share of days", hint: "a small chance on any day" },
+  { kind: "trim", value: "trim", label: "Trim", badge: "TRIM", sub: "always on · no when", hint: "always on — a constant offset or scale" },
+  { kind: "moon", value: "moon", label: "Moon-bound", badge: "MOON", sub: "when.moon · phase window", hint: "gated to a named phase of a moon" },
+  { kind: "spell", value: "spell", label: "Spell", badge: "SPELL", sub: "when.yearPhase + spell · random runs", hint: "rolls its own runs inside a year window" },
+  { kind: "tag", value: "tag", label: "Tag-gated", badge: "TAG", sub: "when.tag · season: / era:", hint: "on while a season or era tag is active" },
+  { kind: "tag", value: "curse", label: "Curse", badge: "CURSE", sub: "when.tag · a curse the tale can name", hint: "a tag-gated device that reads as a curse", flag: "curse" },
+  { kind: "chance", value: "chance", label: "Chance", badge: "DICE", sub: "when.chance · a share of days", hint: "a small chance on any day" },
 ];
 
-/** The kind pill a preset row wears — the same badge its kind's row carries. */
-export function badgeForKind(kind: DeviceKind): string {
-  return INSERT_KINDS.find((k) => k.kind === kind)?.badge ?? kind.toUpperCase();
+/**
+ * The kind pill a preset row wears — the same badge its kind's row carries,
+ * except that a preset saved from a curse carries the flag too and so keeps its
+ * own word (`flag`, `presets.ts`).
+ */
+export function badgeForKind(kind: DeviceKind, flag?: "curse"): string {
+  const wanted = flag === "curse" && kind === "tag" ? "curse" : kind;
+  return INSERT_KINDS.find((k) => k.value === wanted)?.badge ?? kind.toUpperCase();
 }
 
 /** The popover's KINDS list. A fresh array every call, so a caller may hold it without aliasing the source. */
@@ -92,9 +110,9 @@ export function presetsFor(world: WorldDraft): InsertPresetOption[] {
  * one neutral op for `chain` (`newDevice`). Lands after the existing devices
  * and before `forcings:*` (`normaliseOrder`). Returns the new device's id.
  */
-export function insertDevice(z: ZoneProfile, kind: DeviceKind, chain: Channel, calendar: CalendarDescription | null): string {
+export function insertDevice(z: ZoneProfile, kind: DeviceKind, chain: Channel, calendar: CalendarDescription | null, flag?: "curse"): string {
   const taken = z.modifiers.map((m) => m.id);
-  const device = newDevice(kind, chain, calendar, taken);
+  const device = newDevice(kind, chain, calendar, taken, flag);
   z.modifiers.push(toModifier(device));
   normaliseOrder(z);
   return device.id;

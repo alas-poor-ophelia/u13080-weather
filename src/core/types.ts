@@ -148,6 +148,15 @@ export interface Modifier {
   enabled?: boolean;
   /** mod-matrix gates (daily stage only). Absent or empty = factor 1. */
   mods?: ModGate[];
+  /**
+   * Display only, never read by the engine. `"curse"` is the badge a tag
+   * device wears when its author picked `Curse` rather than `Tag` in the insert
+   * picker: same predicate, same ops, a different word and hue on the pill and
+   * a compact one-line body (PLAN D17). Absent is every modifier written before
+   * this existed, and the validator has nothing to say about it — a display
+   * flag can never change a day of weather.
+   */
+  badge?: "curse";
 }
 
 /** What a time adapter provides per day; the generator and predicates read only this. */

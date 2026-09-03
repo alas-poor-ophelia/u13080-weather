@@ -26,7 +26,7 @@ import type { Era, Modifier, ModifierOp, ZoneProfile } from "../../core/types";
 import type { Units } from "../../core/units";
 import { channelOrNull, devices, getWetness, reorderDevice, totalWarmthAt, TRIM_ID, WARMTH_LANE_ID, WETNESS_ID, type Channel } from "./compile";
 import { describeOp, displayName, type Vocabulary } from "./copy";
-import { kindOf, toDevice, type Device } from "./devices";
+import { badgeFor, kindOf, toDevice, type Device } from "./devices";
 import { dayRangeLabel } from "./format";
 import { cycleColour, ERA_CYCLE } from "./palette";
 
@@ -87,7 +87,7 @@ export interface UnitCard {
   slot: string;
   id: string;
   name: string;
-  /** the kind pill's word — `trim`, `moon`, `spell`, `tag`, `chance`, `custom`, `era` */
+  /** the kind pill's word — `trim`, `moon`, `spell`, `tag`, `curse`, `chance`, `custom`, `era` */
   kind: string;
   /** ⧉: this device writes to more than one chain — one brain, several rails */
   linked: boolean;
@@ -326,7 +326,10 @@ export function unitsFor(
       slot: slotLabel(slot++),
       id: m.id,
       name: displayName(d.name),
-      kind,
+      // The pill is a BADGE, not the kind: a tag device flagged `badge: "curse"`
+      // reads `curse` (`devices.ts:badgeFor`). `kind` itself stays what
+      // `kindOf` said — it is what `opChips` picks its vocabulary from.
+      kind: badgeFor(d) === "CURSE" ? "curse" : kind,
       linked: chainsOf(m).size > 1,
       chips: [{ label: railWhenLabel(d, yearLength), color: "var(--wadjet-studio-gold)" }, ...opChips(ops, chain, kind, units)],
       enabled: m.enabled !== false,

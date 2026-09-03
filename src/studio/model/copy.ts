@@ -179,8 +179,9 @@ export function displayName(idOrTag: string): string {
  */
 export function kindColor(badge: string): string {
   switch (badge.trim().toUpperCase()) {
+    // The prototype's curse badge is #f0885c — the same hue SPELL wears
+    // (`1213-vst-neverain.html`), not the error red this used to reach for.
     case "CURSE":
-      return "var(--wadjet-studio-error-text)";
     case "SPELL":
       return "var(--wadjet-studio-temp)";
     case "MOON":

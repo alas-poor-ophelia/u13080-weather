@@ -69,6 +69,8 @@ export interface Device {
   mods: ModGate[];
   tag?: string;
   stage: "climate" | "daily";
+  /** the modifier's display flag (`Modifier.badge`), carried verbatim — see `badgeFor` */
+  badge?: "curse";
   /** the modifier could not be decompiled into a kind; `raw` holds it verbatim */
   custom?: true;
   raw?: Modifier;
@@ -202,6 +204,37 @@ export function kindOf(m: Modifier): DeviceKind | "custom" {
   return "custom";
 }
 
+/** The KIND pill's text, per kind (the prototype's `DEV_KINDS.badge`). */
+export const KIND_BADGE: Record<DeviceKind, string> = {
+  trim: "TRIM",
+  moon: "MOON",
+  spell: "SPELL",
+  tag: "TAG",
+  chance: "DICE",
+};
+
+/**
+ * The KIND pill's text for one device — `kindOf`'s badge, except that a tag
+ * device carrying the `curse` display flag wears `CURSE`.
+ *
+ * The prototype's "Curse of Neverain" is NOT a sixth kind: `DEV_KINDS` has the
+ * same five the studio has, and the emitter writes Neverain as a plain
+ * `when.tag era:Drought` (`1397-logic-class-Component.js` l.874). But nor is it
+ * derived from what the device *writes*: a curse is a specialised tag device the
+ * author opts into in the insert picker because the word reads better for what
+ * they mean, and it could write anything at all (PLAN D17). So the flag is
+ * stored, on the modifier, and read only here.
+ *
+ * The flag is only *shown* while the WHEN is still a tag: switching a curse
+ * device to `chance` makes it a device the word no longer describes, and the
+ * pill says `DICE`. The flag itself survives on the modifier, so switching back
+ * to tag restores `CURSE` — a WHEN edit is not a place to silently drop the
+ * name its author chose.
+ */
+export function badgeFor(d: Device): string {
+  return d.badge === "curse" && d.when.kind === "tag" ? "CURSE" : KIND_BADGE[d.kind];
+}
+
 /** The id as the rack shows it: studio prefixes stripped, everything else verbatim. */
 export function displayName(m: Modifier): string {
   for (const p of ID_PREFIXES) if (m.id.startsWith(p)) return m.id.slice(p.length);
@@ -276,6 +309,7 @@ function customDevice(m: Modifier): Device {
     stage: m.stage ?? "daily",
     ...(m.spell ? { spell: m.spell } : {}),
     ...(m.tag !== undefined ? { tag: m.tag } : {}),
+    ...(m.badge ? { badge: m.badge } : {}),
     custom: true,
     raw: m,
   };
@@ -305,6 +339,7 @@ export function toDevice(m: Modifier, calendar: CalendarDescription | null): Dev
       stage: m.stage ?? "daily",
       ...(m.spell ? { spell: clone(m.spell) } : {}),
       ...(m.tag !== undefined ? { tag: m.tag } : {}),
+      ...(m.badge ? { badge: m.badge } : {}),
     };
   } catch {
     return customDevice(m);
@@ -328,6 +363,7 @@ export function toModifier(d: Device): Modifier {
     ...(d.tag !== undefined ? { tag: d.tag } : {}),
     ...(d.enabled ? {} : { enabled: false }),
     ...(d.mods.length ? { mods: clone(d.mods) } : {}),
+    ...(d.badge ? { badge: d.badge } : {}),
   };
   return d.custom && d.raw ? { ...d.raw, ...m } : m;
 }
@@ -377,6 +413,9 @@ const KIND_LABELS: Record<DeviceKind, string> = {
   chance: "Chance",
 };
 
+/** A flagged tag device is named for the word its author picked, not for its kind. */
+const CURSE_LABEL = "Curse";
+
 /** Default spell for a new spell device: about one run a year, a fortnight long. */
 const DEFAULT_SPELL: SpellSpec = { meanStartsPerYear: 0.6, meanDurationDays: 14 };
 const DEFAULT_YEAR_WINDOW = { start: 0.55, length: 0.12 };
@@ -412,10 +451,14 @@ function defaultWhen(kind: DeviceKind, calendar: CalendarDescription | null): De
  * A fresh device from the insert picker (SPEC §3.6): the kind's default WHEN,
  * one neutral op for the chain it was added to, a unique name. A `trim` has no
  * `when` and so sits at the climate stage; every other kind is daily.
+ *
+ * `badge` is the picker's `Curse` row (PLAN D17): the same `tag` device, plus
+ * the display flag and the name that row's word implies. Nothing else about it
+ * differs — the flag is never derived and never read by the engine.
  */
-export function newDevice(kind: DeviceKind, channel: Channel, calendar: CalendarDescription | null, taken: Iterable<string>): Device {
+export function newDevice(kind: DeviceKind, channel: Channel, calendar: CalendarDescription | null, taken: Iterable<string>, badge?: "curse"): Device {
   const when = defaultWhen(kind, calendar);
-  const id = uniqueDeviceId(KIND_LABELS[kind], taken);
+  const id = uniqueDeviceId(badge === "curse" ? CURSE_LABEL : KIND_LABELS[kind], taken);
   return {
     id,
     name: id,
@@ -426,6 +469,7 @@ export function newDevice(kind: DeviceKind, channel: Channel, calendar: Calendar
     apply: [defaultApplyFor(channel)],
     mods: [],
     stage: when.kind === "always" ? "climate" : "daily",
+    ...(badge ? { badge } : {}),
   };
 }
 

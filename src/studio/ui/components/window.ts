@@ -5,6 +5,7 @@
  * Dragging clamps the panel inside its parent box; z-index comes from the
  * caller, which raises it on focus.
  */
+import { Menu } from "obsidian";
 import { clampRect } from "../../model/clamp";
 import { kindColor } from "../../model/copy";
 import { createLed, type LedComponent, type LedProps } from "./led";
@@ -199,16 +200,63 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
     return typeof p.options === "function" ? p.options() : p.options;
   }
 
+  /**
+   * The name the chip wears once the user has picked one, until the control is
+   * rebuilt. A `<select>` used to hold that reading for free; the chip has to
+   * keep it, because a panel whose `preset.name` is a constant placeholder
+   * (`no preset`, the device path) would otherwise forget what was loaded.
+   */
+  let pickedLabel: string | null = null;
+  let presetLabelEl: HTMLElement | null = null;
+
+  function paintPresetLabel(): void {
+    if (props.preset && presetLabelEl) presetLabelEl.setText(pickedLabel ?? props.preset.name);
+  }
+
+  /**
+   * The prototype's `▾` is a MENU, not a form field (`1095-vst-device.html`
+   * l.8, l.12): the options it carried plus the save the `＋` used to own.
+   */
+  function openPresetMenu(chip: HTMLElement, p: WindowPreset): void {
+    const menu = new Menu();
+    const current = pickedLabel ?? p.name;
+    for (const name of presetOptions(p)) {
+      menu.addItem((item) =>
+        item
+          .setTitle(name)
+          .setChecked(name === current)
+          .onClick(() => {
+            pickedLabel = name;
+            paintPresetLabel();
+            p.onPick(name);
+          }),
+      );
+    }
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle("Save as preset…").onClick(() => p.onSave()));
+    const box = chip.getBoundingClientRect();
+    menu.showAtPosition({ x: box.left, y: box.bottom });
+  }
+
   function paintPreset(): void {
     presetSlot.empty();
+    presetLabelEl = null;
+    pickedLabel = null;
     const p = props.preset;
     if (!p) return;
-    const select = presetSlot.createEl("select", { cls: "wadjet-studio-window-preset-pick" });
-    for (const name of presetOptions(p)) select.createEl("option", { value: name, text: name });
-    select.value = p.name;
-    select.addEventListener("change", () => p.onPick(select.value));
-    const save = presetSlot.createDiv({ cls: "wadjet-studio-window-preset-save", text: "＋", attr: { role: "button", tabindex: "0", "aria-label": "Save as preset" } });
-    save.addEventListener("click", () => p.onSave());
+    const chip = presetSlot.createSpan({
+      cls: "wadjet-studio-window-preset-pick",
+      attr: { role: "button", tabindex: "0", "aria-haspopup": "menu", "aria-label": "Preset" },
+    });
+    presetLabelEl = chip.createSpan({ cls: "wadjet-studio-window-preset-label" });
+    chip.createSpan({ cls: "wadjet-studio-window-preset-caret", text: "▾" });
+    chip.addEventListener("click", () => openPresetMenu(chip, p));
+    chip.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      ev.preventDefault();
+      openPresetMenu(chip, p);
+    });
+    paintPresetLabel();
   }
 
   /**
@@ -276,6 +324,7 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
     badgeEl.setCssProps({ "--wadjet-studio-badge-color": props.badgeColor ?? kindColor(props.badge ?? "") });
     captionEl.setText(props.caption ?? "");
     captionEl.toggleClass("is-hidden", props.caption === undefined);
+    paintPresetLabel();
     place(props.x, props.y);
 
     if (props.led && !led) led = createLed(ledSlot, props.led);

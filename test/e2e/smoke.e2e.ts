@@ -395,7 +395,10 @@ describe("smoke walk", () => {
     const text = await withApp(ob.page, (app) => app.workspace.getMostRecentLeaf().view.editor.getValue() as string);
     const firstLine = text.split("\n")[0] ?? "";
     note(`insert-today wrote: "${firstLine.slice(0, 140)}"`);
-    expect(firstLine).toMatch(/ — .* °C\.$/);
+    // The summary may end with bracketed extras (an active spell such as
+    // `[ashfall]`, a pin) before the full stop — the world here is a fresh
+    // random seed, so whether a spell run lands on day 2 varies per run.
+    expect(firstLine).toMatch(/ — .* °C( \[[^\]]+\])?\.$/);
     expect(firstLine).not.toMatch(/-\d/); // negatives use a real minus sign
     // insert-today ends with a newline, so the codeblock lands on its own line
     expect(text).toContain("°C.\n```wadjet\nzone: greywold-highlands\ndate: today\nstyle: card\n```");

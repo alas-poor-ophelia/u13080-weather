@@ -40,7 +40,7 @@ const list = (name: string, def: string): string[] =>
 const ZOOMS = list("WADJET_SHOT_ZOOMS", "Year,Era,Season,Month,Day");
 const WINDOWS = list(
   "WADJET_SHOT_WINDOWS",
-  "regimes,seasons,cycle:Sable,forcings,atlas,channel:temperature,channel:precipitation,channel:wind,channel:sky,device:sable-stormtide,device:ashfall,device:neverain,era:Ice Age",
+  "regimes,seasons,cycle:Sable,forcings,atlas,channel:temperature,channel:precipitation,channel:wind,channel:sky,device:sable-stormtide,device:ashfall,device:Curse of Neverain,era:Ice Age",
 );
 const EXTRAS = list("WADJET_SHOT_EXTRAS", "json,insert,strip");
 const OPEN_ENV = process.env["WADJET_SHOT_ENV"] === "1";

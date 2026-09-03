@@ -167,8 +167,11 @@ export function openInsertPicker(ctx: SurfaceContext, chain: Chain, anchorEl: HT
       sub: k.sub,
       hintKey: "insert.kind",
       hintDetail: k.hint,
-      attrs: { "data-part": "kind", "data-kind": k.kind },
-      onPick: () => insertAndOpen((z) => insertDevice(z, k.kind, chain, calendar)),
+      // `data-kind` is the ROW's value, not the `DeviceKind`: `curse` and `tag`
+      // are two rows over one kind (PLAN D17), and a picker row a caller cannot
+      // name is a picker row a test cannot click.
+      attrs: { "data-part": "kind", "data-kind": k.value },
+      onPick: () => insertAndOpen((z) => insertDevice(z, k.kind, chain, calendar, k.flag)),
     });
   }
 
@@ -176,7 +179,7 @@ export function openInsertPicker(ctx: SurfaceContext, chain: Chain, anchorEl: HT
   for (const opt of presetsFor(state.world)) {
     row({
       label: opt.name,
-      kindBadge: badgeForKind(opt.kind),
+      kindBadge: badgeForKind(opt.kind, opt.preset.badge),
       sub: presetSub(opt, units),
       hintKey: "insert.preset",
       hintDetail: badgeText(opt.source),

@@ -15,7 +15,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { MODIFIER_EXAMPLES } from "../../src/plugin/modifier-examples";
 import { paramsByChannel } from "../../src/studio/model/device-edit";
@@ -2469,12 +2469,12 @@ interface RegimesProbe {
   /** the panel's own WRITES footer — the draft's `regimes[]` */
   writes: string;
   /**
-   * The chrome's `preset ▾` (F7 · wadjet-6rw.15): the name the pill wears —
-   * the zone's base station record while its states still equal it, `custom`
-   * once they do not — and every set the `▾` offers.
+   * The chrome's preset chip (F7 · wadjet-6rw.15): the name it wears — the
+   * zone's base station record while its states still equal it, `custom` once
+   * they do not. What the `▾` OFFERS is not in the DOM until the menu is open,
+   * so `presetMenuOptions()` reads that.
    */
   presetName: string;
-  presetOptions: string[];
   /** the world draft's saved state sets, by name */
   regimePresets: string[];
   /** the store's truth, so the DOM is never the only witness */
@@ -2508,8 +2508,7 @@ async function probeRegimes(): Promise<RegimesProbe> {
         segments: pick(bodyEl, ".wadjet-studio-regimes-share-seg").map((s) => s.getAttribute("data-id") ?? ""),
         ops: pick(bodyEl, ".wadjet-studio-regimes-op").map((o) => o.getAttribute("data-param") ?? ""),
         writes: text(panel?.querySelector(".wadjet-studio-writes-body") ?? null),
-        presetName: (panel?.querySelector(".wadjet-studio-window-preset-pick") as HTMLSelectElement | null)?.value ?? "",
-        presetOptions: pick(panel, ".wadjet-studio-window-preset-pick option").map((o) => text(o)),
+        presetName: text(panel?.querySelector(".wadjet-studio-window-preset-label") ?? null),
         regimePresets: (state.world.regimePresets ?? []).map((p: any) => p.name),
         zoneRegimes: (zone?.regimes ?? []).map((r: any) => ({ id: r.id, weight: r.weight, dwell: r.meanDurationDays })),
         gatedOn: gate?.when?.regime ?? null,
@@ -2546,13 +2545,66 @@ async function openRegimesWindow(): Promise<void> {
 /** The Regimes panel's own chrome — the title bar the `preset ▾` lives in. */
 const regimesWindow = () => ob.page.locator(".wadjet-studio-window", { has: ob.page.locator(".wadjet-studio-regimes") }).first();
 
+/**
+ * The chrome's preset control is a CHIP with an Obsidian `Menu` behind it
+ * (`components/window.ts`), not a `<select>`: the offered names only exist in
+ * the DOM while the menu is open, so a step that wants them has to open it.
+ */
+async function openPresetMenu(win: Locator): Promise<Locator> {
+  await win.locator(".wadjet-studio-window-preset-pick").click();
+  const menu = ob.page.locator(".menu").last();
+  await menu.waitFor({ state: "visible", timeout: 10_000 });
+  return menu;
+}
+
+/** Every name the chip's menu offers, `Save as preset…` included, in order. */
+async function presetMenuTitles(win: Locator): Promise<string[]> {
+  const menu = await openPresetMenu(win);
+  const titles = (await menu.locator(".menu-item-title").allTextContents()).map((t) => t.replace(/\s+/g, " ").trim());
+  // Blur BEFORE the Escape: the chip that opened the menu still holds focus,
+  // it sits inside a window whose own Escape handler closes the panel, and a
+  // key pressed while it is focused shut the whole window instead of the menu.
+  await ob.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await ob.page.keyboard.press("Escape");
+  await menu.waitFor({ state: "hidden", timeout: 5_000 });
+  return titles;
+}
+
+/** The names the chip OFFERS — the old `<option>` list, minus the save row. */
+async function presetMenuOptions(win: Locator): Promise<string[]> {
+  return (await presetMenuTitles(win)).filter((t) => t !== SAVE_PRESET_ITEM);
+}
+
+/** Pick one offered name by its exact label (`hasText` would match a longer sibling). */
+async function pickPresetItem(win: Locator, label: string): Promise<void> {
+  const menu = await openPresetMenu(win);
+  const titles = (await menu.locator(".menu-item-title").allTextContents()).map((t) => t.replace(/\s+/g, " ").trim());
+  const at = titles.indexOf(label);
+  expect(at, `no "${label}" in ${JSON.stringify(titles)}`).toBeGreaterThanOrEqual(0);
+  await menu.locator(".menu-item").nth(at).click();
+  await nextFrame();
+}
+
+/** The save row the `＋` button used to be (prototype `1095-vst-device.html` l.12). */
+const SAVE_PRESET_ITEM = "Save as preset…";
+
+/** Open the chip's menu and take its save row, then fill the name modal. */
+async function savePresetAs(win: Locator, name: string): Promise<void> {
+  await pickPresetItem(win, SAVE_PRESET_ITEM);
+  const modal = ob.page.locator(".modal-container .modal");
+  await modal.waitFor({ state: "visible", timeout: 10_000 });
+  await modal.locator('.setting-item:has(.setting-item-name:text-is("Name")) input').fill(name);
+  await modal.locator("button:has-text('Save')").click();
+  await modal.waitFor({ state: "detached", timeout: 10_000 });
+}
+
 /** Wait until the `preset ▾` pill reads `name` — the reaction that says the load landed. */
 async function waitForPresetPill(name: string): Promise<void> {
   await ob.page.waitForFunction(
     (a: { type: string; name: string }) => {
       const el = (window as any).app.workspace.getLeavesOfType(a.type)[0]?.view?.containerEl as HTMLElement | undefined;
       const panel = el?.querySelector(".wadjet-studio-regimes")?.closest(".wadjet-studio-window") ?? null;
-      return (panel?.querySelector(".wadjet-studio-window-preset-pick") as HTMLSelectElement | null)?.value === a.name;
+      return (panel?.querySelector(".wadjet-studio-window-preset-label")?.textContent ?? "").trim() === a.name;
     },
     { type: VIEW_TYPE, name },
     { timeout: 10_000 },
@@ -2833,17 +2885,18 @@ describe("climate studio · regimes window", () => {
     await waitForPresetPill("custom");
     const custom = await probeRegimes();
     expect(custom.presetName).toBe("custom");
-    expect(custom.presetOptions).toContain("custom");
+    const customOffered = await presetMenuOptions(regimesWindow());
+    expect(customOffered).toContain("custom");
     expect(custom.zoneRegimes[0]!.weight).toBeCloseTo(0.33, 10);
 
     // Every station record ships the same three states, so the `▾` offers the
     // set once, named for the record this zone came from, with its size as a sub.
-    const shipped = custom.presetOptions.find((o) => o !== "custom" && !o.includes("· yours"));
-    expect(shipped, `no shipped set in ${JSON.stringify(custom.presetOptions)}`).toBeDefined();
+    const shipped = customOffered.find((o) => o !== "custom" && !o.includes("· yours"));
+    expect(shipped, `no shipped set in ${JSON.stringify(customOffered)}`).toBeDefined();
     expect(shipped!).toMatch(/ · \d+ states$/);
     const setName = shipped!.split(" · ")[0]!;
 
-    await regimesWindow().locator(".wadjet-studio-window-preset-pick").selectOption(shipped!);
+    await pickPresetItem(regimesWindow(), shipped!);
     await waitForPresetPill(setName);
 
     const loaded = await probeRegimes();
@@ -2857,8 +2910,9 @@ describe("climate studio · regimes window", () => {
     // The pill wears the bare name once the zone is on that set — the sub is
     // only how the OTHER options tell themselves apart.
     expect(loaded.presetName).toBe(setName);
-    expect(loaded.presetOptions).toContain(setName);
-    expect(loaded.presetOptions).not.toContain("custom");
+    const loadedOffered = await presetMenuOptions(regimesWindow());
+    expect(loadedOffered).toContain(setName);
+    expect(loadedOffered).not.toContain("custom");
 
     // One undoable action, like every other edit in this panel.
     expect(await studioHistory("undo")).toBe(true);
@@ -2885,12 +2939,7 @@ describe("climate studio · regimes window", () => {
     await waitForPresetPill("custom");
     const before = await probeRegimes();
 
-    await regimesWindow().locator(".wadjet-studio-window-preset-save").click();
-    const modal = ob.page.locator(".modal-container .modal");
-    await modal.waitFor({ state: "visible", timeout: 10_000 });
-    await modal.locator('.setting-item:has(.setting-item-name:text-is("Name")) input').fill("House states");
-    await modal.locator("button:has-text('Save')").click();
-    await modal.waitFor({ state: "detached", timeout: 10_000 });
+    await savePresetAs(regimesWindow(), "House states");
     await waitForPresetPill("House states");
 
     const saved = await probeRegimes();
@@ -2903,12 +2952,12 @@ describe("climate studio · regimes window", () => {
     // Wander off it, and the saved set is offered back badged `yours`.
     await seedRegimeDraft("weight", { id: saved.rows[0]!, value: 0.44 });
     await waitForPresetPill("custom");
-    const wandered = await probeRegimes();
-    const mine = wandered.presetOptions.find((o) => o.startsWith("House states"));
-    expect(mine, `no saved set in ${JSON.stringify(wandered.presetOptions)}`).toBeDefined();
+    const wanderedOffered = await presetMenuOptions(regimesWindow());
+    const mine = wanderedOffered.find((o) => o.startsWith("House states"));
+    expect(mine, `no saved set in ${JSON.stringify(wanderedOffered)}`).toBeDefined();
     expect(mine!).toMatch(/^House states · \d+ states · yours$/);
 
-    await regimesWindow().locator(".wadjet-studio-window-preset-pick").selectOption(mine!);
+    await pickPresetItem(regimesWindow(), mine!);
     await waitForPresetPill("House states");
 
     const reloaded = await probeRegimes();
@@ -3527,6 +3576,16 @@ describe("climate studio · era window", () => {
 /** The device the walk builds. `Storm` is what step 57 renames it to. */
 const DEVICE_ID = "Gale";
 const DEVICE_RENAMED = "Storm";
+
+/**
+ * The audit world's Neverain: an ordinary `when.tag` device carrying the
+ * `badge: "curse"` display flag its author picked in the insert picker (PLAN
+ * D17). The flag is the badge — the apply below could be anything.
+ */
+const CURSE_ID = "Curse of Neverain";
+const CURSE_MODIFIER = { id: CURSE_ID, stage: "daily", badge: "curse", when: { tag: "era:Drought" }, apply: [{ param: "precipitation.pwd", op: "scale", value: 0 }] };
+/** The same device with the flag taken off: same shape, no curse. */
+const UNFLAGGED_MODIFIER = { id: CURSE_ID, stage: "daily", when: { tag: "era:Drought" }, apply: [{ param: "precipitation.pwd", op: "scale", value: 0 }] };
 
 /**
  * Four seasons, so the WHEN tag chips and the MOD gate menu have real sources.
@@ -4234,15 +4293,10 @@ describe("climate studio · device window", () => {
     await openDeviceWindow(DEVICE_ID);
     const before = (await draftPresets()).map((p) => p.name);
 
-    // The preset control is the window chrome's now (F11a): a `▾` of the
-    // presets this kind offers, and a `＋` that saves the device as one.
-    await deviceWindow().locator(".wadjet-studio-window-preset-save").click();
-
-    const modal = ob.page.locator(".modal-container .modal");
-    await modal.waitFor({ state: "visible", timeout: 10_000 });
-    await modal.locator('.setting-item:has(.setting-item-name:text-is("Name")) input').fill("Gale preset");
-    await modal.locator("button:has-text('Save')").click();
-    await modal.waitFor({ state: "detached", timeout: 10_000 });
+    // The preset control is the window chrome's now (F11a), and since the
+    // shared-chrome pass it is one chip: a `▾` menu of the presets this kind
+    // offers with `Save as preset…` at the foot of it, where the `＋` was.
+    await savePresetAs(deviceWindow(), "Gale preset");
     await nextFrame();
 
     const presets = await draftPresets();
@@ -4256,8 +4310,20 @@ describe("climate studio · device window", () => {
     expect(saved.stage).toBeUndefined();
 
     // The picker offers it back, badged `yours`.
-    const titles = (await deviceWindow().locator(".wadjet-studio-window-preset-pick option").allTextContents()).map((t) => t.replace(/\s+/g, " ").trim());
+    const titles = await presetMenuOptions(deviceWindow());
     expect(titles.some((t) => t.includes(`${saved.name} · yours`))).toBe(true);
+    // The device path's `preset.name` is the constant `no preset` placeholder,
+    // so the chip has to remember what was picked: load the saved one back and
+    // the chip must wear its label rather than falling to the placeholder.
+    await pickPresetItem(deviceWindow(), `${saved.name} · yours`);
+    expect(
+      (await deviceWindow().locator(".wadjet-studio-window-preset-label").textContent())?.trim(),
+    ).toBe(`${saved.name} · yours`);
+    // Loading back a preset saved FROM this device leaves it exactly as it was,
+    // which is what step 57 starts from.
+    const reloaded = await draftModifier(DEVICE_ID);
+    expect(reloaded.when).toEqual({ tag: "season:Winter" });
+    expect(reloaded.mods).toEqual([{ source: "season:Winter", amount: 0.5 }]);
     console.log(`  · saved "${saved.name}" (was ${JSON.stringify(before)}); picker now ${JSON.stringify(titles)}`);
   });
 
@@ -4520,6 +4586,278 @@ describe("climate studio · device window", () => {
     expect(restored.apply).toEqual(ZONE_DEVICE.apply);
     await closeStudioWindows();
     console.log(`  · ＋ apply offered ${offered.length}/${total} params (3 bound); added ${pick.param} (${pick.op})`);
+  });
+
+  /** The curse's own hue on the KIND pill, straight off the chrome's custom property. */
+  async function badgeColour(): Promise<string> {
+    return withApp(
+      ob.page,
+      (app, type: string) => {
+        const el: HTMLElement | undefined = app.workspace.getLeavesOfType(type)[0]?.view?.containerEl;
+        const badge = el?.querySelector(".wadjet-studio-device")?.closest(".wadjet-studio-window")?.querySelector(".wadjet-studio-window-badge") as HTMLElement | null;
+        return badge?.style.getPropertyValue("--wadjet-studio-badge-color").trim() ?? "";
+      },
+      VIEW_TYPE,
+    );
+  }
+
+  /** Put the curse in the rack (or take it out again), the way the audit world stores it. */
+  async function seedCurse(mod: any): Promise<void> {
+    await revealStudio();
+    await withApp(
+      ob.page,
+      (app, a: { type: string; id: string; mod: any }) => {
+        const leaf = app.workspace.getLeavesOfType(a.type)[0];
+        leaf.view.store.update(
+          (s: any) => {
+            const zone = s.zones[s.view.zoneId];
+            zone.modifiers = zone.modifiers.filter((m: any) => m.id !== a.id);
+            if (a.mod !== null) zone.modifiers.push(JSON.parse(JSON.stringify(a.mod)));
+          },
+          { history: true },
+        );
+      },
+      { type: VIEW_TYPE, id: CURSE_ID, mod },
+    );
+    await nextFrame();
+  }
+
+  test("step 62: the CURSE badge is the flag its author picked, not what the device writes", async () => {
+    // The prototype's Neverain is NOT a sixth kind: `DEV_KINDS` has the same
+    // five the studio has, and the emitter writes it as a plain
+    // `when.tag era:Drought` (`1397-logic-class-Component.js` l.874). Nor is
+    // the badge derived from the apply: a curse is a specialised tag device the
+    // author opts into in the insert picker because the word reads better for
+    // what they mean, and it could write anything (PLAN D17, wadjet-9f9.48.12).
+    await seedCurse(CURSE_MODIFIER);
+    await openDeviceWindow(CURSE_ID);
+
+    const cursed = await probeDevice();
+    expect(cursed.open).toBe(true);
+    expect(cursed.title).toBe(CURSE_ID);
+    expect(cursed.badge).toBe("CURSE");
+    expect(cursed.whenKind).toBe("tag");
+    // #f0885c — the prototype's own curse hue (`1213-vst-neverain.html` l.6),
+    // which is the same one SPELL wears, not the error red.
+    const cursedHue = await badgeColour();
+    expect(cursedHue).toBe("var(--wadjet-studio-temp)");
+
+    // The rail pill says the same word in the rack's lower case.
+    const rail = (await probeMixer()).find((c) => c.chain === "precipitation")!.units.find((u) => u.id === CURSE_ID);
+    expect(rail, `no ${CURSE_ID} on the precipitation rail`).toBeDefined();
+    expect(rail!.kind).toBe("curse");
+
+    // Turn the rain back up: the device stops killing the rain and STAYS a
+    // curse, because the word was never a reading of its ops.
+    await withApp(
+      ob.page,
+      (app, a: { type: string; id: string }) => {
+        const leaf = app.workspace.getLeavesOfType(a.type)[0];
+        leaf.view.store.update(
+          (s: any) => {
+            const zone = s.zones[s.view.zoneId];
+            zone.modifiers.find((m: any) => m.id === a.id).apply[0].value = 0.5;
+          },
+          { history: true },
+        );
+      },
+      { type: VIEW_TYPE, id: CURSE_ID },
+    );
+    await nextFrame();
+
+    const turnedUp = await probeDevice();
+    expect(turnedUp.badge).toBe("CURSE");
+    expect(await badgeColour()).toBe("var(--wadjet-studio-temp)");
+    const still = await draftModifier(CURSE_ID);
+    expect(still.badge).toBe("curse");
+    expect(still.when).toEqual({ tag: "era:Drought" });
+    expect(still.apply).toEqual([{ param: "precipitation.pwd", op: "scale", value: 0.5 }]);
+    expect((await probeMixer()).find((c) => c.chain === "precipitation")!.units.find((u) => u.id === CURSE_ID)!.kind).toBe("curse");
+
+    // …and the converse: the same shape with no flag is a plain TAG, which is
+    // the whole point — the apply no longer decides anything.
+    await seedCurse(UNFLAGGED_MODIFIER);
+    await openDeviceWindow(CURSE_ID);
+    const unflagged = await probeDevice();
+    expect(unflagged.badge).toBe("TAG");
+    const unflaggedHue = await badgeColour();
+    expect(unflaggedHue).toBe("var(--wadjet-studio-gold)");
+    expect((await draftModifier(CURSE_ID)).badge).toBeUndefined();
+    expect((await probeMixer()).find((c) => c.chain === "precipitation")!.units.find((u) => u.id === CURSE_ID)!.kind).toBe("tag");
+
+    // Put the rack back so the walks after this one stand on the same world.
+    await seedCurse(null);
+    expect(await draftModifier(CURSE_ID)).toBeNull();
+    await closeStudioWindows();
+    console.log(`  · ${CURSE_ID}: flagged badge ${cursed.badge} ${cursedHue}, rail "${rail!.kind}" → value 0.5 → badge ${turnedUp.badge}; unflagged same shape → ${unflagged.badge} ${unflaggedHue}`);
+  });
+
+  /** The tag path's summary row and everything the disclosure hides behind it. */
+  interface CurseProbe {
+    /** the panel's own box, which `width` picks at open time */
+    width: number;
+    /** the panel's drawn height, and every row inside it — the prototype's Neverain is 114 tall */
+    height: number;
+    rows: Array<{ part: string; height: number }>;
+    /** the whole summary line, whitespace collapsed */
+    summary: string;
+    /** the op value on its own, and the custom property that colours it */
+    value: string;
+    valueColour: string;
+    /** `null` when the row is not a disclosure at all — i.e. the device is not curse-shaped */
+    expanded: string | null;
+    applySections: number;
+    tagChips: string[];
+  }
+
+  async function probeCurse(): Promise<CurseProbe> {
+    return withApp(
+      ob.page,
+      (app, type: string) => {
+        const el: HTMLElement | undefined = app.workspace.getLeavesOfType(type)[0]?.view?.containerEl;
+        const body: HTMLElement | null = el?.querySelector(".wadjet-studio-device") ?? null;
+        const panel: HTMLElement | null = body?.closest(".wadjet-studio-window") ?? null;
+        const row: HTMLElement | null = body?.querySelector('[data-part="tag-summary"]') ?? null;
+        const value: HTMLElement | null = row?.querySelector(".wadjet-studio-device-summary-value") ?? null;
+        return {
+          width: panel === null ? 0 : Math.round(panel.getBoundingClientRect().width),
+          height: panel === null ? 0 : Math.round(panel.getBoundingClientRect().height),
+          rows:
+            panel === null
+              ? []
+              : [
+                  { part: "title", el: panel.querySelector(".wadjet-studio-window-bar") },
+                  { part: "when", el: body?.querySelector('[data-section="when"]') ?? null },
+                  { part: "spell", el: body?.querySelector('[data-section="spell"]') ?? null },
+                  { part: "＋ mod", el: body?.querySelector(".wadjet-studio-device-add-mod") ?? null },
+                  { part: "foot", el: body?.querySelector(".wadjet-studio-device-foot") ?? null },
+                  { part: "writes", el: panel.querySelector(".wadjet-studio-writes") },
+                ]
+                  .filter((r) => r.el !== null)
+                  .map((r) => ({ part: r.part, height: Math.round((r.el as HTMLElement).getBoundingClientRect().height) })),
+          // Part by part, joined: the flex spacer between the ops and the gate
+          // is an empty div, so the row's own `textContent` runs them together.
+          summary:
+            row === null
+              ? ""
+              : Array.from(row.children)
+                  .map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim())
+                  .filter((t) => t !== "")
+                  .join(" "),
+          value: (value?.textContent ?? "").trim(),
+          valueColour: value?.style.getPropertyValue("--wadjet-studio-chip-color").trim() ?? "",
+          expanded: row?.getAttribute("aria-expanded") ?? null,
+          applySections: body === null ? 0 : body.querySelectorAll('[data-section="apply"]').length,
+          tagChips: body === null ? [] : Array.from(body.querySelectorAll(".wadjet-studio-device-when [data-tag]")).map((n) => n.getAttribute("data-tag") ?? ""),
+        };
+      },
+      VIEW_TYPE,
+    );
+  }
+
+  test("step 63: the curse shape opens 300 wide on one summary line, with the tags and APPLY behind a disclosure", async () => {
+    // `1213-vst-neverain.html` l.2, l.10: a 300 px box whose whole body is
+    // `precip ×0 while active` on the left and a right-aligned
+    // `gate: era:Drought` on the right (gap2 D3, D4, D5). The tag chips and the
+    // APPLY grid are not gone — they are behind the summary row, which on this
+    // shape IS the disclosure.
+    await seedCurse(CURSE_MODIFIER);
+    await openDeviceWindow(CURSE_ID);
+
+    const shut = await probeCurse();
+    expect(shut.width).toBe(300);
+
+    // The narrowest bar in the studio has to CONTAIN every control it carries.
+    // A fixed 118 px name field plus a `<select>` sized to its widest option
+    // put the ＋ and the × on the page background at 300 wide; the name is a
+    // shrinking basis now and the preset is a content-sized chip.
+    const bar = await deviceWindow().evaluate((win) => {
+      const right = win.getBoundingClientRect().right;
+      const rightOf = (sel: string) => {
+        const node = win.querySelector(sel);
+        return node === null ? null : node.getBoundingClientRect().right;
+      };
+      return {
+        right,
+        badge: rightOf(".wadjet-studio-window-badge"),
+        chip: rightOf(".wadjet-studio-window-preset-pick"),
+        close: rightOf(".wadjet-studio-window-close"),
+        chipWidth: win.querySelector(".wadjet-studio-window-preset-pick")?.getBoundingClientRect().width ?? 0,
+        title: win.querySelector(".wadjet-studio-window-title")?.getBoundingClientRect().width ?? 0,
+      };
+    });
+    for (const [what, edge] of [
+      ["badge", bar.badge],
+      ["preset chip", bar.chip],
+      ["close ×", bar.close],
+    ] as Array<[string, number | null]>) {
+      expect(edge, `no ${what} in the title bar`).not.toBeNull();
+      expect(edge!, `${what} at ${edge} runs past the window's right edge ${bar.right}`).toBeLessThanOrEqual(bar.right);
+    }
+    // …and the name yielded the room, rather than the bar overflowing.
+    expect(bar.title).toBeLessThan(118);
+    console.log(`  · 300 px bar: window right ${bar.right.toFixed(1)}; badge ${bar.badge?.toFixed(1)}, chip ${bar.chip?.toFixed(1)} (${bar.chipWidth.toFixed(1)} wide), × ${bar.close?.toFixed(1)}; name ${bar.title.toFixed(1)}`);
+    // `×0.00`, not the prototype's `×0`: the value is `opValueText`, the same
+    // string the APPLY knob and the WRITES footer print, so the summary can
+    // never drift from them.
+    expect(shut.summary).toBe("precip ×0.00 while active gate: era:Drought");
+    expect(shut.value).toBe("×0.00");
+    // The PRECIP hue, not the prototype's curse orange: an orange rain value
+    // would lie about which channel the op writes to.
+    expect(shut.valueColour).toBe("var(--wadjet-studio-precip)");
+    expect(shut.expanded).toBe("false");
+    expect(shut.applySections).toBe(0);
+    expect(shut.tagChips).toEqual([]);
+    // SPELL and MOD are behind the same disclosure: the showcase draws neither,
+    // and the moon and spell paths already drop what their showcases lack.
+    expect(await devicePanel().locator('[data-part="spell-power"]').count()).toBe(0);
+    expect(await devicePanel().locator(".wadjet-studio-device-add-mod").count()).toBe(0);
+    expect(shut.rows.map((r) => r.part)).toEqual(["title", "when", "foot", "writes"]);
+
+    // The row is the toggle: one click brings both back.
+    await devicePanel().locator('[data-part="tag-summary"]').click();
+    await nextFrame();
+    const open = await probeCurse();
+    expect(open.expanded).toBe("true");
+    expect(open.applySections).toBe(1);
+    expect(open.tagChips).toEqual(["era:Drought"]);
+    expect((await probeDevice()).applyKnobs).toBe(1);
+    expect(await devicePanel().locator('[data-part="spell-power"]').count()).toBe(1);
+    expect(await devicePanel().locator(".wadjet-studio-device-add-mod").count()).toBe(1);
+
+    // …and the op's own mute is reachable once it is, which it cannot be while
+    // the section is not drawn at all.
+    await devicePanel().locator('[data-part="op-power-0"]').click();
+    await nextFrame();
+    expect((await draftModifier(CURSE_ID)).apply[0].enabled).toBe(false);
+    await devicePanel().locator('[data-part="op-power-0"]').click();
+    await nextFrame();
+    expect((await draftModifier(CURSE_ID)).apply[0].enabled).not.toBe(false);
+
+    // Shut it again, so the next assertion is about the SHAPE and not about a
+    // cursor a click left open.
+    await devicePanel().locator('[data-part="tag-summary"]').click();
+    await nextFrame();
+    expect((await probeCurse()).applySections).toBe(0);
+
+    // The same shape with no flag is a plain TAG, and a TAG device has no
+    // disclosure at all — the summary row stays, everything under it is drawn.
+    // The disclosure is keyed on the flag, exactly as the badge is.
+    await seedCurse({ ...UNFLAGGED_MODIFIER, apply: [{ param: "precipitation.pwd", op: "scale", value: 0.5 }] });
+    await openDeviceWindow(CURSE_ID);
+
+    const tag = await probeCurse();
+    expect((await probeDevice()).badge).toBe("TAG");
+    expect(tag.expanded).toBeNull();
+    expect(tag.value).toBe("×0.50");
+    expect(tag.applySections).toBe(1);
+    expect(tag.tagChips).toEqual(["era:Drought"]);
+    expect(await devicePanel().locator('[data-part="spell-power"]').count()).toBe(1);
+
+    await seedCurse(null);
+    await closeStudioWindows();
+    console.log(`  · ${CURSE_ID}: ${shut.width}×${shut.height} px, "${shut.summary}", APPLY ${shut.applySections} shut → ${open.applySections} open → TAG ${tag.applySections} with no disclosure`);
+    console.log(`  · rows: ${shut.rows.map((r) => `${r.part} ${r.height}`).join(", ")}`);
   });
 });
 
@@ -7613,8 +7951,11 @@ describe("climate studio · save and drafts", () => {
 interface InsertPickerProbe {
   open: boolean;
   title: string;
+  /** each KINDS row's `data-kind` — the ROW's value, so `curse` and `tag` are two of them */
   kinds: string[];
-  presets: Array<{ name: string; badge: string }>;
+  /** the same rows with the pill and the copy the reader actually sees */
+  kindRows: Array<{ kind: string; badge: string; label: string; sub: string }>;
+  presets: Array<{ name: string; badge: string; kindBadge: string }>;
 }
 
 /** Everything the insert picker's own e2e cares about, read straight off the popover's DOM. */
@@ -7624,13 +7965,21 @@ async function probeInsertPicker(): Promise<InsertPickerProbe> {
     (app, type: string) => {
       const el: HTMLElement | undefined = app.workspace.getLeavesOfType(type)[0]?.view?.containerEl;
       const popover = el?.querySelector(".wadjet-studio-insert") ?? null;
-      if (popover === null) return { open: false, title: "", kinds: [], presets: [] };
+      if (popover === null) return { open: false, title: "", kinds: [], kindRows: [], presets: [] };
       const rows = Array.from(popover.querySelectorAll(".wadjet-studio-insert-row"));
-      const kinds = rows.filter((r) => r.getAttribute("data-part") === "kind").map((r) => r.getAttribute("data-kind") ?? "");
+      const txt = (r: Element, sel: string) => (r.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim();
+      const kindRows = rows
+        .filter((r) => r.getAttribute("data-part") === "kind")
+        .map((r) => ({
+          kind: r.getAttribute("data-kind") ?? "",
+          badge: txt(r, ".wadjet-studio-insert-kind"),
+          label: txt(r, ".wadjet-studio-insert-row-label"),
+          sub: txt(r, ".wadjet-studio-insert-row-sub"),
+        }));
       const presets = rows
         .filter((r) => r.getAttribute("data-part") === "preset")
-        .map((r) => ({ name: r.getAttribute("data-preset") ?? "", badge: (r.querySelector(".wadjet-studio-insert-badge")?.textContent ?? "").trim() }));
-      return { open: true, title: (popover.querySelector(".wadjet-studio-insert-title")?.textContent ?? "").trim(), kinds, presets };
+        .map((r) => ({ name: r.getAttribute("data-preset") ?? "", badge: txt(r, ".wadjet-studio-insert-badge"), kindBadge: txt(r, ".wadjet-studio-insert-kind") }));
+      return { open: true, title: (popover.querySelector(".wadjet-studio-insert-title")?.textContent ?? "").trim(), kinds: kindRows.map((k) => k.kind), kindRows, presets };
     },
     VIEW_TYPE,
   );
@@ -7643,14 +7992,16 @@ async function clickChainInsert(chain: string): Promise<void> {
 }
 
 describe("climate studio · insert picker", () => {
-  test("insert picker 1: ＋ on WIND opens a popover titled with WIND, listing 5 kinds and at least 5 presets", async () => {
+  test("insert picker 1: ＋ on WIND opens a popover titled with WIND, listing 6 kind rows and at least 5 presets", async () => {
     await revealStudio();
     await clickChainInsert("wind");
 
     const picker = await probeInsertPicker();
     expect(picker.open).toBe(true);
     expect(picker.title).toBe("NEW DEVICE → WIND");
-    expect(picker.kinds).toEqual(["trim", "moon", "spell", "tag", "chance"]);
+    // Six ROWS over five `DeviceKind`s: `Curse` sits beside `Tag` and makes the
+    // same `when.tag` device, flagged (PLAN D17).
+    expect(picker.kinds).toEqual(["trim", "moon", "spell", "tag", "curse", "chance"]);
     expect(picker.presets.length).toBeGreaterThanOrEqual(5);
     expect(picker.presets.map((p) => p.name)).toContain("Föhn days");
     console.log(`  · picker "${picker.title}": kinds ${JSON.stringify(picker.kinds)}; ${picker.presets.length} presets`);
@@ -7705,6 +8056,59 @@ describe("climate studio · insert picker", () => {
       expect(card!.linked).toBe(true);
     }
     console.log(`  · picked preset "Föhn days": ${modifier.apply.length} ops, linked card in temperature/wind/sky`);
+
+    await closeStudioWindows();
+  });
+
+  test("insert picker 5: the Curse row makes a flagged tag device, and the flag outlives a trip through another WHEN", async () => {
+    await revealStudio();
+    await clickChainInsert("precipitation");
+
+    // The row reads as the tag row's sibling: same pill, the curse word and hue,
+    // and a sub in the picker's own `when.<predicate> · …` register.
+    const picker = await probeInsertPicker();
+    const tagRow = picker.kindRows.findIndex((k) => k.kind === "tag");
+    const curseRow = picker.kindRows.findIndex((k) => k.kind === "curse");
+    expect(curseRow).toBe(tagRow + 1);
+    expect(picker.kindRows[curseRow]).toEqual({ kind: "curse", badge: "CURSE", label: "Curse", sub: "when.tag · a curse the tale can name" });
+    // The shipped "Drought curse" preset carries the flag, so its row's kind
+    // pill says the same word rather than TAG.
+    expect(picker.presets.find((p) => p.name === "Drought curse")?.kindBadge).toBe("CURSE");
+
+    await ob.page.locator('.wadjet-studio-insert-row[data-kind="curse"]').click();
+    await nextFrame();
+    expect((await probeInsertPicker()).open).toBe(false);
+
+    // An ordinary `when.tag` device plus one display key. `kindOf` never moved:
+    // there is no sixth predicate shape and no sixth DeviceKind.
+    const modifier = await draftModifier("Curse");
+    expect(modifier).not.toBeNull();
+    expect(modifier.badge).toBe("curse");
+    expect(modifier.when).toEqual({ tag: expect.any(String) });
+    expect(modifier.apply).toEqual([{ param: "precipitation.pwd", op: "scale", value: 1 }]);
+
+    await ob.page.locator(".wadjet-studio-window .wadjet-studio-device").first().waitFor({ state: "visible", timeout: 10_000 });
+    expect((await probeDevice()).badge).toBe("CURSE");
+    const rail = await waitForMixer((r) => (r.find((c) => c.chain === "precipitation")?.units.some((u) => u.id === "Curse") ?? false));
+    expect(rail.find((c) => c.chain === "precipitation")!.units.find((u) => u.id === "Curse")!.kind).toBe("curse");
+
+    // Switch the WHEN away from tag: the word no longer describes the device,
+    // so the pill drops to the kind's own badge — but the flag stays on the
+    // modifier, because a WHEN edit is not a place to silently forget the name
+    // its author chose. Switching back restores it.
+    await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=chance]').click();
+    await nextFrame();
+    const away = await probeDevice();
+    expect(away.whenKind).toBe("chance");
+    expect(away.badge).toBe("DICE");
+    expect((await draftModifier("Curse")).badge).toBe("curse");
+
+    await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=tag]').click();
+    await nextFrame();
+    const back = await probeDevice();
+    expect(back.whenKind).toBe("tag");
+    expect(back.badge).toBe("CURSE");
+    console.log(`  · Curse row [${curseRow}] beside Tag [${tagRow}] → device "Curse" badge ${back.badge}, rail "curse"; WHEN chance → ${away.badge} → tag → ${back.badge}`);
 
     await closeStudioWindows();
   });

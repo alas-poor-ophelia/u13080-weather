@@ -16,6 +16,8 @@ import {
   envelopeShape,
   envelopeShapeName,
   gatePercent,
+  badgeFor,
+  KIND_BADGE,
   kindOf,
   type KnobSurface,
   knobRangeOf,
@@ -592,5 +594,81 @@ describe("composedPairs", () => {
     // Two of the same param is ambiguous — which pww does the pwd belong to? —
     // so nothing composes rather than picking one.
     expect(composedPairs([pwd, pww, { ...pww, value: 0.5 }])).toEqual([]);
+  });
+});
+
+describe("badgeFor", () => {
+  const tagDevice = (apply: Device["apply"], badge?: "curse"): Device => ({
+    id: "d",
+    name: "d",
+    kind: "tag",
+    enabled: true,
+    when: { kind: "tag", tags: ["era:Drought"] },
+    apply,
+    mods: [],
+    stage: "daily",
+    ...(badge ? { badge } : {}),
+  });
+
+  test("the flag is the badge — a curse can write anything at all", () => {
+    // A curse is a tag device its author named `Curse` in the insert picker
+    // (PLAN D17). What it writes never enters into it: killing the rain,
+    // halving it, or warming the air are all curses if the flag says so.
+    expect(badgeFor(tagDevice([{ param: "precipitation.pwd", op: "scale", value: 0 }], "curse"))).toBe("CURSE");
+    expect(badgeFor(tagDevice([{ param: "precipitation.pwd", op: "scale", value: 0.5 }], "curse"))).toBe("CURSE");
+    expect(badgeFor(tagDevice([{ param: "temperature.mean", op: "offset", value: 4 }], "curse"))).toBe("CURSE");
+    expect(badgeFor(tagDevice([], "curse"))).toBe("CURSE");
+  });
+
+  test("no flag is no curse, whatever the device writes", () => {
+    // The old rule read the badge off the apply shape; a device that zeroes the
+    // rain is now a plain TAG unless its author said otherwise.
+    expect(badgeFor(tagDevice([{ param: "precipitation.pwd", op: "set", value: 0 }]))).toBe("TAG");
+    expect(badgeFor(tagDevice([{ param: "precipitation.pwd", op: "scale", value: 0 }]))).toBe("TAG");
+    expect(
+      badgeFor(
+        tagDevice([
+          { param: "precipitation.pwd", op: "scale", value: 0 },
+          { param: "precipitation.pww", op: "scale", value: 0 },
+        ]),
+      ),
+    ).toBe("TAG");
+  });
+
+  test("the flag only shows while the WHEN is still a tag, and survives the trip away", () => {
+    // Switching a curse to `chance` makes it a device the word no longer
+    // describes; the pill says DICE. The flag itself is untouched, so switching
+    // back restores the name its author picked.
+    const curse = tagDevice([{ param: "precipitation.pwd", op: "scale", value: 0 }], "curse");
+    const elsewhere: Device = { ...curse, kind: "chance", when: { kind: "chance", p: 0.1 } };
+    expect(badgeFor(elsewhere)).toBe("DICE");
+    expect(elsewhere.badge).toBe("curse");
+    expect(badgeFor({ ...elsewhere, kind: "tag", when: { kind: "tag", tags: ["era:Drought"] } })).toBe("CURSE");
+  });
+
+  test("every unflagged device wears its kind's own badge", () => {
+    for (const d of ROUND_TRIP_DEVICES) expect(badgeFor(d)).toBe(KIND_BADGE[d.kind]);
+  });
+
+  test("the flag round-trips through the modifier and through a preset", () => {
+    const curse = tagDevice([{ param: "precipitation.pwd", op: "scale", value: 0 }], "curse");
+    const m = toModifier(curse);
+    expect(m.badge).toBe("curse");
+    expect(badgeFor(toDevice(m, calendar))).toBe("CURSE");
+    // …and an unflagged device writes no key at all, so nothing on disk moves.
+    expect("badge" in toModifier(tagDevice([]))).toBe(false);
+
+    // Save as preset → insert it again: still a curse.
+    const saved = deviceToPreset(curse, "Mine");
+    expect(saved.badge).toBe("curse");
+    expect(badgeFor(presetToDevice(saved, calendar, []))).toBe("CURSE");
+  });
+
+  test("the shipped Drought curse preset carries the flag, and is still a tag preset", () => {
+    const drought = SHIPPED_PRESETS.find((p) => p.name === "Drought curse")!;
+    expect(drought.badge).toBe("curse");
+    expect(badgeFor(presetToDevice(drought, calendar, []))).toBe("CURSE");
+    // Nothing about the schema's kinds moved: there is no sixth `DeviceKind`.
+    expect(drought.kind).toBe("tag");
   });
 });

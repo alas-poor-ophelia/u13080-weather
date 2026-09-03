@@ -12,7 +12,7 @@ import type { CalendarDescription } from "../src/plugin/time/adapter";
 import { zoneFromPreset } from "../src/plugin/zones";
 import { channelOf, devices } from "../src/studio/model/compile";
 import { toDevice } from "../src/studio/model/devices";
-import { insertDevice, insertKinds, insertPreset, presetsFor } from "../src/studio/model/insert";
+import { badgeForKind, insertDevice, insertKinds, insertPreset, presetsFor } from "../src/studio/model/insert";
 import { SHIPPED_PRESETS } from "../src/studio/model/presets";
 import type { WorldDraft } from "../src/studio/model/state";
 
@@ -58,19 +58,33 @@ function emptyWorld(): WorldDraft {
 }
 
 describe("insert · insertKinds", () => {
-  test("one row per Predicate shape, in WHEN order, each with a label and a hint", () => {
+  test("one row per Predicate shape, in WHEN order, plus the curse — each with a label and a hint", () => {
     const kinds = insertKinds();
-    expect(kinds.map((k) => k.kind)).toEqual(["trim", "moon", "spell", "tag", "chance"]);
+    // Six ROWS over five kinds: `Curse` is the tag row again, flagged (PLAN D17).
+    expect(kinds.map((k) => k.value)).toEqual(["trim", "moon", "spell", "tag", "curse", "chance"]);
+    expect(kinds.map((k) => k.kind)).toEqual(["trim", "moon", "spell", "tag", "tag", "chance"]);
     for (const k of kinds) {
       expect(k.label.length).toBeGreaterThan(0);
       expect(k.hint.length).toBeGreaterThan(0);
     }
+    const curse = kinds.find((k) => k.value === "curse")!;
+    expect(curse).toMatchObject({ kind: "tag", label: "Curse", badge: "CURSE", flag: "curse" });
+    // Every other row writes no flag at all.
+    expect(kinds.filter((k) => k.flag !== undefined).length).toBe(1);
+  });
+
+  test("badgeForKind badges a flagged tag preset CURSE and every other one by its kind", () => {
+    expect(badgeForKind("tag")).toBe("TAG");
+    expect(badgeForKind("tag", "curse")).toBe("CURSE");
+    expect(badgeForKind("chance")).toBe("DICE");
+    // The flag only reads as a curse on a tag preset.
+    expect(badgeForKind("chance", "curse")).toBe("DICE");
   });
 
   test("returns a fresh array — mutating the result never touches the next call", () => {
     const first = insertKinds();
     first.pop();
-    expect(insertKinds().length).toBe(5);
+    expect(insertKinds().length).toBe(6);
   });
 });
 
@@ -91,13 +105,20 @@ describe("insert · presetsFor", () => {
 
 describe("insert · insertDevice", () => {
   test("every kind lands after the existing devices, before forcings:*, with a default apply for the chain", () => {
-    for (const { kind } of insertKinds()) {
+    for (const { kind, flag } of insertKinds()) {
       const z = zoneWith([{ id: "Existing", stage: "climate", apply: [{ param: "temperature.mean", op: "offset", value: 1 }] }, { id: "forcings:temperature.mean", stage: "climate", apply: [{ param: "temperature.mean", op: "offset", value: 0 }] }]);
-      const id = insertDevice(z, kind, "wind", calendar);
+      const id = insertDevice(z, kind, "wind", calendar, flag);
       expect(z.modifiers.map((m) => m.id)).toEqual(["Existing", id, "forcings:temperature.mean"]);
       const inserted = z.modifiers.find((m) => m.id === id)!;
       expect(inserted.apply.length).toBeGreaterThan(0);
       expect(inserted.apply.some((op) => channelOf(op.param) === "wind")).toBe(true);
+      // The flag rides along as a display key the validator has nothing to say
+      // about; the curse row is otherwise an ordinary `when.tag` device.
+      expect(inserted.badge).toBe(flag);
+      if (flag === "curse") {
+        expect(id).toBe("Curse");
+        expect(inserted.when).toBeDefined();
+      }
       expectValid(z);
     }
   });

@@ -49,6 +49,10 @@ export const SHIPPED_PRESETS: readonly DevicePreset[] = [
   {
     name: "Drought curse",
     kind: "tag",
+    // The word is the author's, not the shape's: `badge` is what makes this a
+    // CURSE in the picker and on the card it inserts (PLAN D17). Turning the
+    // zero back up leaves it a curse; only the flag says so.
+    badge: "curse",
     when: { tag: "era:Drought" },
     apply: [{ param: "precipitation.pwd", op: "scale", value: 0 }],
   },
@@ -107,6 +111,7 @@ export function presetToDevice(p: DevicePreset, calendar: CalendarDescription | 
     ...(p.spell ? { spell: { ...p.spell } } : {}),
     apply: structuredClone(p.apply),
     ...(p.mods?.length ? { mods: p.mods.map((g) => ({ ...g })) } : {}),
+    ...(p.badge ? { badge: p.badge } : {}),
   };
   return toDevice(m, calendar);
 }
@@ -126,5 +131,6 @@ export function deviceToPreset(d: Device, name: string): DevicePreset {
     ...(m.spell ? { spell: m.spell } : {}),
     apply: m.apply,
     ...(m.mods?.length ? { mods: m.mods } : {}),
+    ...(m.badge ? { badge: m.badge } : {}),
   };
 }

@@ -68,7 +68,7 @@ export function buildWhen(c: DeviceWindowContext, d: Device, defer = false): (()
     note.createSpan({ text: " · applied once to the curves, not per day" });
   }
   else if (w.kind === "moon") buildMoon(c, kindBody, w.moon, description);
-  else if (w.kind === "tag") buildTag(c, kindBody, w.tags, description);
+  else if (w.kind === "tag") buildTag(c, kindBody, d, w.tags, description);
   else if (w.kind === "yearWindow") buildYearWindow(c, kindBody, d, description, yearLength);
   else if (w.kind === "chance") buildChance(c, kindBody, w.p);
   return null;

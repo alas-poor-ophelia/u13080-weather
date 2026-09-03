@@ -120,7 +120,8 @@ describe("op gloss, factors and kind colours", () => {
     for (const kind of ["CURSE", "SPELL", "MOON", "TAG", "DICE", "TRIM", "ERA", "STATES"]) {
       expect(kindColor(kind)).toMatch(/^var\(--wadjet-studio-[a-z-]+\)$/);
     }
-    expect(kindColor("CURSE")).toBe("var(--wadjet-studio-error-text)");
+    // The prototype badges a curse #f0885c, the same hue SPELL wears.
+    expect(kindColor("CURSE")).toBe("var(--wadjet-studio-temp)");
     expect(kindColor("MOON")).toBe("var(--wadjet-studio-moon)");
     expect(kindColor("TAG")).toBe("var(--wadjet-studio-gold)");
     expect(kindColor("SPELL")).toBe("var(--wadjet-studio-temp)");

@@ -4,7 +4,6 @@
  * badge and the op menu read. Nothing here reads state.
  */
 import type { Channel } from "../../../model/compile";
-import type { DeviceKind } from "../../../model/devices";
 
 /** Year length to draw with when the active adapter does not describe itself (SPEC §8). */
 export const DEFAULT_YEAR_LENGTH = 365;
@@ -18,6 +17,13 @@ export const PANEL_W = 372;
  * widths are what PLAN.md D16 allows — the chrome is shared, the box is not.
  */
 export const PANEL_W_SPELL = 320;
+
+/**
+ * The tag path is narrower still (`1213-vst-neverain.html` l.2): the prototype
+ * draws Neverain 300 wide around a body that is one summary line. Same licence
+ * as the spell width above — the chrome is shared, the box is not (PLAN D16).
+ */
+export const PANEL_W_TAG = 300;
 
 /** The moon gate disc (`proto-markup/0699-vst-stormtide.html`): an 88-unit box, a 34-unit face. */
 export const DISC = 88;
@@ -50,14 +56,12 @@ export const ENVELOPE_MIN_GAP = 0.005;
 /** Phases are in [0, 1): the last drawable phase sits just short of the wrap. */
 export const LAST_PHASE = 1 - ENVELOPE_MIN_GAP;
 
-/** The KIND pill's text, per kind (the prototype's `DEV_KINDS.badge`). */
-export const KIND_BADGE: Record<DeviceKind, string> = {
-  trim: "TRIM",
-  moon: "MOON",
-  spell: "SPELL",
-  tag: "TAG",
-  chance: "DICE",
-};
+/**
+ * The KIND pill's text, per kind. It lives in `model/devices.ts` beside
+ * `badgeFor`, which reads `CURSE` off the modifier's own display flag rather
+ * than its kind; re-exported here so the window's constants still read as one set.
+ */
+export { KIND_BADGE } from "../../../model/devices";
 
 export const CHANNEL_COLOUR: Record<Channel, string> = {
   temperature: "var(--wadjet-studio-temp)",

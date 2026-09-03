@@ -42,7 +42,7 @@
 import type { DevicePreset } from "../../../../plugin/settings";
 import type { CalendarDescription } from "../../../../plugin/time/adapter";
 import { devices } from "../../../model/compile";
-import { displayName as prettyName, kindColor } from "../../../model/copy";
+import { displayName as prettyName } from "../../../model/copy";
 import {
   deviceOf,
   loadPreset,
@@ -51,6 +51,7 @@ import {
   updateDevice,
 } from "../../../model/device-edit";
 import {
+  badgeFor,
   type Device,
   deviceGrammar,
 } from "../../../model/devices";
@@ -63,7 +64,7 @@ import { PresetNameModal } from "../../preset-name-modal";
 import type { SurfaceContext } from "../../surfaces";
 import type { WindowBuilder } from "../../windows";
 import { buildApply } from "./apply";
-import { KIND_BADGE, PANEL_W, PANEL_W_SPELL } from "./constants";
+import { KIND_BADGE, PANEL_W, PANEL_W_SPELL, PANEL_W_TAG } from "./constants";
 import { type DeviceKnobOptions, type DeviceWindowContext, type Section, zoneOf } from "./context";
 import { buildFoot } from "./footer";
 import type { Part } from "./icon-button";
@@ -71,6 +72,7 @@ import { DEVICE_WINDOW_PREFIX, deviceWindowId } from "./ids";
 import { buildMod } from "./mod";
 import { buildSpell } from "./spell";
 import { buildWhen } from "./when";
+import { curseCollapsed } from "./when-tag";
 
 export { DEVICE_WINDOW_PREFIX, deviceWindowId };
 
@@ -96,6 +98,8 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
     let srcPick: number | null = null;
     /** Moon path only: whether `＋ Add target`'s inline list is open under the cards. */
     let targetPick = false;
+    /** Tag path only: whether the curse disclosure is open (`when-tag.ts`); the chips and APPLY hang behind it. */
+    let applyOpen = false;
     let signature = "";
     let issuesKey = "";
     let issuesMemo: StudioIssue[] = [];
@@ -231,6 +235,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         envOpen,
         srcPick,
         targetPick,
+        applyOpen,
         ctx.units(),
       ]);
     }
@@ -371,6 +376,8 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       setSrcPick: (at) => void (srcPick = at),
       targetPick: () => targetPick,
       setTargetPick: (open) => void (targetPick = open),
+      applyOpen: () => applyOpen,
+      setApplyOpen: (open) => void (applyOpen = open),
       setCancelDrag: (cancel) => void (cancelDrag = cancel),
     };
 
@@ -384,8 +391,9 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         body.createDiv({ cls: "wadjet-studio-device-gone", text: "removed" });
         return;
       }
-      // A bypassed device still shows every control; it just stops claiming to
-      // be doing anything (`proto-win-neverain.png`).
+      // A bypassed device still shows every control, at full contrast: the
+      // prototype signals power on the chrome LED alone and leaves the body
+      // legible (gap2 D7), so the class is a hook, not a dimmer.
       body.toggleClass("is-off", !d.enabled);
       chromeLed.on = d.enabled;
       chromeLed.level = ledLevel(issues());
@@ -395,14 +403,21 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       // hands the WINDOWS body back rather than drawing it, so the dials can
       // go above it.
       const spellPath = d.when.kind === "yearWindow" && d.custom !== true;
+      // A shut curse disclosure owns everything the Neverain showcase does not
+      // draw (`1213` l.10): SPELL, APPLY and MOD alike. The WHEN row, the
+      // footer and WRITES stay, the way the moon and spell paths keep what
+      // their own showcases keep.
+      const collapsed = curseCollapsed(c, d);
       const windows = buildWhen(c, d, spellPath);
       // No SPELL row on the moon path: the prototype's Stormtide draws none
       // (gap2 B9), and `buildApply` folds the gate disc and the op knobs into
       // one row there instead of a disc under WHEN and a grid below it.
-      if (d.when.kind !== "moon") buildSpell(c, d, spellPath);
+      if (d.when.kind !== "moon" && !collapsed) buildSpell(c, d, spellPath);
       windows?.();
-      buildApply(c, d);
-      buildMod(c, d);
+      if (!collapsed) {
+        buildApply(c, d);
+        buildMod(c, d);
+      }
       buildFoot(c);
     }
 
@@ -419,9 +434,16 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       // not. `windows.ts` reads this once, at `createWindow`, so it is the
       // width the panel OPENS at — a kind switch inside an open panel keeps
       // the width it was opened with until it is reopened.
-      width: opened?.when.kind === "yearWindow" ? PANEL_W_SPELL : PANEL_W,
-      badge: () => KIND_BADGE[current()?.kind ?? "trim"],
-      badgeColor: kindColor(KIND_BADGE[opened?.kind ?? "trim"]),
+      width: opened?.when.kind === "yearWindow" ? PANEL_W_SPELL : opened?.when.kind === "tag" ? PANEL_W_TAG : PANEL_W,
+      // Stored, not derived: `badgeFor` reads the modifier's own `badge` flag,
+      // so a tag device wears `CURSE` because its author picked that row in the
+      // insert picker, whatever it writes. No `badgeColor` — the chrome's default
+      // is `kindColor(badge)`, which is re-read on every paint and so follows
+      // the badge; a fixed colour here would keep the hue the panel opened with.
+      badge: () => {
+        const d = current();
+        return d === null ? KIND_BADGE.trim : badgeFor(d);
+      },
       // No `caption`: the prototype's device bar is LED · name · KIND · preset ▾
       // · × and nothing else — the stage reads in the WHEN row (`when.ts`).
       preset: {

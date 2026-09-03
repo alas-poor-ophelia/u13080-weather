@@ -717,6 +717,14 @@
   opacity: 0.45;
   pointer-events: none;
 }
+/* …except the per-op mute, which rides INSIDE the knob's own label
+   (`apply.ts`, `● precip`). A disabled knob takes pointer events off its whole
+   subtree, so the one control that can un-mute the op has to take them back —
+   otherwise the mute is a one-way switch on every path but the moon one, whose
+   LED sits on the binding card instead. */
+.wadjet-studio-knob.is-disabled .wadjet-studio-led {
+  pointer-events: auto;
+}
 
 /* LED — sized by what it belongs to: 10 px on a rack unit, 8 px on the mixer's
    fixed strip, 7 px beside an op, 9 px in a window title bar (set with the
@@ -1241,8 +1249,11 @@
    the device panel's prototype pins it — a channel window's title still sizes
    to its text. */
 .wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-title {
-  flex: 0 0 118px;
-  width: 118px;
+  /* A BASIS, not a fixed width: the 300 px curse panel has no 118 px to spare
+     once the badge, the preset chip and the × have taken theirs, and a
+     non-shrinking name is what pushed all three past the right border. The
+     base rule's `min-width: 0` lets it ellipsise the rest of the way. */
+  flex: 0 1 118px;
 }
 .wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-title-input {
   width: 100%;
@@ -1275,29 +1286,37 @@
   align-items: center;
   gap: 4px;
 }
-/* The prototype's preset control is a bordered CHIP with its own caret, not a
+/* The prototype's preset control is a bordered CHIP with a text caret, not a
    form field (`1095-vst-device.html` l.8): 10.5 px, `padding:2px 7px`, 2 px
-   radius. `appearance: none` is what gets it there — the native select's own
-   min-height and drop-arrow gutter were making every window's title bar 47 px
-   against the prototype's 37 (gap2 A5). The caret is two gradient wedges
-   rather than a glyph, because the control's content is its options. */
+   radius, `71 × 20` on the device bar and `80 × 20` on regimes. A native
+   `<select>` sized itself to its WIDEST option — 94 px on the device path —
+   which is what pushed the ＋ and the × off a 300 px curse panel; the chip is
+   sized by the name it is actually wearing. `line-height: 14px` is what makes
+   the 2 px padding and 1 px border add up to the prototype's 20. */
 .wadjet-studio-window-preset-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   max-width: 110px;
-  height: auto;
-  padding: 2px 14px 2px 7px;
-  appearance: none;
+  min-width: 0;
+  padding: 2px 7px;
+  cursor: pointer;
   font-size: var(--wadjet-studio-fs-chip);
-  line-height: 1.2;
+  line-height: 14px;
   color: var(--wadjet-studio-text-dim);
-  background-color: transparent;
-  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%), linear-gradient(135deg, currentcolor 50%, transparent 50%);
-  background-position: right 7px center, right 5px center;
-  background-size: 2px 2px, 2px 2px;
-  background-repeat: no-repeat;
   border: 1px solid #565b61;
   border-radius: 2px;
 }
-.wadjet-studio-window-preset-save,
+/* The caret never ellipsises away: only the name shrinks. */
+.wadjet-studio-window-preset-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.wadjet-studio-window-preset-caret {
+  flex: 0 0 auto;
+}
 .wadjet-studio-window-close {
   padding: 0 2px;
   cursor: pointer;
@@ -1315,6 +1334,11 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+/* The prototype's device body ends 13 px above the WRITES footer, one more
+   than its 12 px top edge. Device-scoped: no other panel's body moves. */
+.wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-body {
+  padding-bottom: 13px;
 }
 .wadjet-studio-window-foot {
   flex: 0 0 auto;
@@ -3978,11 +4002,9 @@
   display: flex;
   flex-direction: column;
 }
-/* Bypassed (`enabled: false`): every control still there, nothing claiming to
-   be doing anything (`proto-win-neverain.png`). */
-.wadjet-studio-device.is-off {
-  opacity: 0.55;
-}
+/* Bypassed (`enabled: false`) has NO body rule: the prototype leaves a
+   powered-off device at full contrast and signals power on the chrome LED
+   alone (gap2 D7). `.is-off` stays on the body as a hook only. */
 .wadjet-studio-device-section {
   display: flex;
   flex-direction: column;
@@ -4064,6 +4086,28 @@
 .wadjet-studio-device-times {
   font-size: var(--wadjet-studio-fs-caption);
   color: var(--wadjet-studio-text-mute);
+}
+/* WHEN · tag opens on the prototype's one summary line (`1213` l.10): what the
+   device writes, left, its value in the op's own CHANNEL hue; the gate it fires
+   on, right, in the mute that colour literally is. On a curse-shaped device the
+   row is also the disclosure the chips and APPLY hang behind. */
+.wadjet-studio-device-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-device-summary[aria-expanded] {
+  cursor: pointer;
+}
+.wadjet-studio-device-summary-value {
+  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text-dim));
+  font-variant-numeric: tabular-nums;
+}
+.wadjet-studio-device-summary-gate {
+  color: var(--wadjet-studio-text-mute);
+  font-variant-numeric: tabular-nums;
 }
 .wadjet-studio-device-chips {
   display: flex;

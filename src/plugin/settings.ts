@@ -27,6 +27,8 @@ export interface DevicePreset {
   apply: ModifierOp[];
   /** mirrors core ModGate (bead wadjet-9f9.2) */
   mods?: Array<{ source: string; amount: number }>;
+  /** display flag, mirrors `Modifier.badge` — a preset saved from a curse stays one (PLAN D17) */
+  badge?: "curse";
 }
 
 /**

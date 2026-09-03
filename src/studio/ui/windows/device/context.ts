@@ -8,7 +8,8 @@
  *
  *  - `addPart`, never the array: `clearParts()` *rebinds* `parts` on every
  *    rebuild, so a body holding the array would be pushing into a dead one.
- *  - `clipAt` / `modOpen` / `envOpen` / `srcPick` / `targetPick` are pairs, not
+ *  - `clipAt` / `modOpen` / `envOpen` / `srcPick` / `targetPick` / `applyOpen`
+ *    are pairs, not
  *    values: they are shared mutable state that `stateKey()` reads, so a copy
  *    would go stale the moment a body moved it.
  *  - `endGesture()` closes a hand-rolled drag the way the knobs do — drop the
@@ -74,5 +75,8 @@ export interface DeviceWindowContext {
   /** Moon path only: whether `＋ Add target`'s inline target list is open (`apply.ts`). */
   targetPick(): boolean;
   setTargetPick(open: boolean): void;
+  /** Tag path only: whether the curse disclosure is open — the tag chips and APPLY hang behind it (`when-tag.ts`). */
+  applyOpen(): boolean;
+  setApplyOpen(open: boolean): void;
   setCancelDrag(cancel: (() => void) | null): void;
 }
