@@ -34,6 +34,16 @@ describe("settings", () => {
     // a non-array value (e.g. corrupt data.json) coerces to []
     expect(migrateSettings({ devicePresets: "nope" }).devicePresets).toEqual([]);
   });
+
+  test("migrate: regimePresets defaults to [] when absent, and passes through an array", () => {
+    expect(migrateSettings({}).regimePresets).toEqual([]);
+    expect(migrateSettings(undefined).regimePresets).toEqual([]);
+    const preset = { name: "House states", regimes: [{ id: "calm", weight: 1, meanDurationDays: 5 }] };
+    const s = migrateSettings({ regimePresets: [preset] });
+    expect(s.regimePresets).toEqual([preset]);
+    // a non-array value (e.g. corrupt data.json) coerces to []
+    expect(migrateSettings({ regimePresets: "nope" }).regimePresets).toEqual([]);
+  });
 });
 
 describe("calendar-text (Moons textarea)", () => {

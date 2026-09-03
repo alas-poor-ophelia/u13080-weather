@@ -78,6 +78,12 @@ describe("initialState", () => {
     delete s.devicePresets;
     expect(initialState(s, null).world.devicePresets).toEqual([]);
   });
+
+  test("regimePresets default to an empty list when settings predate them", () => {
+    const s = settings();
+    delete s.regimePresets;
+    expect(initialState(s, null).world.regimePresets).toEqual([]);
+  });
 });
 
 describe("subscribe (batched)", () => {

@@ -25,7 +25,7 @@ function zoneWith(mods: Modifier[]): ZoneProfile {
 }
 
 function world(): WorldDraft {
-  return { eras: [], calendar: { seasons: [], moons: [] }, devicePresets: [], overrides: [] };
+  return { eras: [], calendar: { seasons: [], moons: [] }, devicePresets: [], regimePresets: [], overrides: [] };
 }
 
 function errors(w: WorldDraft) {

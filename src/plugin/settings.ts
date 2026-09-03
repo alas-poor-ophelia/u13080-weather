@@ -6,7 +6,7 @@
  */
 import type { Override } from "../core/report";
 import type { DescriptorBands } from "../core/report";
-import type { Era, ModifierOp, Predicate, SpellSpec, ZoneProfile } from "../core/types";
+import type { Era, ModifierOp, Predicate, Regime, SpellSpec, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 
 export interface MoonConfig {
@@ -27,6 +27,17 @@ export interface DevicePreset {
   apply: ModifierOp[];
   /** mirrors core ModGate (bead wadjet-9f9.2) */
   mods?: Array<{ source: string; amount: number }>;
+}
+
+/**
+ * A studio regime preset: a whole set of the zone's weather states, saved from
+ * the Regimes window's `preset ▾` and loadable over any zone (SPEC §3.4).
+ * Unlike a `DevicePreset` this is not a shape with instance fields stripped —
+ * `regimes[]` has no instance identity, so the set travels verbatim.
+ */
+export interface RegimePreset {
+  name: string;
+  regimes: Regime[];
 }
 
 export interface InternalCalendarConfig {
@@ -56,6 +67,8 @@ export interface WadjetSettings {
   units: "metric" | "imperial";
   /** studio device presets (rack row seeds), PLAN §2 */
   devicePresets?: DevicePreset[];
+  /** studio regime presets (saved state sets), SPEC §3.4 */
+  regimePresets?: RegimePreset[];
 }
 
 export const DEFAULT_SETTINGS: WadjetSettings = {
@@ -75,6 +88,7 @@ export const DEFAULT_SETTINGS: WadjetSettings = {
   overrides: [],
   units: "metric",
   devicePresets: [],
+  regimePresets: [],
 };
 
 /** A seed that is random once and then fixed forever for this world. */
@@ -95,6 +109,7 @@ export function migrateSettings(raw: unknown): WadjetSettings {
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],
     devicePresets: Array.isArray(r.devicePresets) ? r.devicePresets : [],
+    regimePresets: Array.isArray(r.regimePresets) ? r.regimePresets : [],
   };
   if (!s.worldSeed) s.worldSeed = freshSeed();
   if (!s.generatorVersion) s.generatorVersion = GENERATOR_VERSION;

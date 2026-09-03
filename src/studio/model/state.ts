@@ -18,13 +18,15 @@
  */
 import type { Override } from "../../core/report";
 import type { Era, ZoneProfile } from "../../core/types";
-import type { DevicePreset, InternalCalendarConfig } from "../../plugin/settings";
+import type { DevicePreset, InternalCalendarConfig, RegimePreset } from "../../plugin/settings";
 
 /** The world-scoped slice of settings: everything a world edit touches (`world · N zones`). */
 export interface WorldDraft {
   eras: Era[];
   calendar: { seasons: InternalCalendarConfig["seasons"]; moons: InternalCalendarConfig["moons"] };
   devicePresets: DevicePreset[];
+  /** saved state sets, offered by the Regimes window's `preset ▾` (SPEC §3.4) */
+  regimePresets: RegimePreset[];
   overrides: Override[];
 }
 
@@ -61,6 +63,7 @@ export interface StudioSettingsLike {
   eras: Era[];
   calendar: { seasons: InternalCalendarConfig["seasons"]; moons: InternalCalendarConfig["moons"] };
   devicePresets?: DevicePreset[];
+  regimePresets?: RegimePreset[];
   overrides: Override[];
 }
 
@@ -96,6 +99,7 @@ export function initialState(settingsLike: StudioSettingsLike, zoneId: string | 
     eras: settingsLike.eras,
     calendar: { seasons: settingsLike.calendar.seasons, moons: settingsLike.calendar.moons },
     devicePresets: settingsLike.devicePresets ?? [],
+    regimePresets: settingsLike.regimePresets ?? [],
     overrides: settingsLike.overrides,
   });
   const saved = structuredClone({ zones, world });

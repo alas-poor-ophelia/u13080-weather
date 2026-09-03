@@ -24,6 +24,7 @@ function world(overrides: Partial<WorldDraft> = {}): WorldDraft {
     eras: [{ name: "Wet Age", from: 0 }],
     calendar: { seasons: [{ name: "Warm", from: 0 }, { name: "Cold", from: 0.5 }], moons: [] },
     devicePresets: [],
+    regimePresets: [],
     overrides: [],
     ...overrides,
   };

@@ -46,10 +46,13 @@ import { tabular } from "../../model/format";
 import { regimeHint } from "../../model/hints-regimes";
 import { opFmt, opQuantity, parseDisplay } from "../../model/knob-units";
 import { CHAIN_COLOR_VAR, CHAIN_LABEL, CHAINS } from "../../model/mixer";
+import { CUSTOM_SET, currentSetName, loadRegimeSet, regimeSetSub, regimeSetsOffered, saveRegimeSet, type RegimeSet } from "../../model/regime-presets";
 import { addApply, addState, applyFor, applySummary, colourOf, regimesWrites, regimeTargetName, removeApply, removeState, renameState, setApplyValue, setDwell, setWeight, shareBar } from "../../model/regimes";
 import type { StudioState } from "../../model/state";
 import { issuesByUnit, issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
 import { createKnob, createLed, type KnobComponent, type KnobPhase, type LedComponent } from "../components";
+import type { WindowPreset } from "../components/window";
+import { PresetNameModal } from "../preset-name-modal";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild } from "../windows";
 
@@ -593,6 +596,86 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
     opsEl.toggleClass("is-empty", ops.length === 0);
   }
 
+  // --- the title bar's preset pill (SPEC §3.4) -----------------------------
+
+  /**
+   * The name the pill wears. The zone's states are a *set*, and a set has a
+   * name even though nothing stores one: while they still equal the zone's
+   * base station record it reads that record's name (`Fjord Coast`), and it
+   * reads `custom` the moment a knob moves (`model/regime-presets.ts`).
+   */
+  function currentSet(): string {
+    const state = ctx.store.get();
+    const z = zoneOf(state);
+    return z === null ? CUSTOM_SET : currentSetName(z, state.world);
+  }
+
+  /**
+   * One `▾` entry. Every set carries its `N states` sub — and `yours` when the
+   * user wrote it — EXCEPT the one the zone is on: a `<select>` shows the
+   * selected option's own text, and the prototype's pill reads the bare name
+   * (`Fjord Coast ▾`), not the name with its sub trailing after it.
+   */
+  function optionLabel(set: RegimeSet, current: string): string {
+    if (set.name === current) return set.name;
+    return `${set.name} · ${regimeSetSub(set)}${set.yours ? " · yours" : ""}`;
+  }
+
+  /** Every set, plus `custom` when that is what the zone is on — the pill has to have an option to sit on. */
+  function presetOptions(): string[] {
+    const state = ctx.store.get();
+    const current = currentSet();
+    const labels = regimeSetsOffered(state.world, zoneOf(state)).map((set) => optionLabel(set, current));
+    return labels.includes(current) ? labels : [current, ...labels];
+  }
+
+  /**
+   * Load a set over the zone's `regimes[]`. One undoable action like every
+   * other edit here; the first-world-edit confirm does NOT apply, because
+   * states are zone-level (SPEC §2) — nothing outside this zone moves.
+   */
+  function pickSet(label: string): void {
+    const state = ctx.store.get();
+    const current = currentSet();
+    // `custom` is a reading, not a set: picking it is a no-op by construction.
+    const found = regimeSetsOffered(state.world, zoneOf(state)).find((set) => optionLabel(set, current) === label);
+    if (found === undefined) return;
+    write((z) => void loadRegimeSet(z, found.regimes), { history: true });
+    // The incoming set names its own states; the old cursor is meaningless.
+    selectedId = null;
+    render();
+  }
+
+  /** `＋ save "name" as preset` — the world keeps the set, so every zone can load it back. */
+  function saveSet(): void {
+    const z = zone();
+    if (z === null) return;
+    const current = currentSet();
+    new PresetNameModal(ctx.plugin.app, current === CUSTOM_SET ? `${z.name} states` : current, (name) => {
+      ctx.store.update(
+        (s) => {
+          const draft = zoneOf(s);
+          if (draft !== null) saveRegimeSet(s.world, draft, name);
+        },
+        { history: true },
+      );
+    }).open();
+  }
+
+  /**
+   * A live object, not a snapshot: `windows.ts` re-reads `options()` every tick
+   * and rebuilds the control when the list changes, and the getter is what
+   * makes the pill follow the zone rather than the tick the panel opened on.
+   */
+  const presetControl: WindowPreset = {
+    get name(): string {
+      return currentSet();
+    },
+    options: () => presetOptions(),
+    onPick: (label) => pickSet(label),
+    onSave: () => saveSet(),
+  };
+
   // --- pull-based readouts -------------------------------------------------
 
   /** SPEC law 5: the exact grammar this window produces — the draft's `regimes[]`. */
@@ -626,6 +709,7 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
     // SPEC §6's one statement of where states sit in the signal path, and the
     // only place the user meets it.
     caption: "slot 00 · every chain",
+    preset: presetControl,
     body,
     led: { on: true, scope: "device" },
     // Re-read every tick against the `byUnit` map `renderAll` computes once (SPEC §3.9).

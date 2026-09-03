@@ -30,7 +30,7 @@
  *    `Modifier.mods[]`; the onset envelope editor under it writes
  *    `ModifierOp.envelope` (SPEC §7, §7a).
  */
-import { Menu, Modal, Setting, type App } from "obsidian";
+import { Menu } from "obsidian";
 import type { Era, ModifierOp } from "../../../core/types";
 import type { DevicePreset } from "../../../plugin/settings";
 import type { CalendarDescription } from "../../../plugin/time/adapter";
@@ -89,6 +89,7 @@ import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/vali
 import { createChart, createChip, createKnob, createLed, createSegmented } from "../components";
 import type { LedProps } from "../components/led";
 import { beginDrag } from "../pointer";
+import { PresetNameModal } from "../preset-name-modal";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuilder } from "../windows";
 import { openCycleFor } from "./cycle";
@@ -233,43 +234,6 @@ function iconButton(parent: HTMLElement, o: { text: string; label: string; hint:
     o.onClick(new MouseEvent("click", { clientX: el.getBoundingClientRect().left, clientY: el.getBoundingClientRect().bottom }));
   });
   return el;
-}
-
-/** `＋ save "<name>" as preset` asks for the name before it writes one (PLAN D12). */
-class PresetNameModal extends Modal {
-  constructor(
-    app: App,
-    private readonly initial: string,
-    private readonly onSubmit: (name: string) => void,
-  ) {
-    super(app);
-  }
-
-  override onOpen(): void {
-    const { contentEl } = this;
-    this.setTitle("Save as preset");
-    let name = this.initial;
-    new Setting(contentEl).setName("Name").addText((t) =>
-      t
-        .setValue(name)
-        .setPlaceholder(this.initial)
-        .onChange((v) => (name = v)),
-    );
-    new Setting(contentEl).addButton((b) =>
-      b
-        .setButtonText("Save")
-        .setCta()
-        .onClick(() => {
-          const trimmed = name.trim();
-          this.close();
-          if (trimmed) this.onSubmit(trimmed);
-        }),
-    );
-  }
-
-  override onClose(): void {
-    this.contentEl.empty();
-  }
 }
 
 interface Part {

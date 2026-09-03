@@ -2467,6 +2467,15 @@ interface RegimesProbe {
   ops: string[];
   /** the panel's own WRITES footer — the draft's `regimes[]` */
   writes: string;
+  /**
+   * The chrome's `preset ▾` (F7 · wadjet-6rw.15): the name the pill wears —
+   * the zone's base station record while its states still equal it, `custom`
+   * once they do not — and every set the `▾` offers.
+   */
+  presetName: string;
+  presetOptions: string[];
+  /** the world draft's saved state sets, by name */
+  regimePresets: string[];
   /** the store's truth, so the DOM is never the only witness */
   zoneRegimes: Array<{ id: string; weight: number; dwell: number }>;
   gatedOn: string | null;
@@ -2498,6 +2507,9 @@ async function probeRegimes(): Promise<RegimesProbe> {
         segments: pick(bodyEl, ".wadjet-studio-regimes-share-seg").map((s) => s.getAttribute("data-id") ?? ""),
         ops: pick(bodyEl, ".wadjet-studio-regimes-op").map((o) => o.getAttribute("data-param") ?? ""),
         writes: text(panel?.querySelector(".wadjet-studio-writes-body") ?? null),
+        presetName: (panel?.querySelector(".wadjet-studio-window-preset-pick") as HTMLSelectElement | null)?.value ?? "",
+        presetOptions: pick(panel, ".wadjet-studio-window-preset-pick option").map((o) => text(o)),
+        regimePresets: (state.world.regimePresets ?? []).map((p: any) => p.name),
         zoneRegimes: (zone?.regimes ?? []).map((r: any) => ({ id: r.id, weight: r.weight, dwell: r.meanDurationDays })),
         gatedOn: gate?.when?.regime ?? null,
         canUndo: leaf.view.store.canUndo() as boolean,
@@ -2528,6 +2540,22 @@ async function openRegimesWindow(): Promise<void> {
   );
   await nextFrame();
   await ob.page.locator(".wadjet-studio-window .wadjet-studio-regimes").first().waitFor({ state: "visible", timeout: 10_000 });
+}
+
+/** The Regimes panel's own chrome — the title bar the `preset ▾` lives in. */
+const regimesWindow = () => ob.page.locator(".wadjet-studio-window", { has: ob.page.locator(".wadjet-studio-regimes") }).first();
+
+/** Wait until the `preset ▾` pill reads `name` — the reaction that says the load landed. */
+async function waitForPresetPill(name: string): Promise<void> {
+  await ob.page.waitForFunction(
+    (a: { type: string; name: string }) => {
+      const el = (window as any).app.workspace.getLeavesOfType(a.type)[0]?.view?.containerEl as HTMLElement | undefined;
+      const panel = el?.querySelector(".wadjet-studio-regimes")?.closest(".wadjet-studio-window") ?? null;
+      return (panel?.querySelector(".wadjet-studio-window-preset-pick") as HTMLSelectElement | null)?.value === a.name;
+    },
+    { type: VIEW_TYPE, name },
+    { timeout: 10_000 },
+  );
 }
 
 /** Write into the zone draft the way a knob would, so a step can start from a known state. */
@@ -2792,6 +2820,101 @@ describe("climate studio · regimes window", () => {
     const redone = await probeRegimes();
     expect(redone.zoneRegimes[0]!.weight).toBeCloseTo(0.5, 6);
     console.log(`  · HOW OFTEN drag 30 px up: 0.30 to ${redone.zoneRegimes[0]!.weight}; one undo restored 0.30, redo put it back`);
+  });
+
+  test("step 38a: the preset ▾ names the zone's state set and loads a shipped one back over it", async () => {
+    await openRegimesWindow();
+    const target = (await probeRegimes()).rows[0]!;
+
+    // A known custom draft: the pill only says `custom` once the states stop
+    // equalling the record the zone was copied from.
+    await seedRegimeDraft("weight", { id: target, value: 0.33 });
+    await waitForPresetPill("custom");
+    const custom = await probeRegimes();
+    expect(custom.presetName).toBe("custom");
+    expect(custom.presetOptions).toContain("custom");
+    expect(custom.zoneRegimes[0]!.weight).toBeCloseTo(0.33, 10);
+
+    // Every station record ships the same three states, so the `▾` offers the
+    // set once, named for the record this zone came from, with its size as a sub.
+    const shipped = custom.presetOptions.find((o) => o !== "custom" && !o.includes("· yours"));
+    expect(shipped, `no shipped set in ${JSON.stringify(custom.presetOptions)}`).toBeDefined();
+    expect(shipped!).toMatch(/ · \d+ states$/);
+    const setName = shipped!.split(" · ")[0]!;
+
+    await regimesWindow().locator(".wadjet-studio-window-preset-pick").selectOption(shipped!);
+    await waitForPresetPill(setName);
+
+    const loaded = await probeRegimes();
+    // The set replaced `regimes[]` wholesale: the state step 37 added is gone
+    // with it, and the seeded weight is back to what the record ships.
+    expect(loaded.rows).toEqual(["normal", "wet-spell", "dry-spell"]);
+    expect(loaded.zoneRegimes.map((r) => r.id)).toEqual(loaded.rows);
+    expect(loaded.zoneRegimes[0]!.weight).not.toBeCloseTo(0.33, 6);
+    expect(loaded.segments).toEqual(loaded.rows);
+    expect(loaded.writes).toContain("normal");
+    // The pill wears the bare name once the zone is on that set — the sub is
+    // only how the OTHER options tell themselves apart.
+    expect(loaded.presetName).toBe(setName);
+    expect(loaded.presetOptions).toContain(setName);
+    expect(loaded.presetOptions).not.toContain("custom");
+
+    // One undoable action, like every other edit in this panel.
+    expect(await studioHistory("undo")).toBe(true);
+    await waitForPresetPill("custom");
+    const undone = await probeRegimes();
+    expect(undone.rows).toEqual(custom.rows);
+    expect(undone.zoneRegimes[0]!.weight).toBeCloseTo(0.33, 10);
+    expect(await studioHistory("redo")).toBe(true);
+    await waitForPresetPill(setName);
+    console.log(`  · preset ▾: custom → "${shipped}" loaded ${loaded.rows.length} states (was ${custom.rows.length}); undo restored them, redo put the set back`);
+  });
+
+  test("step 38b: ＋ saves the zone's states as a set, badged yours, and the ▾ loads it back", async () => {
+    // Obsidian builds a Modal into whichever window is active, so the name
+    // prompt has to land in the vault window and not behind a stray settings one.
+    await withApp(ob.page, (app) => app.setting.close());
+    await ob.page.bringToFront();
+    await openRegimesWindow();
+
+    // Tune the states off the record first: a set saved while the zone still
+    // matches its base record would be shadowed by it in the pill, because the
+    // zone's OWN record wins that tie (`model/regime-presets.ts`).
+    await seedRegimeDraft("weight", { id: (await probeRegimes()).rows[0]!, value: 0.37 });
+    await waitForPresetPill("custom");
+    const before = await probeRegimes();
+
+    await regimesWindow().locator(".wadjet-studio-window-preset-save").click();
+    const modal = ob.page.locator(".modal-container .modal");
+    await modal.waitFor({ state: "visible", timeout: 10_000 });
+    await modal.locator('.setting-item:has(.setting-item-name:text-is("Name")) input').fill("House states");
+    await modal.locator("button:has-text('Save')").click();
+    await modal.waitFor({ state: "detached", timeout: 10_000 });
+    await waitForPresetPill("House states");
+
+    const saved = await probeRegimes();
+    expect(saved.regimePresets).toContain("House states");
+    // The draft is unchanged by a save — only the world gained a set — so the
+    // pill now names the set rather than the record.
+    expect(saved.rows).toEqual(before.rows);
+    expect(saved.presetName).toBe("House states");
+
+    // Wander off it, and the saved set is offered back badged `yours`.
+    await seedRegimeDraft("weight", { id: saved.rows[0]!, value: 0.44 });
+    await waitForPresetPill("custom");
+    const wandered = await probeRegimes();
+    const mine = wandered.presetOptions.find((o) => o.startsWith("House states"));
+    expect(mine, `no saved set in ${JSON.stringify(wandered.presetOptions)}`).toBeDefined();
+    expect(mine!).toMatch(/^House states · \d+ states · yours$/);
+
+    await regimesWindow().locator(".wadjet-studio-window-preset-pick").selectOption(mine!);
+    await waitForPresetPill("House states");
+
+    const reloaded = await probeRegimes();
+    expect(reloaded.rows).toEqual(before.rows);
+    expect(reloaded.zoneRegimes).toEqual(before.zoneRegimes);
+    expect(reloaded.segments).toEqual(reloaded.rows);
+    console.log(`  · ＋ saved "House states" (${before.rows.length} states); the ▾ offered it as "${mine}" and loading it restored ${JSON.stringify(reloaded.rows)}`);
   });
 
   test("step 39: the remove button drops a state, the share bar follows, and the last state is kept", async () => {

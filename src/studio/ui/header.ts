@@ -356,6 +356,7 @@ export function createHeaderSurface(): Surface {
       settings.calendar.seasons = structuredClone(state.world.calendar.seasons);
       settings.calendar.moons = structuredClone(state.world.calendar.moons);
       settings.devicePresets = structuredClone(state.world.devicePresets);
+      settings.regimePresets = structuredClone(state.world.regimePresets);
       settings.overrides = structuredClone(state.world.overrides);
       await c.plugin.saveAndRebuild();
     } catch (e) {

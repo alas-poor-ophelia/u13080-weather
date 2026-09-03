@@ -93,7 +93,7 @@ function device(m: Modifier): Device {
 }
 
 function emptyWorld(): WorldDraft {
-  return { eras: [], calendar: { seasons: calendar.seasons, moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] }, devicePresets: [], overrides: [] };
+  return { eras: [], calendar: { seasons: calendar.seasons, moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] }, devicePresets: [], regimePresets: [], overrides: [] };
 }
 
 describe("device-edit · updateDevice", () => {
