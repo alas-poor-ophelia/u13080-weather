@@ -4,7 +4,6 @@
  * function here is a function of its arguments alone.
  */
 import type { Era, ModifierOp } from "../../../../core/types";
-import type { Device } from "../../../model/devices";
 import { SEASON_CYCLE, cycleColour } from "../../../model/palette";
 import { CHANNEL_COLOUR, DISC_C, DISC_R } from "./constants";
 
@@ -82,5 +81,5 @@ export function ringArc(a: number, b: number): string {
   return `M ${from.x.toFixed(2)} ${from.y.toFixed(2)} A ${DISC_R} ${DISC_R} 0 ${span > 0.5 ? 1 : 0} 1 ${to.x.toFixed(2)} ${to.y.toFixed(2)}`;
 }
 
-/** The ops an envelope may be drawn on — `set` installs a value, it has no onset to shape. */
-export const shapeable = (d: Device): Array<{ op: ModifierOp; i: number }> => d.apply.map((op, i) => ({ op, i })).filter((o) => o.op.op === "offset" || o.op.op === "scale");
+/** True of an op an envelope may be drawn on — `set` installs a value, it has no onset to shape. */
+export const shapeable = (op: ModifierOp): boolean => op.op === "offset" || op.op === "scale";

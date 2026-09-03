@@ -23,8 +23,11 @@ export function buildYearWindow(c: DeviceWindowContext, parent: HTMLElement, d: 
 
   parent.createDiv({ cls: "wadjet-studio-device-subhead", text: "WINDOWS · repeat yearly" });
 
-  const top = parent.createDiv({ cls: "wadjet-studio-device-lane-row" });
-  const lane = top.createDiv({ cls: "wadjet-studio-device-lane", attr: { "data-hint": deviceHint("device.when.lane") } });
+  // The lane spans the whole content width, as the prototype has it (`0905`
+  // l.17-26; gap2 C5). The two clip knobs used to share its row and cost it a
+  // third of that width — they sit under it now, still the only editor of the
+  // selected clip.
+  const lane = parent.createDiv({ cls: "wadjet-studio-device-lane", attr: { "data-hint": deviceHint("device.when.lane") } });
   const stripe = lane.createDiv({ cls: "wadjet-studio-device-lane-stripe" });
   for (const band of seasonBands(seasons)) {
     const seg = stripe.createDiv({ cls: "wadjet-studio-device-band", attr: { "data-name": band.name } });
@@ -47,7 +50,7 @@ export function buildYearWindow(c: DeviceWindowContext, parent: HTMLElement, d: 
     }
   });
 
-  const knobs = top.createDiv({ cls: "wadjet-studio-device-knobs" });
+  const knobs = parent.createDiv({ cls: "wadjet-studio-device-knobs" });
   c.knob(knobs, {
     part: "when-start",
     label: "start",
@@ -86,18 +89,27 @@ export function buildYearWindow(c: DeviceWindowContext, parent: HTMLElement, d: 
       c.setClipAt(i);
       c.invalidate();
     });
-    if (clips.length > 1) {
-      iconButton(row, {
-        text: "×",
-        label: `Remove window ${i + 1}`,
-        hint: deviceHint("device.when.window.remove"),
-        cls: "wadjet-studio-device-remove",
-        onClick: () => {
-          c.setClipAt(0);
-          c.mutate((x) => void removeYearWindow(x, i), true);
-        },
-      });
-    }
+    // The prototype draws the × on every clip row (`0905` l.34) — but
+    // `removeYearWindow` refuses the last one: a window device keeps at least
+    // one window, and the way to drop them all is the WHEN kind. So the glyph
+    // is always there, and on a lone clip it is disabled rather than absent,
+    // with a hint that says why.
+    const lone = clips.length === 1;
+    const remove = iconButton(row, {
+      text: "×",
+      label: lone ? "The last window cannot be removed" : `Remove window ${i + 1}`,
+      // Two literal calls, not one with a ternary inside the parentheses: the
+      // hint table's contract test scans this folder for literal keys passed
+      // to deviceHint, and cannot see one that is computed.
+      hint: lone ? deviceHint("device.when.window.last") : deviceHint("device.when.window.remove"),
+      cls: "wadjet-studio-device-remove",
+      onClick: () => {
+        if (lone) return;
+        c.setClipAt(0);
+        c.mutate((x) => void removeYearWindow(x, i), true);
+      },
+    });
+    if (lone) remove.setAttrs({ "aria-disabled": "true", tabindex: "-1" });
   });
   iconButton(rows, {
     text: "＋ add window",

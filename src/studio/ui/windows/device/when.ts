@@ -16,7 +16,15 @@ import { buildYearWindow } from "./when-year-window";
 
 // --- WHEN ---------------------------------------------------------------
 
-export function buildWhen(c: DeviceWindowContext, d: Device): void {
+/**
+ * Draw the WHEN row, and — on the spell path (`defer`, i.e. `when.kind ===
+ * "yearWindow"`) — hand the WINDOWS body back as a thunk instead of drawing it
+ * inside the row. The prototype puts the two spell dials above the lane
+ * (`0905-vst-ashfall.html` l.12-16), and only the spine knows where the dials
+ * go, so the caller decides when this runs. Every other kind returns `null`
+ * and is drawn in place, exactly as before.
+ */
+export function buildWhen(c: DeviceWindowContext, d: Device, defer = false): (() => void) | null {
   const description = c.calendar();
   const yearLength = description?.yearLength ?? DEFAULT_YEAR_LENGTH;
   const sec = c.section("WHEN", "device.when");
@@ -32,7 +40,7 @@ export function buildWhen(c: DeviceWindowContext, d: Device): void {
   if (d.custom === true) {
     c.addPart(createChip(sec.content, { label: "custom", color: "var(--wadjet-studio-warn)", hint: deviceHint("device.when") }));
     sec.content.createSpan({ cls: "wadjet-studio-device-raw", text: JSON.stringify(d.raw?.when ?? null) });
-    return;
+    return null;
   }
 
   const segmented = createSegmented(sec.head, {
@@ -43,8 +51,15 @@ export function buildWhen(c: DeviceWindowContext, d: Device): void {
   segmented.el.setAttr("data-part", "when-kind");
   c.addPart(segmented);
 
-  const kindBody = sec.content.createDiv({ cls: "wadjet-studio-device-when" });
   const w = d.when;
+  // The spell path's WHEN row is the segmented and nothing else: its body
+  // becomes a section of its own, under the dials the spine draws next.
+  if (defer && w.kind === "yearWindow") {
+    sec.content.remove();
+    return () => buildYearWindow(c, c.body.createDiv({ cls: "wadjet-studio-device-section", attr: { "data-section": "windows" } }), d, description, yearLength);
+  }
+
+  const kindBody = sec.content.createDiv({ cls: "wadjet-studio-device-when" });
   if (w.kind === "always") {
     // `1095` l.34, verbatim: the stage the sentence lands on is the one word
     // in it that is not dim.
@@ -52,8 +67,9 @@ export function buildWhen(c: DeviceWindowContext, d: Device): void {
     note.createSpan({ cls: "wadjet-studio-device-note-em", text: "climate stage" });
     note.createSpan({ text: " · applied once to the curves, not per day" });
   }
-  else if (w.kind === "moon") buildMoon(c, kindBody, w.moon, w.phases, w.range, description);
+  else if (w.kind === "moon") buildMoon(c, kindBody, w.moon, description);
   else if (w.kind === "tag") buildTag(c, kindBody, w.tags, description);
   else if (w.kind === "yearWindow") buildYearWindow(c, kindBody, d, description, yearLength);
   else if (w.kind === "chance") buildChance(c, kindBody, w.p);
+  return null;
 }

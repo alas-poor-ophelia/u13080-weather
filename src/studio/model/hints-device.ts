@@ -32,6 +32,7 @@ export const DEVICE_HINTS: Record<string, Hint> = {
   "device.when.length": ["Length", "how many days the window covers"],
   "device.when.window.add": ["Add a window", "a second clip, repeating every year"],
   "device.when.window.remove": ["Remove window", "drops this clip from the year"],
+  "device.when.window.last": ["Remove window", "a window device keeps at least one window; switch WHEN to drop them all"],
   "device.when.chance": ["Chance", "the share of days the device fires on"],
 
   // --- SPELL ---
@@ -44,6 +45,7 @@ export const DEVICE_HINTS: Record<string, Hint> = {
   "device.op.power": ["Op power", "a disabled op never reaches the curves"],
   "device.op.remove": ["Remove op", "drops this parameter from the device"],
   "device.op.add": ["Add an op", "pick a parameter for this device to move"],
+  "device.op.target": ["Target", "binds this parameter, with the op the studio would pick for it"],
 
   // --- MOD ---
   "device.mod": ["Mod", "gates and onset envelopes — daily stage only"],
@@ -51,11 +53,14 @@ export const DEVICE_HINTS: Record<string, Hint> = {
   "device.mod.mode": ["Cycle mode", "curve follows the drawn envelope; phases is on or off per phase"],
   "device.gate.source": ["Gate", "the tag that dims this device"],
   "device.gate.amount": ["Amount", "a dimmer: 1 is full strength, 0 mutes"],
+  "device.gate.drag": ["Gate amount", "drag up or down to dim the device on this tag"],
   "device.gate.remove": ["Remove gate", "the device runs at full strength again"],
   "device.gate.add": ["Add a gate", "pick a season or era to dim the device on"],
   "device.envelope": ["Envelope", "drag the onset shape across the moon cycle"],
   "device.envelope.shape": ["Onset shape", "a named curve, or the points you drew"],
   "device.envelope.remove": ["Remove envelope", "the op returns to full strength"],
+  "device.envelope.overlay": ["Envelope", "strength across the last third of the cycle — drag a point to redraw it"],
+  "device.envelope.preset": ["Onset preset", "rewrites the points; drawing over them makes the shape custom"],
 
   // --- footer ---
   "device.remove": ["Remove from chain", "deletes the modifier from this zone"],

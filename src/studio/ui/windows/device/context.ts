@@ -8,9 +8,9 @@
  *
  *  - `addPart`, never the array: `clearParts()` *rebinds* `parts` on every
  *    rebuild, so a body holding the array would be pushing into a dead one.
- *  - `clipAt` / `modOpen` are getter/setter pairs, not values: they are shared
- *    mutable state that `stateKey()` reads, so a copy would go stale the
- *    moment a body moved it.
+ *  - `clipAt` / `modOpen` / `envOpen` / `srcPick` / `targetPick` are pairs, not
+ *    values: they are shared mutable state that `stateKey()` reads, so a copy
+ *    would go stale the moment a body moved it.
  *  - `endGesture()` closes a hand-rolled drag the way the knobs do — drop the
  *    live flag, then take one undo snapshot — without a body ever touching the
  *    flag itself.
@@ -65,5 +65,14 @@ export interface DeviceWindowContext {
   setClipAt(at: number): void;
   modOpen(): boolean;
   setModOpen(open: boolean): void;
+  /** Which moon binding card has its `∿` shape chip open, or null (`mod-moon.ts`). */
+  envOpen(): number | null;
+  setEnvOpen(at: number | null): void;
+  /** Which moon binding card has its inline source list open, or null. */
+  srcPick(): number | null;
+  setSrcPick(at: number | null): void;
+  /** Moon path only: whether `＋ Add target`'s inline target list is open (`apply.ts`). */
+  targetPick(): boolean;
+  setTargetPick(open: boolean): void;
   setCancelDrag(cancel: (() => void) | null): void;
 }

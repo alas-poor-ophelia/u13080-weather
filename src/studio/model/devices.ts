@@ -787,19 +787,69 @@ export function opValueText(op: ModifierOp, units?: "metric" | "imperial"): stri
   return full.startsWith(`${name} `) ? full.slice(name.length + 1) : full;
 }
 
+/**
+ * The engine has no `precip` param: "no rain" is two writes, one to the odds of
+ * rain after a dry day and one after a wet one. The prototype hides that seam —
+ * its Ashfall APPLY has ONE `precip` column whose field reads
+ * `precipitation.pww / pwd` (`1397-logic-class-Component.js` l.139, emitter
+ * l.873) — so a device that writes both the same way renders as one column too.
+ *
+ * Presentation only: nothing is stored, and the pair is a property of the OPS,
+ * not of the device's kind. The moment the two writes disagree about anything a
+ * reader could see — the op, the number, the mute, the envelope — they are two
+ * different edits wearing one hat, and the honest render is two columns.
+ */
+const COMPOSED_PARAMS = ["precipitation.pwd", "precipitation.pww"] as const;
+
+/** The field string the composed column's gloss carries, in the prototype's own order. */
+export const COMPOSED_FIELD = "precipitation.pww / pwd";
+
+/** `[[lower, higher]]` for every pair of ops an APPLY should draw as one column, else `[]`. */
+export function composedPairs(apply: readonly ModifierOp[]): Array<[number, number]> {
+  const at = COMPOSED_PARAMS.map((p) => {
+    const found = apply.flatMap((o, i) => (o.param === p ? [i] : []));
+    return found.length === 1 ? found[0]! : -1;
+  });
+  const [a, b] = [at[0]!, at[1]!];
+  if (a < 0 || b < 0) return [];
+  const [x, y] = [apply[a]!, apply[b]!];
+  if (x.op !== y.op) return [];
+  // `clamp` has a floor and a ceiling rather than one number to turn, and it
+  // renders as raw text anyway — two of them stay two.
+  if (x.op === "clamp" || y.op === "clamp") return [];
+  if (x.value !== y.value) return [];
+  if ((x.enabled === false) !== (y.enabled === false)) return [];
+  if (JSON.stringify(x.envelope ?? null) !== JSON.stringify(y.envelope ?? null)) return [];
+  return [[Math.min(a, b), Math.max(a, b)]];
+}
+
 /** The `when` clause of the WRITES grammar — engine grammar, product numbers. */
+/**
+ * A moon gate's end as a number to print: the stored range is `[a, b)` on
+ * the cycle, so a gate that runs to the end of the cycle stores `b = 0` — and
+ * prints as `1.00`, the way the prototype's own `gate 0.78-1.00` does.
+ */
+export function moonRangeEnd(range: readonly [number, number]): number {
+  return range[1] === 0 && range[0] > 0 ? 1 : range[1];
+}
+
+/** `[0.86, 1.00]` — the gate range as the WRITES footer prints it. */
+export function moonRangeLabel(range: readonly [number, number]): string {
+  return `[${range[0].toFixed(2)}, ${moonRangeEnd(range).toFixed(2)}]`;
+}
+
 export function whenPhrase(d: Device): string {
   const w = d.when;
   switch (w.kind) {
     case "always":
       return d.spell ? "" : "stage climate";
     case "moon":
-      return `when.moon ${w.moon} [${w.range[0].toFixed(2)}, ${w.range[1].toFixed(2)}]`;
+      return `when.moon ${w.moon} ${moonRangeLabel(w.range)}`;
     case "tag":
       return w.tags.length === 1 ? `when.tag ${w.tags[0]}` : `when.any ${w.tags.map((t) => `tag ${t}`).join(", ")}`;
     case "yearWindow":
       return `when.yearPhase ${yearWindowsOf(w)
-        .map((c) => `[${c.start.toFixed(2)}, ${Math.min(1, round10(c.start + c.length)).toFixed(2)}]`)
+        .map((c) => `[${c.start.toFixed(2)},${Math.min(1, round10(c.start + c.length)).toFixed(2)}]`)
         .join(" ")}`;
     case "chance":
       return `when.chance ${w.p.toFixed(2)}`;
@@ -815,9 +865,27 @@ export function whenPhrase(d: Device): string {
  *
  * `index` is the device's slot in `zone.modifiers`, which is the signal-path
  * position the id alone does not carry.
+ *
+ * On the **moon path** the tail is named rather than counted, the way the
+ * prototype's `stWrites` reads it (`0699` l.106) —
+ *
+ *   modifiers[0] · when.moon Sable [0.86, 1.00] ·
+ *   apply precipitation.pwd ×1.50 ∿ease in, wind.speed +12 · × season:Harvest@72%
+ *
+ * — because that is the path whose window edits a binding at a time, so the
+ * footer has to say which binding carries which onset. Three things stay the
+ * plugin's rather than the prototype's, all for law 5: the `modifiers[N]`
+ * slot and the `[a, b)` range stay (they are the fields written, and the
+ * prototype simply has no rack); the param paths stay whole (`precipitation.pwd`,
+ * not the prototype's short `pwd`); and the moon keeps the calendar's own
+ * casing (`Sable`, not `sable`) because that string IS `when.moon`. The gates
+ * are listed ONCE, not repeated per clause as the prototype does: `mods` hangs
+ * off the modifier, not the op, and repeating it would claim a per-binding
+ * field the schema does not have (`mod-moon.ts` header).
  */
 export function deviceGrammar(d: Device, index: number): string {
-  const ops = d.apply.map((op) => applyPhrase(op).replace(/^apply /, ""));
+  const moon = d.when.kind === "moon";
+  const ops = d.apply.map((op) => `${applyPhrase(op).replace(/^apply /, "")}${moon && op.envelope !== undefined ? ` ∿${envelopeShapeName(op.envelope).toLowerCase()}` : ""}`);
   const envelopes = d.apply.filter((op) => op.envelope !== undefined).length;
   return grammar(
     `modifiers[${index}]`,
@@ -825,8 +893,8 @@ export function deviceGrammar(d: Device, index: number): string {
     whenPhrase(d),
     d.spell ? `spell ${num(d.spell.meanStartsPerYear)}/yr ${num(d.spell.meanDurationDays)} d` : "",
     ops.length > 0 ? `apply ${ops.join(", ")}` : "no apply",
-    d.mods.length > 0 ? `mods ${d.mods.length}` : "",
-    envelopes > 0 ? `envelope ${envelopes}` : "",
+    moon ? d.mods.map((g) => `× ${g.source}@${gatePercent(g.amount)}`).join(" ") : d.mods.length > 0 ? `mods ${d.mods.length}` : "",
+    moon || envelopes === 0 ? "" : `envelope ${envelopes}`,
   );
 }
 

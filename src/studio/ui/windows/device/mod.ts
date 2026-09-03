@@ -1,8 +1,12 @@
 /**
  * The MOD section — the prototype's mod matrix. A carrier row
- * (`moon:Sable` × `∿ curve / ▦ phases` × season gate chips) writes
- * `Modifier.mods[]`; the onset envelope editor under it writes
- * `ModifierOp.envelope` (SPEC §7, §7a).
+ * (season gate chips) writes `Modifier.mods[]`; the onset envelope editor
+ * under it writes `ModifierOp.envelope` (SPEC §7, §7a).
+ *
+ * The moon path does not come through here: a moon-bound device is edited per
+ * *binding*, one card per apply target, and those live in `mod-moon.ts`
+ * (gap2 B4) — with their own envelope overlay in `env-moon.ts`. What the two
+ * editors share is the point-editing itself (`envelopeEdits`), not the card.
  */
 import { Menu } from "obsidian";
 import type { ModifierOp } from "../../../../core/types";
@@ -11,21 +15,30 @@ import { addGate, removeGate, setEnvelope, setGateAmount, setGateSource } from "
 import { type Device, ENVELOPE_SHAPES, envelopeShape, envelopeShapeName, gatePercent } from "../../../model/devices";
 import { deviceHint } from "../../../model/hints-device";
 import { createChart, createChip } from "../../components";
-import { openCycleFor } from "../cycle";
-import { ENVELOPE_H, ENVELOPE_MIN_GAP, ENVELOPE_W, LAST_PHASE } from "./constants";
+import { ENVELOPE_H, ENVELOPE_W } from "./constants";
 import type { DeviceWindowContext } from "./context";
-import { colourOf, shapeable, tagColour, tagSources } from "./geometry";
+import { envelopeEdits } from "./env-moon";
+import { colourOf, tagColour, tagSources } from "./geometry";
 import { iconButton } from "./icon-button";
+import { buildBindCards } from "./mod-moon";
 
 // --- MOD ----------------------------------------------------------------
 
 export function buildMod(c: DeviceWindowContext, d: Device): void {
+  // A moon-bound device is edited per binding, not per device (gap2 B4): one
+  // card per apply target, and no MOD caption above them (`0699` l.42-64).
+  if (d.when.kind === "moon") {
+    buildBindCards(c, d, d.when.moon);
+    return;
+  }
+
   const envelopes = d.apply.map((op, i) => ({ op, i })).filter((o) => o.op.envelope !== undefined);
-  // A moon-bound device always has a carrier, so its matrix is always on
-  // show; every other kind earns the section by having a gate, an envelope,
-  // or a click on `＋ mod`.
-  const always = d.when.kind === "moon";
-  if (!always && d.mods.length === 0 && envelopes.length === 0 && !c.modOpen()) {
+  // Every other kind earns the section by having a gate, an envelope, or a
+  // click on `＋ mod`.
+  if (d.mods.length === 0 && envelopes.length === 0 && !c.modOpen()) {
+    // …except the spell path, which ends at the apply row: `0905` has no `＋
+    // mod` and neither does `1095` (gap2 C10).
+    if (d.when.kind === "yearWindow") return;
     iconButton(c.body, {
       text: "＋ mod",
       label: "Add a gate or an envelope",
@@ -39,7 +52,7 @@ export function buildMod(c: DeviceWindowContext, d: Device): void {
     return;
   }
 
-  const sec = c.section("MOD", "device.mod", { qualifier: always ? "every cycle" : "gates" });
+  const sec = c.section("MOD", "device.mod", { qualifier: "gates" });
   iconButton(sec.head, {
     text: "＋ gate",
     label: "Add a gate",
@@ -50,40 +63,9 @@ export function buildMod(c: DeviceWindowContext, d: Device): void {
 
   const row = sec.content.createDiv({ cls: "wadjet-studio-device-mod-row" });
   row.createSpan({ cls: "wadjet-studio-device-mod-label", text: "MOD" });
-  if (d.when.kind === "moon") buildCarrier(c, row, d, envelopes.length > 0);
   buildGates(c, row, d);
 
   for (const { op, i } of envelopes) buildEnvelope(c, sec.content, op, i);
-}
-
-/** `moon:Sable × ∿ curve / ▦ phases` — the carrier and how it reads the cycle. */
-function buildCarrier(c: DeviceWindowContext, row: HTMLElement, d: Device, curve: boolean): void {
-  const moon = d.when.kind === "moon" ? d.when.moon : "";
-  const chip = createChip(row, {
-    label: `moon:${moon}`,
-    color: "var(--wadjet-studio-moon)",
-    hint: deviceHint("device.mod.carrier"),
-    onClick: () => openCycleFor(c.ctx, moon),
-  });
-  chip.el.addClass("is-carrier");
-  c.addPart(chip);
-  const mode = iconButton(row, {
-    text: curve ? "∿ curve" : "▦ phases",
-    label: curve ? "Cycle mode: curve" : "Cycle mode: phases",
-    hint: deviceHint("device.mod.mode"),
-    cls: "wadjet-studio-device-toggle",
-    onClick: () =>
-      c.mutate((x) => {
-        if (curve) {
-          // Back to phases: the gate is the phase chips again.
-          x.apply.forEach((_, i) => setEnvelope(x, i, undefined));
-          return;
-        }
-        const first = shapeable(x)[0];
-        if (first !== undefined) setEnvelope(x, first.i, envelopeShape("Ease in"));
-      }, true),
-  });
-  mode.setAttrs({ "data-part": "mod-mode", "aria-pressed": curve ? "true" : "false" });
 }
 
 /** The season/era gate chips — `⚑ Harvest 72% ×`, with the dimmer on its own small knob. */
@@ -172,21 +154,9 @@ function buildEnvelope(c: DeviceWindowContext, parent: HTMLElement, op: Modifier
     onClick: () => c.mutate((x) => setEnvelope(x, index, undefined), true),
   });
 
-  /** Keep a dragged point between its neighbours: `setEnvelope` sorts, and a reorder mid-drag would swap the handle. */
-  const move = (at: number, phase: number, strength: number): ((d: Device) => void) => {
-    const lo = at === 0 ? 0 : (points[at - 1]?.[0] ?? 0) + ENVELOPE_MIN_GAP;
-    const hi = at === points.length - 1 ? LAST_PHASE : (points[at + 1]?.[0] ?? LAST_PHASE) - ENVELOPE_MIN_GAP;
-    const x = Math.min(Math.max(phase, lo), Math.max(lo, hi));
-    return (d) => {
-      const current_ = d.apply[index]?.envelope;
-      if (current_ === undefined) return;
-      setEnvelope(
-        d,
-        index,
-        current_.map((p, k): [number, number] => (k === at ? [x, strength] : p)),
-      );
-    };
-  };
+  // The point edits are the moon overlay's too (`env-moon.ts`): same field,
+  // same `setEnvelope`, and only the first handle's floor differs.
+  const edits = envelopeEdits(c, index, points);
 
   const chart = createChart(box, {
     kind: "automation",
@@ -196,24 +166,9 @@ function buildEnvelope(c: DeviceWindowContext, parent: HTMLElement, op: Modifier
     yRange: [0, 1],
     editable: true,
     series: [{ points: points.map((p): [number, number] => [p[0], p[1]]), color: "var(--wadjet-studio-accent)" }],
-    onPoint: (at, x, y, phase) => c.gesture(phase, move(at, x, y)),
-    onAdd: (x, y) =>
-      c.mutate((d) => {
-        const current_ = d.apply[index]?.envelope;
-        if (current_ === undefined) return;
-        setEnvelope(d, index, [...current_, [x, y]]);
-      }, true),
-    onRemove: (at) =>
-      c.mutate((d) => {
-        const current_ = d.apply[index]?.envelope;
-        // One point is a flat envelope; zero is the shape the validator rejects.
-        if (current_ === undefined || current_.length <= 1) return;
-        setEnvelope(
-          d,
-          index,
-          current_.filter((_, k) => k !== at),
-        );
-      }, true),
+    onPoint: (at, x, y, phase) => c.gesture(phase, edits.move(at, x, y)),
+    onAdd: (x, y) => edits.add(x, y),
+    onRemove: (at) => edits.remove(at),
   });
   chart.el.setAttr("data-part", `envelope-${index}`);
   c.addPart(chart);

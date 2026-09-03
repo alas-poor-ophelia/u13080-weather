@@ -20,6 +20,7 @@ import {
   type KnobSurface,
   knobRangeOf,
   knobSpecFor,
+  composedPairs,
   moonRange,
   newDevice,
   opValueText,
@@ -517,9 +518,37 @@ describe("apply copy and the WRITES grammar", () => {
   });
 
   test("the footer is the authored grammar, not the serialised object", () => {
-    expect(deviceGrammar(ROUND_TRIP_DEVICES[1]!, 0)).toBe("modifiers[0] · when.moon Sable [0.86, 0.00] · apply precipitation.pwd ×1.40 · mods 1 · envelope 1");
-    expect(deviceGrammar(ROUND_TRIP_DEVICES[2]!, 1)).toBe("modifiers[1] · off · when.yearPhase [0.61, 0.72] · spell 0.6/yr 18 d · apply cloud.dry = 0.95");
+    expect(deviceGrammar(ROUND_TRIP_DEVICES[1]!, 0)).toBe("modifiers[0] · when.moon Sable [0.86, 1.00] · apply precipitation.pwd ×1.40 ∿custom · × season:Harvest@50%");
+    expect(deviceGrammar(ROUND_TRIP_DEVICES[2]!, 1)).toBe("modifiers[1] · off · when.yearPhase [0.61,0.72] · spell 0.6/yr 18 d · apply cloud.dry = 0.95");
     expect(deviceGrammar(ROUND_TRIP_DEVICES[0]!, 2)).toBe("modifiers[2] · stage climate · apply temperature.mean +1.5");
+  });
+
+  /**
+   * The moon path's footer (`0699` `stWrites`, D15 bead 4): the tail is NAMED
+   * rather than counted, because that is the path whose window edits one
+   * binding at a time. What stays the plugin's is law 5's half of the bargain
+   * — the `modifiers[N]` slot, the `[a, b)` range, the whole param paths and
+   * the calendar's own casing for the moon, all of which are fields actually
+   * written where the prototype's `pwd` / `sable` are not.
+   */
+  test("a moon device names each binding's onset and each gate, and keeps the real field names", () => {
+    const d: Device = {
+      ...ROUND_TRIP_DEVICES[1]!,
+      apply: [
+        { param: "precipitation.pwd", op: "scale", value: 1.5, envelope: envelopeShape("Ease in") },
+        { param: "wind.speed", op: "offset", value: 12 },
+      ],
+      mods: [{ source: "season:Harvest", amount: 0.72 }],
+    };
+    expect(deviceGrammar(d, 0)).toBe("modifiers[0] · when.moon Sable [0.86, 1.00] · apply precipitation.pwd ×1.50 ∿ease in, wind.speed +12 · × season:Harvest@72%");
+    // `mods` hangs off the modifier, not the op, so the gate is listed once
+    // however many bindings there are — never repeated per clause.
+    expect(deviceGrammar({ ...d, apply: [d.apply[0]!] }, 0)).toBe("modifiers[0] · when.moon Sable [0.86, 1.00] · apply precipitation.pwd ×1.50 ∿ease in · × season:Harvest@72%");
+    expect(deviceGrammar({ ...d, mods: [...d.mods, { source: "era:Ice Age", amount: 1 }] }, 0)).toContain("· × season:Harvest@72% × era:Ice Age@100%");
+    // An ungated device says nothing there rather than `mods 0`.
+    expect(deviceGrammar({ ...d, mods: [] }, 0)).toBe("modifiers[0] · when.moon Sable [0.86, 1.00] · apply precipitation.pwd ×1.50 ∿ease in, wind.speed +12");
+    // Every other kind still counts: the `mods N · envelope N` tail is untouched.
+    expect(deviceGrammar({ ...d, when: { kind: "always" } }, 0)).toBe("modifiers[0] · stage climate · apply precipitation.pwd ×1.50, wind.speed +12 · mods 1 · envelope 1");
   });
 
   test("a device with nothing to apply says so rather than trailing off", () => {
@@ -532,5 +561,36 @@ describe("apply copy and the WRITES grammar", () => {
     expect(at({ kind: "tag", tags: ["era:Drought"] })).toBe("when.tag era:Drought");
     expect(at({ kind: "tag", tags: ["season:Thaw", "era:Drought"] })).toBe("when.any tag season:Thaw, tag era:Drought");
     expect(at({ kind: "chance", p: 0.06 })).toBe("when.chance 0.06");
+  });
+});
+
+describe("composedPairs", () => {
+  const pwd = { param: "precipitation.pwd", op: "set", value: 0 } as const;
+  const pww = { param: "precipitation.pww", op: "set", value: 0 } as const;
+  const sky = { param: "cloud.dry", op: "set", value: 0.95 } as const;
+
+  test("the two rain-odds writes compose when they say the same thing", () => {
+    // Ashfall's own shape: the pair, then a third op that is nobody's partner.
+    expect(composedPairs([pwd, pww, sky])).toEqual([[0, 1]]);
+    // Order on the rack does not matter; the LOWER index owns the column.
+    expect(composedPairs([sky, pww, pwd])).toEqual([[1, 2]]);
+    // Muting is part of "the same thing": both off still composes.
+    expect(composedPairs([{ ...pwd, enabled: false }, { ...pww, enabled: false }])).toEqual([[0, 1]]);
+  });
+
+  test("any visible disagreement splits them back into two honest columns", () => {
+    expect(composedPairs([pwd, { ...pww, value: 0.2 }])).toEqual([]);
+    expect(composedPairs([pwd, { ...pww, op: "scale" }])).toEqual([]);
+    expect(composedPairs([pwd, { ...pww, enabled: false }])).toEqual([]);
+    expect(composedPairs([pwd, { ...pww, envelope: envelopeShape("Ease in") }])).toEqual([]);
+  });
+
+  test("one without the other is just an op", () => {
+    expect(composedPairs([pwd, sky])).toEqual([]);
+    expect(composedPairs([pww])).toEqual([]);
+    expect(composedPairs([])).toEqual([]);
+    // Two of the same param is ambiguous — which pww does the pwd belong to? —
+    // so nothing composes rather than picking one.
+    expect(composedPairs([pwd, pww, { ...pww, value: 0.5 }])).toEqual([]);
   });
 });

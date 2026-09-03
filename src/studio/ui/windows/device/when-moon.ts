@@ -1,12 +1,14 @@
 /**
- * WHEN · moon — the carrier chip, the phase chips, the moon picker, and the
- * gate disc whose two handles drag `when.moon.range` (SPEC §5). The chips and
- * the disc are two views of one `[a, b)`: dragging a handle rewrites the
- * phases, and toggling a phase rewrites the range.
+ * WHEN · moon — the carrier chip, the moon picker, and the gate disc whose two
+ * handles drag `when.moon.range` (SPEC §5). The phase chips are the same
+ * `[a, b)` seen the other way round — dragging a handle rewrites the phases,
+ * toggling a phase rewrites the range — and they live on the binding cards
+ * now (`mod-moon.ts`, gap2 B6), so `togglePhase` is exported to them. The disc
+ * is built from `apply.ts`, which owns the row it shares with the op knobs.
  */
 import type { CalendarDescription } from "../../../../plugin/time/adapter";
 import { setWhen } from "../../../model/device-edit";
-import { moonRange, phasesFor } from "../../../model/devices";
+import { moonRange, moonRangeEnd, phasesFor } from "../../../model/devices";
 import { deviceHint } from "../../../model/hints-device";
 import { createChip, createSegmented } from "../../components";
 import { beginDrag } from "../../pointer";
@@ -15,9 +17,8 @@ import { DISC, DISC_C, DISC_FACE_R, DISC_R, HANDLE_R } from "./constants";
 import type { DeviceWindowContext } from "./context";
 import { moonPath, ringArc, ringPoint, ringSpan } from "./geometry";
 
-export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: string, selected: string[], range: [number, number], description: CalendarDescription | null): void {
+export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: string, description: CalendarDescription | null): void {
   const moons = description?.moons ?? [];
-  const named = moons.find((m) => m.name === name)?.phases ?? [];
   const row = parent.createDiv({ cls: "wadjet-studio-device-chips" });
   const carrier = createChip(row, {
     label: `moon:${name}`,
@@ -29,24 +30,9 @@ export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: str
   // tag chip is dim text and a 5 px one (`1095` l.37 against l.47).
   carrier.el.addClass("is-carrier");
   c.addPart(carrier);
-  row.createSpan({ cls: "wadjet-studio-device-times", text: "×" });
-
-  for (const phase of named) {
-    const on = selected.includes(phase.name);
-    const chip = createChip(row, {
-      label: phase.name,
-      ...(on ? { color: "var(--wadjet-studio-moon)" } : {}),
-      dot: false,
-      hint: deviceHint("device.when.phase"),
-      onClick: () => togglePhase(c, named, phase.name),
-    });
-    chip.el.toggleClass("is-selected", on);
-    chip.el.setAttrs({ "data-phase": phase.name, "aria-pressed": on ? "true" : "false" });
-    c.addPart(chip);
-  }
-  // The ends do not sit on boundaries (or the moon has no named phases):
-  // the window is a hand-written arc, and says so rather than lying.
-  if (selected.length === 0) c.addPart(createChip(row, { label: "custom range", dot: false, hint: deviceHint("device.when.phase") }));
+  // No phase chips here: on the moon path they live on the binding cards
+  // (`mod-moon.ts`, gap2 B6). What stays in the WHEN row is the carrier and,
+  // where the world has more than one moon, the picker.
 
   if (moons.length > 1) {
     const picker = createSegmented(parent, {
@@ -64,8 +50,6 @@ export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: str
     picker.el.setAttr("data-part", "when-moon");
     c.addPart(picker);
   }
-
-  buildGateDisc(c, parent, range, name);
 }
 
 /**
@@ -73,8 +57,11 @@ export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: str
  * the lit face at the middle of the gate, the gate arc round the rim, and a
  * handle on each end. Dragging a handle writes `when.moon.phase` — which is
  * the compiled `[a, b)` the engine reads, so the phase chips follow it back.
+ *
+ * It is not built here: on the moon path the disc shares one flex row with the
+ * op knobs (`0699` l.21-40), so `apply.ts` places it (gap2 B1).
  */
-function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range: [number, number], moonName: string): void {
+export function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range: [number, number], moonName: string): void {
   const box = parent.createDiv({ cls: "wadjet-studio-device-gate-disc", attr: { "data-hint": deviceHint("device.when.gate") } });
   const svg = box.createSvg("svg", { attr: { viewBox: `0 0 ${DISC} ${DISC}`, role: "img", "aria-label": `Moon gate ${range[0].toFixed(2)} to ${endLabel(range)}` } });
   // The face is the prototype's door to the moon's CYCLE editor
@@ -98,7 +85,16 @@ function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range: [numb
     handle.addEventListener("pointerdown", (ev: PointerEvent) => startGateDrag(c, ev, svg, handle, end));
   });
 
-  box.createSpan({ cls: "wadjet-studio-device-disc-readout", text: `gate ${range[0].toFixed(2)}–${endLabel(range)}` });
+  // The readout is the prototype's `gateTextEl` (`Component.js` l.1278): a
+  // `<text>` INSIDE the disc's own svg, not a line hung under it. Its size is
+  // 10 units of the 88-unit viewBox, so it scales with the box and cannot
+  // climb into the face under a wider interface font — which is exactly what
+  // an absolutely-placed HTML span did. The baseline sits two units past the
+  // box foot (the prototype's own is at 84 and grazes the rim); `overflow:
+  // visible` on the svg draws it, and the moon row has the room.
+  svg
+    .createSvg("text", { cls: "wadjet-studio-device-disc-readout", attr: { x: DISC_C, y: DISC + 2, "text-anchor": "middle" } })
+    .setText(`gate ${range[0].toFixed(2)}–${endLabel(range)}`);
 }
 
 /**
@@ -108,7 +104,7 @@ function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range: [numb
  * 1.00, which is the same instant and the only one that scans (the prototype's
  * own `gate 0.78-1.00`).
  */
-const endLabel = (range: [number, number]): string => (range[1] === 0 && range[0] > 0 ? "1.00" : range[1].toFixed(2));
+const endLabel = (range: [number, number]): string => moonRangeEnd(range).toFixed(2);
 
 function startGateDrag(c: DeviceWindowContext, ev: PointerEvent, svg: SVGElement, node: SVGElement, end: 0 | 1): void {
   if (ev.button !== 0) return;
@@ -144,7 +140,8 @@ function setGate(c: DeviceWindowContext, end: 0 | 1, phase: number, history: boo
   }, history);
 }
 
-function togglePhase(c: DeviceWindowContext, named: ReadonlyArray<{ name: string; at: number }>, name: string): void {
+/** Toggle one phase in the device-wide window; the cards call it, so it is exported (`mod-moon.ts`). */
+export function togglePhase(c: DeviceWindowContext, named: ReadonlyArray<{ name: string; at: number }>, name: string): void {
   c.mutate((x) => {
     if (x.when.kind !== "moon") return;
     const chosen = new Set(x.when.phases);

@@ -18,6 +18,7 @@ import path from "node:path";
 import type { Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { MODIFIER_EXAMPLES } from "../../src/plugin/modifier-examples";
+import { paramsByChannel } from "../../src/studio/model/device-edit";
 import { installPlugin, launchObsidian, notices, resetPluginData, withApp, PLUGIN_DIR, VAULT, type Obsidian } from "./obsidian";
 
 let ob: Obsidian;
@@ -2931,7 +2932,9 @@ describe("climate studio · regimes window", () => {
     expect(after.zoneRegimes.map((r) => r.id)).toEqual(after.rows);
     // The share bar is derived from the same list, so its segments follow.
     expect(after.segments).toEqual(after.rows);
-    expect(after.writes).not.toContain(`{ ${doomed} w `);
+    // The WRITES footer repaints on the view's render pass, one tick behind the
+    // rows' own store subscription — wait for it rather than read it at once.
+    await expect.poll(async () => (await probeRegimes()).writes, { timeout: 5_000 }).not.toContain(`{ ${doomed} w `);
 
     // Down to one, then the remove button on the survivor is dead (SPEC §3.4).
     for (let guard = 0; guard < 12; guard++) {
@@ -3693,6 +3696,144 @@ async function pickDeviceMenuItem(match: string | RegExp): Promise<void> {
   await nextFrame();
 }
 
+/** One binding card on the moon path (`ui/windows/device/mod-moon.ts`, D15 bead 2). */
+interface BindProbe {
+  name: string;
+  value: string;
+  path: string;
+  shape: string;
+  shapeOpen: boolean;
+  mode: string;
+  phases: string[];
+  selectedPhases: string[];
+  sources: Array<{ source: string; pct: string }>;
+  offered: string[];
+}
+
+/** Every card the open device panel draws, in `apply` order. */
+async function probeBinds(): Promise<BindProbe[]> {
+  return withApp(
+    ob.page,
+    (app, type: string) => {
+      const leaf = app.workspace.getLeavesOfType(type)[0];
+      const body: HTMLElement | null = leaf?.view?.containerEl?.querySelector(".wadjet-studio-device") ?? null;
+      const txt = (root: Element, sel: string) => (root.querySelector(sel)?.textContent ?? "").replace(/\s+/g, " ").trim();
+      const attrs = (root: Element, sel: string, name: string) => Array.from(root.querySelectorAll(sel)).map((n) => n.getAttribute(name) ?? "");
+      return Array.from(body?.querySelectorAll(".wadjet-studio-device-bind") ?? []).map((card) => ({
+        name: txt(card, ".wadjet-studio-device-bind-name"),
+        value: txt(card, ".wadjet-studio-device-bind-value"),
+        path: txt(card, ".wadjet-studio-device-bind-path"),
+        shape: txt(card, ".wadjet-studio-device-shape"),
+        shapeOpen: card.querySelector(".wadjet-studio-device-shape.is-open") !== null,
+        mode: txt(card, '[data-part^="mod-mode-"]'),
+        phases: attrs(card, "[data-phase]", "data-phase"),
+        selectedPhases: attrs(card, '[data-phase][aria-pressed="true"]', "data-phase"),
+        sources: Array.from(card.querySelectorAll(".wadjet-studio-device-src")).map((n) => ({
+          source: n.getAttribute("data-source") ?? "",
+          pct: (n.querySelector(".wadjet-studio-device-src-pct")?.textContent ?? "").trim(),
+        })),
+        offered: attrs(card, '[data-part="src-list"] [data-source]', "data-source"),
+      }));
+    },
+    VIEW_TYPE,
+  );
+}
+
+/** The rows `＋ Add target` opens under the cards (`ui/windows/device/apply.ts`, D15 bead 4). */
+async function probeTargets(): Promise<Array<{ param: string; op: string }>> {
+  return withApp(
+    ob.page,
+    (app, type: string) => {
+      const leaf = app.workspace.getLeavesOfType(type)[0];
+      const body: HTMLElement | null = leaf?.view?.containerEl?.querySelector(".wadjet-studio-device") ?? null;
+      return Array.from(body?.querySelectorAll('[data-part="target-list"] [data-target]') ?? []).map((n) => ({
+        param: n.getAttribute("data-target") ?? "",
+        op: (n.querySelector(".wadjet-studio-device-srcrow-note")?.textContent ?? "").trim(),
+      }));
+    },
+    VIEW_TYPE,
+  );
+}
+
+/** The envelope overlay under an open binding card (`ui/windows/device/env-moon.ts`, D15 bead 3). */
+interface EnvelopeProbe {
+  count: number;
+  title: string;
+  presets: string[];
+  lit: string[];
+  xTicks: string[];
+  yTicks: string[];
+  handles: number;
+}
+
+async function probeEnvelope(): Promise<EnvelopeProbe> {
+  return withApp(
+    ob.page,
+    (app, type: string) => {
+      const leaf = app.workspace.getLeavesOfType(type)[0];
+      const body: HTMLElement | null = leaf?.view?.containerEl?.querySelector(".wadjet-studio-device") ?? null;
+      const boxes = Array.from(body?.querySelectorAll(".wadjet-studio-device-env") ?? []);
+      const box = boxes[0] ?? null;
+      const texts = (sel: string) => (box === null ? [] : Array.from(box.querySelectorAll(sel)).map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim()));
+      return {
+        count: boxes.length,
+        title: box === null ? "" : (box.querySelector(".wadjet-studio-device-env-title")?.textContent ?? "").replace(/\s+/g, " ").trim(),
+        presets: box === null ? [] : Array.from(box.querySelectorAll("[data-env]")).map((n) => n.getAttribute("data-env") ?? ""),
+        lit: box === null ? [] : Array.from(box.querySelectorAll("[data-env].is-on")).map((n) => n.getAttribute("data-env") ?? ""),
+        xTicks: texts(".wadjet-studio-chart-xtick"),
+        yTicks: texts(".wadjet-studio-chart-tick"),
+        handles: box === null ? 0 : box.querySelectorAll(".wadjet-studio-chart-point").length,
+      };
+    },
+    VIEW_TYPE,
+  );
+}
+
+/**
+ * Put the walk's device on the moon path with the Stormtide's own two
+ * bindings, so the cards have a `scale` and an `offset` to draw — one of each
+ * shape the mode toggle can move.
+ */
+async function seedMoonBindings(): Promise<void> {
+  await openDeviceWindow(DEVICE_ID);
+  await withApp(
+    ob.page,
+    (app, a: { type: string; id: string }) => {
+      const leaf = app.workspace.getLeavesOfType(a.type)[0];
+      leaf.view.store.update(
+        (s: any) => {
+          // The fixture's moon has no named phases, so the cards would have
+          // nothing to chip. Name them the way the CYCLE window would.
+          s.world.calendar.moons = [
+            {
+              name: "Moon",
+              cycleDays: 29.53,
+              phaseAtEpoch: 0,
+              phases: [
+                { name: "New", at: 0 },
+                { name: "Crescent", at: 0.16 },
+                { name: "Half", at: 0.42 },
+                { name: "Gibbous", at: 0.68 },
+                { name: "Full", at: 0.86 },
+              ],
+            },
+          ];
+          const modifier = s.zones[s.view.zoneId].modifiers.find((m: any) => m.id === a.id);
+          modifier.apply = [
+            { param: "precipitation.pwd", op: "scale", value: 1.5 },
+            { param: "wind.speed", op: "offset", value: 12 },
+          ];
+          delete modifier.mods;
+        },
+        { history: true },
+      );
+    },
+    { type: VIEW_TYPE, id: DEVICE_ID },
+  );
+  await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=moon]').click();
+  await nextFrame();
+}
+
 describe("climate studio · device window", () => {
   test("step 52: a chance device opens as a DEVICE panel with its KIND, its % knob and one apply knob", async () => {
     await seedDevice();
@@ -3745,6 +3886,13 @@ describe("climate studio · device window", () => {
     await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=moon]').click();
     await nextFrame();
     expect((await probeDevice()).whenKind).toBe("moon");
+    // D15 / gap2 B1, B9: on the moon path the gate disc and the op knobs share
+    // ONE row (`0699` l.21-40) instead of a centred disc under WHEN and an
+    // APPLY grid 200 px below it, and the empty SPELL row is not drawn.
+    expect(await devicePanel().locator('[data-section="moon"] .wadjet-studio-device-gate-disc').count()).toBe(1);
+    expect(await devicePanel().locator('[data-section="moon"] .wadjet-studio-knob').count()).toBe(1);
+    expect(await devicePanel().locator('[data-section="apply"]').count()).toBe(0);
+    expect(await devicePanel().locator('[data-part="spell-power"]').count()).toBe(0);
     // Earlier describes may leave a cycle panel up; this step asserts on what its own click adds.
     const before = await cycleIds();
     const face = devicePanel().locator(".wadjet-studio-device-gate-disc .wadjet-studio-device-disc-face").first();
@@ -3765,6 +3913,237 @@ describe("climate studio · device window", () => {
     // Leave the device as step 52 made it, so step 53 starts from the same place.
     await devicePanel().locator('[data-part="when-kind"] [role=radio][data-value=chance]').click();
     await nextFrame();
+  });
+
+  test("step 52b: the moon path draws one MOD card per binding, and each card owns its shape, its mode and its ×", async () => {
+    // D15 bead 2 / gap2 B4-B7: the single device-wide MOD card is gone. The
+    // unit of edit on a moon device is the BINDING — one card per apply
+    // target, carrying that op's value, onset shape and cycle mode.
+    await seedMoonBindings();
+    const cards = await probeBinds();
+    expect(cards.length).toBe(2);
+    // A name stands alone on a card, so it is the `macro` vocabulary the
+    // prototype's bindings use, not the knob row's `precip`.
+    expect(cards.map((b) => b.name)).toEqual(["storm odds", "wind"]);
+    expect(cards.map((b) => b.value)).toEqual(["×1.50", "+12 km/h"]);
+    expect(cards.map((b) => b.path)).toEqual(["scale · precipitation.pwd", "offset · wind.speed"]);
+    // Neither the device-wide MOD row nor `＋ mod` is drawn on this path.
+    expect(await devicePanel().locator(".wadjet-studio-device-mod-row").count()).toBe(0);
+    expect(await devicePanel().locator(".wadjet-studio-device-add-mod").count()).toBe(0);
+
+    // The `∿` chip toggles one card open, and only that one.
+    expect(cards.map((b) => b.shapeOpen)).toEqual([false, false]);
+    await devicePanel().locator('[data-part="shape-0"]').click();
+    await nextFrame();
+    expect((await probeBinds()).map((b) => b.shapeOpen)).toEqual([true, false]);
+    await devicePanel().locator('[data-part="shape-0"]').click();
+    await nextFrame();
+    expect((await probeBinds()).map((b) => b.shapeOpen)).toEqual([false, false]);
+
+    // `▦ phases` → `∿ curve` writes an envelope on THAT op and no other.
+    expect(cards.map((b) => b.mode)).toEqual(["▦ phases", "▦ phases"]);
+    await devicePanel().locator('[data-part="mod-mode-0"]').click();
+    await nextFrame();
+    const curved = await probeBinds();
+    expect(curved.map((b) => b.mode)).toEqual(["∿ curve", "▦ phases"]);
+    expect(curved[0]!.shape).toBe("∿ Ease in");
+    const withEnvelope = await draftModifier(DEVICE_ID);
+    expect(Array.isArray(withEnvelope.apply[0].envelope)).toBe(true);
+    expect(withEnvelope.apply[1].envelope).toBeUndefined();
+    // A curve rides its envelope, so that card drops its phase chips; the
+    // other card still has them.
+    expect(curved[0]!.phases).toEqual([]);
+    expect(curved[1]!.phases.length).toBeGreaterThan(0);
+    await devicePanel().locator('[data-part="mod-mode-0"]').click();
+    await nextFrame();
+    expect((await draftModifier(DEVICE_ID)).apply[0].envelope).toBeUndefined();
+
+    // The phase chips moved off the WHEN row onto the cards (gap2 B6), and
+    // they still write the device-wide `[a, b)` — so both cards agree.
+    expect(await devicePanel().locator(".wadjet-studio-device-when [data-phase]").count()).toBe(0);
+    const before = await probeBinds();
+    const wasRange = (await draftModifier(DEVICE_ID)).when.moon.phase;
+    const selected = before[0]!.selectedPhases;
+    expect(before[1]!.selectedPhases).toEqual(selected);
+    const target = before[0]!.phases.find((p) => !selected.includes(p));
+    expect(target, `every phase already selected in ${JSON.stringify(before[0]!.phases)}`).toBeDefined();
+    await devicePanel().locator(`[data-part="bind-0"] [data-phase="${target}"]`).click();
+    await nextFrame();
+    const toggled = await probeBinds();
+    expect(toggled[0]!.selectedPhases).toContain(target);
+    expect(toggled[1]!.selectedPhases).toEqual(toggled[0]!.selectedPhases);
+    expect((await draftModifier(DEVICE_ID)).when.moon.phase).not.toEqual(wasRange);
+
+    // Line 1's channel dot is also the op's mute: the moon row's knobs are
+    // bare, so a device switched to moon would otherwise lose the only way to
+    // reach `ModifierOp.enabled`. The generic contract survives with it.
+    expect(await devicePanel().locator('[data-part="op-power-0"]').count()).toBe(1);
+    await devicePanel().locator('[data-part="op-power-0"]').click();
+    await nextFrame();
+    expect((await draftModifier(DEVICE_ID)).apply[0].enabled).toBe(false);
+    await devicePanel().locator('[data-part="op-power-0"]').click();
+    await nextFrame();
+    expect((await draftModifier(DEVICE_ID)).apply[0].enabled).toBeUndefined();
+
+    // The card's `×` removes the whole binding, card and all.
+    await devicePanel().locator('[data-part="bind-remove-1"]').click();
+    await nextFrame();
+    const left = await probeBinds();
+    expect(left.length).toBe(1);
+    expect(left[0]!.name).toBe("storm odds");
+    expect((await draftModifier(DEVICE_ID)).apply).toEqual([{ param: "precipitation.pwd", op: "scale", value: 1.5 }]);
+    console.log(`  · ${cards.length} bind cards ${JSON.stringify(cards.map((b) => `${b.name} ${b.value}`))}; phases ${JSON.stringify(before[0]!.phases)}; × left ${left.length}`);
+  });
+
+  test("step 52c: a card's ＋ opens an inline source list, and the chip it adds drags its own amount", async () => {
+    await seedMoonBindings();
+    expect((await probeBinds())[0]!.sources).toEqual([]);
+
+    // `＋` opens an inline list under the card (`0699` l.66-74), not a Menu.
+    await devicePanel().locator('[data-part="src-add-0"]').click();
+    await nextFrame();
+    const open = await probeBinds();
+    expect(open[0]!.offered).toContain("season:Harvest");
+    // Only the card that was asked shows the list.
+    expect(open[1]!.offered).toEqual([]);
+
+    await devicePanel().locator('[data-part="bind-0"] [data-part="src-list"] [data-source="season:Harvest"]').click();
+    await nextFrame();
+    const added = await probeBinds();
+    expect((await draftModifier(DEVICE_ID)).mods).toEqual([{ source: "season:Harvest", amount: 1 }]);
+    // `ModGate[]` lives on the modifier, not the op: every card draws it.
+    expect(added.map((b) => b.sources)).toEqual([[{ source: "season:Harvest", pct: "100%" }], [{ source: "season:Harvest", pct: "100%" }]]);
+    expect(added[0]!.offered).toEqual([]);
+
+    // The chip IS the dimmer: 120 px of drag is the whole [0, 1], so 60 px
+    // down halves it (the prototype's `srcAmtDown`).
+    await dragKnobDial('[data-part="bind-0"] [data-part="gate-chip-0"]', 60);
+    expect((await draftModifier(DEVICE_ID)).mods).toEqual([{ source: "season:Harvest", amount: 0.5 }]);
+    expect((await probeBinds())[0]!.sources).toEqual([{ source: "season:Harvest", pct: "50%" }]);
+
+    // The `×` inside the chip drops the source without ever starting a drag.
+    await devicePanel().locator('[data-part="bind-0"] [data-part="gate-drop-0"]').click();
+    await nextFrame();
+    expect((await draftModifier(DEVICE_ID)).mods ?? []).toEqual([]);
+    expect((await probeBinds())[0]!.sources).toEqual([]);
+    console.log(`  · ＋ offered ${JSON.stringify(open[0]!.offered)}; season:Harvest dragged to 50% then removed`);
+
+    // Leave the walk the chance device step 53 expects.
+    await seedDevice();
+    await openDeviceWindow(DEVICE_ID);
+  });
+
+  test("step 52d: the `∿` chip opens the envelope overlay, its presets rewrite the points, and a drag makes them custom", async () => {
+    // D15/D16 bead 3 / `0699` l.75-93: an open card reveals the prototype's own
+    // overlay — a header that names the binding, five preset chips with the
+    // matching one lit, and a plot of the last third of the cycle.
+    await seedMoonBindings();
+    // No envelope, no overlay: the chip toggles `envOpen`, but there is nothing
+    // to draw until the mode toggle writes points.
+    await devicePanel().locator('[data-part="mod-mode-0"]').click();
+    await nextFrame();
+    expect(Array.isArray((await draftModifier(DEVICE_ID)).apply[0].envelope)).toBe(true);
+    expect(await devicePanel().locator(".wadjet-studio-device-env").count()).toBe(0);
+
+    await devicePanel().locator('[data-part="shape-0"]').click();
+    await nextFrame();
+    const opened = await probeEnvelope();
+    expect(opened.count).toBe(1);
+    // The header names the binding in the same `macro` vocabulary the card does.
+    expect(opened.title).toBe("envelope · storm odds (×1.50 at full strength)");
+    expect(opened.presets).toEqual(["Sharp", "Ease in", "Swell", "Pulse", "Ramp out"]);
+    expect(opened.lit).toEqual(["Ease in"]);
+    expect((await probeBinds())[0]!.shape).toBe("∿ Ease in");
+    // The plot runs 0.70 → full, not 0 → 1: an onset only ever lives there.
+    expect(opened.xTicks).toEqual(["0.70", "0.80", "0.90", "full ●"]);
+    expect(opened.yTicks).toEqual(["0", "1"]);
+    // Only the open card gets one.
+    expect(await devicePanel().locator('[data-part="env-overlay-1"]').count()).toBe(0);
+
+    // A preset click rewrites the points, so the card's label follows it.
+    await devicePanel().locator('.wadjet-studio-device-env [data-env="Pulse"]').click();
+    await nextFrame();
+    expect((await draftModifier(DEVICE_ID)).apply[0].envelope).toEqual([
+      [0.92, 0],
+      [0.94, 1],
+      [0.96, 0],
+    ]);
+    expect((await probeEnvelope()).lit).toEqual(["Pulse"]);
+    expect((await probeBinds())[0]!.shape).toBe("∿ Pulse");
+    expect((await probeEnvelope()).handles).toBe(3);
+
+    // Dragging the peak down is what makes a shape `custom` — nothing stores
+    // the name, `envelopeShapeName` recognises the points.
+    await dragKnobDial('[data-part="env-chart-0"] .wadjet-studio-chart-point[data-index="1"]', 20);
+    const drawn = (await draftModifier(DEVICE_ID)).apply[0].envelope as Array<[number, number]>;
+    expect(drawn[1]![1]).toBeLessThan(0.9);
+    expect((await probeBinds())[0]!.shape).toBe("∿ custom");
+    expect((await probeEnvelope()).lit).toEqual([]);
+    console.log(`  · overlay "${opened.title}"; presets ${JSON.stringify(opened.presets)}; peak dragged to ${drawn[1]![1].toFixed(2)} → custom`);
+
+    // Leave the walk the chance device step 53 expects.
+    await seedDevice();
+    await openDeviceWindow(DEVICE_ID);
+  });
+
+  test("step 52e: `＋ Add target` opens an inline list of the unbound params, and the WRITES names each onset and gate", async () => {
+    // D15/D16 bead 4 / `0699` l.95-104: the moon path drops the `＋ apply`
+    // cell and its Obsidian `Menu` for a full-width block under the cards,
+    // opening a list in the panel rather than a floating menu.
+    await seedMoonBindings();
+    expect(await devicePanel().locator(".wadjet-studio-device-add-apply").count()).toBe(0);
+    const add = devicePanel().locator('[data-part="add-target"]');
+    expect((await add.textContent())?.trim()).toBe("＋ Add target");
+    expect(await devicePanel().locator('[data-part="target-list"]').count()).toBe(0);
+
+    await add.click();
+    await nextFrame();
+    const offered = await probeTargets();
+    // Only what the device is NOT already bound to: `paramsByChannel` drops
+    // the two `seedMoonBindings` wrote, so the list is every other param.
+    const total = paramsByChannel("daily").reduce((n, g) => n + g.params.length, 0);
+    expect(offered.length).toBe(total - 2);
+    expect(offered.map((t) => t.param)).not.toContain("precipitation.pwd");
+    expect(offered.map((t) => t.param)).not.toContain("wind.speed");
+    // Each row says which op it would add — the plugin's own default, not the
+    // prototype's fixed table.
+    expect(offered.every((t) => t.op === "scale" || t.op === "offset" || t.op === "set")).toBe(true);
+
+    const pick = offered[0]!;
+    await devicePanel().locator(`[data-part="target-list"] [data-target="${pick.param}"]`).click();
+    await nextFrame();
+    // A row adds the card and closes the list.
+    expect((await probeBinds()).length).toBe(3);
+    expect(await devicePanel().locator('[data-part="target-list"]').count()).toBe(0);
+    const applied = (await draftModifier(DEVICE_ID)).apply;
+    expect(applied.length).toBe(3);
+    expect(applied[2].param).toBe(pick.param);
+    expect(applied[2].op).toBe(pick.op);
+    // …and the list no longer offers it.
+    await add.click();
+    await nextFrame();
+    expect((await probeTargets()).length).toBe(total - 3);
+    await devicePanel().locator('[data-part="bind-remove-2"]').click();
+    await nextFrame();
+    expect((await probeBinds()).length).toBe(2);
+
+    // Law 5 on the moon path (bead 4): the tail is NAMED, not counted — each
+    // binding carries its own `∿shape`, and the device's gates are listed once
+    // because `mods` hangs off the modifier, not the op. The param paths, the
+    // `[a, b)` range and the moon's own casing stay the plugin's.
+    await devicePanel().locator('[data-part="mod-mode-0"]').click();
+    await nextFrame();
+    await devicePanel().locator('[data-part="src-add-0"]').click();
+    await nextFrame();
+    await devicePanel().locator('[data-part="bind-0"] [data-part="src-list"] [data-source="season:Harvest"]').click();
+    await nextFrame();
+    const writes = (await probeDevice()).writes;
+    expect(writes).toMatch(/^modifiers\[\d+\] · when\.moon Moon \[\d\.\d\d, \d\.\d\d\] · apply precipitation\.pwd ×1\.50 ∿ease in, wind\.speed \+12 · × season:Harvest@100%$/);
+    console.log(`  · ＋ Add target offered ${offered.length} of ${total}; added ${pick.param} (${pick.op}); writes ${writes}`);
+
+    // Leave the walk the chance device step 53 expects.
+    await seedDevice();
+    await openDeviceWindow(DEVICE_ID);
   });
 
   test("step 53: the WHEN segmented switches to tag, and season chips write tag then any", async () => {
@@ -3937,6 +4316,210 @@ describe("climate studio · device window", () => {
     );
     expect(open.filter((id) => id.startsWith("device:"))).toEqual([]);
     console.log(`  · removed ${DEVICE_RENAMED}; no device panels left (open windows ${JSON.stringify(open)})`);
+  });
+
+  /**
+   * The vault's own `ashfall`, put back exactly as `MODIFIER_EXAMPLES` ships it.
+   * Earlier walks rewrite the rack, so this step seeds rather than assumes, and
+   * restores at the end the way `atlas` puts back what it borrows.
+   */
+  async function seedAshfall(): Promise<any> {
+    await revealStudio();
+    await withApp(
+      ob.page,
+      (app, a: { type: string; mod: any }) => {
+        const leaf = app.workspace.getLeavesOfType(a.type)[0];
+        leaf.view.store.update(
+          (s: any) => {
+            const zone = s.zones[s.view.zoneId];
+            const next = JSON.parse(JSON.stringify(a.mod));
+            const at = zone.modifiers.findIndex((m: any) => m.id === "ashfall");
+            if (at < 0) zone.modifiers.unshift(next);
+            else zone.modifiers[at] = next;
+          },
+          { history: true },
+        );
+      },
+      { type: VIEW_TYPE, mod: ZONE_DEVICE },
+    );
+    await nextFrame();
+    return draftModifier("ashfall");
+  }
+
+  test("step 59: ashfall's two rain-odds writes are one composed precip column", async () => {
+    // The prototype's Ashfall APPLY has TWO columns, `precip 0 — no rain` and
+    // `sky 0.95 — ash-dark` (`1397-logic-class-Component.js` l.137-140): its
+    // `precip` control writes `precipitation.pww` AND `.pwd` from one knob.
+    const seeded = await seedAshfall();
+    expect(seeded.apply.map((o: any) => o.param)).toEqual(["precipitation.pwd", "precipitation.pww", "cloud.dry"]);
+    await openDeviceWindow("ashfall");
+
+    // Three ops, two columns — and the composed one names its partner while
+    // keeping the LOWER op's `op-N` part, so every existing selector still hits.
+    expect(await devicePanel().locator('[data-section="apply"] .wadjet-studio-knob').count()).toBe(2);
+    const composed = devicePanel().locator(".wadjet-studio-device-apply-cell[data-composed]");
+    expect(await composed.count()).toBe(1);
+    expect(await composed.getAttribute("data-composed")).toBe("1");
+    expect(await composed.locator(".wadjet-studio-knob-label").innerText()).toContain("precip");
+    expect(await composed.getAttribute("data-hint")).toContain("set · precipitation.pww / pwd");
+    const values = (await devicePanel().locator('[data-section="apply"] .wadjet-studio-knob-value').allTextContents()).map((t) => t.replace(/\s+/g, " ").trim());
+    expect(values).toEqual(["0 — no rain", "0.95 — ash-dark"]);
+
+    // One nudge on the one knob moves BOTH writes, in one undo step.
+    await devicePanel().locator('[data-part="op-0"] .wadjet-studio-knob-dial').press("ArrowUp");
+    await nextFrame();
+    const nudged = await draftModifier("ashfall");
+    expect(nudged.apply[0].value).toBeGreaterThan(0);
+    expect(nudged.apply[1].value).toBe(nudged.apply[0].value);
+    expect(nudged.apply[2].value).toBe(0.95);
+
+    // One mute for the pair …
+    await devicePanel().locator('[data-part="op-power-0"]').click();
+    await nextFrame();
+    const muted = await draftModifier("ashfall");
+    expect([muted.apply[0].enabled, muted.apply[1].enabled]).toEqual([false, false]);
+    expect(muted.apply[2].enabled).toBeUndefined();
+
+    // … and one × that takes both away, leaving the sky op alone.
+    await composed.locator(".wadjet-studio-device-remove").click();
+    await nextFrame();
+    const dropped = await draftModifier("ashfall");
+    expect(dropped.apply).toEqual([{ param: "cloud.dry", op: "set", value: 0.95 }]);
+    expect(await devicePanel().locator('[data-section="apply"] .wadjet-studio-knob').count()).toBe(1);
+
+    // Put the fixture back so the walks after this one stand on the same world.
+    const restored = await seedAshfall();
+    expect(restored.apply).toEqual(ZONE_DEVICE.apply);
+    await closeStudioWindows();
+    console.log(`  · ashfall: 3 ops → ${values.length} columns ${JSON.stringify(values)}; nudge wrote both (${nudged.apply[0].value}), × left ${JSON.stringify(dropped.apply.map((o: any) => o.param))}`);
+  });
+
+  test("step 60: the spell path opens 320 wide, dials first, WINDOWS then APPLY, lane full width, no ＋ mod", async () => {
+    // `0905-vst-ashfall.html`: a 320 px window whose body is the two spell
+    // dials uncaptioned, `WINDOWS · repeat yearly`, `APPLY · while running`,
+    // and nothing else (gap2 C5, C9, C10).
+    await seedAshfall();
+    await openDeviceWindow("ashfall");
+
+    const shape = await withApp(
+      ob.page,
+      (app, type: string) => {
+        const el: HTMLElement = app.workspace.getLeavesOfType(type)[0].view.containerEl;
+        const body: HTMLElement | null = el.querySelector(".wadjet-studio-device");
+        const panel: HTMLElement | null = body?.closest(".wadjet-studio-window") ?? null;
+        const lane: HTMLElement | null = body?.querySelector(".wadjet-studio-device-lane") ?? null;
+        /** A dial's centre as a percentage of the body's content width — the prototype's are 26 and 72. */
+        const centre = (part: string): number => {
+          const dial: HTMLElement | null = body?.querySelector(`[data-part="${part}"] .wadjet-studio-knob-dial`) ?? null;
+          if (dial === null || body === null) return -1;
+          const d = dial.getBoundingClientRect();
+          const b = body.getBoundingClientRect();
+          return Math.round(((d.left + d.width / 2 - b.left) / b.width) * 1000) / 10;
+        };
+        return {
+          startsCentre: centre("spell-starts"),
+          durationCentre: centre("spell-duration"),
+          width: panel === null ? 0 : Math.round(panel.getBoundingClientRect().width),
+          bodyWidth: body === null ? 0 : Math.round(body.getBoundingClientRect().width),
+          laneWidth: lane === null ? 0 : Math.round(lane.getBoundingClientRect().width),
+          sections: body === null ? [] : Array.from(body.querySelectorAll("[data-section]")).map((n) => n.getAttribute("data-section") ?? ""),
+          // `querySelectorAll` answers in document order, so this IS the order.
+          marks:
+            body === null
+              ? []
+              : Array.from(body.querySelectorAll('[data-section], [data-part="spell-starts"], [data-part="spell-duration"]')).map((n) =>
+                  n.hasAttribute("data-part") ? (n.getAttribute("data-part") ?? "") : `section:${n.getAttribute("data-section")}`,
+                ),
+        };
+      },
+      VIEW_TYPE,
+    );
+
+    expect(shape.width).toBe(320);
+    expect(shape.sections).toEqual(["when", "spell", "windows", "apply"]);
+    // The dials come before APPLY, which is the whole point of the reorder.
+    expect(shape.marks.indexOf("spell-starts")).toBeGreaterThan(-1);
+    expect(shape.marks.indexOf("spell-starts")).toBeLessThan(shape.marks.indexOf("section:apply"));
+    expect(shape.marks.indexOf("spell-duration")).toBeLessThan(shape.marks.indexOf("section:apply"));
+    // The lane owns the content width now, not two thirds of it (gap2 C5).
+    expect(shape.laneWidth).toBe(shape.bodyWidth);
+    // The spell is still switchable, and the `＋ mod` button is gone.
+    expect(await devicePanel().locator('[data-part="spell-power"]').count()).toBe(1);
+    expect(await devicePanel().locator(".wadjet-studio-device-add-mod").count()).toBe(0);
+
+    // The two dials space-around the whole row (`0905` l.12-15 puts their
+    // centres at 26% and 72%); the power pill is out of flow so it cannot pull
+    // them into the left third.
+    expect(shape.startsCentre).toBeGreaterThan(20);
+    expect(shape.startsCentre).toBeLessThan(32);
+    expect(shape.durationCentre).toBeGreaterThan(66);
+    expect(shape.durationCentre).toBeLessThan(80);
+    // The caption `starts / yr` carries the unit, so the readout is the bare
+    // number the prototype prints (`0905` l.13).
+    expect((await devicePanel().locator('[data-part="spell-starts"] .wadjet-studio-knob-value').innerText()).trim()).toBe("0.6");
+    expect((await devicePanel().locator('[data-part="spell-duration"] .wadjet-studio-knob-value').innerText()).trim()).toBe("18 d");
+
+    // Ashfall has one clip, and the model keeps a window device on at least
+    // one: the × is drawn anyway (`0905` l.34) and refuses.
+    const lone = devicePanel().locator(".wadjet-studio-device-clip-row .wadjet-studio-device-remove");
+    expect(await lone.count()).toBe(1);
+    expect(await lone.getAttribute("aria-disabled")).toBe("true");
+    // Playwright refuses to click an `aria-disabled` element, which is itself
+    // the proof; the event is dispatched anyway to show the handler no-ops.
+    await lone.dispatchEvent("click");
+    await nextFrame();
+    expect((await draftModifier("ashfall")).when).toEqual(ZONE_DEVICE.when);
+
+    await closeStudioWindows();
+    console.log(
+      `  · spell path: ${shape.width} px wide; sections ${JSON.stringify(shape.sections)}; lane ${shape.laneWidth}/${shape.bodyWidth} px; dial centres ${shape.startsCentre}% / ${shape.durationCentre}%`,
+    );
+  });
+
+  test("step 61: the spell path's ＋ apply opens the inline target list, not an Obsidian menu", async () => {
+    // `0905` l.49-59: the dashed 44 px circle stays the trigger, but what it
+    // opens is `ashAddOpts` hanging under the APPLY row — the same inline list
+    // the moon path opens (step 52e), filtered to the params not yet bound.
+    await seedAshfall();
+    await openDeviceWindow("ashfall");
+
+    const add = devicePanel().locator('[data-section="apply"] [data-part="add-target"]');
+    expect(await add.count()).toBe(1);
+    // Still the dashed circle, not the moon path's full-width block.
+    expect(await add.getAttribute("class")).toContain("wadjet-studio-device-add-apply");
+    expect((await add.textContent())?.trim()).toBe("＋");
+    expect(await devicePanel().locator('[data-part="target-list"]').count()).toBe(0);
+
+    await add.click();
+    await nextFrame();
+    const offered = await probeTargets();
+    const total = paramsByChannel("daily").reduce((n, g) => n + g.params.length, 0);
+    // Ashfall binds three params and draws two columns: the composed precip
+    // pair is ONE column but TWO ops, and both count as bound.
+    expect(offered.length).toBe(total - 3);
+    const params = offered.map((t) => t.param);
+    expect(params).not.toContain("precipitation.pwd");
+    expect(params).not.toContain("precipitation.pww");
+    expect(params).not.toContain("cloud.dry");
+    // And no `precip` pseudo-target — the prototype's fixed table has one, the
+    // plugin offers the real param paths it would actually write.
+    expect(params).not.toContain("precip");
+
+    const pick = offered[0]!;
+    await devicePanel().locator(`[data-part="target-list"] [data-target="${pick.param}"]`).click();
+    await nextFrame();
+    // A row adds the op and closes the list.
+    expect(await devicePanel().locator('[data-part="target-list"]').count()).toBe(0);
+    const added = (await draftModifier("ashfall")).apply;
+    expect(added.length).toBe(4);
+    expect(added[3].param).toBe(pick.param);
+    expect(added[3].op).toBe(pick.op);
+
+    // Put the fixture back so the walks after this one stand on the same world.
+    const restored = await seedAshfall();
+    expect(restored.apply).toEqual(ZONE_DEVICE.apply);
+    await closeStudioWindows();
+    console.log(`  · ＋ apply offered ${offered.length}/${total} params (3 bound); added ${pick.param} (${pick.op})`);
   });
 });
 

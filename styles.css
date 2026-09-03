@@ -1041,6 +1041,15 @@
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
+/* X-axis labels in the strip under the plot (`pad.bottom`). No `fill` here on
+   purpose: one label may be a reading rather than a scale mark, and it carries
+   its own hue as an attribute the way a rule does. */
+.wadjet-studio-chart-xtick {
+  font-family: var(--wadjet-studio-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 .wadjet-studio-chart-marker {
   stroke: var(--wadjet-studio-text-mute);
   stroke-width: 1;
@@ -2971,9 +2980,9 @@
 
 
 /* ── Studio windows (floating panels, SPEC §3.4, and their popovers) ── */
-/* Moon CYCLE window (SPEC 3.4 "Sable · CYCLE") — the prototype's 452 px panel:
-   a 212 px ring with the lit moon inside it on the left, the phase list on
-   the right. `--wadjet-studio-cycle-tint` is how lit a phase is (model/
+/* Moon CYCLE window (SPEC 3.4 "Sable · CYCLE") — the prototype's 452 px panel
+   plus the disc's label gutter: a 212 px ring with the lit moon inside it on
+   the left, the phase list on the right. `--wadjet-studio-cycle-tint` is how lit a phase is (model/
    moon-shape.ts) — the ring, the swatches and the names all ramp on it. */
 .wadjet-studio-cycle {
   display: flex;
@@ -2984,15 +2993,18 @@
   gap: 10px;
   align-items: flex-start;
 }
+/* 212 px of ring plus the 26 px label gutter on each side (`LABEL_PAD` in
+   cycle.ts): the phase names are drawn outside the ring, so their overhang is
+   part of this box rather than something that leaks onto the phase table. */
 .wadjet-studio-cycle-disc {
   flex: 0 0 auto;
-  width: 212px;
+  width: 264px;
   height: 212px;
 }
 .wadjet-studio-cycle-svg {
   width: 100%;
   height: 100%;
-  overflow: visible;
+  overflow: hidden;
 }
 /* The unlit disc the moon is drawn over. */
 .wadjet-studio-cycle-face {
@@ -3954,6 +3966,15 @@
    and no rule anywhere in the panel), and each carries its own inset cards the
    way the prototype's two-tone panel system does. */
 .wadjet-studio-device {
+  /* Three shades the prototype's Stormtide uses that the palette does not
+     carry: the faint text under a binding's path and on an unselected phase
+     chip, the shape chip's rim, and the fill behind a selected phase chip
+     (`0699-vst-stormtide.html` l.48, l.49, l.62). */
+  /* The prototype's #6b7178 sits under the SPEC §9 contrast floor (see the
+     ruling near the top of this file); readable text takes the ratified mute. */
+  --wadjet-studio-device-faint: var(--wadjet-studio-text-mute);
+  --wadjet-studio-device-chip-edge: #565b61;
+  --wadjet-studio-device-phase-on: #26323f;
   display: flex;
   flex-direction: column;
 }
@@ -4112,6 +4133,19 @@
   color: var(--wadjet-studio-text);
   border-color: var(--wadjet-studio-border-bright);
 }
+/* A control drawn for the shape it holds but refusing the gesture: the clip
+   row's × on a lone window (`when-year-window.ts`). The prototype draws it on
+   every row (`0905` l.34); the model keeps a window device on at least one
+   window, so here it dims rather than disappears. */
+.wadjet-studio-device-remove[aria-disabled="true"] {
+  cursor: default;
+  color: var(--wadjet-studio-device-faint);
+}
+.wadjet-studio-device-remove[aria-disabled="true"]:hover,
+.wadjet-studio-device-remove[aria-disabled="true"]:focus-visible {
+  color: var(--wadjet-studio-device-faint);
+  border-color: transparent;
+}
 .wadjet-studio-device-add-mod,
 .wadjet-studio-device-toggle {
   align-self: flex-start;
@@ -4166,27 +4200,82 @@
   cursor: grab;
   touch-action: none;
 }
+/* The gate readout is SVG `<text>` inside the disc (`when-moon.ts`), so its
+   10 px is 10 units of the 88-unit viewBox — theme-font independent — and
+   `fill`, not `color`, paints it. `pointer-events: none` keeps it out of the
+   svg's open-the-cycle click. */
 .wadjet-studio-device-disc-readout {
-  font-size: var(--wadjet-studio-fs-caption);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
-  color: var(--wadjet-studio-text-mute);
+  fill: var(--wadjet-studio-text-mute);
+  pointer-events: none;
 }
-
-/* WHEN · year window — the season-striped mini-lane and its clip rows */
-.wadjet-studio-device-lane-row {
+/* The moon path's signature row (`0699-vst-stormtide.html` l.21-40, gap2 B1):
+   the 84 px gate disc and the op knobs in ONE row, where every other kind
+   wears the disc alone under WHEN and an APPLY grid further down. The window
+   body's own 13 px padding is the prototype's, so the disc needs no inset of
+   its own to land its centre where the capture has it. */
+.wadjet-studio-device-moon {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-top: 12px;
 }
+.wadjet-studio-device-moon .wadjet-studio-device-gate-disc {
+  flex: 0 0 auto;
+  height: 84px;
+  margin: 0;
+}
+/* `0699` l.36-37 measures 19 px from the label's top to the readout's; our
+   caption line box is tighter than the prototype's 11 px one, so the moon
+   row's knobs buy the difference back here rather than everywhere. */
+.wadjet-studio-device-moon .wadjet-studio-knob-value {
+  margin-top: 2px;
+}
+.wadjet-studio-device-moon-knobs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: space-around;
+  gap: 8px;
+}
+
+/* The spell path's two dials (`0905-vst-ashfall.html` l.12-15): uncaptioned, at
+   the top of the body, spread across it. 42 px in the prototype, drawn at the
+   studio's nearest size (`lg`, 44). The on/off toggle trails them — the
+   prototype has no counterpart for it (its Ashfall always runs, and the only
+   lamp on that window is the chrome's own), but it is the one control that adds
+   or drops a spell, so it keeps its place in the row. */
+.wadjet-studio-device-spell {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-around;
+  gap: 8px;
+  margin-top: 12px;
+}
+/* With a spell on, the toggle leaves the flow: three flex items would spread
+   the dials across the left third, and the prototype's two sit at about 26%
+   and 72% of the content width. Out of flow they space-around the whole row
+   again, and the pill parks in the row's top right corner — which is what the
+   padding buys it, so it never lands on the duration dial. With the spell off
+   the row is the toggle alone, so it stays in flow and carries the height. */
+.wadjet-studio-device-spell[data-spell="on"] {
+  padding-top: 20px;
+}
+.wadjet-studio-device-spell[data-spell="on"] .wadjet-studio-device-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+/* WHEN · year window — the season-striped mini-lane and its clip rows. The lane
+   spans the whole content width (`0905` l.17-26, gap2 C5); the start and length
+   knobs are a row of their own under it. */
 .wadjet-studio-device-lane {
   flex: 1 1 auto;
   min-width: 0;
-}
-/* The two clip knobs sit BESIDE the lane, never wrapped under each other. */
-.wadjet-studio-device-lane-row .wadjet-studio-device-knobs {
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  gap: 10px;
 }
 .wadjet-studio-device-lane-stripe {
   display: flex;
@@ -4318,6 +4407,31 @@
   font-size: var(--wadjet-studio-fs-chip);
   color: var(--wadjet-studio-text-mute);
 }
+/* The spell path's `＋ apply` opens the target list under the APPLY row
+   (`0905` l.52-58): the prototype's 118 px panel, but laid out under the row
+   rather than floated over it — `.wadjet-studio-window-body` scrolls, so a
+   floated list would be clipped by it, and APPLY is the last thing above the
+   WRITES footer, so there is nothing for it to cover. */
+.wadjet-studio-device-apply + .wadjet-studio-device-srclist {
+  width: max-content;
+  min-width: 118px;
+  max-width: 100%;
+  margin-top: 6px;
+  /* The two prototypes disagree, so each path takes its own: the spell path's
+     list is `#26282c` (`0905` l.53) and the moon path's is `#202225`
+     (`0699` l.97, the base rule above). The border is `#565b61` in both. */
+  background: var(--wadjet-studio-bg-header);
+}
+/* …which is also the base list's row separator and hover tone, so both step up
+   a tier here, or the rows vanish into the fill (`0905` l.55 draws them at
+   `#2c2f33` over `#26282c`, and hovers a shade lighter still). */
+.wadjet-studio-device-apply + .wadjet-studio-device-srclist .wadjet-studio-device-srcrow {
+  border-bottom-color: var(--wadjet-studio-hairline);
+}
+.wadjet-studio-device-apply + .wadjet-studio-device-srclist .wadjet-studio-device-srcrow:hover,
+.wadjet-studio-device-apply + .wadjet-studio-device-srclist .wadjet-studio-device-srcrow:focus-visible {
+  background: var(--wadjet-studio-border);
+}
 
 /* MOD — the mod matrix: carrier × mode × gate chips, then the envelope card */
 .wadjet-studio-device-mod-row {
@@ -4366,6 +4480,308 @@
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--wadjet-studio-device-dot-color, var(--wadjet-studio-text-mute));
+}
+
+/* MOD · moon — the per-binding cards (`0699` l.43-94, gap2 B4-B7). One card
+   per apply target: line 1 is the binding, line 2 is what modulates it. */
+.wadjet-studio-device-binds {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 11px;
+}
+.wadjet-studio-device-bind {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 9px;
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-hairline);
+  border-radius: 2px;
+}
+.wadjet-studio-device-bind-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--wadjet-studio-fs-chip);
+  font-variant-numeric: tabular-nums;
+}
+/* Line 1's leading dot IS the op's mute (`components/led.ts`, scope `op`):
+   7 px, the channel's hue when on, the unpowered socket when off. The
+   prototype's dot is a flat disc, so the lamp's rim and halo come off. */
+.wadjet-studio-device-bind-head .wadjet-studio-led {
+  border: 0;
+  box-shadow: none;
+}
+/* A muted binding keeps every control reachable — including the lamp that
+   un-mutes it — so the card dims its copy rather than its opacity. */
+.wadjet-studio-device-bind.is-off .wadjet-studio-device-bind-name,
+.wadjet-studio-device-bind.is-off .wadjet-studio-device-bind-value {
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-device-bind.is-off .wadjet-studio-device-bind-mod {
+  opacity: 0.55;
+}
+.wadjet-studio-device-bind-name {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--wadjet-studio-accent);
+}
+/* The value is the one thing on the line that carries the channel's hue. */
+.wadjet-studio-device-bind-value {
+  white-space: nowrap;
+  color: var(--wadjet-studio-device-bind-color, var(--wadjet-studio-text-dim));
+}
+/* `scale · precipitation.pwd` — the engine path, and the line's only slack. */
+.wadjet-studio-device-bind-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wadjet-studio-device-faint);
+}
+/* `∿ Ease in`. Closed it is a bright label on a dim rim; open it inverts, so
+   which binding the envelope below belongs to is never in doubt. */
+.wadjet-studio-device-shape {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: var(--wadjet-studio-fs-chip);
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--wadjet-studio-text);
+  border: 1px solid var(--wadjet-studio-device-chip-edge);
+  border-radius: 2px;
+}
+.wadjet-studio-device-shape:hover,
+.wadjet-studio-device-shape:focus-visible {
+  border-color: var(--wadjet-studio-accent);
+}
+.wadjet-studio-device-shape.is-open {
+  color: var(--wadjet-studio-bg);
+  background: var(--wadjet-studio-accent);
+  border-color: var(--wadjet-studio-accent);
+}
+.wadjet-studio-device-bind-head .wadjet-studio-device-remove {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border: 0;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-device-bind-mod {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-left: 13px;
+  font-size: var(--wadjet-studio-fs-chip);
+}
+/* Every chip on line 2 sits ON the card, so it takes the header fill rather
+   than the panel fill the card itself already wears. */
+.wadjet-studio-device-bind-mod .wadjet-studio-chip,
+.wadjet-studio-device-src {
+  padding: 1px 7px;
+  line-height: 16px;
+  background: var(--wadjet-studio-bg-header);
+}
+.wadjet-studio-device-bind-mod .wadjet-studio-device-mod-label {
+  color: var(--wadjet-studio-device-faint);
+}
+.wadjet-studio-device-bind-mod .wadjet-studio-device-toggle {
+  align-self: auto;
+  background: var(--wadjet-studio-bg-header);
+  border-color: var(--wadjet-studio-border);
+}
+/* A phase OUT of the window is faint on the card's own fill; one IN it takes
+   the cycle's tint on its rim (`--wadjet-studio-phase-tint`, model side). */
+.wadjet-studio-device-bind-mod .wadjet-studio-chip[data-phase] {
+  color: var(--wadjet-studio-device-faint);
+  background: transparent;
+  border-color: var(--wadjet-studio-hairline);
+}
+.wadjet-studio-device-bind-mod .wadjet-studio-chip.is-selected[data-phase] {
+  color: var(--wadjet-studio-accent);
+  background: var(--wadjet-studio-device-phase-on);
+  border-color: color-mix(in srgb, var(--wadjet-studio-moon) calc(var(--wadjet-studio-phase-tint, 0.5) * 100%), var(--wadjet-studio-hairline));
+}
+/* `⚑ Harvest 72% ×` — a drag control, not a chip: the whole span is the
+   dimmer (`0699` l.61, `srcAmtDown`), and the `×` inside it is not. */
+.wadjet-studio-device-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: ns-resize;
+  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text-dim));
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 2px;
+}
+.wadjet-studio-device-src:focus-visible {
+  border-color: var(--wadjet-studio-chip-color, var(--wadjet-studio-border-bright));
+}
+.wadjet-studio-device-src-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-device-src-drop {
+  padding: 0;
+  font-size: var(--wadjet-studio-fs-chip);
+  cursor: pointer;
+  color: var(--wadjet-studio-device-faint);
+}
+.wadjet-studio-device-src-drop:hover,
+.wadjet-studio-device-src-drop:focus-visible {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-device-src-add {
+  padding: 0 5px;
+  font-size: var(--wadjet-studio-fs-caption);
+  line-height: 16px;
+  cursor: pointer;
+  color: var(--wadjet-studio-device-faint);
+  border: 1px solid var(--wadjet-studio-hairline);
+  border-radius: 2px;
+}
+.wadjet-studio-device-src-add:hover,
+.wadjet-studio-device-src-add:focus-visible {
+  color: var(--wadjet-studio-text-dim);
+  border-color: var(--wadjet-studio-device-chip-edge);
+}
+/* The inline list `＋` opens, in the card rather than in an Obsidian menu
+   (`0699` l.66-74). */
+.wadjet-studio-device-srclist {
+  overflow: hidden;
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-device-chip-edge);
+  border-radius: 2px;
+}
+.wadjet-studio-device-srcrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  font-size: var(--wadjet-studio-fs-chip);
+  cursor: pointer;
+  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text-dim));
+  border-bottom: 1px solid var(--wadjet-studio-bg-header);
+}
+.wadjet-studio-device-srcrow:hover,
+.wadjet-studio-device-srcrow:focus-visible {
+  background: var(--wadjet-studio-bg-header);
+}
+.wadjet-studio-device-srcrow.is-empty {
+  cursor: default;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-device-srcrow-name {
+  color: var(--wadjet-studio-sky);
+}
+.wadjet-studio-device-srcrow-note {
+  color: var(--wadjet-studio-device-faint);
+}
+/* `＋ Add target` and its inline list (`0699` l.95-104): the moon path's
+   replacement for the `＋ apply` cell, a full-width block under the binding
+   cards. The list is the source list above with the prototype's 148 px
+   scroll cap. */
+.wadjet-studio-device-addtarget {
+  padding: 6px 8px;
+  text-align: center;
+  font-size: var(--wadjet-studio-fs-body);
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--wadjet-studio-sky);
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+}
+.wadjet-studio-device-addtarget:hover,
+.wadjet-studio-device-addtarget:focus-visible {
+  border-color: var(--wadjet-studio-device-chip-edge);
+}
+.wadjet-studio-device-srclist.is-targets {
+  max-height: 148px;
+  overflow: auto;
+}
+.wadjet-studio-device-bind .wadjet-studio-device-envelope {
+  background: var(--wadjet-studio-bg-deep);
+  border-color: var(--wadjet-studio-device-chip-edge);
+}
+
+/* The envelope overlay under an open binding card (`0699` l.75-93). It is the
+   card's sibling, not its child: the plot is 344 px — the device body's whole
+   content width — so a card's 9 px padding would push it off the panel. */
+.wadjet-studio-device-env {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-device-chip-edge);
+  border-radius: 2px;
+}
+.wadjet-studio-device-env-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.wadjet-studio-device-env-title {
+  font-size: var(--wadjet-studio-fs-chip);
+  font-weight: 600;
+  color: var(--wadjet-studio-text);
+}
+/* Five preset chips, the matching one lit. The prototype's unlit rim (#3d4147)
+   is the palette's border-bright; its unlit text (#9298a1) is the ratified
+   mute, so the row already sits on the SPEC §9 floor rather than under it. */
+.wadjet-studio-device-env-preset {
+  padding: 2px 7px;
+  font-size: var(--wadjet-studio-fs-caption);
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--wadjet-studio-text-mute);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 3px;
+}
+.wadjet-studio-device-env-preset:hover,
+.wadjet-studio-device-env-preset:focus-visible {
+  color: var(--wadjet-studio-text-dim);
+  border-color: var(--wadjet-studio-device-chip-edge);
+}
+.wadjet-studio-device-env-preset.is-on {
+  color: var(--wadjet-studio-text);
+  border-color: var(--wadjet-studio-accent);
+}
+/* The plot's own inset panel (`0699` l.86: rect x20 y8 w310 h70). It belongs to
+   the wrapper, not to the chart: a background is not a mark, and the chart's
+   marks are all data. The four numbers ARE `ENV_PAD` in `device/constants.ts`. */
+.wadjet-studio-device-env-plot {
+  position: relative;
+}
+.wadjet-studio-device-env-plot::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 20px;
+  width: 310px;
+  height: 70px;
+  background: var(--wadjet-studio-bg-deep);
+  border: 1px solid var(--wadjet-studio-hairline);
+}
+.wadjet-studio-device-env-plot .wadjet-studio-chart {
+  position: relative;
+}
+/* The overlay's handles are the prototype's r 5.5 rather than the studio's
+   default 4, and they take the text colour rather than the series' — on a plot
+   with one curve there is nothing for a coloured rim to distinguish. */
+.wadjet-studio-device-env-plot .wadjet-studio-chart-point {
+  r: 5.5px;
+  stroke: var(--wadjet-studio-text);
+}
+/* The area under the onset is 10 % (`0699` l.88), a shade lighter than the
+   16 % a channel row fills under its curve. */
+.wadjet-studio-device-env-plot .wadjet-studio-chart-fill {
+  opacity: 0.1;
 }
 
 /* Footer — `remove from chain`, lowercase, right-aligned (SPEC §9 copy) */

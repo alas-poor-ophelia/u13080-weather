@@ -11,6 +11,15 @@
  *   WADJET_SHOT_ZOOMS    comma list of zoom presets (default Year,Era,Season,Month,Day; "" = none)
  *   WADJET_SHOT_WINDOWS  comma list of window ids (default all; "" = none)
  *   WADJET_SHOT_EXTRAS   comma list of json,insert,strip (default all; "" = none)
+ *   WADJET_SHOT_ENV      1 = on every device window, put binding 0 on the curve
+ *                        mode and open its envelope overlay before shooting.
+ *                        The audit fixture carries no envelopes, so this is the
+ *                        only way to capture the overlay (PLAN D15/D16 bead 3).
+ *   WADJET_SHOT_ADD      1 = on every device window, click the `＋` that opens
+ *                        the inline target list (`＋ apply` on the spell path,
+ *                        `＋ Add target` on the moon one) before shooting. The
+ *                        harness cannot hover a floating menu, so this is the
+ *                        only way to capture the open list.
  *
  * Compare the output against the prototype captures in
  * C:\Dev\U+13080\docs\handoff\climate-studio\audit\proto-*.png.
@@ -34,6 +43,8 @@ const WINDOWS = list(
   "regimes,seasons,cycle:Sable,forcings,atlas,channel:temperature,channel:precipitation,channel:wind,channel:sky,device:sable-stormtide,device:ashfall,device:neverain,era:Ice Age",
 );
 const EXTRAS = list("WADJET_SHOT_EXTRAS", "json,insert,strip");
+const OPEN_ENV = process.env["WADJET_SHOT_ENV"] === "1";
+const OPEN_ADD = process.env["WADJET_SHOT_ADD"] === "1";
 const SEL = ".workspace-leaf-content[data-type='wadjet-studio']";
 
 test.skipIf(process.env["WADJET_SHOTS"] !== "1")(
@@ -73,6 +84,29 @@ test.skipIf(process.env["WADJET_SHOTS"] !== "1")(
       await shot(`zoom-${z}`);
     }
     await zoom("Year");
+    /** The harness cannot draw an envelope, so it makes one: `∿ curve` then the `∿` chip. */
+    const openEnvelope = async (): Promise<void> => {
+      const mode = ob.page.locator(`${SEL} [data-part="mod-mode-0"]`).first();
+      if ((await mode.count()) === 0) return;
+      if ((await mode.getAttribute("aria-pressed")) !== "true") {
+        await mode.click();
+        await ob.page.waitForTimeout(400);
+      }
+      const shape = ob.page.locator(`${SEL} [data-part="shape-0"]`).first();
+      if ((await shape.count()) === 0) return;
+      if ((await shape.getAttribute("aria-pressed")) !== "true") {
+        await shape.click();
+        await ob.page.waitForTimeout(400);
+      }
+    };
+    /** The `＋` that opens the inline target list, on whichever path draws it. */
+    const openAdd = async (): Promise<void> => {
+      const add = ob.page.locator(`${SEL} [data-part="add-target"]`).first();
+      if ((await add.count()) === 0) return;
+      if ((await add.getAttribute("aria-pressed")) === "true") return;
+      await add.click();
+      await ob.page.waitForTimeout(400);
+    };
     for (const id of WINDOWS) {
       try {
         await withApp(
@@ -87,6 +121,8 @@ test.skipIf(process.env["WADJET_SHOTS"] !== "1")(
           { id },
         );
         await ob.page.waitForTimeout(800);
+        if (OPEN_ENV && id.startsWith("device:")) await openEnvelope();
+        if (OPEN_ADD && id.startsWith("device:")) await openAdd();
         await shot(`win-${id.replace(/[^a-z]/gi, "_")}`);
         await withApp(
           ob.page,

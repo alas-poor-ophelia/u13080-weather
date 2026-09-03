@@ -63,7 +63,7 @@ import { PresetNameModal } from "../../preset-name-modal";
 import type { SurfaceContext } from "../../surfaces";
 import type { WindowBuilder } from "../../windows";
 import { buildApply } from "./apply";
-import { KIND_BADGE, PANEL_W } from "./constants";
+import { KIND_BADGE, PANEL_W, PANEL_W_SPELL } from "./constants";
 import { type DeviceKnobOptions, type DeviceWindowContext, type Section, zoneOf } from "./context";
 import { buildFoot } from "./footer";
 import type { Part } from "./icon-button";
@@ -91,6 +91,11 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
     let modOpen = false;
     /** Which year-window clip the start/length knobs edit (`＋ add window` can make several). */
     let clipAt = 0;
+    /** Moon path only: which binding card has its `∿` shape chip open, and which its `＋` source list. */
+    let envOpen: number | null = null;
+    let srcPick: number | null = null;
+    /** Moon path only: whether `＋ Add target`'s inline list is open under the cards. */
+    let targetPick = false;
     let signature = "";
     let issuesKey = "";
     let issuesMemo: StudioIssue[] = [];
@@ -223,6 +228,9 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
         description?.yearLength ?? null,
         modOpen,
         clipAt,
+        envOpen,
+        srcPick,
+        targetPick,
         ctx.units(),
       ]);
     }
@@ -357,6 +365,12 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       setClipAt: (at) => void (clipAt = at),
       modOpen: () => modOpen,
       setModOpen: (open) => void (modOpen = open),
+      envOpen: () => envOpen,
+      setEnvOpen: (at) => void (envOpen = at),
+      srcPick: () => srcPick,
+      setSrcPick: (at) => void (srcPick = at),
+      targetPick: () => targetPick,
+      setTargetPick: (open) => void (targetPick = open),
       setCancelDrag: (cancel) => void (cancelDrag = cancel),
     };
 
@@ -376,8 +390,17 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       chromeLed.on = d.enabled;
       chromeLed.level = ledLevel(issues());
       if (d.custom === true) parts.push(createChip(body, { label: "custom", color: "var(--wadjet-studio-warn)" }));
-      buildWhen(c, d);
-      buildSpell(c, d);
+      // The spell path (`0905-vst-ashfall.html`, gap2 C9) reorders the body:
+      // WHEN row, the two spell dials uncaptioned, WINDOWS, APPLY. `buildWhen`
+      // hands the WINDOWS body back rather than drawing it, so the dials can
+      // go above it.
+      const spellPath = d.when.kind === "yearWindow" && d.custom !== true;
+      const windows = buildWhen(c, d, spellPath);
+      // No SPELL row on the moon path: the prototype's Stormtide draws none
+      // (gap2 B9), and `buildApply` folds the gate disc and the op knobs into
+      // one row there instead of a disc under WHEN and a grid below it.
+      if (d.when.kind !== "moon") buildSpell(c, d, spellPath);
+      windows?.();
       buildApply(c, d);
       buildMod(c, d);
       buildFoot(c);
@@ -392,7 +415,11 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
     return {
       title: prettyName(opened?.name ?? modifierId),
       onRename: (name) => rename(name),
-      width: PANEL_W,
+      // Per-kind widths are PLAN.md D16's: the chrome is shared, the box is
+      // not. `windows.ts` reads this once, at `createWindow`, so it is the
+      // width the panel OPENS at — a kind switch inside an open panel keeps
+      // the width it was opened with until it is reopened.
+      width: opened?.when.kind === "yearWindow" ? PANEL_W_SPELL : PANEL_W,
       badge: () => KIND_BADGE[current()?.kind ?? "trim"],
       badgeColor: kindColor(KIND_BADGE[opened?.kind ?? "trim"]),
       // No `caption`: the prototype's device bar is LED · name · KIND · preset ▾

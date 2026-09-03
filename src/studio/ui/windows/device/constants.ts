@@ -12,6 +12,13 @@ export const DEFAULT_YEAR_LENGTH = 365;
 /** Prototype width (`proto-markup/1095-vst-device.html`): a design constant, not a function of the content. */
 export const PANEL_W = 372;
 
+/**
+ * The spell path is narrower (`0905-vst-ashfall.html` l.2): its body is two
+ * dials, a lane and an apply row, and the prototype draws it 320 wide. Per-kind
+ * widths are what PLAN.md D16 allows — the chrome is shared, the box is not.
+ */
+export const PANEL_W_SPELL = 320;
+
 /** The moon gate disc (`proto-markup/0699-vst-stormtide.html`): an 88-unit box, a 34-unit face. */
 export const DISC = 88;
 export const DISC_C = 44;
@@ -22,6 +29,18 @@ export const HANDLE_R = 6;
 /** The envelope chart, in CSS pixels. */
 export const ENVELOPE_W = 316;
 export const ENVELOPE_H = 84;
+
+/**
+ * The moon path's envelope OVERLAY plot (`0699-vst-stormtide.html` l.85-86): a
+ * 344 × 98 box around a 310 × 70 plot at x 20, y 8. The four insets are the
+ * chart's `pad`, and `styles.css` draws the plot's own panel at the same
+ * numbers — the two must stay in step.
+ */
+export const ENV_W = 344;
+export const ENV_H = 98;
+export const ENV_PAD = { left: 20, right: 14, top: 8, bottom: 20 } as const;
+/** The overlay plots the ONSET, not the whole cycle: 0.70 to full (`envEditor`'s `ex`). */
+export const ENV_X0 = 0.7;
 
 /** A spell longer than this earns an amber readout (SPEC §3.9). */
 export const LONG_SPELL_DAYS = 50;

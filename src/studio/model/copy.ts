@@ -143,9 +143,13 @@ export function describeOp(op: ModifierOp, opts?: CopyOptions): string {
   }
 }
 
-/** The dim `op · param` annotation under an apply knob — `scale · precipitation.pwd`. */
-export function opGloss(op: ModifierOp): string {
-  return `${op.op} · ${op.param}`;
+/**
+ * The dim `op · param` annotation under an apply knob — `scale · precipitation.pwd`.
+ * `field` overrides the param path where one column stands for two writes
+ * (`devices.ts` `COMPOSED_FIELD`).
+ */
+export function opGloss(op: ModifierOp, field: string = op.param): string {
+  return `${op.op} · ${field}`;
 }
 
 const SMALL_WORDS = new Set(["of", "the", "and", "in", "on", "at", "a", "an"]);

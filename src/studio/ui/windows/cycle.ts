@@ -76,6 +76,22 @@ const RING_R = 78;
 const LABEL_R = 96;
 const HANDLE_R = 6;
 
+/**
+ * The gutter the phase names hang in. They are centred outside the ring at
+ * `LABEL_R`, so a name near 3 o'clock is centred at x 202 of a 212 box and
+ * half of it leaks past the svg's layout box — in the prototype it lands on
+ * the phase table's dot column ("Crescent" cuts into the dot). Widening the
+ * viewBox (and the box that draws it) by the gutter on BOTH sides makes that
+ * overhang part of the svg's own layout, so the table can only ever start
+ * after the names and the window's own edge can no longer clip "Gibbous".
+ * Symmetric on purpose: the svg's box centre stays the ring's centre, which
+ * the handle-drag e2e measures from. 26 units is a name of ~9 wide glyphs at
+ * 10 px; longer ones are clipped by `overflow: hidden` rather than allowed
+ * onto the table.
+ */
+const LABEL_PAD = 26;
+const VIEW_W = SIZE + LABEL_PAD * 2;
+
 /** A whole-circle segment (one phase) cannot be drawn as an arc — it is the circle. */
 const FULL_CIRCLE = 0.999;
 
@@ -273,7 +289,7 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     function phaseAt(ev: MouseEvent): number {
       const rect = svg.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return 0;
-      const x = ((ev.clientX - rect.left) / rect.width) * SIZE - CENTRE;
+      const x = ((ev.clientX - rect.left) / rect.width) * VIEW_W - LABEL_PAD - CENTRE;
       const y = ((ev.clientY - rect.top) / rect.height) * SIZE - CENTRE;
       return phaseOfAngle((Math.atan2(y, x) * 180) / Math.PI + 90);
     }
@@ -308,7 +324,7 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     function drawDisc(list_: readonly Mark[]): void {
       svg.remove();
-      svg = discWrap.createSvg("svg", { cls: "wadjet-studio-cycle-svg", attr: { viewBox: `0 0 ${SIZE} ${SIZE}`, role: "img", "aria-label": `${moonName} phases` } });
+      svg = discWrap.createSvg("svg", { cls: "wadjet-studio-cycle-svg", attr: { viewBox: `${-LABEL_PAD} 0 ${VIEW_W} ${SIZE}`, role: "img", "aria-label": `${moonName} phases` } });
       // The unlit disc, then the lit shape over it: together they are the moon.
       svg.createSvg("circle", { cls: "wadjet-studio-cycle-face", attr: { cx: CENTRE, cy: CENTRE, r: MOON_R } });
       moonPath = svg.createSvg("path", { cls: "wadjet-studio-cycle-moon", attr: { d: litShapePath(previewPhase(list_), CENTRE, CENTRE, MOON_R) } });
@@ -516,8 +532,10 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     return {
       title: moonName,
-      // Prototype width (`proto-markup/`): a design constant, not a function of the content.
-      width: 452,
+      // Prototype width (`proto-markup/`): a design constant, not a function
+      // of the content — plus the label gutter the disc now owns on each side
+      // (`LABEL_PAD`), so the phase table keeps the prototype's 204 px.
+      width: 452 + LABEL_PAD * 2,
       badge: "CYCLE",
       badgeColor: "var(--wadjet-studio-moon)",
       // The prototype's `↻ 29.53 d` title readout — the period is a fact, not a control.

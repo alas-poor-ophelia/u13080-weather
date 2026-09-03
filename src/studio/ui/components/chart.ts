@@ -60,10 +60,18 @@ export interface ChartBand {
   color: string;
 }
 
-/** One y-axis tick: where it sits in data space, and what it reads. */
+/**
+ * One axis tick: where it sits in data space, and what it reads. Serves both
+ * axes — `ticks` puts it in the left gutter, `xTicks` under the plot.
+ *
+ * `color` is for the one tick that is a *reading* rather than a scale mark
+ * (the moon envelope's `full ●`); like a rule's, it arrives as an attribute so
+ * the stylesheet can leave the default alone.
+ */
 export interface ChartTick {
   value: number;
   label: string;
+  color?: string;
 }
 
 /**
@@ -132,8 +140,17 @@ export interface ChartProps {
    * sit a few pixels left of the day it is drawn at. `pad` wins per side.
    */
   padX?: number;
+  /**
+   * The x extent to plot, overriding the domain's own. A year and a cycle are
+   * whole by default and a history follows its data; the one caller that wants
+   * neither is the moon envelope overlay, which plots the last third of a cycle
+   * (`[0.70, 1]`) across the full width because that is where an onset lives.
+   */
+  xRange?: [number, number];
   bands?: ChartBand[];
   ticks?: ChartTick[];
+  /** X-axis labels under the plot, centred on their value. The y-axis pair is `ticks`. */
+  xTicks?: ChartTick[];
   rules?: ChartRule[];
   envelope?: ChartEnvelope | null;
   /**
@@ -157,6 +174,8 @@ const POINT_R = 4;
 const POINT_R_SELECTED = 6.5;
 /** Gap between a tick label's right edge and the plot's left edge. */
 const TICK_GAP = 6;
+/** Baseline drop from the plot's floor to an x-axis label (the prototype's 78 → 90). */
+const X_TICK_GAP = 12;
 
 export interface ChartComponent {
   el: HTMLElement;
@@ -172,8 +191,12 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
   markDragTarget(el);
   let svg = el.createSvg("svg");
 
-  /** The x extent actually plotted: a whole year or moon cycle is [0,1]; history follows the data. */
+  /**
+   * The x extent actually plotted: the caller's `xRange` if it named one, else
+   * a whole year or moon cycle ([0,1]) and a history that follows its data.
+   */
   function xRange(): [number, number] {
+    if (props.xRange) return props.xRange;
     if (props.domain !== "history") return [0, 1];
     const xs = props.series.flatMap((s) => s.points.map((p) => p[0]));
     if (xs.length === 0) return [0, 1];
@@ -312,6 +335,34 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
         .createSvg("text", {
           cls: "wadjet-studio-chart-tick",
           attr: { x: (padL() - TICK_GAP).toFixed(2), y: (sy(t.value) + 3).toFixed(2), "text-anchor": "end" },
+        })
+        .setText(t.label);
+    }
+  }
+
+  /**
+   * X-axis labels, centred on their value in the strip under the plot. The
+   * caller picks the values for the same reason it picks the y ticks: only it
+   * knows what the x unit means (`0.90`, `full ●`).
+   *
+   * A label ON the domain's end is anchored to it instead of centred: the last
+   * one carries a reading rather than a scale mark (the envelope's `full ●`),
+   * and half of it would otherwise hang off the plot and be clipped away.
+   */
+  function drawXTicks(): void {
+    const [lo, hi] = xRange();
+    const [min, max] = [Math.min(lo, hi), Math.max(lo, hi)];
+    for (const t of props.xTicks ?? []) {
+      if (t.value < min || t.value > max) continue;
+      svg
+        .createSvg("text", {
+          cls: "wadjet-studio-chart-xtick",
+          attr: {
+            x: sx(t.value).toFixed(2),
+            y: (props.height - padB() + X_TICK_GAP).toFixed(2),
+            "text-anchor": t.value === max ? "end" : t.value === min ? "start" : "middle",
+            fill: t.color ?? "var(--wadjet-studio-text-mute)",
+          },
         })
         .setText(t.label);
     }
@@ -503,6 +554,7 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     if (cartesian) {
       drawMarkers();
       drawTicks();
+      drawXTicks();
     }
     svg.addEventListener("dblclick", onDblClick);
   }
