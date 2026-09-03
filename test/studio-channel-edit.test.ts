@@ -23,7 +23,10 @@ import {
   curvePoints,
   directionLayer,
   directionRose,
+  isDerivedSeries,
   layerGlob,
+  plotPoints,
+  PRECIP_WET_SHARE,
   primarySeries,
   ROSE_SECTORS,
   writesText,
@@ -54,6 +57,7 @@ import {
   writtenLayers,
   type KnobId,
 } from "../src/studio/model/channel-edit";
+import { wetFraction } from "../src/studio/model/channel-series";
 import { effectiveBase, getAllYear, getCycle, getSeasonOffset, getSwing, setSwing, type Channel } from "../src/studio/model/compile";
 import { rollYear } from "../src/studio/model/audition";
 import { InternalCalendar } from "../src/plugin/time/internal";
@@ -391,6 +395,22 @@ describe("the chart's reference marks", () => {
     expect(writtenLayers(z, TEMP_CHANNEL)).toEqual(["layer:temperature.mean"]);
     expect(writtenLayers(z, "precipitation").every((id) => id.startsWith("layer:precipitation."))).toBe(true);
   });
+
+  test("every layer the SKY footer names has a writer row of its own", () => {
+    // SKY spans two sections, so `layer:humidity.*` is a different writer from
+    // `layer:cloud.*` — the footer and the stack have to agree about that.
+    const z = zone();
+    write(z, "sky", ALL_SCOPE, "humidity", 0.2);
+    const named = writtenLayers(z, "sky");
+    expect(named.filter((id) => id.startsWith("layer:humidity.")).length).toBeGreaterThan(0);
+    const quoted = writers(z, [], "sky")
+      .filter((r) => r.kind === "layer")
+      .map((r) => r.opsText);
+    for (const id of named) {
+      const param = id.slice("layer:".length).split(":")[0]!;
+      expect(quoted.some((t) => t.startsWith(param)), id).toBe(true);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -442,12 +462,15 @@ describe("the writers stack", () => {
     return { z, rows: writers(z, eras, "temperature") };
   }
 
-  test("signal order, one row per source (SPEC §1)", () => {
+  test("signal order, one row per source (SPEC §1), Forcings always among them", () => {
     const { rows } = stacked();
-    expect(rows.map((r) => r.kind)).toEqual(["station", "layer", "layer", "regime", "device", "era"]);
-    expect(rows[0]?.label).toBe(fjord.id);
+    expect(rows.map((r) => r.kind)).toEqual(["station", "layer", "layer", "regime", "device", "forcings", "era"]);
+    // The BASE row names the STATION, as the SRC chip does — not the preset's file id.
+    expect(rows[0]?.label).toBe("Bergen record");
     expect(rows[1]?.label).toBe("all year offset");
     expect(rows[2]?.label).toBe("season · Winter");
+    expect(rows[5]?.label).toBe("Forcings");
+    expect(rows[5]?.opsText).toBe("neutral");
   });
 
   test("every row is a click-through to the window that owns it", () => {
@@ -466,15 +489,47 @@ describe("the writers stack", () => {
     z.modifiers.push({ id: "forcings:temperature.mean", stage: "climate", apply: [{ param: TEMP, op: "offset", value: 1 }] });
     z.automation = [{ id: "frc.warmth", param: TEMP, op: "offset", points: [[1, 2]] }];
     const rows = writers(z, [], "temperature");
-    expect(rows.find((r) => r.kind === "forcings")?.target).toEqual({ win: "forcings", id: "forcings" });
-    expect(rows.find((r) => r.kind === "automation")?.target).toEqual({ win: "forcings", id: "forcings" });
+    // One panel, one signal path, one row — the prototype's MST. The lane is
+    // folded in rather than standing alone under its own id (`frc.warmth`).
+    expect(rows.filter((r) => r.kind === "automation")).toEqual([]);
+    const mst = rows.filter((r) => r.kind === "forcings");
+    expect(mst).toHaveLength(1);
+    expect(mst[0]?.target).toEqual({ win: "forcings", id: "forcings" });
+    expect(mst[0]?.label).toBe("Forcings");
+    expect(mst[0]?.opsText).toBe("∿ +2 · trim +1");
   });
 
-  test("the station row says it is the baseline; the rest quote their ops", () => {
-    const { rows } = stacked();
-    expect(rows[0]?.opsText).toBe("the baseline the stack edits");
+  test("the Forcings row names itself on every channel, whatever is turned", () => {
+    const bare = zone();
+    for (const c of ["temperature", "precipitation", "wind", "sky"] as const) {
+      const mst = writers(bare, [], c).filter((r) => r.kind === "forcings");
+      expect(mst.map((r) => [r.label, r.opsText]), c).toEqual([["Forcings", "neutral"]]);
+    }
+    // A lane alone still reads as Forcings, never as its own key.
+    const laned = zone();
+    laned.automation = [{ id: "frc.warmth", param: TEMP, op: "offset", points: [[1, 3]] }];
+    const rows = writers(laned, [], "temperature").filter((r) => r.kind === "forcings");
+    expect(rows.map((r) => [r.label, r.opsText])).toEqual([["Forcings", "∿ +3"]]);
+    for (const r of writers(laned, [], "temperature")) expect(r.label).not.toBe("frc.warmth");
+  });
+
+  test("the station row quotes its own record; the rest quote their ops", () => {
+    const { z, rows } = stacked();
+    // `12 kf · 30 yr` — the prototype's BASE value, off the shipped station:
+    // the record's own keyframes and how many years were kept.
+    expect(rows[0]?.opsText).toBe("12 kf · 30 yr");
     expect(rows[1]?.opsText).toBe("temperature.mean offset 2");
     expect(rows[2]?.opsText).toBe("temperature.mean offset −2");
+    // A layer left the record alone; dragging the curve itself does not.
+    setKeyframe(z, TEMP, 0, 9);
+    expect(writers(z, [], "temperature")[0]?.opsText).toBe("edited");
+  });
+
+  test("the station row reads every channel off its own primary curve", () => {
+    const z = zone();
+    for (const c of ["temperature", "precipitation", "wind", "sky"] as const) {
+      expect(writers(z, [], c)[0], c).toMatchObject({ kind: "station", label: "Bergen record", opsText: "12 kf · 30 yr" });
+    }
   });
 
   test("opText renders every op shape a channel can carry", () => {
@@ -667,8 +722,11 @@ describe("wind direction", () => {
 describe("the drawn series", () => {
   test("every channel stacks its plots, a pair to an axis, and names the line the moon scope rides", () => {
     expect(chartPlots("temperature")).toEqual([["temperature.mean"]]);
-    // The Markov pair shares one 0-1 axis; millimetres get an axis of their own.
-    expect(chartPlots("precipitation")).toEqual([["precipitation.pwd", "precipitation.pww"], ["precipitation.scale"]]);
+    // `0345` stacks PRECIP three deep: the derived wet-day share on top, then
+    // the Markov pair sharing one 0-1 axis, then millimetres on an axis of
+    // their own. The pair reads wet-after-wet first, as the prototype's legend
+    // does.
+    expect(chartPlots("precipitation")).toEqual([["precipitation.wetFraction"], ["precipitation.pww", "precipitation.pwd"], ["precipitation.scale"]]);
     expect(chartPlots("wind")).toEqual([["wind.speed"], ["wind.calmFraction"]]);
     expect(chartPlots("sky")).toEqual([
       ["cloud.dry", "cloud.wet"],
@@ -678,9 +736,10 @@ describe("the drawn series", () => {
     // `chartSeries` is the same list, flattened — every line the panel draws.
     for (const channel of ["temperature", "precipitation", "wind", "sky"] as const) {
       expect(chartSeries(channel), channel).toEqual(chartPlots(channel).flat());
-      // Nothing is drawn twice, and every line is a real curve path.
+      // Nothing is drawn twice, and every line is a real curve path — or a
+      // derived one, which has no curve behind it by definition.
       expect(new Set(chartSeries(channel)).size, channel).toBe(chartSeries(channel).length);
-      for (const param of chartSeries(channel)) expect(isCurvePath(param), param).toBe(true);
+      for (const param of chartSeries(channel)) expect(isCurvePath(param) || isDerivedSeries(param), param).toBe(true);
       // The moon scope's series is always one of the drawn ones.
       expect(chartSeries(channel), channel).toContain(primarySeries(channel));
     }
@@ -698,6 +757,25 @@ describe("the drawn series", () => {
     expect(companionSeries("sky", "humidity.wet")).toEqual(["humidity.dry"]);
     expect(companionSeries("wind", "wind.speed")).toEqual([]);
     expect(companionSeries("temperature", "temperature.mean")).toEqual([]);
+  });
+
+  test("the wet-day share is derived from the pair, and a plain series is not", () => {
+    const z = zone();
+    const share = plotPoints(z, PRECIP_WET_SHARE, ALL_SCOPE);
+    const pwd = curvePoints(z, "precipitation.pwd", ALL_SCOPE);
+    const pww = curvePoints(z, "precipitation.pww", ALL_SCOPE);
+    expect(isDerivedSeries(PRECIP_WET_SHARE)).toBe(true);
+    expect(isDerivedSeries("precipitation.pwd")).toBe(false);
+    // Sampled at the pwd phases, so the two curves meet on one set of points.
+    expect(share.map((p) => p[0])).toEqual(pwd.map((p) => p[0]));
+    expect(share.map((p) => p[1])).toEqual(pwd.map((p, i) => wetFraction(p[1], pww[i]![1])));
+    // It is a share of days, so it never leaves the plot's 0-1 axis.
+    for (const [, v] of share) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+    // Every other series still comes straight off its own curve.
+    expect(plotPoints(z, "precipitation.pwd", ALL_SCOPE)).toEqual(pwd);
   });
 
   test("both halves of a pair draw and edit independently", () => {
@@ -847,6 +925,43 @@ describe("the per-channel stat card (SPEC §8)", () => {
     expect(stat.persistence).toBe(fjord.climate.temperature.persistence);
     expect(stat.wetDayOffset).not.toBeNull();
     expect([stat.wetShare, stat.amountMm, stat.calmShare, stat.mean, stat.daySigma]).toEqual([null, null, null, null, null]);
+  });
+
+  /**
+   * The prototype states the wet-day ghost as one constant (`mean(t) + 0.35`).
+   * The engine's is not a constant: `climate.temperature.wetDayOffset` is a
+   * `Curve` (`core/types.ts`), read per day by `evaluateDayParams`, and every
+   * shipped station carries a signed seasonal one. The ghost is therefore
+   * drawn seasonal and the note card says the span — the number the prototype
+   * prints does not exist here and must not be faked.
+   */
+  test("the wet-day ghost is the engine's seasonal offset, not a constant", () => {
+    const curve = fjord.climate.temperature.wetDayOffset;
+    expect(Array.isArray(curve)).toBe(true);
+    const z = zone();
+    const mean = curvePoints(z, TEMP, ALL_SCOPE);
+    const ghost = wetDayPoints(z, TEMP, ALL_SCOPE);
+    expect(ghost.length).toBe(mean.length);
+    // Point for point, the ghost is the mean plus that day's own offset…
+    const gaps = ghost.map((p, i) => p[1] - mean[i]![1]);
+    for (const [i, g] of gaps.entries()) expect(g).toBeCloseTo(evalCurve(curve, mean[i]![0]), 12);
+    // …and those offsets are not all the same number, which is the whole point.
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeGreaterThan(0.05);
+    // The card's span is that same spread, reported as [min, max] rather than
+    // as a mean — a signed seasonal offset averages out to nearly nothing.
+    const span = channelStat(z, TEMP, ALL_SCOPE).wetDayOffset!;
+    expect(span[0]).toBeCloseTo(Math.min(...gaps), 12);
+    expect(span[1]).toBeCloseTo(Math.max(...gaps), 12);
+  });
+
+  test("SKY's card can name both sections' sigma from whichever half is selected", () => {
+    // What `paintStats` joins into `cloud 0.15 · humid 0.10` (`0480` l.24):
+    // the scatter is a channel fact, so it does not change under a legend click.
+    const z = zone();
+    for (const selected of ["cloud.dry", "cloud.wet", "humidity.dry", "humidity.wet"]) {
+      expect(channelStat(z, "cloud.dry", ALL_SCOPE).daySigma, selected).toBe(z.climate.cloud.sd);
+      expect(channelStat(z, "humidity.dry", ALL_SCOPE).daySigma, selected).toBe(z.climate.humidity.sd);
+    }
   });
 });
 

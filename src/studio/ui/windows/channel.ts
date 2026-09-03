@@ -62,7 +62,8 @@
 import { Notice } from "obsidian";
 import type { ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
-import { addEnvelopePoint, addKeyframe, ALL_SCOPE, channelStat, chartPlots, clearDirection, curvePoints, directionLayer, directionRose, knobsFor, layerGlob, MOON_GLYPH, parseScope, pointWhen, primarySeries, read, removeEnvelopePoint, removeKeyframe, scopeChips, seasonBands, seasonDirections, seasonScope, setEnvelopePoint, setKeyframe, spreadPoints, stageCaption, stationPoints, swungPoints, wetDayPoints, write, writers, writtenLayers, type KnobId, type WriterRow } from "../../model/channel-edit";
+import { addEnvelopePoint, addKeyframe, ALL_SCOPE, channelStat, chartPlots, clearDirection, curvePoints, directionLayer, directionRose, knobsFor, layerGlob, MOON_GLYPH, parseScope, plotPoints, pointWhen, PRECIP_WET_SHARE, primarySeries, read, removeEnvelopePoint, removeKeyframe, scopeChips, seasonBands, seasonDirections, seasonScope, setEnvelopePoint, setKeyframe, spreadPoints, stageCaption, stationPoints, swungPoints, wetDayPoints, write, writers, writtenLayers, type ChannelStat, type KnobId, type WriterRow } from "../../model/channel-edit";
+import { axisTicks as seriesAxisTicks } from "../../model/channel-series";
 import type { Channel } from "../../model/compile";
 import { grammar } from "../../model/copy";
 import { format, fromDisplay, toDisplay, unitLabel, type Quantity } from "../../model/format";
@@ -94,14 +95,25 @@ const CHART_W = 770;
 /** WIND spends part of that column on the rose, so its plots are narrower (the prototype's 560). */
 const ROSE_COL_W = 236;
 const CHART_W_WITH_ROSE = CHART_W - ROSE_COL_W - 14;
-/** Plot inset. `left` is the tick gutter; `top`/`bottom` are the headroom the axis ends in. */
-const CHART_PAD = { left: 38, right: 8, top: 18, bottom: 24 };
+/** The tick gutter and the right margin — the prototype's `eX0 = 38`, `770 − 762 = 8`. */
+const CHART_PAD_X = { left: 38, right: 8 };
 /** Headroom above and below the drawn extent, so a keyframe can be dragged past it. */
 const CHART_PAD_FRACTION = 0.12;
 /** …and at least this much, in the channel's own unit, when the curve is nearly flat. */
 const CHART_MIN_PAD = 1;
-/** Roughly this many y-axis ticks; the step is snapped to the 1·2·5 ladder. */
-const TICK_TARGET = 5;
+/** Plot height per printed y-axis tick — the prototype's 6 on 330 px, 2 on 86 px. */
+const TICK_EVERY_PX = 45;
+
+/**
+ * The headroom a plot keeps above and below its ink, as a share of its *own*
+ * height. The prototype sizes it per plot rather than flat — 18/24 on the
+ * 330 px mean but 8/6 on the 86 px wet-day amount (`proto-markup/0250`…`0480`)
+ * — so a short plot is not half gutter. Clamped to the prototype's extremes.
+ */
+function chartPad(height: number): { left: number; right: number; top: number; bottom: number } {
+  const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+  return { ...CHART_PAD_X, top: clamp(Math.round(height * 0.12), 8, 20), bottom: clamp(Math.round(height * 0.08), 6, 12) };
+}
 /** The keyframe the panel opens on — the prototype's `selKf: 6`, mid-year. */
 const DEFAULT_POINT = 6;
 /** Only when the adapter describes no calendar (`ui/header.ts`, `ui/ruler.ts` keep the same fallback). */
@@ -175,6 +187,14 @@ interface ChannelWindowSpec {
   title: string;
   /** the palette colour for the drawn curve and the knobs (SPEC §9) */
   color: string;
+  /**
+   * The KIND pill's text, where the channel hue is too saturated to read as
+   * a word on the pill's dark ground. Only the two hues the prototype softens
+   * carry one; the rest wear `color` (`--wadjet-studio-*-soft` in styles.css).
+   */
+  badgeColor?: string;
+  /** the caption over the knob group, where the prototype gives it one (WIND's `Scalars`) */
+  knobHeading?: string;
   /** every knob the channel offers in any scope; `knobsFor` picks the scope's own */
   knobs: Partial<Record<KnobId, ChannelKnobSpec>>;
   /**
@@ -198,6 +218,7 @@ interface ChannelWindowSpec {
 const TEMPERATURE: ChannelWindowSpec = {
   title: "Temperature",
   color: "var(--wadjet-studio-temp)",
+  badgeColor: "var(--wadjet-studio-temp-soft)",
   axis: { "temperature.mean": "temperature" },
   plots: [
     {
@@ -219,24 +240,42 @@ const TEMPERATURE: ChannelWindowSpec = {
 };
 
 /**
- * PLAN §5.2 "Precip: … scale ops". Two plots, as the prototype stacks them:
- * the Markov pair on one 0–1 axis — both lines always drawn, `pwd` solid in
- * the channel hue and `pww` dashed green, because the pair only means anything
- * read against each other — and the wet-day amount in mm on its own, because
- * millimetres do not live on a probability axis.
+ * PLAN §5.2 "Precip: … scale ops". Three plots, as the prototype stacks them
+ * (`proto-markup/0345-precip-editor.html`):
+ *
+ * 1. the share of wet days, filled to the floor — the one number the channel
+ *    is read for, and the thing the pair below it *is* once it settles;
+ * 2. the Markov pair on one 0–1 axis — both lines always drawn, `pwd` solid in
+ *    the channel hue and `pww` dashed green, because the pair only means
+ *    anything read against each other;
+ * 3. the wet-day amount in mm on its own, because millimetres do not live on a
+ *    probability axis.
+ *
+ * The share is derived (`channel-edit.ts` `plotPoints`), so it carries no
+ * handles and — being alone on its plot — no legend entry either.
  */
 const PRECIPITATION: ChannelWindowSpec = {
   title: "Precipitation",
   color: "var(--wadjet-studio-precip)",
+  badgeColor: "var(--wadjet-studio-precip-soft)",
   axis: {
-    "precipitation.pww": "probability",
-    "precipitation.pwd": "probability",
+    "precipitation.pww": "percent",
+    "precipitation.pwd": "percent",
     "precipitation.scale": "amount",
   },
   plots: [
     {
-      // `proto-markup/0345-precip-editor.html`'s "Markov pair" plot: 140 px.
-      caption: "p(wet)",
+      // `0345`'s "Share of wet days" plot: 170 px, the area under the line
+      // filled in the channel hue (the stylesheet's 16 %, `0345` l.16).
+      caption: "share of wet days",
+      quantity: "fraction",
+      height: 170,
+      yRange: [0, 1],
+      series: { [PRECIP_WET_SHARE]: { width: 1.8, fill: true } },
+    },
+    {
+      // `0345`'s "Markov pair" plot: 140 px.
+      caption: "markov pair",
       quantity: "probability",
       height: 140,
       yRange: [0, 1],
@@ -271,13 +310,20 @@ const PRECIPITATION: ChannelWindowSpec = {
 const WIND: ChannelWindowSpec = {
   title: "Wind",
   color: "var(--wadjet-studio-wind)",
+  // WIND is the one channel whose knobs get a caption of their own in the
+  // prototype (`0415` l.49): its scalars sit in a column beside the plots
+  // rather than under the scope chips, so they have to say what they are.
+  knobHeading: "Scalars",
   rose: true,
-  axis: { "wind.speed": "speed", "wind.calmFraction": "fraction" },
+  axis: { "wind.speed": "speed", "wind.calmFraction": "percent" },
   plots: [
     { caption: "speed", quantity: "speed", height: 200, spread: true },
     {
       caption: "calm days",
-      quantity: "fraction",
+      // A share of days is read aloud as a percentage — the card next to it
+      // already says "wet 61% of days" — so the axis marks its half `50%`, the
+      // prototype's one calm-day tick (`weCalmGridEls`). Stored as a fraction.
+      quantity: "percent",
       height: 96,
       yRange: [0, 0.7],
       series: { "wind.calmFraction": { color: "var(--wadjet-studio-moon)", width: 1.3, fill: true } },
@@ -302,7 +348,7 @@ const WIND: ChannelWindowSpec = {
 const SKY: ChannelWindowSpec = {
   title: "Sky",
   color: "var(--wadjet-studio-sky)",
-  axis: { "cloud.dry": "fraction", "cloud.wet": "fraction", "humidity.dry": "fraction", "humidity.wet": "fraction" },
+  axis: { "cloud.dry": "percent", "cloud.wet": "percent", "humidity.dry": "percent", "humidity.wet": "percent" },
   plots: [
     {
       caption: "cloud cover · okta fraction",
@@ -317,7 +363,10 @@ const SKY: ChannelWindowSpec = {
     {
       // Humidity is gold in the prototype and nowhere else in the studio: on a
       // grey channel it is the only way to tell the second pairing from the first.
-      caption: "humidity · rh %",
+      // The caption is the prototype's `same pairing` (`0480` l.19) rather than
+      // a second unit: the plot above already named the dry/wet split, and this
+      // one is that split again.
+      caption: "humidity · same pairing",
       quantity: "fraction",
       height: 140,
       yRange: [0, 1],
@@ -356,6 +405,23 @@ const WEDGE_SPREAD = 66;
 /** The dash glyphs the inline legend uses for a solid and a dashed series. */
 const LEGEND_GLYPH = { solid: "━", dashed: "┄" } as const;
 
+/**
+ * The writer stack's tag gutter, in the prototype's own vocabulary
+ * (`1397-logic-class-Component.js` `tWriters`: BASE / TAG / CYC / INS / MST).
+ * A row is one line, so the tag is a fixed 30 px column and the words have to
+ * fit it — the full signal-path name is still on the row as `data-kind`, which
+ * is what a probe and the stylesheet read.
+ */
+const WRITER_TAG: Record<WriterRow["kind"], string> = {
+  station: "BASE",
+  layer: "TAG",
+  regime: "REG",
+  device: "INS",
+  forcings: "MST",
+  automation: "AUT",
+  era: "ERA",
+};
+
 // ---------------------------------------------------------------------------
 // Readouts
 // ---------------------------------------------------------------------------
@@ -367,45 +433,82 @@ function knobText(v: number, quantity: Quantity, units: Units): string {
   return f.unit === "" ? f.text : `${f.text} ${f.unit}`;
 }
 
-/** `14.3 °C` / `0.62` — a plotted value, unsigned, with its unit. */
+/**
+ * `14.3 °C` / `59 %` — a plotted value, unsigned, with its unit.
+ *
+ * A share carries a `%` rather than reading as a bare `0.59`, which names no
+ * unit at all: whole percent is exactly the two decimals of a fraction the
+ * curve is dragged in, so nothing is rounded away by saying it out loud.
+ */
 function valueText(v: number, quantity: Quantity, units: Units): string {
-  const f = format(v, quantity, units);
+  const f = format(v, quantity, units, quantity === "percent" ? { digits: 0 } : undefined);
   return f.unit === "" ? f.text : `${f.text} ${f.unit}`;
 }
 
-/** A tick step near `span / TICK_TARGET`, snapped to the 1·2·5 ladder. Display units. */
-function niceStep(span: number): number {
-  const raw = Math.abs(span) / TICK_TARGET;
-  if (!(raw > 0) || !Number.isFinite(raw)) return 1;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const n = raw / mag;
-  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+/**
+ * Which channel's ladder a plot's quantity counts on. The prototype's steps
+ * are a property of the *unit*, not of the panel it is on — millimetres climb
+ * the same 2 · 5 · 10 rungs degrees do, and every fraction on the panel (a
+ * probability, an okta share) marks its quarters — so a two-plot editor is not
+ * forced onto one ladder. `model/channel-series.ts` already tabulates them.
+ */
+const TICK_LADDER: Partial<Record<Quantity, Channel>> = {
+  temperature: "temperature",
+  temperatureDelta: "temperature",
+  amount: "temperature",
+  speed: "wind",
+  fraction: "precipitation",
+  probability: "precipitation",
+};
+
+/**
+ * The tick label the prototype prints: the glyph rides the number (`20°`,
+ * `50%`), a fraction drops its leading zero and its trailing ones (`.5`, `.95`,
+ * `.25`), and anything the caption already names its unit for stays bare
+ * (`10` mm, `12` km/h).
+ */
+function tickLabel(v: number, quantity: Quantity, units: Units): string {
+  if (quantity === "fraction" || quantity === "probability") {
+    return format(v, quantity, units, { digits: 2 })
+      .text.replace(/^(-?)0\./, "$1.")
+      .replace(/0+$/, "");
+  }
+  const text = format(v, quantity, units, { digits: 0 }).text;
+  if (quantity === "temperature" || quantity === "temperatureDelta") return `${text}°`;
+  return quantity === "percent" ? `${text}%` : text;
 }
 
 /**
- * The y-axis ticks for a range, and the range widened to sit on them — so the
- * top and bottom of the plot are round numbers rather than wherever the data
- * happened to stop.
+ * The y-axis ticks *inside* a range — the prototype's own ladder, every rung
+ * labelled, and never on the plot's own border: a tick sitting on the frame is
+ * a number the reader has to guess the side of (`0250-temperature-editor`
+ * marks −5°…20° well within a −6…22 axis).
  *
  * Ticks are *chosen* in display units, because that is the scale the reader is
  * counting in (5 °C steps are not round in °F), and handed back in the
  * channel's own metric units, because that is the space the chart plots and
  * drags in. Both conversions are affine, so nothing drifts.
+ *
+ * How many survive is the plot's own height: the prototype prints six on its
+ * 330 px mean and two on its 86 px wet-day amount, roughly a rung per
+ * `TICK_EVERY_PX`. A short plot thins its ladder rather than stacking numbers.
  */
-function axisTicks(range: [number, number], quantity: Quantity, units: Units): { ticks: ChartTick[]; range: [number, number] } {
+function axisTicks(range: [number, number], quantity: Quantity, units: Units, height: number): ChartTick[] {
   const lo = toDisplay(range[0], quantity, units);
   const hi = toDisplay(range[1], quantity, units);
   const [a, b] = lo <= hi ? [lo, hi] : [hi, lo];
-  const step = niceStep(b - a);
-  const digits = step < 1 ? 2 : 0;
-  const first = Math.floor(a / step + 1e-9) * step;
-  const last = Math.ceil(b / step - 1e-9) * step;
-  const ticks: ChartTick[] = [];
-  for (let i = 0, v = first; v <= last + 1e-9 && i < 24; i++, v = first + i * step) {
-    ticks.push({ value: fromDisplay(v, quantity, units), label: format(fromDisplay(v, quantity, units), quantity, units, { digits }).text });
-  }
-  const ends = ticks.map((t) => t.value);
-  return { ticks, range: ends.length === 0 ? range : [Math.min(...ends), Math.max(...ends)] };
+  if (!(b > a)) return [];
+  const ladder = TICK_LADDER[quantity];
+  // The calm-day share is the one axis the prototype speaks in percent, and it
+  // marks the half and nothing else (`weCalmGridEls`).
+  const inset = (b - a) * 1e-6;
+  // Drop the rungs on the frame *before* thinning: a tick the axis only just
+  // reaches is not one of the numbers the plot has room for.
+  const all = (quantity === "percent" ? [0.5] : ladder === undefined ? [] : seriesAxisTicks(ladder, a, b)).filter((v) => v > a + inset && v < b - inset);
+  const room = Math.max(1, Math.round(height / TICK_EVERY_PX));
+  const every = Math.ceil(all.length / room);
+  const rungs = all.length > room ? all.filter((_, i) => i % every === 0) : all;
+  return rungs.map((v) => ({ value: fromDisplay(v, quantity, units), label: tickLabel(fromDisplay(v, quantity, units), quantity, units) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -542,15 +645,34 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
 
     const macros = card(sideCol, "Channel macros · scope");
     const scopeRow = macros.body.createDiv({ cls: "wadjet-studio-channel-win-scopes", attr: { "data-part": "channel-scopes", "data-hint": channelEditorHint("channel.scope") } });
+    // The caption over the knob group, where the channel has one. It wears the
+    // card heading's own treatment because that is what the prototype's
+    // `Scalars` is — the same 11 px small caps as `Selected point` above it.
+    if (spec.knobHeading !== undefined) macros.body.createDiv({ cls: "wadjet-studio-channel-win-card-head", text: spec.knobHeading, attr: { "data-part": "channel-knobs-head" } });
     const knobRow = macros.body.createDiv({ cls: "wadjet-studio-channel-win-knobs", attr: { "data-part": "channel-knobs" } });
     const extraRow = macros.body.createDiv({ cls: "wadjet-studio-channel-win-extras" });
     const stageEl = macros.body.createDiv({ cls: "wadjet-studio-channel-win-stage", attr: { "data-part": "channel-stage", "data-hint": channelEditorHint("channel.stage") } });
 
+    /**
+     * The channel's one fact card, and the fourth card in the column — which is
+     * all four prototype editors have (`0250` l.70, `0345` l.51 and l.61,
+     * `0415`, `0480` l.24). It is unheaded on purpose: a card holding `range`,
+     * `wet days / yr` and a sentence about the ghost has no one noun to head
+     * it, and the head was a whole row of vertical space spent saying the word
+     * already in the title bar.
+     *
+     * The facts come first as key/value rows (`0345` l.51) and the prose last
+     * (`0250` l.70, `0345` l.61), which is the order the prototype reads them
+     * in. Both parts stay on it: `channel-stats` is the rows, `channel-note`
+     * the card that carries them.
+     */
+    const noteCard = sideCol.createDiv({ cls: "wadjet-studio-channel-win-card wadjet-studio-channel-win-note is-hidden", attr: { "data-part": "channel-note" } });
+    const statList = noteCard.createDiv({ cls: "wadjet-studio-channel-win-stat-list", attr: { "data-part": "channel-stats" } });
+    /** The prose half, under the rows — kept apart so a repaint can empty one without the other. */
+    const noteProse = noteCard.createDiv({ cls: "wadjet-studio-channel-win-note-prose" });
+
     const writersBox = card(sideCol, `Writers → ${title}`, channelEditorHint("channel.writers"));
     const writerList = writersBox.body.createDiv({ cls: "wadjet-studio-channel-win-writer-list", attr: { "data-part": "channel-writers" } });
-
-    const stats = card(sideCol, title);
-    const statList = stats.body.createDiv({ cls: "wadjet-studio-channel-win-stat-list", attr: { "data-part": "channel-stats" } });
 
     let rose: ChartComponent | null = null;
     let resetChip: ChipComponent | null = null;
@@ -635,7 +757,9 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       const out: ChartSeries[] = order.map((p) => {
         const paint = view.spec.series?.[p];
         return {
-          points: curvePoints(z, p, scope),
+          // `plotPoints`, not `curvePoints`: a derived line (the wet-day share)
+          // is computed from the curves it reads, and has none of its own.
+          points: plotPoints(z, p, scope),
           color: paint?.color ?? color,
           width: p === param ? 2.2 : (paint?.width ?? 1.6),
           ...(paint?.dash === undefined ? {} : { dash: paint.dash }),
@@ -696,7 +820,12 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       const lo = Math.min(...ys);
       const hi = Math.max(...ys);
       const pad = Math.max(CHART_MIN_PAD, (hi - lo) * CHART_PAD_FRACTION);
-      return [lo - pad, hi + pad];
+      // A magnitude reads against zero: the prototype's speed and millimetre
+      // axes both start there (`we1Y`'s 0–24, `peAmt`'s 0–30) rather than at
+      // whatever the lowest sample happened to be. Degrees do not — a winter
+      // below freezing is not a smaller amount of anything.
+      const floor = (plot.quantity === "speed" || plot.quantity === "amount") && lo >= 0;
+      return [floor ? 0 : lo - pad, hi + pad];
     }
 
     function paintPlot(view: PlotView, z: ZoneProfile | null, state: StudioState): void {
@@ -721,19 +850,21 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
         const m = mid[i]?.[1];
         return m === undefined ? [] : [m - sp[1], m + sp[1]];
       });
-      const axis = axisTicks(yRangeOf(lines, isCycle, view.spec, ribbon), isCycle ? "fraction" : view.spec.quantity, ctx.units());
+      // The domain is the plot's own; the ticks land inside it, never on it.
+      const range = yRangeOf(lines, isCycle, view.spec, ribbon);
+      const axis = axisTicks(range, isCycle ? "fraction" : view.spec.quantity, ctx.units(), view.spec.height);
       const next = {
         kind: owns ? ("automation" as const) : ("curve" as const),
         domain: isCycle ? ("cycle" as const) : ("year" as const),
         width: plotWidth,
         height: view.spec.height,
-        pad: CHART_PAD,
+        pad: chartPad(view.spec.height),
         series: lines,
         editable: z !== null && owns,
         // The tint band IS the season label: nothing is printed inside the plot.
         markers: [],
         bands: bandsFor(state),
-        ticks: axis.ticks,
+        ticks: axis,
         rules: isCycle || view.spec.rule === undefined ? [] : [view.spec.rule],
         envelope:
           spread.length === 0
@@ -741,7 +872,7 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
             : { lo: mid.map((p, i) => [p[0], p[1] - (spread[i]?.[1] ?? 0)] as [number, number]), hi: mid.map((p, i) => [p[0], p[1] + (spread[i]?.[1] ?? 0)] as [number, number]), color },
         selected: owns ? selected : null,
         onSelect: selectPoint,
-        yRange: axis.range,
+        yRange: range,
       };
       if (view.chart === null) {
         // The gestures are guarded per plot rather than per chart: a plot can
@@ -921,7 +1052,10 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
             ? cycleColour(state.view.colours.seasons[seasonIndex.get(parsed.name) ?? 0] ?? (seasonIndex.get(parsed.name) ?? 0), SEASON_CYCLE)
             : isMoon
               ? "var(--wadjet-studio-moon)"
-              : "var(--wadjet-studio-accent)";
+              // `All year` is the one scope with no entity colour of its own, so
+              // it wears the text tone the prototype gives it (`pScopes`,
+              // `#f2f3f5`) — the accent is a shade dimmer and read as a hue.
+              : "var(--wadjet-studio-text)";
         const props = {
           label: isMoon ? `${MOON_GLYPH} ${parsed.moon}` : c.label,
           color: colour,
@@ -1048,13 +1182,13 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
           cls: "wadjet-studio-channel-win-writer",
           attr: { role: "button", tabindex: "0", "data-part": "channel-writer", "data-kind": row.kind, "data-hint": channelEditorHint("channel.writer", `${row.label} — ${row.opsText}`) },
         });
-        el.createSpan({ cls: "wadjet-studio-channel-win-writer-kind", text: row.kind });
+        el.createSpan({ cls: "wadjet-studio-channel-win-writer-kind", text: WRITER_TAG[row.kind] });
         el.createSpan({ cls: "wadjet-studio-channel-win-writer-label", text: row.label });
         const ops = el.createSpan({ cls: "wadjet-studio-channel-win-writer-ops", text: row.opsText });
+        // Every row's value sits in the same right-hand column, the station's
+        // record included: the prototype's BASE row quotes `12 kf · 30 yr`
+        // there, which is a readout and not a caption about the stack.
         ops.setCssProps({ "--wadjet-studio-channel-win-writer-color": writerColour(row.kind) });
-        // The station contributes no ops — its "value" is a caption about the
-        // stack, so it is set as one rather than pretending to be a readout.
-        ops.toggleClass("is-caption", row.kind === "station");
         el.addEventListener("click", () => openWriter(row));
         el.addEventListener("keydown", (ev: KeyboardEvent) => {
           if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -1065,61 +1199,128 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
     }
 
     /**
-     * The channel's fact card: the drawn range, and the two scalars that shape
-     * the curve without being on it. Every line is real zone data — a line
-     * whose number the channel has no curve for is simply not drawn (SPEC §8).
+     * The unheaded note card — the prototype's last card in the info column,
+     * prose with its numbers picked out rather than rows in the fact list.
+     *
+     * TEMPERATURE (`0250` l.63): what the dashed ghost is, and how much of
+     * yesterday carries into today. The prototype states one constant
+     * (`mean(t) + 0.35`), but `climate.temperature.wetDayOffset` is a *Curve*
+     * (`core/types.ts`) and every shipped station carries twelve signed
+     * keyframes of it — warmer on wet winter days, cooler on wet summer ones —
+     * so the ghost is drawn seasonal (`channel-edit.ts wetDayPoints`) and the
+     * note says the span rather than inventing an average that reads as "no
+     * effect".
+     *
+     * PRECIP (`0345` l.61): `snow when day peaks below 0 °C · amount
+     * gamma(κ 0.85)` — the shape of what falls once it does.
+     *
+     * A channel with neither simply has no note.
      */
-    function paintStats(z: ZoneProfile | null): void {
+    function paintNote(stat: ChannelStat | null): boolean {
+      noteProse.empty();
+      const units = ctx.units();
+      const wet = stat?.wetDayOffset;
+      const warm = wet != null && (Math.abs(wet[0]) > 1e-9 || Math.abs(wet[1]) > 1e-9);
+      const snow = stat?.freezingPoint != null && stat.gammaShape != null;
+      const gust = stat?.wetDayScale != null;
+      noteProse.toggleClass("is-hidden", !warm && !snow && !gust);
+      const value = (text: string): void => {
+        noteProse.createSpan({ cls: "wadjet-studio-channel-win-note-value wadjet-studio-num", text });
+      };
+      if (warm && wet != null) {
+        // Two digits, unlike a knob's one: this is the size of a small effect,
+        // and rounding 0.35 to 0.4 loses the point of stating it.
+        const at = (v: number): string => format(v, "temperatureDelta", units, { signed: true, digits: 2 }).text;
+        const flat = Math.abs(wet[1] - wet[0]) < 5e-3;
+        noteProse.createSpan({ text: "Wet days run " });
+        value(`${flat ? at(wet[1]) : `${at(wet[0])} … ${at(wet[1])}`} ${unitLabel("temperatureDelta", units)}`);
+        noteProse.createSpan({ text: flat ? `${wet[1] >= 0 ? " warmer" : " cooler"} (dashed)` : " off the mean by season (dashed)" });
+        if (stat?.persistence != null) {
+          noteProse.createSpan({ text: " · persistence " });
+          value(format(stat.persistence, "fraction", units, { digits: 3 }).text);
+        }
+      }
+      // WIND — `wind.wetDayScale`, what a wet day does to the speed. A
+      // multiplier on a card of shares reads as a share until it is said in
+      // words, which is why it is the sentence and not a row.
+      if (gust && stat?.wetDayScale != null) {
+        noteProse.createSpan({ text: "Wet days blow " });
+        value(`×${format(stat.wetDayScale, "factor", units).text}`);
+        noteProse.createSpan({ text: " harder" });
+      }
+      if (!snow || stat?.freezingPoint == null || stat.gammaShape == null) return warm || gust;
+      noteProse.createSpan({ text: "snow when day peaks below " });
+      value(valueText(stat.freezingPoint, "temperature", units));
+      noteProse.createSpan({ text: " · amount " });
+      value(`gamma(κ ${format(stat.gammaShape, "fraction", units).text})`);
+      return true;
+    }
+
+    /**
+     * The rows half of the fact card: the drawn range, and the scalars that
+     * shape the curve without being on it. Every line is real zone data — a
+     * line whose number the channel has no curve for is simply not drawn
+     * (SPEC §8) — and `paintNote` adds the prose under them.
+     */
+    function paintStats(z: ZoneProfile | null, state: StudioState): void {
       statList.empty();
       const isCycle = parseScope(scope).kind === "cycle";
       const param = chartParam();
       const stat = z === null || isCycle ? null : channelStat(z, param, scope);
       const quantity = spec.axis[param] ?? "fraction";
       const units = ctx.units();
-      /** `[key, value, wearsTheWetHue]` — a line per non-null fact, in reading order. */
-      const lines: Array<[string, string, boolean]> = [];
+      /** `[key, value, hueClass]` — a line per non-null fact, in reading order. */
+      const lines: Array<[string, string, string]> = [];
       const pct = (v: number): string => `${format(v, "percent", units, { digits: 0 }).text}%`;
+      /** The low end of a range: the same digits as `valueText`, with the unit held back to the high end. */
+      const bare = (v: number): string => format(v, quantity, units, quantity === "percent" ? { digits: 0 } : undefined).text;
 
-      if (stat?.range) lines.push(["range", `${format(stat.range[0], quantity, units).text} – ${valueText(stat.range[1], quantity, units)}`, false]);
+      if (stat?.range) lines.push(["range", `${bare(stat.range[0])} – ${valueText(stat.range[1], quantity, units)}`, ""]);
 
-      // TEMPERATURE — the dashed ghost's size, and how much of yesterday carries over.
-      const wet = stat?.wetDayOffset;
-      if (wet != null && (Math.abs(wet[0]) > 1e-9 || Math.abs(wet[1]) > 1e-9)) {
-        // Two digits, unlike a knob's one: this is the size of a small effect,
-        // and rounding 0.35 to 0.4 loses the point of stating it.
-        const at = (v: number): string => format(v, "temperatureDelta", units, { signed: true, digits: 2 }).text;
-        const unit = unitLabel("temperatureDelta", units);
-        const span = Math.abs(wet[1] - wet[0]) < 5e-3 ? at(wet[1]) : `${at(wet[0])} … ${at(wet[1])}`;
-        lines.push(["wet days", `${span} ${unit} (dashed)`, true]);
-      }
-      if (stat?.persistence != null) lines.push(["persistence", format(stat.persistence, "fraction", units, { digits: 3 }).text, false]);
+      // TEMPERATURE's ghost and persistence, and PRECIP's snow line, are the
+      // prose half of the same card (`0250` l.70, `0345` l.61) — under the
+      // rows, because a sentence after a column of numbers reads, and one
+      // before them buries the numbers.
+      const prose = paintNote(stat);
 
-      // PRECIPITATION — what the Markov pair settles at, what a wet day drops,
-      // and the two scalars that shape it but are on neither line.
-      if (stat?.wetShare != null) lines.push(["wet", `${pct(stat.wetShare)} of days`, true]);
-      if (stat?.wetRunPeak != null) lines.push(["p(wet | wet) peak", pct(stat.wetRunPeak), false]);
-      if (stat?.amountMm != null) lines.push(["mean fall", valueText(stat.amountMm, "amount", units), true]);
-      if (stat?.freezingPoint != null && stat.gammaShape != null) {
-        lines.push(["snow below", `${valueText(stat.freezingPoint, "temperature", units)} · gamma(κ ${format(stat.gammaShape, "fraction", units).text})`, false]);
-      }
+      // PRECIPITATION — the count of wet days the Markov pair settles at and
+      // the peak of the run odds, as `0345` l.51 puts them: a count, not the
+      // share it came from, and the peak in the `pww` line's own green.
+      if (stat?.wetShare != null) lines.push(["wet days / yr", `≈ ${Math.round(stat.wetShare * calendar(state).yearLength)}`, "is-wet"]);
+      if (stat?.wetRunPeak != null) lines.push(["p(wet | wet) peak", pct(stat.wetRunPeak), "is-run"]);
+      if (stat?.amountMm != null) lines.push(["mean fall", valueText(stat.amountMm, "amount", units), "is-wet"]);
 
       // WIND — the still days, and what a wet day does to the speed.
-      if (stat?.calmShare != null) lines.push(["calm", `${pct(stat.calmShare)} of days`, false]);
-      if (stat?.wetDayScale != null) lines.push(["wet days", `×${format(stat.wetDayScale, "factor", units).text}`, true]);
+      if (stat?.calmShare != null) lines.push(["calm", `${pct(stat.calmShare)} of days`, ""]);
+      // …and the wet-day multiplier is the sentence this card closes on, the
+      // way the other three do (`0415`'s own `gust on wet days`).
 
       // SKY — the pair's two means, then the day-to-day scatter around them.
       if (stat?.mean != null) {
         const section = param.split(".")[0] ?? param;
-        lines.push([section, stat.companionMean == null ? pct(stat.mean) : `${pct(stat.mean)} · wet ${pct(stat.companionMean)}`, false]);
+        lines.push([section, stat.companionMean == null ? pct(stat.mean) : `${pct(stat.mean)} · wet ${pct(stat.companionMean)}`, ""]);
       }
-      if (stat?.daySigma != null) lines.push(["day-to-day σ", format(stat.daySigma, "fraction", units).text, false]);
+      // Both sections' σ, always in the prototype's order (`0480` l.24) — the
+      // scatter is a property of the channel, not of the half the handles are
+      // on, and naming only one made the card change under a legend click.
+      if (stat?.daySigma != null && z !== null) {
+        const sigma = (p: string): number | null => (p === param ? stat.daySigma : channelStat(z, p, scope).daySigma);
+        const parts = ([["cloud", "cloud.dry"], ["humid", "humidity.dry"]] as const).flatMap(([name, p]) => {
+          const v = sigma(p);
+          return v === null ? [] : [`${name} ${format(v, "fraction", units).text}`];
+        });
+        if (parts.length > 0) lines.push(["day-to-day σ", parts.join(" · "), ""]);
+      }
 
-      stats.el.toggleClass("is-hidden", lines.length === 0);
-      for (const [key, value, wetHue] of lines) {
+      // One card, so it is here that the whole thing goes: a channel with
+      // neither a fact nor a sentence shows nothing rather than an empty box.
+      noteCard.toggleClass("is-hidden", lines.length === 0 && !prose);
+      statList.toggleClass("is-hidden", lines.length === 0);
+      for (const [key, value, hue] of lines) {
         const el = statList.createDiv({ cls: "wadjet-studio-channel-win-fact" });
         el.createSpan({ cls: "wadjet-studio-channel-win-fact-key", text: key });
         const v = el.createSpan({ cls: "wadjet-studio-channel-win-fact-value wadjet-studio-num", text: value });
-        v.toggleClass("is-wet", wetHue);
+        if (hue !== "") v.addClass(hue);
       }
     }
 
@@ -1142,7 +1343,7 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       paintKnobs(z);
       paintExtras(z);
       paintWriters(z, state);
-      paintStats(z);
+      paintStats(z, state);
     }
 
     // --- pull-based readouts -------------------------------------------------
@@ -1180,7 +1381,10 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       badge: BADGE,
       // The title lamp carries the channel's own identity, not a generic
       // ok-green — a validation level still wins over it (`components/led.ts`).
-      badgeColor: color,
+      // The pill beside it takes the softened form of that hue where the
+      // channel has one: at 10 px on #202225 the raw orange and blue read as
+      // a lit mark rather than as a word.
+      badgeColor: spec.badgeColor ?? color,
       body: root,
       led: { on: true, scope: "chain", color },
       level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "channel", channel }))),

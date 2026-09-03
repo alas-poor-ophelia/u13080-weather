@@ -7224,6 +7224,10 @@ interface ChannelProbe {
   points: number;
   /** their pixel y values — a shrinking curve is visible without reading the draft */
   pointYs: number[];
+  /** the printed y-axis tick labels of the plot the handles are on, top to bottom */
+  ticks: string[];
+  /** per plot, the mean pixel y of each drawn line — two crushed series read as one number */
+  plotLineYs: number[][];
   scopes: string[];
   scope: string;
   stage: string;
@@ -7259,6 +7263,16 @@ async function probeChannel(): Promise<ChannelProbe> {
         domain: panel?.querySelector('[data-part="channel-chart"] .wadjet-studio-chart')?.getAttribute("data-domain") ?? "",
         points: points.length,
         pointYs: points.map((p) => Math.round(Number(p.getAttribute("cy")) * 100) / 100),
+        ticks: Array.from(panel?.querySelectorAll('[data-part="channel-chart"] text.wadjet-studio-chart-tick') ?? []).map((t) => (t.textContent ?? "").trim()),
+        plotLineYs: Array.from(panel?.querySelectorAll(".wadjet-studio-channel-win-plot-block") ?? []).map((plot) =>
+          Array.from(plot.querySelectorAll("polyline.wadjet-studio-chart-line")).map((line) => {
+            const ys = (line.getAttribute("points") ?? "").split(" ").flatMap((pt) => {
+              const y = Number(pt.split(",")[1]);
+              return Number.isFinite(y) ? [y] : [];
+            });
+            return ys.length === 0 ? 0 : Math.round((ys.reduce((a, b) => a + b, 0) / ys.length) * 100) / 100;
+          }),
+        ),
         // Scope chips, not segments (F10a): `All year · <seasons> · ☾ <moon>`.
         scopes: Array.from(panel?.querySelectorAll('[data-part="channel-scopes"] .wadjet-studio-chip') ?? []).map((s) => s.getAttribute("data-value") ?? ""),
         scope: panel?.querySelector('[data-part="channel-scopes"] .wadjet-studio-chip.is-selected')?.getAttribute("data-value") ?? "",
@@ -7503,6 +7517,12 @@ describe("climate studio · temperature editor", () => {
     // Knob labels are the prototype's words, not the model's ids (F10a).
     expect(probe.knobs).toEqual(["offset", "seasonal swing", "day jitter σ"]);
     expect(probe.knobValues).toEqual(["+0.0 °C", "×1.00", "+0.0 °C"]);
+    // A1 (O-2): the prototype hangs the degree sign on the number itself
+    // (`0250-temperature-editor`'s `20°`), and every rung it prints is one the
+    // axis actually contains — a tick on the frame is a number with no side.
+    expect(probe.ticks.length).toBeGreaterThan(0);
+    expect(probe.ticks.every((t) => t.endsWith("°"))).toBe(true);
+    console.log(`  · temperature axis: ${probe.ticks.join(" · ")}`);
     // The caption names the modifier it writes as well as the stage (F10a):
     // SPEC law 5 read at the control rather than only in the footer.
     expect(probe.stage).toBe("writes modifiers[layer:temperature.mean] · stage climate · unconditional, reshapes the baseline once");
@@ -8621,8 +8641,10 @@ describe("climate studio · channel parity", () => {
     expect(probe.domain).toBe("year");
     expect(probe.points).toBe(12);
     // SPEC §8: the odds pair, one of the two editable at a time. The picker is
-    // the plot's own legend now (F10b), in draw order — the primary first.
-    expect(probe.seriesOptions).toEqual(["precipitation.pwd", "precipitation.pww"]);
+    // the plot's own legend now (F10b), in draw order — and `0345` reads the
+    // pair wet-after-wet first, so that is the order the legend is drawn in.
+    // The share plot above it is one derived line, so it adds no entry here.
+    expect(probe.seriesOptions).toEqual(["precipitation.pww", "precipitation.pwd"]);
     expect(probe.series).toBe("precipitation.pwd");
     expect(probe.knobs).toEqual(["stickiness", "rain chance", "wet-day amount"]);
     expect(probe.knobValues).toEqual(["×1.00", "×1.00", "×1.00"]);
@@ -8780,6 +8802,14 @@ describe("climate studio · channel parity", () => {
     expect(probe.knobValues).toEqual(["+0.00", "+0.00"]);
     expect(probe.writes).toContain("layer:cloud.*");
     expect(probe.writes).toContain("layer:humidity.*");
+    // A1 (O-1/O-3): the humidity plot draws the dry/wet pair, and the pair is
+    // only a *pair* if the reader can see two lines. Sized headroom is what
+    // buys that separation on a 140 px plot.
+    const humidity = probe.plotLineYs[1] ?? [];
+    expect(humidity.length).toBe(2);
+    const apart = Math.abs((humidity[0] ?? 0) - (humidity[1] ?? 0));
+    expect(apart).toBeGreaterThan(8);
+    console.log(`  · sky humidity: dry/wet mean y ${humidity.join(" vs ")} — ${apart.toFixed(1)} px apart`);
 
     // The picker really swaps the editable line.
     await ob.page.locator('[data-part="channel-series"] .wadjet-studio-channel-win-legend-item[data-value="humidity.wet"]').first().click();

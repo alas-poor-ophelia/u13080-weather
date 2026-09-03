@@ -252,19 +252,37 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     return pts.map((p, i) => `${i === 0 ? "M" : "L"} ${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`).join(" ");
   }
 
+  /**
+   * A year is a loop, so a curve keyed at month centres stops ~4 % short of
+   * both plot edges and leaves a bare-tint margin the prototype does not have
+   * (its `poly` samples the whole [0,1] domain). The wrapped value is the same
+   * at x = 0 and x = 1, so carrying the ink to both edges leaves no seam.
+   * Handles are drawn from `points`, never from this, so keyframes still count.
+   */
+  function edged(pts: Array<[number, number]>): Array<[number, number]> {
+    if (props.domain !== "year" || pts.length < 2) return pts;
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    if (!first || !last || first[0] <= 0 || last[0] >= 1) return pts;
+    const span = first[0] + 1 - last[0];
+    const y = last[1] + ((1 - last[0]) / span) * (first[1] - last[1]);
+    return [[0, y], ...pts, [1, y]];
+  }
+
   function drawSeries(s: ChartSeries): void {
-    const first = s.points[0];
-    const last = s.points[s.points.length - 1];
+    const pts = edged(s.points);
+    const first = pts[0];
+    const last = pts[pts.length - 1];
     if (!first || !last) return;
     if (s.fill) {
       const floor = (props.height - padB()).toFixed(2);
-      const d = `${pathOf(s.points)} L ${sx(last[0]).toFixed(2)} ${floor} L ${sx(first[0]).toFixed(2)} ${floor} Z`;
+      const d = `${pathOf(pts)} L ${sx(last[0]).toFixed(2)} ${floor} L ${sx(first[0]).toFixed(2)} ${floor} Z`;
       svg.createSvg("path", { cls: "wadjet-studio-chart-fill", attr: { d, fill: s.color } });
     }
     svg.createSvg("polyline", {
       cls: "wadjet-studio-chart-line",
       attr: {
-        points: polyline(s.points),
+        points: polyline(pts),
         stroke: s.color,
         ...(s.dash === undefined ? {} : { "stroke-dasharray": s.dash }),
         ...(s.width === undefined ? {} : { "stroke-width": String(s.width) }),
@@ -321,8 +339,8 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
   function drawEnvelope(): void {
     const e = props.envelope;
     if (!e || e.lo.length === 0 || e.hi.length === 0) return;
-    const up = e.hi.map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
-    const down = [...e.lo].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const up = edged(e.hi).map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const down = [...edged(e.lo)].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
     svg.createSvg("path", { cls: "wadjet-studio-chart-band", attr: { d: `M ${up.join(" L ")} L ${down.join(" L ")} Z`, fill: e.color } });
   }
 
@@ -374,10 +392,10 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
       props.series.forEach(drawSeries);
       return;
     }
-    const up = lo.points.map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
-    const down = [...hi.points].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const up = edged(lo.points).map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const down = [...edged(hi.points)].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
     svg.createSvg("path", { cls: "wadjet-studio-chart-band", attr: { d: `M ${up.join(" L ")} L ${down.join(" L ")} Z`, fill: lo.color } });
-    svg.createSvg("polyline", { cls: "wadjet-studio-chart-line", attr: { points: polyline(hi.points), stroke: hi.color } });
+    svg.createSvg("polyline", { cls: "wadjet-studio-chart-line", attr: { points: polyline(edged(hi.points)), stroke: hi.color } });
   }
 
   /** Compass bearing (degrees clockwise from north) to a point on the rose. */

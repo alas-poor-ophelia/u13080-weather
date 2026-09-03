@@ -746,27 +746,53 @@ describe("writersFor", () => {
   test("humidity and cloud writers land on the sky channel", () => {
     const z = zone([{ id: "haar", when: { tag: "season:Thaw" }, apply: [{ param: "humidity.dry", op: "offset", value: 5 }, { param: "cloud.dry", op: "offset", value: 0.1 }] }]);
     const ws = writersFor(z, [], "sky");
-    expect(kinds(ws)).toEqual(["station", "device"]);
+    expect(kinds(ws)).toEqual(["station", "device", "forcings"]);
     expect(ws[1]!.ops).toHaveLength(2);
+  });
+
+  test("the Forcings row is present on every channel, turned to nothing or not", () => {
+    // The prototype's MST row (`tWriters`) never leaves the stack: Forcings is
+    // wired to every channel, so a channel it does nothing on says so.
+    const bare = zone();
+    for (const c of ["temperature", "precipitation", "wind", "sky"] as const) {
+      const ws = writersFor(bare, [], c);
+      expect(ws.filter((w) => w.kind === "forcings"), c).toEqual([{ kind: "forcings", id: FORCINGS, label: "Forcings", ops: [] }]);
+    }
+    // …and it is the real row, not a second one, once something IS turned.
+    const trimmed = zone();
+    setTrim(trimmed, 1.5);
+    const rows = writersFor(trimmed, [], "temperature").filter((w) => w.kind === "forcings");
+    expect(rows.map((w) => w.id)).toEqual([TRIM_ID]);
+    // A lane rides in the forcings slot beside the row, never instead of it:
+    // `channel-edit.ts writers()` folds the two into the prototype's one MST.
+    const laned = zone();
+    setWarmthLane(laned, [
+      [1, 0],
+      [500, 3],
+    ]);
+    expect(kinds(writersFor(laned, [], "temperature"))).toEqual(["station", "regime", "forcings", "automation"]);
   });
 
   test("a disabled device is still listed (the UI greys it)", () => {
     const z = zone([{ ...device("stormtide"), enabled: false }]);
     // "dry-spell" is the preset's own temperature-writing regime
-    expect(writersFor(z, [], "temperature").map((w) => w.id)).toEqual(["fjord-coast", "dry-spell", "stormtide"]);
+    expect(writersFor(z, [], "temperature").map((w) => w.id)).toEqual(["fjord-coast", "dry-spell", "stormtide", FORCINGS]);
   });
 
   test("a zone without a preset still reports a station row", () => {
     const z = zone();
     delete z.preset;
     const ws = writersFor(z, [], "wind");
-    expect(ws).toEqual([{ kind: "station", id: "climate", label: "base climate", ops: [] }]);
+    expect(ws).toEqual([
+      { kind: "station", id: "climate", label: "base climate", ops: [] },
+      { kind: "forcings", id: FORCINGS, label: "Forcings", ops: [] },
+    ]);
   });
 
   test("an op on a path with no channel never crashes the stack", () => {
     const z = zone([{ id: "odd", apply: [{ param: "nonsense.path", op: "offset", value: 1 }] }]);
     const ws = writersFor(z, [], "temperature");
-    expect(ws.map((w) => w.id)).toEqual(["fjord-coast", "dry-spell"]);
+    expect(ws.map((w) => w.id)).toEqual(["fjord-coast", "dry-spell", FORCINGS]);
     for (const c of ["temperature", "precipitation", "wind", "sky"] as const) {
       expect(writersFor(z, [], c).some((w) => w.id === "odd")).toBe(false);
     }

@@ -180,3 +180,29 @@ describe("studio copy · one day's condition", () => {
     expect(conditionColour(report())).toBe("var(--wadjet-studio-text-dim)");
   });
 });
+
+/**
+ * The precipitation window's own copy, read out of the window source: it
+ * imports Obsidian, so it cannot be constructed under `bun test`, and the
+ * strings are what the prototype pins (`proto-markup/0345-precip-editor.html`).
+ */
+const CHANNEL_WINDOW_SOURCE = await Bun.file(new URL("../src/studio/ui/windows/channel.ts", import.meta.url)).text();
+
+describe("the precipitation window's copy", () => {
+  const SOURCE = CHANNEL_WINDOW_SOURCE;
+
+  test("the snow / gamma note is the prototype's sentence, in its own card", () => {
+    expect(SOURCE).toContain('text: "snow when day peaks below "');
+    expect(SOURCE).toContain('text: " · amount "');
+    expect(SOURCE).toContain("gamma(κ ${format(stat.gammaShape");
+    // It is a card of its own, not the last line of the scrolling fact list.
+    expect(SOURCE).toContain("wadjet-studio-channel-win-note");
+    expect(SOURCE).not.toContain('"snow below"');
+  });
+
+  test("the pair's plot is named for the chain, and the share plot for the number", () => {
+    expect(SOURCE).toContain('caption: "markov pair"');
+    expect(SOURCE).toContain('caption: "share of wet days"');
+    expect(SOURCE).not.toContain('caption: "p(wet)"');
+  });
+});

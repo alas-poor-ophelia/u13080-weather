@@ -144,6 +144,14 @@
   --wadjet-studio-precip: #5cb8f0;
   --wadjet-studio-wind: #7fd6a8;
   --wadjet-studio-sky: #b9c2cf;
+  /* The two saturated channel hues, softened for text ON a dark chip — the
+     KIND pill in the panel's own title bar (`0250` l.8 `#f0b08c`, `0345` l.7
+     `#7cb8e8`). The prototype's own pair, not a mix: neither is reachable by
+     lightening the hue toward white (its precipitation tint drops blue while
+     it lifts red), and wind and sky already read at full strength there, so
+     they have no softened form and use the hue itself. */
+  --wadjet-studio-temp-soft: #f0b08c;
+  --wadjet-studio-precip-soft: #7cb8e8;
   --wadjet-studio-gold: #e8c15a;
   --wadjet-studio-moon: #cdd9ee;
   --wadjet-studio-error: #e0605c;
@@ -1067,10 +1075,14 @@
 .wadjet-studio-chart-point.is-selected {
   stroke-width: 2.5;
 }
-/* Season / moon-phase tint behind the plot. 10 % of the palette hue: the band
-   IS the label, so it must read as ground, never as a mark. */
+/* Season / moon-phase tint behind the plot. The band IS the label, so it must
+   read as ground, never as a mark. 8 %, not the 10 % of the first pass: the
+   prototype's own season fills are `rgba(<hue>,0.08)` (`Component.js`
+   `SEASON_COLORS`), and at 0.1 the Thaw band came out #2c3535 over #222428
+   against the prototype's #283130 over #212327 — half again the lift it
+   should have. 0.08 puts all six hues back within a level or two. */
 .wadjet-studio-chart-tint {
-  opacity: 0.1;
+  opacity: 0.08;
   stroke: none;
 }
 /* Reference and grid lines. A solid rule is a grid line and recedes into the
@@ -5163,6 +5175,23 @@
 .wadjet-studio-window:has(.wadjet-studio-channel-win) {
   background: linear-gradient(180deg, #26282c, #1f2124);
 }
+/* A channel panel is as tall as its own content, the way the prototype draws
+   it (`0250` l.3 — a window with no `max-height` at all): the plot column and
+   the card column, the taller of the two wins. The shared window's
+   `max-height: calc(100% - win-y - 16px)` stays as the guard and nothing here
+   overrides it — `.wadjet-studio-windows` clips (`overflow: hidden`), so a
+   panel that outgrows the box has to scroll to its WRITES footer rather than
+   lose it (bead wadjet-6rw.14). The guard is not the fit: it bit all four
+   channels at once, which is what a panel 100 px over its budget looks like.
+   Card-column height is a budget, not a free variable — it is the taller
+   column in every channel, and it is what has to come down to reach the
+   prototype's 636 / 561 / 396 / 418. */
+/* The channel body ends 8 px above the WRITES footer, not the shared 12: the
+   prototype's is `padding:12px 0 8px` (`0250` l.11) and the columns carry
+   their own side padding. Four of the budget's pixels. */
+.wadjet-studio-window:has(.wadjet-studio-channel-win) .wadjet-studio-window-body {
+  padding-bottom: 8px;
+}
 .wadjet-studio-channel-win {
   display: flex;
   flex-direction: column;
@@ -5244,8 +5273,13 @@
   display: none;
 }
 /* The prototype hangs the legend off the caption with a middot rather than a
-   gap, so the two read as one line. */
-.wadjet-studio-channel-win-legend::before {
+   gap, so the two read as one line — and separates the entries with the same
+   mark: `MARKOV PAIR · ┄ wet-after-wet · ━ wet-after-dry` (`0345` l.19). The
+   middot therefore rides each ENTRY, not the list, so every gap gets one. It
+   stays muted whatever the entry does, because it is punctuation, not a label.
+   Scoped to this legend: the rose's season list reuses the entry class and
+   reads as a column, not a sentence. */
+.wadjet-studio-channel-win-legend > .wadjet-studio-channel-win-legend-item::before {
   content: "·";
   color: var(--wadjet-studio-text-mute);
 }
@@ -5285,13 +5319,40 @@
 .wadjet-studio-channel-win-card.is-hidden {
   display: none;
 }
+/* 7 px, the middle of the prototype's own three: it heads `Selected point` at
+   8 (`0250` l.29), `Channel macros · scope` at 6 (l.34) and `Writers →` at 7
+   (l.72). One value for one class rather than three selectors to save two
+   pixels — and in a column of five cards the one px each is the difference
+   between WIND clearing the box and not. */
 .wadjet-studio-channel-win-card-head {
-  margin-bottom: 8px;
+  margin-bottom: 7px;
   font-size: var(--wadjet-studio-fs-body);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--wadjet-studio-text-mute);
+}
+/* PRECIP's snow / gamma note (`0345` l.61): an unheaded card of prose, with its
+   two numbers picked out of the sentence rather than tabulated against keys. */
+/* The fourth and last card: fact rows, then the prose about them. Unheaded —
+   the prototype's own fourth card is (`0250` l.70) — so it needs no head row
+   and the two halves sit directly on the card. */
+.wadjet-studio-channel-win-note {
+  font-size: var(--wadjet-studio-fs-body);
+  line-height: 1.7;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-channel-win-note-value {
+  color: var(--wadjet-studio-text);
+}
+/* The sentence is set apart from the rows above it, and takes the whole gap
+   only when there are rows to be set apart from. */
+.wadjet-studio-channel-win-note-prose:not(:first-child) {
+  margin-top: 7px;
+}
+.wadjet-studio-channel-win-note-prose.is-hidden,
+.wadjet-studio-channel-win-stat-list.is-hidden {
+  display: none;
 }
 /* `when day 196 · 54% of year` — a key in dim text, its value beside it. */
 .wadjet-studio-channel-win-fact {
@@ -5319,6 +5380,13 @@
 .wadjet-studio-channel-win-fact-value.is-wet {
   color: var(--wadjet-studio-precip);
 }
+/* `p(wet | wet) peak` is a number read off the wet-after-wet line, which is
+   the one green line on a blue channel (`0345` l.52) — so it wears that line's
+   hue rather than the channel's, or the reader cannot tell which of the pair
+   it came from. */
+.wadjet-studio-channel-win-fact-value.is-run {
+  color: var(--wadjet-studio-wind);
+}
 /* Scope chips: separate outlined pills that wrap, NOT a Segmented. Unselected
    is a hairline on nothing; selected is a dark fill with the scope's own
    colour as its outline (SPEC §9 — the active accent is an outline, not a
@@ -5335,10 +5403,14 @@
   border-color: var(--wadjet-studio-border-bright);
   color: var(--wadjet-studio-text-mute);
 }
+/* A scope with no colour of its own — ALL YEAR — is the prototype's `#f2f3f5`
+   (`Component.js` `pScopes`, the `all` entry), which is the text colour, not
+   the dimmer `--wadjet-studio-accent` the first pass fell back to. A season or
+   moon scope still wears its own hue. */
 .wadjet-studio-channel-win-scopes .wadjet-studio-chip.is-selected {
   background: var(--wadjet-studio-bg-alt);
-  border-color: var(--wadjet-studio-chip-color, var(--wadjet-studio-accent));
-  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-accent));
+  border-color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text));
+  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text));
 }
 .wadjet-studio-channel-win-knobs {
   display: flex;
@@ -5360,20 +5432,22 @@
   flex-direction: column;
   gap: 4px;
 }
-/* One row per source, in signal order — the whole row is the click target.
-   Two lines in a 250 px column: role tag and name, then the ops it applies.
-   The tag gutter is wider than the prototype's because this stack names the
-   real signal path (STATION / REGIME / AUTOMATION / DEVICE / ERA), not the
-   prototype's two-letter BASE / MST. */
+/* One row per source, in signal order — the whole row is the click target,
+   and one line, as `0250` l.57 draws it: a fixed 30 px tag gutter, the name,
+   and the value hard right. The gutter is fixed rather than `auto` so the
+   names of eight rows start on the same pixel; that is what makes the tags
+   readable as a column, and it is why the tag is the prototype's three-letter
+   word (`WRITER_TAG`) rather than the full signal-path name, which stays on
+   the row as `data-kind`. */
 .wadjet-studio-channel-win-writer {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 1px 7px;
+  grid-template-columns: 30px minmax(0, auto) minmax(0, 1fr);
+  gap: 7px;
   align-items: baseline;
   padding: 4px 8px;
   font-size: var(--wadjet-studio-fs-chip);
   background: var(--wadjet-studio-bg-alt);
-  border: 1px solid var(--wadjet-studio-border);
+  border: 1px solid var(--wadjet-studio-hairline);
   border-radius: 2px;
   cursor: pointer;
 }
@@ -5383,35 +5457,30 @@
   outline: none;
 }
 .wadjet-studio-channel-win-writer-kind {
-  grid-column: 1;
   font-size: var(--wadjet-studio-fs-micro);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--wadjet-studio-text-mute);
 }
-.wadjet-studio-channel-win-writer-label {
-  grid-column: 2;
+/* The name is short and sized to itself, so it is the value that runs out of
+   row first: the prototype's values are formatted numbers that always fit
+   (`0250` l.59), while this stack quotes op grammar that sometimes does not.
+   Both columns therefore ellipsize rather than spilling past the card — an
+   op reads in the row's `data-hint`, which carries it whole. */
+.wadjet-studio-channel-win-writer-label,
+.wadjet-studio-channel-win-writer-ops {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.wadjet-studio-channel-win-writer-label {
   color: var(--wadjet-studio-text-dim);
 }
 .wadjet-studio-channel-win-writer-ops {
-  grid-column: 1 / -1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
   color: var(--wadjet-studio-channel-win-writer-color, var(--wadjet-studio-text-dim));
-}
-/* The station applies no ops: its line is a caption about the stack, so it is
-   set as one rather than dressed up as a readout. */
-.wadjet-studio-channel-win-writer-ops.is-caption {
-  text-align: left;
-  color: var(--wadjet-studio-text-mute);
 }
 .wadjet-studio-channel-win-stat-list {
   display: flex;
@@ -5434,6 +5503,20 @@
 }
 .wadjet-studio-channel-win-rose-legend:empty {
   display: none;
+}
+/* A rose entry names a SEASON, and a season IS its palette colour everywhere
+   else in the studio — so the whole entry wears that hue, not just its swatch.
+   The series legend below a plot is the opposite case (one channel, several
+   lines), and keeps its mute label with a coloured dash. */
+.wadjet-studio-channel-win-rose-legend .wadjet-studio-channel-win-legend-item {
+  color: var(--wadjet-studio-legend-color, var(--wadjet-studio-text-mute));
+}
+/* Selection cannot be a colour swap here — the colour is the season's identity
+   — so the selected entry is the one sitting on a fill, the same shape the
+   scope chips use. */
+.wadjet-studio-channel-win-rose-legend .wadjet-studio-channel-win-legend-item.is-selected {
+  background: var(--wadjet-studio-bg-alt);
+  font-weight: 600;
 }
 /* Empty unless a control needs to sit below the knobs — the bearing reset does */
 .wadjet-studio-channel-win-extras {

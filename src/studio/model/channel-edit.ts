@@ -50,6 +50,8 @@ import { evalCurve, monthCentrePhase, wrapPhase } from "../../core/curve";
 import { getPath, isCurvePath } from "../../core/curve-ops";
 import { compassPoint } from "../../core/report";
 import type { Curve, Era, Keyframe, ModifierOp, ZoneProfile } from "../../core/types";
+import { presetOf } from "./atlas";
+import { wetFraction } from "./channel-series";
 import {
   channelOf,
   channelOrNull,
@@ -302,9 +304,25 @@ interface ChannelChart {
   plots: ReadonlyArray<readonly string[]>;
 }
 
+/**
+ * The wet-day share — `wetFraction(pwd, pww)`, the fraction of days the Markov
+ * pair settles at. A *derived* series: no `precipitation.*` curve carries it,
+ * so it is drawn and never edited, and `plotPoints` computes it rather than
+ * reading it off a curve.
+ */
+export const PRECIP_WET_SHARE = "precipitation.wetFraction";
+
+/** Series the chart computes rather than reads off a curve — drawn, never edited. */
+export function isDerivedSeries(param: string): boolean {
+  return param === PRECIP_WET_SHARE;
+}
+
 const CHANNEL_CHART: Record<Channel, ChannelChart> = {
   temperature: { primary: TEMP_MEAN, plots: [[TEMP_MEAN]] },
-  precipitation: { primary: PRECIP_PWD, plots: [[PRECIP_PWD, "precipitation.pww"], ["precipitation.scale"]] },
+  // `proto-markup/0345-precip-editor.html`: the share of wet days on top — the
+  // one number the channel is read for — then the pair it is derived from, then
+  // the millimetres, which are on neither probability axis.
+  precipitation: { primary: PRECIP_PWD, plots: [[PRECIP_WET_SHARE], ["precipitation.pww", PRECIP_PWD], ["precipitation.scale"]] },
   wind: { primary: WIND_SPEED, plots: [[WIND_SPEED], ["wind.calmFraction"]] },
   sky: {
     primary: "cloud.dry",
@@ -328,6 +346,20 @@ export function chartPlots(channel: Channel): string[][] {
 /** Every series the channel draws, plot by plot, in draw order. */
 export function chartSeries(channel: Channel): string[] {
   return CHANNEL_CHART[channel].plots.flatMap((p) => [...p]);
+}
+
+/**
+ * The points a drawn line is made of: a curve's own (`curvePoints`), or — for a
+ * derived series — the value computed from the curves it is a function of.
+ *
+ * The wet-day share is `wetFraction(pwd, pww)` read at the *pwd* keyframes, so
+ * the two curves are sampled at one set of phases even when only one of them
+ * has been drawn on.
+ */
+export function plotPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  if (param !== PRECIP_WET_SHARE) return curvePoints(z, param, scope);
+  const wet = effectiveBase(z, "precipitation.pww");
+  return curvePoints(z, PRECIP_PWD, scope).map(([at, pwd]) => [at, wetFraction(pwd, evalCurve(wet, at))] as [number, number]);
 }
 
 /**
@@ -688,6 +720,14 @@ export function spreadPoints(z: ZoneProfile, param: string, scope: string): Arra
  * Temperature is the one channel that carries the offset as a curve
  * (`temperature.wetDayOffset`), so the other three return `[]` until they
  * grow one.
+ *
+ * The prototype draws this ghost as `mean(t) + 0.35`, one constant. The engine
+ * has no such number: `wetDayOffset` is a `Curve` (`core/types.ts`), evaluated
+ * per day by `core/generator.ts` and signed — every shipped station carries
+ * twelve keyframes of it, positive on wet winter days and negative on wet
+ * summer ones, so a real ghost crosses the mean. Drawing a flat +0.35 would be
+ * a picture of a parameter the generator never reads (SPEC law 4), so the
+ * ghost stays seasonal and the note card states the span instead.
  */
 const WET_DAY_OFFSET_OF: Record<string, string> = { "temperature.mean": "temperature.wetDayOffset" };
 
@@ -1007,18 +1047,94 @@ function targetFor(w: Writer, channel: Channel): WriterTarget {
   }
 }
 
+/** How a curve is shaped, in the two words the station row has room for. */
+function curveShape(curve: Curve | undefined): string {
+  if (Array.isArray(curve)) return `${curve.length} kf`;
+  if (typeof curve === "number") return "flat";
+  return curve === undefined ? "no curve" : "harmonic";
+}
+
+/**
+ * The BASE row's value, the prototype's `12 kf · 30 yr` / `edited`
+ * (`1397-logic-class-Component.js` `tWriters`): how the station's own record
+ * draws this channel, and how long a record it is. `edited` replaces both once
+ * the drawn curve has left the shipped one — the row is then no longer quoting
+ * the station, and saying how many keyframes the station had would be a lie
+ * about what is on screen.
+ */
+/** `Bergen record` — the place the record was kept, as the SRC chip names it (`ui/header.ts`), not the preset's file id. */
+function stationLabel(z: ZoneProfile, fallback: string): string {
+  const preset = z.preset === undefined ? null : presetOf(z.preset.id);
+  return `${preset?.source.place ?? preset?.source.stationName ?? fallback} record`;
+}
+
+function stationText(z: ZoneProfile, channel: Channel): string {
+  const param = primarySeries(channel);
+  const own = isCurvePath(param) ? getPath(z.climate, param) : undefined;
+  // A dragged keyframe is stored as a `layer:` set-op, not written back over
+  // `climate` (`compile.ts setCurveLayer`), so the drawn curve can have left
+  // the record while the record itself is untouched — both count as edited.
+  if (getCurveLayer(z, param) !== null) return "edited";
+  const preset = z.preset === undefined ? null : presetOf(z.preset.id);
+  if (preset === null) return curveShape(own);
+  const base = isCurvePath(param) ? getPath(preset.climate, param) : undefined;
+  if (JSON.stringify(own) !== JSON.stringify(base)) return "edited";
+  return `${curveShape(base)} · ${preset.source.yearsOfRecord} yr`;
+}
+
+/** One forcings number, as the mixer's own chips read it: a signed offset, a `×` scale. */
+function forcingsValue(o: ModifierOp): string {
+  if (o.op === "scale") return `×${num(o.value)}`;
+  if (o.op === "offset") return o.value >= 0 ? `+${num(o.value)}` : num(o.value);
+  return opText(o);
+}
+
+/**
+ * The MST row's value in the prototype's shape (`tWriters`):
+ * `∿ <lane> · trim <warmth>` — the automation lane's terminal value and the
+ * forcings knob's, from the zone's own numbers. Unit-free, like every other
+ * row in this stack; the Forcings panel the row opens carries the units.
+ */
+function forcingsText(lane: readonly ModifierOp[], w: Writer): string {
+  // `wetness` turns `pww` and `pwd` by the same factor, so its two ops are one
+  // number to the reader — distinct values only.
+  const knob = [...new Set(w.ops.map(forcingsValue))];
+  const parts = [
+    ...new Set(lane.map((o) => `∿ ${forcingsValue(o)}`)),
+    // `w.label` is `forcingsLabel`'s — `trim` or `wetness`; the synthetic row
+    // is labelled `Forcings` and has no ops to name.
+    ...knob.map((v) => `${w.label} ${v}`),
+  ];
+  return parts.length === 0 ? "neutral" : parts.join(" · ");
+}
+
 /**
  * Every source that writes to `channel`, in signal order (SPEC §1), each row
  * carrying the window its click opens. The order and the membership are
  * `writersFor`'s; this only adds the label, the ops line and the target.
+ *
+ * Two rows carry no ops and so say something else instead: the station quotes
+ * its own record, and the always-present Forcings row (`writersFor`) says it
+ * is turned to nothing on this channel.
  */
 export function writers(z: ZoneProfile, eras: readonly Era[], channel: Channel): WriterRow[] {
-  return writersFor(z, eras, channel).map((w) => ({
-    kind: w.kind,
-    label: w.label,
-    opsText: w.ops.length === 0 ? "the baseline the stack edits" : w.ops.map(opText).join(" · "),
-    target: targetFor(w, channel),
-  }));
+  const source = writersFor(z, eras, channel);
+  // The lane and the trim are one panel and one signal path, so they are one
+  // row — the prototype's MST. Left apart, the lane row had nothing to call
+  // itself but its own id (`frc.warmth`), which is a key, not a name.
+  const lane = source.filter((w) => w.kind === "automation").flatMap((w) => w.ops);
+  return source.flatMap((w) => {
+    if (w.kind === "automation") return [];
+    const forcings = w.kind === "forcings";
+    return [
+      {
+        kind: w.kind,
+        label: w.kind === "station" ? stationLabel(z, w.label) : forcings ? "Forcings" : w.label,
+        opsText: forcings ? forcingsText(lane, w) : w.ops.length > 0 ? w.ops.map(opText).join(" · ") : w.kind === "station" ? stationText(z, channel) : "neutral",
+        target: targetFor(w, channel),
+      },
+    ];
+  });
 }
 
 // ---------------------------------------------------------------------------

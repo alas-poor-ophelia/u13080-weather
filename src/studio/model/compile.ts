@@ -746,14 +746,22 @@ export function writersFor(z: ZoneProfile, eras: readonly Era[], channel: Channe
     const ops = pick(m.apply);
     if (ops.length) out.push({ kind: "device", id: m.id, label: m.id, ops });
   }
+  let master = false;
   for (const m of mods) {
     if (!isForcingsId(m.id)) continue;
     const ops = pick(m.apply);
-    if (ops.length) out.push({ kind: "forcings", id: m.id, label: forcingsLabel(m.id), ops });
+    if (ops.length) {
+      out.push({ kind: "forcings", id: m.id, label: forcingsLabel(m.id), ops });
+      master = true;
+    }
   }
-  for (const l of z.automation ?? []) {
-    if (channelOrNull(l.param) === channel) out.push({ kind: "automation", id: l.id, label: l.id, ops: [laneOp(l)] });
-  }
+  const lanes = (z.automation ?? []).filter((l) => channelOrNull(l.param) === channel);
+  // The prototype's MST row (`1397-logic-class-Component.js` `tWriters`) is the
+  // one row that is always there: Forcings is a panel every channel is wired
+  // to, so a channel it is turned to nothing on still says so rather than
+  // dropping out of the stack. Its ops are empty and the reader is told.
+  if (!master) out.push({ kind: "forcings", id: FORCINGS, label: "Forcings", ops: [] });
+  for (const l of lanes) out.push({ kind: "automation", id: l.id, label: l.id, ops: [laneOp(l)] });
   for (const e of eras) {
     const ops = pick(e.apply);
     if (ops.length) out.push({ kind: "era", id: ERA + e.name, label: e.name, ops });
