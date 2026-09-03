@@ -59,7 +59,7 @@ export interface DeviceWindowContext {
   endGesture(): void;
   invalidate(): void;
   addPart(part: Part): void;
-  section(name: string, hintKey: string, o?: { qualifier?: string; summary?: string }): Section;
+  section(name: string, hintKey: string, o?: { qualifier?: string }): Section;
   knob(parent: HTMLElement, o: DeviceKnobOptions): HTMLElement;
   clipAt(): number;
   setClipAt(at: number): void;

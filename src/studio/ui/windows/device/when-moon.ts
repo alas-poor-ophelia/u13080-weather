@@ -19,14 +19,16 @@ export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: str
   const moons = description?.moons ?? [];
   const named = moons.find((m) => m.name === name)?.phases ?? [];
   const row = parent.createDiv({ cls: "wadjet-studio-device-chips" });
-  c.addPart(
-    createChip(row, {
-      label: `moon:${name}`,
-      color: "var(--wadjet-studio-moon)",
-      hint: deviceHint("device.when.moon"),
-      onClick: () => openCycleFor(c.ctx, name),
-    }),
-  );
+  const carrier = createChip(row, {
+    label: `moon:${name}`,
+    color: "var(--wadjet-studio-moon)",
+    hint: deviceHint("device.when.moon"),
+    onClick: () => openCycleFor(c.ctx, name),
+  });
+  // The carrier wears the moon's own hue on its label and a 7 px dot, where a
+  // tag chip is dim text and a 5 px one (`1095` l.37 against l.47).
+  carrier.el.addClass("is-carrier");
+  c.addPart(carrier);
   row.createSpan({ cls: "wadjet-studio-device-times", text: "×" });
 
   for (const phase of named) {
@@ -74,7 +76,7 @@ export function buildMoon(c: DeviceWindowContext, parent: HTMLElement, name: str
  */
 function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range: [number, number], moonName: string): void {
   const box = parent.createDiv({ cls: "wadjet-studio-device-gate-disc", attr: { "data-hint": deviceHint("device.when.gate") } });
-  const svg = box.createSvg("svg", { attr: { viewBox: `0 0 ${DISC} ${DISC}`, role: "img", "aria-label": `Moon gate ${range[0].toFixed(2)} to ${range[1].toFixed(2)}` } });
+  const svg = box.createSvg("svg", { attr: { viewBox: `0 0 ${DISC} ${DISC}`, role: "img", "aria-label": `Moon gate ${range[0].toFixed(2)} to ${endLabel(range)}` } });
   // The face is the prototype's door to the moon's CYCLE editor
   // (`data-vst="sablemoon"` on the circle and the lit path); the handles
   // keep their drag and never open anything.
@@ -96,8 +98,17 @@ function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range: [numb
     handle.addEventListener("pointerdown", (ev: PointerEvent) => startGateDrag(c, ev, svg, handle, end));
   });
 
-  box.createSpan({ cls: "wadjet-studio-device-disc-readout", text: `gate ${range[0].toFixed(2)}–${range[1].toFixed(2)}` });
+  box.createSpan({ cls: "wadjet-studio-device-disc-readout", text: `gate ${range[0].toFixed(2)}–${endLabel(range)}` });
 }
+
+/**
+ * The window's END as a reader sees it. `[a, b)` is stored wrapped, so a gate
+ * that runs to the top of the cycle stores `b = 0` — and `gate 0.86–0.00`
+ * reads as a window that closes before it opens. The last phase of a cycle is
+ * 1.00, which is the same instant and the only one that scans (the prototype's
+ * own `gate 0.78-1.00`).
+ */
+const endLabel = (range: [number, number]): string => (range[1] === 0 && range[0] > 0 ? "1.00" : range[1].toFixed(2));
 
 function startGateDrag(c: DeviceWindowContext, ev: PointerEvent, svg: SVGElement, node: SVGElement, end: 0 | 1): void {
   if (ev.button !== 0) return;

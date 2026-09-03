@@ -39,13 +39,18 @@ import type { WorldDraft } from "./state";
 /** The chain a brand-new op defaults to when the caller does not say (`newOpFor` reads the param instead). */
 const DEFAULT_CHANNEL: Channel = "temperature";
 
-/** The WHEN segmented's options in SPEC §3.4 order, and the `DeviceKind` each one is a shape of. */
+/**
+ * The WHEN segmented's options in SPEC §3.4 order, and the `DeviceKind` each
+ * one is a shape of. The labels are lowercase because the prototype's own
+ * `whenTypes` are (`1397-logic-class-Component.js:1045`) — they name a
+ * predicate shape, not a proper noun.
+ */
 export const WHEN_KINDS: ReadonlyArray<{ when: WhenKind; kind: DeviceKind; label: string }> = [
-  { when: "always", kind: "trim", label: "Always" },
-  { when: "moon", kind: "moon", label: "Moon" },
-  { when: "tag", kind: "tag", label: "Tag" },
-  { when: "yearWindow", kind: "spell", label: "Year window" },
-  { when: "chance", kind: "chance", label: "Chance" },
+  { when: "always", kind: "trim", label: "always" },
+  { when: "moon", kind: "moon", label: "moon" },
+  { when: "tag", kind: "tag", label: "tag" },
+  { when: "yearWindow", kind: "spell", label: "year window" },
+  { when: "chance", kind: "chance", label: "chance" },
 ];
 
 const clamp01 = (v: number): number => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);

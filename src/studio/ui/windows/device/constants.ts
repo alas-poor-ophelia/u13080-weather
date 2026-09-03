@@ -12,10 +12,6 @@ export const DEFAULT_YEAR_LENGTH = 365;
 /** Prototype width (`proto-markup/1095-vst-device.html`): a design constant, not a function of the content. */
 export const PANEL_W = 372;
 
-/** The year-window mini-lane, in SVG user units; the element is stretched to the panel by CSS. */
-export const LANE_W = 240;
-export const LANE_H = 10;
-
 /** The moon gate disc (`proto-markup/0699-vst-stormtide.html`): an 88-unit box, a 34-unit face. */
 export const DISC = 88;
 export const DISC_C = 44;

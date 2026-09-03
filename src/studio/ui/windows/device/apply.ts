@@ -31,8 +31,10 @@ export function buildApply(c: DeviceWindowContext, d: Device): void {
       cls: "wadjet-studio-device-remove",
       onClick: () => c.mutate((x) => removeOp(x, i), true),
     });
+    // No `op · field` line under the value: the prototype carries that string
+    // as the column's `data-hint` only (`1095` l.87), and a fourth line both
+    // truncates and pushes every row 16 px taller.
     buildOpControl(c, cell, op, i);
-    cell.createSpan({ cls: "wadjet-studio-device-apply-field", text: opGloss(op) });
   });
 
   const add = grid.createDiv({ cls: "wadjet-studio-device-apply-cell" });

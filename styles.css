@@ -727,7 +727,10 @@
   flex-shrink: 0;
   border-radius: 50%;
   border: 1px solid #17181a;
-  background: #24262a;
+  /* Unpowered is a SOLID grey disc, not a hollow ring: the prototype's `devLed`
+     / `nrLed` fall back to #54585e, and #24262a against the bar read as an
+     empty socket (gap2 A14). */
+  background: #54585e;
 }
 .wadjet-studio-led[role="button"] {
   cursor: pointer;
@@ -1223,6 +1226,18 @@
   border-radius: 0;
   outline: none;
 }
+/* The device window's name field is a FIXED 118 px (`1095-vst-device.html`
+   l.5), so the KIND pill sits at the same x whatever the device is called
+   instead of sliding with the title's length. Scoped with `:has` because only
+   the device panel's prototype pins it — a channel window's title still sizes
+   to its text. */
+.wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-title {
+  flex: 0 0 118px;
+  width: 118px;
+}
+.wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-title-input {
+  width: 100%;
+}
 .wadjet-studio-window-badge {
   flex: 0 0 auto;
   padding: 1px 6px;
@@ -1251,12 +1266,25 @@
   align-items: center;
   gap: 4px;
 }
+/* The prototype's preset control is a bordered CHIP with its own caret, not a
+   form field (`1095-vst-device.html` l.8): 10.5 px, `padding:2px 7px`, 2 px
+   radius. `appearance: none` is what gets it there — the native select's own
+   min-height and drop-arrow gutter were making every window's title bar 47 px
+   against the prototype's 37 (gap2 A5). The caret is two gradient wedges
+   rather than a glyph, because the control's content is its options. */
 .wadjet-studio-window-preset-pick {
   max-width: 110px;
-  padding: 1px 5px;
+  height: auto;
+  padding: 2px 14px 2px 7px;
+  appearance: none;
   font-size: var(--wadjet-studio-fs-chip);
+  line-height: 1.2;
   color: var(--wadjet-studio-text-dim);
-  background: transparent;
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%), linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: right 7px center, right 5px center;
+  background-size: 2px 2px, 2px 2px;
+  background-repeat: no-repeat;
   border: 1px solid #565b61;
   border-radius: 2px;
 }
@@ -1325,7 +1353,9 @@
   padding: 3px 8px;
   font-family: var(--wadjet-studio-mono);
   font-size: var(--wadjet-studio-fs-caption);
-  line-height: 1.5;
+  /* 1.2, not 1.5: the prototype leaves the chip's line-height at normal, and
+     the extra half-line made the band 3 px taller than its 20 px (gap2 A9). */
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3920,8 +3950,9 @@
 
 /* Device window (SPEC §3.4 "Generic device", §5) — WHEN · SPELL · APPLY · MOD.
    The title row is the shared chrome's; the body starts at WHEN. Sections are
-   separated by a hairline, and each carries its own inset cards the way the
-   prototype's two-tone panel system does. */
+   separated by MARGIN alone (`1095-vst-device.html` l.74/84: `margin:12px 0 6px`
+   and no rule anywhere in the panel), and each carries its own inset cards the
+   way the prototype's two-tone panel system does. */
 .wadjet-studio-device {
   display: flex;
   flex-direction: column;
@@ -3935,14 +3966,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 9px 0 0;
-  margin-top: 9px;
-  border-top: 1px solid var(--wadjet-studio-border);
+  margin-top: 12px;
 }
 .wadjet-studio-device-section:first-child {
-  padding-top: 0;
   margin-top: 0;
-  border-top: none;
 }
 .wadjet-studio-device-head {
   display: flex;
@@ -3951,21 +3978,23 @@
   gap: 6px;
   min-width: 0;
 }
+/* NOT uppercased here: the caption arrives written (`APPLY · while active`),
+   noun in caps and qualifier in lowercase, the way the prototype writes it. */
 .wadjet-studio-device-head-label {
   font-size: var(--wadjet-studio-fs-micro);
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--wadjet-studio-text-mute);
 }
-/* The WHEN summary wraps under the segmented rather than squeezing it. */
-.wadjet-studio-device-head-summary {
-  order: 9;
-  flex: 1 0 100%;
-  font-size: var(--wadjet-studio-fs-chip);
-  color: var(--wadjet-studio-text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* The stage badge between WHEN and the segmented (`1095` l.27) — a bordered
+   pill that says which stage this predicate puts the device on. */
+.wadjet-studio-device-stage {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: var(--wadjet-studio-fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--wadjet-studio-text-mute);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
 }
 .wadjet-studio-device-head .wadjet-studio-segmented {
   flex: 0 0 auto;
@@ -3979,12 +4008,34 @@
 .wadjet-studio-device-subhead {
   font-size: var(--wadjet-studio-fs-micro);
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--wadjet-studio-text-mute);
 }
 .wadjet-studio-device-note {
   font-size: var(--wadjet-studio-fs-chip);
   color: var(--wadjet-studio-text-mute);
+}
+/* The one word in a note that is not dim — the stage the sentence lands on. */
+.wadjet-studio-device-note-em {
+  color: var(--wadjet-studio-sky);
+}
+/* WHEN · chance is ONE row (`1095` l.68-72): a 36 px dial, the readout, then
+   the seeding note — `gap:12px`, everything centred, and no caption under the
+   dial, because the segmented above it already says `chance`. */
+.wadjet-studio-device-chance {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.wadjet-studio-device-chance .wadjet-studio-knob {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.wadjet-studio-device-chance .wadjet-studio-knob-label {
+  display: none;
+}
+.wadjet-studio-device-chance .wadjet-studio-knob-value {
+  font-size: var(--wadjet-studio-fs-chip);
 }
 .wadjet-studio-device-spacer {
   flex: 1 1 auto;
@@ -3999,9 +4050,27 @@
   align-items: center;
   gap: 4px;
 }
+/* The carrier moon reads in the moon's own colour, with the 7 px dot the
+   prototype gives it — a WHEN tag's dot is 5 px (`1095` l.37 against l.47). */
+.wadjet-studio-chip.is-carrier {
+  color: var(--wadjet-studio-chip-color, var(--wadjet-studio-text-dim));
+}
+.wadjet-studio-chip.is-carrier .wadjet-studio-chip-icon.is-dot {
+  width: 7px;
+  height: 7px;
+}
+/* A tag the device is gated on wears its OWN hue on the label and the border,
+   over the flat chip fill — the prototype's `devTagChips` (`1095` l.47). */
 .wadjet-studio-device-chips .wadjet-studio-chip.is-selected {
-  color: var(--wadjet-studio-text);
+  color: var(--wadjet-studio-chip-color);
   border-color: var(--wadjet-studio-chip-color);
+}
+/* A phase that is IN the window is filled, not outlined — the prototype's
+   `devPhaseChips` swap fill and text on it (`1095` l.40). Tags stay outlined
+   (l.47), so this is keyed on the phase chips alone. */
+.wadjet-studio-device-chips .wadjet-studio-chip.is-selected[data-phase] {
+  color: var(--wadjet-studio-bg);
+  background: var(--wadjet-studio-chip-color);
 }
 .wadjet-studio-device-knobs {
   display: flex;
@@ -4130,26 +4199,27 @@
   background: var(--wadjet-studio-device-band-color, var(--wadjet-studio-border));
 }
 .wadjet-studio-device-track {
+  position: relative;
   height: 10px;
   background: var(--wadjet-studio-bg-alt);
   border-radius: 0 0 3px 3px;
 }
-.wadjet-studio-device-lane-svg {
-  display: block;
-  width: 100%;
-  height: 10px;
-}
-/* The prototype's diagonal hatch, drawn as an SVG fill would not tile: a
-   repeating gradient behind a gold hairline. */
+/* The marker is the prototype's 45 deg hatch behind a gold hairline
+   (`1095-vst-device.html` l.58). The two browns are the hatch itself — light,
+   not data colour, and they have no palette equivalent, so they stay literal
+   the way the knob's bevel does. */
 .wadjet-studio-device-clip {
-  fill: var(--wadjet-studio-gold);
-  fill-opacity: 0.3;
-  stroke: var(--wadjet-studio-gold);
-  stroke-width: 1;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wadjet-studio-device-clip-left, 0%);
+  width: var(--wadjet-studio-device-clip-w, 0%);
+  background: repeating-linear-gradient(45deg, #4a4430, #4a4430 3px, #2c2818 3px, #2c2818 6px);
+  border: 1px solid var(--wadjet-studio-gold);
+  border-radius: 2px;
 }
 .wadjet-studio-device-clip[data-selected="false"] {
-  fill-opacity: 0.16;
-  stroke-opacity: 0.5;
+  opacity: 0.5;
 }
 .wadjet-studio-device-clips {
   display: flex;

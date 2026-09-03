@@ -243,12 +243,16 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
 
     // --- sections -----------------------------------------------------------
 
-    /** `APPLY · while active` — the caption and the qualifier that teaches what it means (SPEC §9). */
-    function section(name: string, hintKey: string, o?: { qualifier?: string; summary?: string }): Section {
+    /**
+     * `APPLY · while active` — the caption and the qualifier that teaches what
+     * it means (SPEC §9). The noun is caps and the qualifier is not, exactly as
+     * written: the stylesheet no longer uppercases the label for us
+     * (`1095` l.84).
+     */
+    function section(name: string, hintKey: string, o?: { qualifier?: string }): Section {
       const root = body.createDiv({ cls: "wadjet-studio-device-section", attr: { "data-section": name.toLowerCase() } });
       const head = root.createDiv({ cls: "wadjet-studio-device-head", attr: { "data-hint": deviceHint(hintKey) } });
       head.createSpan({ cls: "wadjet-studio-device-head-label", text: o?.qualifier === undefined ? name : `${name} · ${o.qualifier}` });
-      if (o?.summary !== undefined) head.createSpan({ cls: "wadjet-studio-device-head-summary", text: o.summary });
       return { head, content: root.createDiv({ cls: "wadjet-studio-device-body" }) };
     }
 
@@ -391,7 +395,8 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       width: PANEL_W,
       badge: () => KIND_BADGE[current()?.kind ?? "trim"],
       badgeColor: kindColor(KIND_BADGE[opened?.kind ?? "trim"]),
-      ...(opened?.stage === "climate" ? { caption: "climate stage" } : {}),
+      // No `caption`: the prototype's device bar is LED · name · KIND · preset ▾
+      // · × and nothing else — the stage reads in the WHEN row (`when.ts`).
       preset: {
         name: NO_PRESET,
         // A reader, not a snapshot: `onSave` below writes a preset into the

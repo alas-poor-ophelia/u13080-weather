@@ -7,7 +7,10 @@ import { deviceHint } from "../../../model/hints-device";
 import type { DeviceWindowContext } from "./context";
 
 export function buildChance(c: DeviceWindowContext, parent: HTMLElement, p: number): void {
-  const row = parent.createDiv({ cls: "wadjet-studio-device-knobs" });
+  // One flex row, not a knob column (`1095` l.68-72): dial, then the readout
+  // and the seeding note beside it. The caption is dropped there because the
+  // WHEN segmented already says `chance` two lines up.
+  const row = parent.createDiv({ cls: "wadjet-studio-device-chance" });
   c.knob(row, {
     part: "when-chance",
     label: "chance",
@@ -15,7 +18,7 @@ export function buildChance(c: DeviceWindowContext, parent: HTMLElement, p: numb
     max: 1,
     step: 0.01,
     value: p,
-    fmt: (v) => `${(v * 100).toFixed(0)} %`,
+    fmt: (v) => `${Math.round(v * 100)}% of days`,
     color: "var(--wadjet-studio-wind)",
     hint: deviceHint("device.when.chance"),
     onChange: (v, phase) =>
@@ -23,5 +26,5 @@ export function buildChance(c: DeviceWindowContext, parent: HTMLElement, p: numb
         if (x.when.kind === "chance") setWhen(x, { kind: "chance", p: v });
       }),
   });
-  row.createSpan({ cls: "wadjet-studio-device-note", text: "seeded · the same days every roll" });
+  row.createSpan({ cls: "wadjet-studio-device-note", text: "seeded · same days every roll" });
 }

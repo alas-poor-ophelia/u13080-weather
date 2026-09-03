@@ -9,7 +9,6 @@ import { type Device, yearWindowsOf } from "../../../model/devices";
 import { dayRangeLabel } from "../../../model/format";
 import { deviceHint } from "../../../model/hints-device";
 import { BAND_TINT_ALPHA, SEASON_CYCLE, tintColour } from "../../../model/palette";
-import { LANE_H, LANE_W } from "./constants";
 import type { DeviceWindowContext } from "./context";
 import { seasonBands, windowSpans } from "./geometry";
 import { iconButton } from "./icon-button";
@@ -37,11 +36,14 @@ export function buildYearWindow(c: DeviceWindowContext, parent: HTMLElement, d: 
       "--wadjet-studio-device-band-color": tintColour(band.index, BAND_TINT_ALPHA, SEASON_CYCLE),
     });
   }
+  // Positioned elements rather than SVG rects: the prototype's marker is a
+  // 45 deg hatch (`1095` l.58), and a `repeating-linear-gradient` cannot fill
+  // an SVG shape. The lane is percentage-addressed either way.
   const track = lane.createDiv({ cls: "wadjet-studio-device-track" });
-  const svg = track.createSvg("svg", { cls: "wadjet-studio-device-lane-svg", attr: { viewBox: `0 0 ${LANE_W} ${LANE_H}`, preserveAspectRatio: "none" } });
   clips.forEach((clip, i) => {
     for (const [a, b] of windowSpans(clip.start, clip.length)) {
-      svg.createSvg("rect", { cls: "wadjet-studio-device-clip", attr: { x: (a * LANE_W).toFixed(2), y: 0, width: ((b - a) * LANE_W).toFixed(2), height: LANE_H, "data-clip": String(i), "data-selected": i === at ? "true" : "false" } });
+      const mark = track.createDiv({ cls: "wadjet-studio-device-clip", attr: { "data-clip": String(i), "data-selected": i === at ? "true" : "false" } });
+      mark.setCssProps({ "--wadjet-studio-device-clip-left": `${(a * 100).toFixed(2)}%`, "--wadjet-studio-device-clip-w": `${((b - a) * 100).toFixed(2)}%` });
     }
   });
 

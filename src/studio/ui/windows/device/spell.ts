@@ -33,7 +33,7 @@ export function buildSpell(c: DeviceWindowContext, d: Device): void {
     label: "starts / yr",
     ...SPELL_STARTS_RANGE,
     value: spell.meanStartsPerYear,
-    fmt: (v) => String(Number(v.toFixed(2))),
+    fmt: (v) => `${v.toFixed(1)} / yr`,
     color: "var(--wadjet-studio-gold)",
     hint: deviceHint("device.spell.starts"),
     onChange: (v, phase) => c.gesture(phase, (x) => setSpell(x, { meanStartsPerYear: v, meanDurationDays: x.spell?.meanDurationDays ?? spell.meanDurationDays })),

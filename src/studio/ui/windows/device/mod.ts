@@ -59,14 +59,14 @@ export function buildMod(c: DeviceWindowContext, d: Device): void {
 /** `moon:Sable × ∿ curve / ▦ phases` — the carrier and how it reads the cycle. */
 function buildCarrier(c: DeviceWindowContext, row: HTMLElement, d: Device, curve: boolean): void {
   const moon = d.when.kind === "moon" ? d.when.moon : "";
-  c.addPart(
-    createChip(row, {
-      label: `moon:${moon}`,
-      color: "var(--wadjet-studio-moon)",
-      hint: deviceHint("device.mod.carrier"),
-      onClick: () => openCycleFor(c.ctx, moon),
-    }),
-  );
+  const chip = createChip(row, {
+    label: `moon:${moon}`,
+    color: "var(--wadjet-studio-moon)",
+    hint: deviceHint("device.mod.carrier"),
+    onClick: () => openCycleFor(c.ctx, moon),
+  });
+  chip.el.addClass("is-carrier");
+  c.addPart(chip);
   const mode = iconButton(row, {
     text: curve ? "∿ curve" : "▦ phases",
     label: curve ? "Cycle mode: curve" : "Cycle mode: phases",

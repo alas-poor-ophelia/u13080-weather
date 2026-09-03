@@ -20,6 +20,7 @@ export const DEVICE_HINTS: Record<string, Hint> = {
 
   // --- WHEN ---
   "device.when": ["When", "which days the device is active — the modifier's predicate"],
+  "device.stage": ["Stage", "no when = climate stage, curves reshaped once; any when or spell = daily stage, checked per day"],
   "device.when.moon": ["Carrier moon", "opens the cycle editor for this moon"],
   "device.when.moonPick": ["Moon", "which moon carries the device"],
   "device.when.phase": ["Phase", "selected phases compile to one [a, b) window"],

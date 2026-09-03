@@ -23,7 +23,9 @@ export function buildTag(c: DeviceWindowContext, parent: HTMLElement, tags: stri
     const chip = createChip(chips, {
       label: tag,
       color: tagColour(tag, seasons),
-      icon: "⚑",
+      // A dot, not the ⚑ the MOD gate rows wear: in the prototype the flag
+      // belongs to the gate matrix (`0699` l.70) and a WHEN tag is a plain
+      // coloured dot (`1095` l.47).
       hint: deviceHint("device.when.tag"),
       ...(tags.length > 1 ? { onClick: () => toggleTag(c, tag) } : {}),
     });

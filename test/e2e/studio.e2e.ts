@@ -3709,8 +3709,10 @@ describe("climate studio · device window", () => {
     // The chrome title is the rename field, so the name is editable in place.
     expect(probe.name).toBe(DEVICE_ID);
     expect(probe.whenKind).toBe("chance");
-    // `{ chance: 0.1 }` reads as a percentage, not a fraction (SPEC §3.4).
-    expect(probe.chance).toBe("10 %");
+    // `{ chance: 0.1 }` reads as a percentage, not a fraction (SPEC §3.4), and
+    // says what the percentage is OF, the way the prototype's `devChance.lbl`
+    // does (wadjet-9f9.48.8.2).
+    expect(probe.chance).toBe("10% of days");
     expect(probe.applyKnobs).toBe(1);
     // Law 5: the footer is the exact modifier the window writes — as authored
     // grammar now rather than the serialised object (F11a `deviceGrammar`),
