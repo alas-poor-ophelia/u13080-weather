@@ -62,7 +62,7 @@ export const DEVICE_HINTS: Record<string, Hint> = {
 
 /**
  * The keys the device window uses. `test/studio-hints-device.test.ts` scans
- * `src/studio/ui/windows/device.ts` and asserts this list is exactly what it
+ * every module under `src/studio/ui/windows/device/` and asserts this list is exactly what it
  * asks for, so a control added without a hint (or a hint left behind by a
  * deleted control) fails the unit gate rather than showing an empty hint bar.
  */

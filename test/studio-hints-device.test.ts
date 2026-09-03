@@ -4,15 +4,37 @@
  * built by `deviceHint(key)`. A control added without an entry would render
  * the raw key into the hint bar.
  *
- * `src/studio/ui/windows/device.ts` imports Obsidian, so it cannot be imported
- * under `bun test` (the `obsidian` package is typings only). The check is a
- * source scan, in both directions — the same shape as `studio-hints.test.ts`.
+ * The device window imports Obsidian, so it cannot be imported under `bun test`
+ * (the `obsidian` package is typings only). The check is a source scan, in both
+ * directions — the same shape as `studio-hints.test.ts`.
+ *
+ * The window is a folder of modules (`windows/device/`), so the scan reads
+ * every `.ts` under it — a body module that grows a control has to bring its
+ * hint with it. The single-file form is still read when it is there, so this
+ * holds whichever shape the window is in.
  */
 import { describe, expect, test } from "bun:test";
+import { existsSync, readdirSync } from "node:fs";
 import { HINT_SEPARATOR, parseHint } from "../src/studio/model/hints";
 import { DEVICE_HINTS, DEVICE_HINT_KEYS, deviceHint } from "../src/studio/model/hints-device";
 
-const WINDOW_SOURCE = await Bun.file(new URL("../src/studio/ui/windows/device.ts", import.meta.url)).text();
+const WINDOW_FILE = new URL("../src/studio/ui/windows/device.ts", import.meta.url);
+const WINDOW_DIR = new URL("../src/studio/ui/windows/device/", import.meta.url);
+
+async function windowSources(): Promise<string> {
+  const sources: string[] = [];
+  if (existsSync(WINDOW_FILE)) sources.push(await Bun.file(WINDOW_FILE).text());
+  if (existsSync(WINDOW_DIR)) {
+    const names = readdirSync(WINDOW_DIR, { recursive: true })
+      .map((name) => String(name).replaceAll("\\", "/"))
+      .filter((name) => name.endsWith(".ts"))
+      .sort();
+    for (const name of names) sources.push(await Bun.file(new URL(name, WINDOW_DIR)).text());
+  }
+  return sources.join("\n");
+}
+
+const WINDOW_SOURCE = await windowSources();
 
 function keysUsedByWindow(): string[] {
   const found = new Set<string>();
