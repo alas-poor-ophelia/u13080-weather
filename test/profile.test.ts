@@ -119,6 +119,22 @@ describe("resolveProfile / profileHash", () => {
     expect(profileHash(zone())).toBe("wh1:5806b0fe11328ba9");
   });
 
+  test("badge (display-only) does not move the hash, but a real field on the same modifier still does (D20)", () => {
+    const curse = { id: "hexed", when: { yearPhase: [0, 1] as [number, number] }, apply: [{ param: "wind.speed" as const, op: "offset" as const, value: 1 }] };
+    const flagged = profileHash(zone({ modifiers: [{ ...curse, badge: "curse" }] }));
+    const unflagged = profileHash(zone({ modifiers: [curse] }));
+    expect(flagged).toBe(unflagged);
+    // a real field — the apply value — still changes the hash even with the same badge
+    const differentValue = profileHash(zone({ modifiers: [{ ...curse, badge: "curse", apply: [{ param: "wind.speed", op: "offset", value: 2 }] }] }));
+    expect(differentValue).not.toBe(flagged);
+    // a real field — when — still changes the hash
+    const differentWhen = profileHash(zone({ modifiers: [{ ...curse, badge: "curse", when: { yearPhase: [0, 0.5] } }] }));
+    expect(differentWhen).not.toBe(flagged);
+    // a real field — id — still changes the hash
+    const differentId = profileHash(zone({ modifiers: [{ ...curse, badge: "curse", id: "other" }] }));
+    expect(differentId).not.toBe(flagged);
+  });
+
   test("enabled: false switches a climate-stage modifier, and an op inside one, off", () => {
     const colder = { param: "temperature.mean", op: "offset" as const, value: -5 };
     const base = evalCurve(fjord.climate.temperature.mean, 0.5);
@@ -244,17 +260,17 @@ describe("validateProfile: mod-matrix gates and onset envelopes", () => {
       ),
     ).toEqual([
       "modifiers[0].mods[0].source: must be a non-empty string (a tag, never a moon)",
-      "modifiers[0].mods[1].amount: amount must be between 0 and 1 (a gate dims, it never amplifies)",
+      "modifiers[0].mods[1].amount: amount must be between 0 and 1 (gate strength: 1 restricts to the source, 0 is no gate)",
       "modifiers[0].mods[2].source: must be a non-empty string (a tag, never a moon)",
-      "modifiers[0].mods[2].amount: amount must be between 0 and 1 (a gate dims, it never amplifies)",
+      "modifiers[0].mods[2].amount: amount must be between 0 and 1 (gate strength: 1 restricts to the source, 0 is no gate)",
       "modifiers[0].mods[3]: gate must be an object",
     ]);
   });
 
-  test("a gate is a dimmer: amount above 1 is an error, and both ends of [0, 1] are legal", () => {
+  test("a gate's strength is in [0, 1]: amount above 1 is an error, and both ends are legal", () => {
     const gates = (mods: Array<Record<string, unknown>>) => zone({ modifiers: [{ id: "m", mods: mods as never, apply: [{ param: "wind.speed", op: "offset", value: 1 }] }] });
-    expect(errs(gates([{ source: "season:Harvest", amount: 1.5 }]))).toEqual(["modifiers[0].mods[0].amount: amount must be between 0 and 1 (a gate dims, it never amplifies)"]);
-    // exactly 0 and exactly 1 are the two ends of the dimmer, not off-by-one rejections
+    expect(errs(gates([{ source: "season:Harvest", amount: 1.5 }]))).toEqual(["modifiers[0].mods[0].amount: amount must be between 0 and 1 (gate strength: 1 restricts to the source, 0 is no gate)"]);
+    // exactly 0 (no gate) and exactly 1 (a hard gate) are the two ends, not off-by-one rejections
     expect(validateProfile(gates([{ source: "a", amount: 0 }, { source: "b", amount: 1 }]))).toEqual([]);
   });
 
@@ -308,13 +324,14 @@ describe("validateProfile: mod-matrix gates and onset envelopes", () => {
 });
 
 describe("gates and envelopes (end to end)", () => {
-  test("a gate at amount 0 gives a day byte-equal to switching the modifier off", () => {
-    const timeOf = (d: number) => ({ ...gregorianTime(d), tags: ["season:Harvest"] });
+  test("a hard gate outside its source gives a day byte-equal to switching the modifier off", () => {
+    // no day carries the gate's source, so a gate at amount 1 mutes the device everywhere (D19)
+    const timeOf = (d: number) => ({ ...gregorianTime(d), tags: [] as string[] });
     // the anchor guarantees a non-empty op list on both sides, so day-param normalisation runs identically
     const anchor = { id: "anchor", apply: [{ param: "wind.speed", op: "offset" as const, value: 0 }] };
     const gated = {
       id: "gated",
-      mods: [{ source: "season:Harvest", amount: 0 }],
+      mods: [{ source: "season:Harvest", amount: 1 }],
       apply: [
         { param: "temperature.mean", op: "offset" as const, value: -8 },
         { param: "precipitation.pwd", op: "scale" as const, value: 2 },
@@ -325,8 +342,8 @@ describe("gates and envelopes (end to end)", () => {
     const off = days([anchor, { ...gated, enabled: true, mods: [], apply: [] }]);
     expect(JSON.stringify(muted)).toBe(JSON.stringify(days([anchor, { ...gated, enabled: false }])));
     expect(JSON.stringify(muted)).toBe(JSON.stringify(off));
-    // sanity: at full strength the same modifier does change the world
-    expect(JSON.stringify(days([anchor, { ...gated, mods: [{ source: "season:Harvest", amount: 1 }] }]))).not.toBe(JSON.stringify(off));
+    // sanity: amount 0 is no gate at all, and the same modifier does change the world
+    expect(JSON.stringify(days([anchor, { ...gated, mods: [{ source: "season:Harvest", amount: 0 }] }]))).not.toBe(JSON.stringify(off));
   });
 
   test("an envelope shapes a moon-carried modifier over the lunar cycle", () => {

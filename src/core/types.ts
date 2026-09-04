@@ -122,17 +122,19 @@ export interface SpellSpec {
 }
 
 /**
- * A mod-matrix gate (PLAN §0 D7, §2.4). `source` is always a TAG — never a moon —
- * and when that tag is on the day, every op's magnitude in the modifier is
- * multiplied by `amount`. An inactive gate contributes ×1; gates multiply;
- * `amount: 0` mutes the modifier without silencing its tag.
+ * A mod-matrix gate (PLAN §0 D7, §2.4, D19). `source` is always a TAG — never a
+ * moon. A gate RESTRICTS the modifier to its source: on a day carrying the tag
+ * it contributes ×1, and on every other day it contributes ×(1 − amount). Gates
+ * multiply, so a modifier with two gates runs whole only where BOTH tags are on
+ * the day; a hard gate outside its source mutes the modifier without silencing
+ * its tag.
  *
- * A gate is a dimmer: `amount` is in [0, 1] (validation rejects the rest), so a
+ * `amount` is the gate's STRENGTH, in [0, 1] (validation rejects the rest), so a
  * gate can only take a device down from the magnitude its author wrote.
  */
 export interface ModGate {
   source: string;
-  /** dimmer in [0, 1]: 1 is full strength, 0 mutes */
+  /** gate strength in [0, 1]: 1 is a hard gate (silent outside `source`), 0 is no gate */
   amount: number;
 }
 

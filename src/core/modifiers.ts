@@ -35,16 +35,22 @@ export function sampleEnvelope(env: readonly (readonly [number, number])[], t: n
 }
 
 /**
- * Product of the `amount`s of the gates whose `source` tag is on the day
- * (PLAN §2.4: a gate source is a TAG, never a moon). Inactive gates contribute
- * ×1; no gates = 1. `time.tags` is the day's context as the modifier's own
- * predicate saw it, so tags pushed by EARLIER modifiers today do gate later ones.
+ * A gate RESTRICTS a device to its source (PLAN §0 D19). On a day carrying the
+ * gate's `source` tag the gate contributes ×1 — the device runs at the strength
+ * its author wrote; on every OTHER day it contributes ×(1 − amount). So `amount`
+ * is the gate's STRENGTH, not a dimmer: 1 is a hard gate (silent outside the
+ * source), 0.5 halves the device outside it, 0 is no gate at all.
+ *
+ * A gate source is a TAG, never a moon (PLAN §2.4). Gates multiply, so a device
+ * with two gates runs full only on a day carrying BOTH sources. No gates = 1.
+ * `time.tags` is the day's context as the modifier's own predicate saw it, so
+ * tags pushed by EARLIER modifiers today do gate later ones.
  */
 function gateFactor(m: Modifier, time: DayTime): number {
   if (!m.mods?.length) return 1;
   const tags = time.tags ?? [];
   let f = 1;
-  for (const g of m.mods) if (tags.includes(g.source)) f *= g.amount;
+  for (const g of m.mods) if (!tags.includes(g.source)) f *= 1 - g.amount;
   return f;
 }
 
@@ -69,8 +75,9 @@ function envelopeFactor(m: Modifier, op: ModifierOp, time: DayTime): number {
  * `applyDayOps` must never see it): `offset v → v·f`, `scale v → 1 + (v−1)·f`,
  * `set`/`clamp` pass through. f = 1 with no envelope returns the op unchanged.
  *
- * `f` is always in [0, 1]: gate amounts and envelope strengths are dimmers, and
- * `validateGates` / `validateEnvelope` reject anything outside that range. With
+ * `f` is always in [0, 1]: a gate factor is 1 inside its source and 1 − amount
+ * outside it, an envelope strength is a dimmer, and `validateGates` /
+ * `validateEnvelope` reject any `amount`/`strength` outside [0, 1]. With
  * a non-negative `scale` value that pins `1 + (v−1)·f` between `v` and 1, so a
  * dimmer can never flip the sign of a scale. The invariant is the validator's;
  * the engine deliberately does no clamping of its own.

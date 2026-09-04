@@ -879,7 +879,7 @@ interface Modifier {
 | `spell` | `SpellSpec`, optional | Turns `when` into a multi-day event (see below). Also not allowed on `climate` stage. |
 | `apply` | `ModifierOp[]` | The ops to run when active, in list order. |
 | `tag` | `string`, optional | Added to `WeatherReport.conditions` while the modifier is active; a modifier with a `tag` and no meaningful `apply` (e.g. `apply: []`) is pure flavour text. |
-| `enabled` | `boolean`, optional | Power switch, absent = enabled. `enabled: false` skips the modifier at **both** stages: no ops, no `tag`, and its climate-stage ops are not folded into the resolved climate. Distinct from a muted gate (below), which still runs and still tags the day. |
+| `enabled` | `boolean`, optional | Power switch, absent = enabled. `enabled: false` skips the modifier at **both** stages: no ops, no `tag`, and its climate-stage ops are not folded into the resolved climate. Distinct from a modifier gated out by its `mods` (below), which still runs and still tags the day. |
 | `mods` | `ModGate[]`, optional | Mod-matrix gates. Absent or empty is a factor of 1. `daily` stage only — `mods` on a `climate`-stage modifier is a validation error, since a climate-stage modifier is unconditional by construction. |
 
 ### Id conventions
@@ -916,21 +916,21 @@ order, then `forcings:*`; the order is meaningful (ops stack in list order) but 
 ```ts
 interface ModGate {
   source: string;   // a TAG, never a moon
-  amount: number;   // a dimmer in [0, 1]
+  amount: number;   // gate strength in [0, 1]
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `source` | `string` | **A tag** — `season:Harvest`, `era:Ice Age`, or a tag set by a modifier earlier in the list the same day. The engine tests tag membership and nothing else. There is no `moon:` gate: a moon shapes a modifier as its *carrier* instead, through `when.moon` plus an `envelope` (see Ops below). A `source` **starting with `moon:` is a validation error**, not a tag that happens never to match. |
-| `amount` | `number` in `[0, 1]` | Magnitude multiplier applied while `source` is on the day. **A gate is a dimmer: it never amplifies.** `1` is full strength, `0` mutes; anything outside `[0, 1]` is a validation error. Author the device at the magnitude you want at its strongest and let the gate take it down. |
+| `amount` | `number` in `[0, 1]` | The gate's **strength** — how hard it restricts the modifier to `source`. `1` is a hard gate (the modifier is silent on any day without the tag), `0.5` halves it on those days, `0` is no gate at all. Anything outside `[0, 1]` is a validation error. A gate never amplifies: author the device at the magnitude you want at its strongest, inside its source. |
 
 | Rule | Detail |
 |---|---|
-| Factor | The day's gate factor is the **product** of `amount` over the gates whose `source` is on the day. A gate whose source is absent contributes ×1; a modifier with no gates has factor 1. Every factor is in `[0, 1]`, so the product is too. |
-| Sign is safe | Because the factor `f` is in `[0, 1]` and a `scale` value is non-negative, `1 + (v − 1)·f` sits between `v` and `1` — dimming can never flip the sign of a scaled parameter. The bound is enforced by validation, not clamped by the engine. |
+| Factor | **A gate restricts a modifier to its source.** Each gate contributes ×1 on a day carrying its `source` tag and ×`(1 − amount)` on every other day, and the day's gate factor is the **product** across gates — so a modifier with two gates runs whole only where *both* tags are on the day. A modifier with no gates has factor 1. Every factor is in `[0, 1]`, so the product is too. |
+| Sign is safe | Because the factor `f` is in `[0, 1]` and a `scale` value is non-negative, `1 + (v − 1)·f` sits between `v` and `1` — a gate can never flip the sign of a scaled parameter. The bound is enforced by validation, not clamped by the engine. |
 | What it scales | The *magnitude* of each op, not the day's value: `offset v → v · f`, `scale v → 1 + (v − 1) · f`. `set` and `clamp` pass through untouched — there is no continuous "half a `set`". |
-| `amount: 0` **mutes**, it does not disable | The ops still run (as `offset 0` / `scale 1`), so the modifier stays active and still contributes its `tag` and its visibility to later `tag` predicates. Only `enabled: false` removes a modifier. |
+| A gated-out modifier is **muted**, not disabled | At factor 0 the ops still run (as `offset 0` / `scale 1`), so the modifier stays active and still contributes its `tag` and its visibility to later `tag` predicates. Only `enabled: false` removes a modifier. |
 | Chaining | Gates read the day's tags as the modifier's own predicate saw them, so a modifier earlier in the list can gate a later one. |
 | With an envelope | Gate factor and envelope strength multiply. |
 
@@ -1078,7 +1078,7 @@ magnitude across the carrier moon's cycle, so the effect swells and fades instea
 | Effect | Strength `s` scales the op's magnitude exactly as a gate does: `offset v → v · s`, `scale v → 1 + (v − 1) · s`. Gate factor and envelope strength multiply. |
 | `set` / `clamp` | Ignore it. Validation raises a **warning** (`"envelope has no effect on set/clamp"`), not an error. |
 | Stage | `daily` only — an envelope on a `climate`-stage op is an error. The engine strips `envelope` from the op before it reaches the curves. |
-| Shape rules | The array must be non-empty; each point is `[phase ∈ [0,1), strength ∈ [0,1]]`. **Strength is a dimmer, exactly like a gate's `amount`**: a strength above 1 is a validation error, so an envelope shapes a device's onset but never amplifies it past the magnitude the author wrote. |
+| Shape rules | The array must be non-empty; each point is `[phase ∈ [0,1), strength ∈ [0,1]]`. **Strength is a dimmer**: a strength above 1 is a validation error, so an envelope shapes a device's onset but never amplifies it past the magnitude the author wrote. |
 
 ### Named moon phases (`MoonConfig.phases`)
 
@@ -1130,7 +1130,7 @@ present.
 | `modifiers[i].enabled`, `modifiers[i].apply[j].enabled` | error | Present but not `true`/`false`. |
 | `modifiers[i].mods` | error | Not an array, or present on a `climate`-stage modifier. |
 | `modifiers[i].mods[j].source` | error | Not a non-empty string, **or starting with `moon:`** — "a gate is a tag; a moon is the carrier (use `when.moon`)". |
-| `modifiers[i].mods[j].amount` | error | Not a number in `[0, 1]` — "a gate dims, it never amplifies". |
+| `modifiers[i].mods[j].amount` | error | Not a number in `[0, 1]` — "gate strength: 1 restricts to the source, 0 is no gate". |
 | `modifiers[i].mods[j].<field>` | warning | Unknown field on a gate — ignored. |
 | `modifiers[i].apply[j].envelope` | error | Present on a `climate`-stage op, or not a non-empty array. |
 | `modifiers[i].apply[j].envelope[k]` | error | Not `[phase ∈ [0,1), strength ∈ [0,1]]`. |

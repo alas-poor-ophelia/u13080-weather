@@ -107,20 +107,21 @@ describe("device lanes · laneSpec", () => {
     expect(spec.editable).toBe(false);
   });
 
-  test("a moon device is pulses, and a gate at amount 0 dims the ones it mutes", () => {
+  test("a moon device is pulses, and a gate dims the ones OUTSIDE its source (D19)", () => {
     const m = device("Stormtide", {
       when: { moon: { name: "Sable", phase: [0, 0.1] } },
-      mods: [{ source: "season:Winter", amount: 0 }],
+      mods: [{ source: "season:Winter", amount: 1 }],
     });
     const spec = laneSpec(m, CAL, YEAR_3);
     expect(spec.kind).toBe("pulse");
     expect(spec.editable).toBe(false);
     expect(spec.spans.length).toBeGreaterThan(0);
     expect(spec.spans.every((s) => s.kind === "pulse")).toBe(true);
-    // Winter is the last quarter of the year; the pulses in it are the dim ones.
+    // Winter is the last quarter of the year; the gate restricts the device to it,
+    // so the pulses OUTSIDE Winter are the dim ones.
     expect(spec.spans.some((s) => s.dim === true)).toBe(true);
     expect(spec.spans.some((s) => s.dim !== true)).toBe(true);
-    for (const s of spec.spans) expect(s.dim === true).toBe((s.from + s.to) / 2 - 3 >= 0.75);
+    for (const s of spec.spans) expect(s.dim === true).toBe((s.from + s.to) / 2 - 3 < 0.75);
   });
 
   test("a composite is one stacked window row, never editable", () => {

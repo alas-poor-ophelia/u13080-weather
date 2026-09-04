@@ -281,7 +281,8 @@ export function setOpEnabled(d: Device, index: number, on: boolean): void {
 /**
  * Add a mod-matrix gate. A gate is always a *tag* (PLAN §2.4): `moon:*` is the
  * carrier, never a gate, and the validator rejects it — so does this. `amount`
- * is a dimmer, clamped into [0, 1].
+ * is the gate's strength, clamped into [0, 1]: it defaults to 1, a hard gate
+ * that restricts the device to `source` (D19), and 0 is no gate at all.
  */
 export function addGate(d: Device, source: string, amount = 1): boolean {
   if (!source.trim() || source.startsWith("moon:")) return false;

@@ -1,5 +1,5 @@
 {
-  "generatorVersion": "wadjet-gen/0.0.2",
+  "generatorVersion": "wadjet-gen/0.0.3",
   "rngVersion": "wadjet-rng/1",
   "presetId": "fjord-coast",
   "presetContentHash": "sha256:8c1ba2e3ed029dd40a87f1031c9086938dcdf75fba431f387fb7e841d2625460",

@@ -18,7 +18,7 @@ import { buildGolden, compareGolden, type Golden } from "../test/golden/golden";
 import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "../test/golden/golden-gen";
 
 const rngPath = new URL("../test/golden/rng-1.json", import.meta.url);
-const genPath = new URL("../test/golden/gen-0.0.2.json", import.meta.url);
+const genPath = new URL("../test/golden/gen-0.0.3.json", import.meta.url);
 const write = process.argv.includes("--write");
 
 const freshRng: Golden = buildGolden(rng);

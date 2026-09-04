@@ -25,6 +25,8 @@ import {
   directionRose,
   isDerivedSeries,
   layerGlob,
+  mirrorsStation,
+  stationDisplay,
   plotPoints,
   PRECIP_WET_SHARE,
   primarySeries,
@@ -66,6 +68,7 @@ import {
 } from "../src/studio/model/channel-edit";
 import { wetFraction } from "../src/studio/model/channel-series";
 import { effectiveBase, getAllYear, getCycle, getSeasonOffset, getSwing, setSwing, type Channel } from "../src/studio/model/compile";
+import { arcAngles, valueToAngle } from "../src/studio/model/knob";
 import { rollYear } from "../src/studio/model/audition";
 import { InternalCalendar } from "../src/plugin/time/internal";
 
@@ -234,6 +237,103 @@ describe("knobs", () => {
     write(z, TEMP_CHANNEL, ALL_SCOPE, "offset", 0);
     write(z, TEMP_CHANNEL, ALL_SCOPE, "swing", 1);
     expect(z.modifiers).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/**
+ * PLAN D18 — day jitter σ and gust show the station's own figure and store the
+ * delta. The lens is the whole of the change: nothing below asserts a new
+ * modifier shape, because there is none.
+ */
+describe("station-absolute knobs (D18)", () => {
+  /** The station σ the jitter knob rests on: `temperature.sd` at the twelve month centres. */
+  function stationSigma(z: ZoneProfile): number {
+    const sd = z.climate.temperature.sd;
+    let sum = 0;
+    for (let m = 0; m < 12; m++) sum += evalCurve(sd, monthCentrePhase(m));
+    return sum / 12;
+  }
+
+  test("only jitter and gust mirror a station quantity", () => {
+    expect(mirrorsStation(TEMP_CHANNEL, "jitter")).toBe(true);
+    expect(mirrorsStation("wind", "gust")).toBe(true);
+    for (const id of ["offset", "swing", "depth", "wind", "calm", "chance"] as KnobId[]) {
+      expect(mirrorsStation(TEMP_CHANNEL, id)).toBe(false);
+    }
+    // The pairing is per channel, not per id: `gust` is WIND's alone.
+    expect(mirrorsStation(TEMP_CHANNEL, "gust")).toBe(false);
+    expect(mirrorsStation("wind", "jitter")).toBe(false);
+  });
+
+  test("jitter rests on the station's own σ, and a stored offset rides on it", () => {
+    const z = zone();
+    const lens = stationDisplay(z, TEMP_CHANNEL, "jitter");
+    expect(lens).not.toBeNull();
+    expect(lens!.neutral).toBe(0);
+    expect(lens!.station).toBeCloseTo(stationSigma(z), 12);
+    // At rest the face is the station's σ, not a bare 0.
+    expect(lens!.toDisplay(read(z, TEMP_CHANNEL, ALL_SCOPE).jitter)).toBeCloseTo(lens!.station, 12);
+    write(z, TEMP_CHANNEL, ALL_SCOPE, "jitter", 1.5);
+    expect(lens!.toDisplay(read(z, TEMP_CHANNEL, ALL_SCOPE).jitter)).toBeCloseTo(lens!.station + 1.5, 12);
+  });
+
+  test("gust rests on wind.wetDayScale — the ×1.30 the card prints — and its layer's no-op is ×1", () => {
+    const z = zone();
+    const lens = stationDisplay(z, "wind", "gust");
+    expect(lens).not.toBeNull();
+    expect(lens!.neutral).toBe(1);
+    expect(lens!.station).toBe(z.climate.wind.wetDayScale);
+    expect(lens!.toDisplay(read(z, "wind", ALL_SCOPE).gust)).toBeCloseTo(lens!.station, 12);
+  });
+
+  test("toDisplay and fromDisplay round-trip, both ways, on both knobs", () => {
+    const z = zone();
+    for (const [channel, knob, stored] of [
+      [TEMP_CHANNEL, "jitter", [-2, -0.4, 0, 0.7, 2.1]],
+      ["wind", "gust", [0.7, 1, 1.15, 1.4]],
+    ] as Array<[Channel, KnobId, number[]]>) {
+      const lens = stationDisplay(z, channel, knob)!;
+      for (const v of stored) expect(lens.fromDisplay(lens.toDisplay(v))).toBeCloseTo(v, 12);
+      for (const shown of [0, 1, 2.5, 4.9]) expect(lens.toDisplay(lens.fromDisplay(shown))).toBeCloseTo(shown, 12);
+    }
+  });
+
+  test("what a drag writes is the delta, and the station never moves", () => {
+    const z = zone();
+    const lens = stationDisplay(z, TEMP_CHANNEL, "jitter")!;
+    const before = structuredClone(z.climate);
+    // The face is dragged to a whole absolute σ; the layer stores the difference.
+    write(z, TEMP_CHANNEL, ALL_SCOPE, "jitter", lens.fromDisplay(4));
+    expect(read(z, TEMP_CHANNEL, ALL_SCOPE).jitter).toBeCloseTo(4 - lens.station, 12);
+    expect(z.modifiers.map((m) => m.id)).toEqual(["layer:temperature.sd"]);
+    // The record is untouched, so the lens still reads the same station.
+    expect(z.climate).toEqual(before);
+    expect(stationDisplay(z, TEMP_CHANNEL, "jitter")!.station).toBe(lens.station);
+    expect(errors(z)).toEqual([]);
+  });
+
+  test("a knob with no station lens is unchanged, and an absent station degrades to the plain delta", () => {
+    const z = zone();
+    expect(stationDisplay(z, TEMP_CHANNEL, "offset")).toBeNull();
+    expect(stationDisplay(z, "precipitation", "chance")).toBeNull();
+    // A record whose σ curve is missing has no station figure to show.
+    const broken = zone();
+    (broken.climate.temperature as { sd?: unknown }).sd = undefined;
+    expect(stationDisplay(broken, TEMP_CHANNEL, "jitter")).toBeNull();
+  });
+
+  test("the arc grows from the track minimum: no neutral on either spec (SPEC law 6)", () => {
+    // The two specs `windows/channel.ts` carries, restated — a station knob is
+    // unipolar, so `arcAngles` sweeps from −135° (the minimum) and the knob is
+    // lit at rest rather than dark at a mid-track neutral.
+    const jitter = { min: 0, max: 5, step: 0.1 };
+    const gust = { min: 1, max: 1.6, step: 0.01 };
+    expect(arcAngles(2.9, jitter)).toEqual({ from: -135, to: valueToAngle(2.9, jitter) });
+    expect(arcAngles(1.3, gust)).toEqual({ from: -135, to: valueToAngle(1.3, gust) });
+    // …and a bipolar delta knob still sweeps from its own neutral.
+    expect(arcAngles(3, { min: -10, max: 10, neutral: 0 })).toEqual({ from: 0, to: valueToAngle(3, { min: -10, max: 10, neutral: 0 }) });
   });
 });
 

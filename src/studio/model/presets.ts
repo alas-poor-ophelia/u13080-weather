@@ -4,7 +4,7 @@
  * A `DevicePreset` is a modifier *shape*, not a modifier: it has no id, no
  * stage and no tag, because those belong to the instance the rack creates.
  * Values use the real grammar (`meanStartsPerYear` / `meanDurationDays`) and
- * are legal under `validateProfile` — gates dim within [0, 1], probabilities
+ * are legal under `validateProfile` — gate strengths sit in [0, 1], probabilities
  * stay in range, every `param` is a real curve path.
  *
  * Shapes are borrowed from the shipped copy-paste examples

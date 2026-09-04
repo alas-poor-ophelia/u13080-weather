@@ -7,5 +7,5 @@
  * - SCHEMA_VERSION is the WeatherReport shape. 0 until alpha ships.
  */
 export { RNG_VERSION } from "./rng";
-export const GENERATOR_VERSION = "wadjet-gen/0.0.2" as const;
+export const GENERATOR_VERSION = "wadjet-gen/0.0.3" as const;
 export const SCHEMA_VERSION = 0 as const;

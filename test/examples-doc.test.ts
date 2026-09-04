@@ -94,9 +94,10 @@ describe("docs/EXAMPLES.md", () => {
 });
 
 /**
- * "Spring tide": the recipe's promise is +14 km/h at full Sable and +7 in
- * Summer, where the gate dims it by half, ramping to nothing at the edges of
- * the window. Wind is flattened (`speedSd: 0`, `calmFraction: 0`,
+ * "Spring tide": the recipe's promise is +14 km/h at full Sable inside
+ * `season:Summer` — the gate's source — and +7 outside it, where the gate at
+ * `amount: 0.5` takes half (D19), ramping to nothing at the edges of the
+ * window. Wind is flattened (`speedSd: 0`, `calmFraction: 0`,
  * `wetDayScale: 1`) so the day's wind speed is exactly `10 + 14 · strength ·
  * gate` and the claim can be checked outright.
  */
@@ -129,20 +130,21 @@ describe("docs/EXAMPLES.md — spring tide (gate × envelope)", () => {
 
   test("every day's wind is 10 + 14 × envelope strength × gate", () => {
     for (const { d, phase, season } of days) {
-      const gate = season === "season:Summer" ? 0.5 : 1;
+      // D19: a gate RESTRICTS the device to its source — ×1 inside season:Summer, ×(1 − 0.5) outside it
+      const gate = season === "season:Summer" ? 1 : 0.5;
       expect(withGate[d]!.windSpeedKph, `day ${d}`).toBeCloseTo(10 + 14 * strength(phase) * gate, 7);
       expect(noGate[d]!.windSpeedKph, `day ${d}`).toBeCloseTo(10 + 14 * strength(phase), 7);
     }
   });
 
-  test("the gated season differs when the gate is removed; another season does not", () => {
+  test("the seasons OUTSIDE the gate's source differ when the gate is removed; the source does not", () => {
     const differing = (name: string) => days.filter((x) => x.season === name && Math.abs(withGate[x.d]!.windSpeedKph - noGate[x.d]!.windSpeedKph) > 1e-9).length;
-    // Summer: the gate halves the device, so every day the device fires moves.
-    expect(differing("season:Summer")).toBeGreaterThan(0);
-    expect(differing("season:Summer")).toBe(days.filter((x) => x.season === "season:Summer" && strength(x.phase) > 0).length);
-    // Autumn: the device still fires (the moon does not care about seasons) but the gate is absent, so nothing moves.
-    expect(differing("season:Autumn")).toBe(0);
-    expect(days.some((x) => x.season === "season:Autumn" && strength(x.phase) > 0)).toBe(true);
+    // Summer is the gate's source: inside it the device runs whole, so nothing moves.
+    expect(differing("season:Summer")).toBe(0);
+    expect(days.some((x) => x.season === "season:Summer" && strength(x.phase) > 0)).toBe(true);
+    // Autumn is outside it: the gate halves the device, so every day the device fires moves.
+    expect(differing("season:Autumn")).toBeGreaterThan(0);
+    expect(differing("season:Autumn")).toBe(days.filter((x) => x.season === "season:Autumn" && strength(x.phase) > 0).length);
   });
 
   test("the envelope is a ramp, not a switch: peak at full moon, nothing at the edges", () => {

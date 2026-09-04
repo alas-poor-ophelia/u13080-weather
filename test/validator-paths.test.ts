@@ -142,7 +142,7 @@ const EXPECTED_PATHS: string[] = [
   "modifiers[i].mods", // error: gates (mods) are daily-stage only; a climate-stage modifier is unconditional | error: mods must be an array
   "modifiers[i].mods[j]", // error: gate must be an object
   "modifiers[i].mods[j].amont", // warning: unknown field (ignored) — the path is `modifiers[i].mods[j].<any unknown key>`
-  "modifiers[i].mods[j].amount", // error: amount must be between 0 and 1 (a gate dims, it never amplifies)
+  "modifiers[i].mods[j].amount", // error: amount must be between 0 and 1 (gate strength: 1 restricts to the source, 0 is no gate)
   "modifiers[i].mods[j].source", // error: must be a non-empty string (a tag, never a moon) | error: a gate is a tag; a moon is the carrier (use when.moon)
   "modifiers[i].spell.meanDurationDays", // error: must be >= 1 | warning: very long spells (> 50 days) are looked back over at most 400 days
   "modifiers[i].spell.meanStartsPerYear", // error: must be > 0

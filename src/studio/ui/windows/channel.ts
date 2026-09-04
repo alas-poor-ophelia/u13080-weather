@@ -63,7 +63,7 @@
 import { Notice } from "obsidian";
 import type { ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
-import { addEnvelopePoint, addKeyframe, ALL_SCOPE, channelStat, chartPlots, clearDirection, curvePoints, curveSamples, directionLayer, directionRose, knobsFor, layerGlob, MOON_GLYPH, parseScope, plotPoints, plotSamples, pointWhen, PRECIP_WET_SHARE, primarySeries, read, removeEnvelopePoint, removeKeyframe, scopeChips, seasonBands, seasonDirections, seasonScope, setEnvelopePoint, setKeyframe, spreadSamples, stageCaption, stationPoints, stationSamples, swungPoints, swungSamples, wetDayPoints, wetDaySamples, write, writers, writtenLayers, type ChannelStat, type KnobId, type WriterRow } from "../../model/channel-edit";
+import { addEnvelopePoint, addKeyframe, ALL_SCOPE, channelStat, chartPlots, clearDirection, curvePoints, curveSamples, directionLayer, directionRose, knobsFor, layerGlob, mirrorsStation, MOON_GLYPH, parseScope, plotPoints, plotSamples, pointWhen, PRECIP_WET_SHARE, primarySeries, read, removeEnvelopePoint, removeKeyframe, scopeChips, seasonBands, seasonDirections, seasonScope, setEnvelopePoint, setKeyframe, spreadSamples, stageCaption, stationDisplay, stationPoints, stationSamples, swungPoints, swungSamples, wetDayPoints, wetDaySamples, write, writers, writtenLayers, type ChannelStat, type KnobId, type WriterRow } from "../../model/channel-edit";
 import { axisTicks as seriesAxisTicks } from "../../model/channel-series";
 import type { Channel } from "../../model/compile";
 import { grammar } from "../../model/copy";
@@ -220,7 +220,16 @@ interface ChannelWindowSpec {
   schema: string;
 }
 
-/** PLAN §5.2: offset ±10 °C, swing ×0.4–1.6, jitter ±5 °C on `temperature.sd`, ☾ depth ±10 °C. */
+/**
+ * PLAN §5.2: offset ±10 °C, swing ×0.4–1.6, jitter on `temperature.sd`, ☾ depth ±10 °C.
+ *
+ * Jitter is a **station-absolute** knob (PLAN D18): its face carries the
+ * zone's own day-to-day σ, not the ±5 °C delta it stores, so its track is the
+ * prototype's `KNOB.jitter` 0…5 °C and it has no `neutral` — the arc grows
+ * from the minimum, and the knob is lit at rest because a real station has a
+ * real σ. `channel-edit.ts stationDisplay` is the lens; the layer it writes is
+ * unchanged.
+ */
 const TEMPERATURE: ChannelWindowSpec = {
   title: "Temperature",
   color: "var(--wadjet-studio-temp)",
@@ -240,7 +249,7 @@ const TEMPERATURE: ChannelWindowSpec = {
   knobs: {
     offset: { label: "offset", quantity: "temperatureDelta", spec: { min: -10, max: 10, step: 0.1, neutral: 0 }, hint: channelEditorHint("channel.offset"), seasonHint: channelEditorHint("channel.season.offset"), color: "var(--wadjet-studio-accent)" },
     swing: { label: "seasonal swing", quantity: "factor", spec: { min: 0.4, max: 1.6, step: 0.01, neutral: 1 }, hint: channelEditorHint("channel.swing"), color: "var(--wadjet-studio-gold)" },
-    jitter: { label: "day jitter σ", quantity: "temperatureDelta", spec: { min: -5, max: 5, step: 0.1, neutral: 0 }, hint: channelEditorHint("channel.jitter") },
+    jitter: { label: "day jitter σ", quantity: "temperatureDelta", spec: { min: 0, max: 5, step: 0.1 }, hint: channelEditorHint("channel.jitter") },
     depth: { label: "curve depth", quantity: "temperatureDelta", spec: { min: -10, max: 10, step: 0.1, neutral: 0 }, hint: channelEditorHint("channel.depth"), color: "var(--wadjet-studio-moon)" },
   },
 };
@@ -340,7 +349,10 @@ const WIND: ChannelWindowSpec = {
   schema: "climate.wind — speed/direction/spread/calm keyframes · wetDayScale",
   knobs: {
     wind: { label: "wind", quantity: "speed", spec: { min: -10, max: 24, step: 0.1, neutral: 0 }, hint: channelEditorHint("channel.wind"), seasonHint: channelEditorHint("channel.season.wind"), color: "var(--wadjet-studio-accent)" },
-    gust: { label: "gust spread", quantity: "factor", spec: { min: 1, max: 1.6, step: 0.01, neutral: 1 }, hint: channelEditorHint("channel.gust") },
+    // Station-absolute (PLAN D18): the face carries `wind.wetDayScale` — the
+    // ×1.30 the card prints — and the ×1–1.6 track is the prototype's
+    // `KNOB.gust`. No `neutral`, so the arc grows from ×1.
+    gust: { label: "gust spread", quantity: "factor", spec: { min: 1, max: 1.6, step: 0.01 }, hint: channelEditorHint("channel.gust") },
     calm: { label: "calm days", quantity: "fraction", spec: { min: -0.3, max: 0.3, step: 0.01, neutral: 0 }, hint: channelEditorHint("channel.calm"), color: "var(--wadjet-studio-moon)" },
     direction: { label: "direction", quantity: "direction", spec: { min: 0, max: 360, step: 1, neutral: 0 }, hint: channelEditorHint("channel.direction"), color: "var(--wadjet-studio-gold)" },
     depth: { label: "depth", quantity: "speed", spec: { min: -20, max: 20, step: 0.1, neutral: 0 }, hint: channelEditorHint("channel.depth"), color: "var(--wadjet-studio-moon)" },
@@ -436,9 +448,14 @@ const WRITER_TAG: Record<WriterRow["kind"], string> = {
 // Readouts
 // ---------------------------------------------------------------------------
 
-/** `+2.0 °C` / `×1.25` / `0.62` — the knob's own readout, in the user's units. */
-function knobText(v: number, quantity: Quantity, units: Units): string {
-  const f = format(v, quantity, units, quantity === "factor" ? undefined : { signed: true });
+/**
+ * `+2.0 °C` / `×1.25` / `0.62` — the knob's own readout, in the user's units.
+ *
+ * `signed` is false for a station-absolute knob (PLAN D18): `+2.9 °C` of day
+ * jitter would claim a change from something, and the number is the σ itself.
+ */
+function knobText(v: number, quantity: Quantity, units: Units, signed = true): string {
+  const f = format(v, quantity, units, quantity === "factor" || !signed ? undefined : { signed: true });
   if (quantity === "factor") return `${f.unit}${f.text}`;
   return f.unit === "" ? f.text : `${f.text} ${f.unit}`;
 }
@@ -1123,7 +1140,13 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       const values = z === null ? null : read(z, channel, scope);
       for (const id of wanted) {
         const k = knobSpecs[id]!;
-        const value = values === null ? (k.spec.neutral ?? 0) : values[id];
+        // PLAN D18: a station-absolute knob shows `station + delta`; every
+        // other knob shows the delta it stores. With no zone to read a station
+        // from, the face rests at the track's own zero — its `neutral`, or its
+        // minimum where the arc grows from there.
+        const lens = z === null ? null : stationDisplay(z, channel, id);
+        const stored = values === null ? (k.spec.neutral ?? k.spec.min) : values[id];
+        const value = lens === null ? stored : lens.toDisplay(stored);
         const existing = knobs.get(id);
         if (existing !== undefined) {
           existing.update({ value, hint: hintFor(id), disabled: z === null, color: k.color ?? color });
@@ -1137,10 +1160,16 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
           size: "lg",
           hint: hintFor(id),
           disabled: z === null,
-          fmt: (v) => knobText(v, k.quantity, ctx.units()),
+          fmt: (v) => knobText(v, k.quantity, ctx.units(), !mirrorsStation(channel, id)),
           ...(needsUnitParse(k.quantity) ? { parse: (text: string) => parseDisplay(k.spec, k.quantity, ctx.units())(text) } : {}),
           onChange: (next, phase) => {
-            editZone((draft) => write(draft, channel, scope, id, next));
+            // Typed entry lands here too, already in display units (the spec's
+            // own range is what `parseDisplay` clamps against), so both edges
+            // convert in exactly one place.
+            editZone((draft) => {
+              const d = stationDisplay(draft, channel, id);
+              write(draft, channel, scope, id, d === null ? next : d.fromDisplay(next));
+            });
             endOfGesture(phase === "drag" ? "drag" : "end");
           },
         });

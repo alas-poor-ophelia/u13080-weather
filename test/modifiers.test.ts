@@ -218,61 +218,92 @@ describe("engine: mod-matrix gates", () => {
     mods: [{ source: "season:Harvest", amount: 0.5 }],
   };
 
-  test("an active gate scales magnitudes (offset ×f, scale toward 1); an inactive one is ×1", () => {
+  test("inside its source a gate is ×1; OUTSIDE it magnitudes fall to (1 − amount) (D19)", () => {
     const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [gated], timeOf: harvest });
-    expect(e.forDay(0, "normal").ops).toEqual([
+    // inside the source the device runs at the strength its author wrote, and the ops come
+    // through as the very same objects, so a satisfied gate cannot perturb history
+    const on = e.forDay(0, "normal");
+    expect(on.ops).toEqual(gated.apply);
+    expect(on.ops[0]).toBe(gated.apply[0]);
+    // outside it the gate restricts: offset ×0.5, scale halfway toward 1, set/clamp untouched
+    expect(e.forDay(1, "normal").ops).toEqual([
       { param: "precipitation.pwd", op: "offset", value: 5 },
       { param: "wind.speed", op: "scale", value: 1.5 },
       { param: "cloud.dry", op: "set", value: 0.9 },
       { param: "humidity.wet", op: "clamp", min: 0.2 },
     ]);
-    // gate inactive: the ops come through as the very same objects, so an absent gate cannot perturb history
-    const off = e.forDay(1, "normal");
-    expect(off.ops).toEqual(gated.apply);
-    expect(off.ops[0]).toBe(gated.apply[0]);
   });
 
-  test("two gates multiply and inactive gates contribute ×1", () => {
-    const timeOf = (d: number): DayTime => ({ ...gregorianTime(d), tags: ["season:Harvest", "era:Long Winter"] });
+  test("amount 0.72 leaves 0.28 of the device outside the source", () => {
+    const m: Modifier = { id: "seven", apply: [{ param: "precipitation.pwd", op: "offset", value: 10 }], mods: [{ source: "season:Harvest", amount: 0.72 }] };
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf: harvest });
+    expect((e.forDay(0, "normal").ops[0] as { value: number }).value).toBe(10);
+    expect((e.forDay(1, "normal").ops[0] as { value: number }).value).toBeCloseTo(2.8, 12);
+  });
+
+  test("a hard gate (amount 1) silences the device outside its source and leaves it whole inside", () => {
+    const m: Modifier = { id: "hard", apply: [{ param: "precipitation.pwd", op: "offset", value: 10 }, { param: "wind.speed", op: "scale", value: 2 }], mods: [{ source: "season:Harvest", amount: 1 }] };
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf: harvest });
+    expect(e.forDay(0, "normal").ops).toEqual(m.apply);
+    expect(e.forDay(1, "normal").ops).toEqual([
+      { param: "precipitation.pwd", op: "offset", value: 0 },
+      { param: "wind.speed", op: "scale", value: 1 },
+    ]);
+  });
+
+  test("amount 0 is no gate at all: ×1 on every day, inside the source or out", () => {
+    const m: Modifier = { id: "none", apply: [{ param: "precipitation.pwd", op: "offset", value: 10 }], mods: [{ source: "season:Harvest", amount: 0 }] };
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf: harvest });
+    for (const d of [0, 1, 2, 3]) expect(e.forDay(d, "normal").ops).toEqual(m.apply);
+  });
+
+  test("two gates multiply: full only where BOTH tags are on the day", () => {
+    const tagsOn = (tags: string[]) => (d: number): DayTime => ({ ...gregorianTime(d), tags });
     const m: Modifier = {
       id: "two",
       apply: [{ param: "precipitation.pwd", op: "offset", value: 8 }],
       mods: [
         { source: "season:Harvest", amount: 0.5 },
         { source: "era:Long Winter", amount: 0.25 },
-        { source: "never", amount: 0 },
       ],
     };
-    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf }).forDay(3, "normal").ops).toEqual([{ param: "precipitation.pwd", op: "offset", value: 1 }]);
+    const at = (tags: string[]) => (new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [m], timeOf: tagsOn(tags) }).forDay(3, "normal").ops[0] as { value: number }).value;
+    expect(at(["season:Harvest", "era:Long Winter"])).toBe(8); // both sources: ×1 × ×1
+    expect(at(["season:Harvest"])).toBe(6); // outside the era only: ×0.75
+    expect(at(["era:Long Winter"])).toBe(4); // outside the season only: ×0.5
+    expect(at([])).toBeCloseTo(3, 12); // outside both: ×0.5 × ×0.75
   });
 
-  test("a dimmed `scale` below 1 stays non-negative: 1 + (v − 1)·f for every legal f", () => {
-    // f ∈ [0, 1] is what the validator guarantees, and it is what keeps 1 + (v − 1)·f
-    // from crossing zero for a shrinking scale — the sign cannot flip, so no op can
-    // silently invert the parameter it scales.
+  test("a gated `scale` below 1 stays non-negative: 1 + (v − 1)·f for every legal f", () => {
+    // f ∈ [0, 1] is what the validator guarantees (a gate is ×1 inside its source and
+    // ×(1 − amount) outside it), and it is what keeps 1 + (v − 1)·f from crossing zero
+    // for a shrinking scale — the sign cannot flip, so no op can silently invert the
+    // parameter it scales.
     const shrink: Modifier = { id: "shrink", apply: [{ param: "wind.speed", op: "scale", value: 0.5 }] };
-    const at = (amount: number) => new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...shrink, mods: [{ source: "season:Harvest", amount }] }], timeOf: harvest }).forDay(0, "normal").ops[0]!;
-    for (const f of [1, 0.25]) {
-      const op = at(f);
-      expect(op).toEqual({ param: "wind.speed", op: "scale", value: 1 + (0.5 - 1) * f });
+    // day 1 is OUTSIDE Harvest, so the gate bites and f is 1 − amount
+    const at = (amount: number) => new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...shrink, mods: [{ source: "season:Harvest", amount }] }], timeOf: harvest }).forDay(1, "normal").ops[0]!;
+    for (const amount of [0, 0.75]) {
+      const op = at(amount);
+      expect(op).toEqual({ param: "wind.speed", op: "scale", value: 1 + (0.5 - 1) * (1 - amount) });
       expect((op as { value: number }).value).toBeGreaterThanOrEqual(0);
     }
-    expect(at(1)).toEqual({ param: "wind.speed", op: "scale", value: 0.5 });
-    expect(at(0.25)).toEqual({ param: "wind.speed", op: "scale", value: 0.875 });
+    expect(at(0)).toEqual({ param: "wind.speed", op: "scale", value: 0.5 });
+    expect(at(0.75)).toEqual({ param: "wind.speed", op: "scale", value: 0.875 });
   });
 
   test("a gate sees a tag set by an EARLIER modifier the same day", () => {
     const timeOf = (d: number): DayTime => gregorianTime(d);
     const storm: Modifier = { id: "storm", when: { chance: 1 }, apply: [], tag: "storm" };
     const react: Modifier = { id: "react", apply: [{ param: "wind.speed", op: "offset", value: 10 }], mods: [{ source: "storm", amount: 0.25 }] };
-    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [storm, react], timeOf }).forDay(5, "normal").ops).toEqual([{ param: "wind.speed", op: "offset", value: 2.5 }]);
-    // order matters: a gate listed before its source sees nothing
-    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [react, storm], timeOf }).forDay(5, "normal").ops).toEqual([{ param: "wind.speed", op: "offset", value: 10 }]);
+    // the storm tag is on the day, so the gate is satisfied and the device runs whole
+    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [storm, react], timeOf }).forDay(5, "normal").ops).toEqual([{ param: "wind.speed", op: "offset", value: 10 }]);
+    // order matters: a gate listed before its source sees nothing, so it restricts (×0.75)
+    expect(new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [react, storm], timeOf }).forDay(5, "normal").ops).toEqual([{ param: "wind.speed", op: "offset", value: 7.5 }]);
   });
 
-  test("amount 0 mutes but keeps the modifier active and its tag", () => {
-    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...gated, tag: "gated", mods: [{ source: "season:Harvest", amount: 0 }] }], timeOf: harvest });
-    const r = e.forDay(0, "normal");
+  test("a hard gate mutes outside its source but keeps the modifier active and its tag", () => {
+    const e = new ModifierEngine({ seed: "s", zoneId: "z", modifiers: [{ ...gated, tag: "gated", mods: [{ source: "season:Harvest", amount: 1 }] }], timeOf: harvest });
+    const r = e.forDay(1, "normal");
     expect(r.active).toEqual(["gated"]);
     expect(r.tags).toEqual(["gated"]);
     expect(r.ops.slice(0, 2)).toEqual([
@@ -289,22 +320,22 @@ describe("engine: mod-matrix gates", () => {
       mods: [{ source: "season:Harvest", amount: 0.5 }],
     };
     const e = new ModifierEngine({ seed: "p", zoneId: "z", modifiers: [fog], timeOf: harvest });
-    let gatedDays = 0;
-    let ungatedDays = 0;
+    let insideDays = 0;
+    let outsideDays = 0;
     for (let d = 0; d < 365; d++) {
       const r = e.forDay(d, "normal");
       if (!r.active.length) continue;
       const value = (r.ops[0] as { value: number }).value;
       if (d % 2 === 0) {
-        expect(value).toBe(5);
-        gatedDays++;
+        expect(value).toBe(10); // inside season:Harvest the gate is satisfied
+        insideDays++;
       } else {
-        expect(value).toBe(10);
-        ungatedDays++;
+        expect(value).toBe(5); // outside it the gate takes half
+        outsideDays++;
       }
     }
-    expect(gatedDays).toBeGreaterThan(0);
-    expect(ungatedDays).toBeGreaterThan(0);
+    expect(insideDays).toBeGreaterThan(0);
+    expect(outsideDays).toBeGreaterThan(0);
   });
 });
 
@@ -356,7 +387,9 @@ describe("engine: onset envelopes", () => {
   });
 
   test("gate and envelope multiply", () => {
-    const timeOf = (d: number): DayTime => ({ ...gregorianTime(d), moons: [{ name: "Sable", phase: 0.25 }], tags: ["season:Harvest"] });
+    // the day is OUTSIDE season:Harvest, so the gate contributes 1 − 0.5 and the
+    // envelope another 0.5 on top of it
+    const timeOf = (d: number): DayTime => ({ ...gregorianTime(d), moons: [{ name: "Sable", phase: 0.25 }], tags: [] });
     const m: Modifier = {
       id: "both",
       apply: [{ param: "precipitation.pwd", op: "offset", value: 10, envelope: [[0, 0], [0.5, 1]] }],

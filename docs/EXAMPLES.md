@@ -110,7 +110,7 @@ the modifier must match the calendar exactly.
 **In the studio:** `＋` on a chain → *Moon-bound*, or the shipped **Spring-tide** preset, then pick
 the moon and the phases it fires on. The device gets its own lane of pulses in the playlist; click
 one to open the moon's cycle disc and drag the phase boundaries. In the device's MOD section you
-can gate it on a season (a dimmer, not a switch) and draw an onset envelope so it swells and fades
+can gate it to a season (softly or hard, your choice of strength) and draw an onset envelope so it swells and fades
 across the phase rather than snapping on — that is the `mods` and `envelope` in the "Spring tide"
 recipe below.
 
@@ -195,11 +195,10 @@ ignores it. This example results in about three spells a year.
 ### Spring tide (a moon device, gated by season, with an onset envelope)
 
 Everything above switches on and off at the edge of a range. This one swells and fades instead,
-and one season damps it to half.
+and one season is where it runs at full strength — everywhere else it is damped to half.
 
-Two new pieces — and both of them are **dimmers**, in `[0, 1]`. You author a device at the
-magnitude you want at its strongest, and an envelope or a gate only ever takes it *down* from
-there; neither can amplify past what you wrote.
+Two new pieces, both in `[0, 1]`, and neither can amplify: you author a device at the magnitude
+you want at its strongest, and an envelope or a gate only ever takes it *down* from there.
 
 - `envelope` is a list of `[phase, strength]` points sampled at the **carrier moon** — the moon
   named in `when.moon` — and interpolated between them, wrapping around the cycle. Strength is in
@@ -207,11 +206,14 @@ there; neither can amplify past what you wrote.
   offset is 0 at the edges of the window, full at exactly full moon, and a straight ramp in
   between. `set` and `clamp` ignore envelopes (there is no half of a `set`); `offset` and `scale`
   honour them.
-- `mods` is a list of **gates**. A gate's `source` is a *tag* — never a moon; a `moon:` source is
-  a validation error, because a moon is the device's carrier (`when.moon`), not a gate. While that
-  tag is on the day, every op's magnitude in this modifier is multiplied by `amount`, itself in
-  `[0, 1]`. Gates multiply, a gate whose tag is absent counts as `1`, and `amount: 0` mutes the
-  device without silencing it (it keeps its `tag`, so other rules can still react to it).
+- `mods` is a list of **gates**, and a gate **restricts a device to its source**. The `source` is a
+  *tag* — never a moon; a `moon:` source is a validation error, because a moon is the device's
+  carrier (`when.moon`), not a gate. While that tag is on the day the device runs whole; on every
+  *other* day its ops are multiplied by `1 − amount`. So `amount` is the gate's **strength**, in
+  `[0, 1]`: `1` is a hard gate (the device is silent away from its source), `0.5` halves it away
+  from its source, and `0` is no gate at all. Gates multiply, so a device with two gates runs whole
+  only where *both* tags are on the day — and a gated-out device is muted, not silenced (it keeps
+  its `tag`, so other rules can still react to it).
 
 ```json
 {
@@ -228,8 +230,9 @@ there; neither can amplify past what you wrote.
 
 What you should see: through most of the month, nothing. Over the six or seven days around each
 full Sable the wind climbs and falls again, peaking at +14 km/h on the night of the full moon —
-and in Summer that peak is only +7, because the `season:Summer` gate halves it. Autumn full moons
-are the ordinary +14: the gate is not on the day, so it contributes nothing.
+but only in Summer, the gate's source. Autumn full moons peak at +7, because outside `season:Summer`
+the gate at `amount: 0.5` takes half of everything the device does. Raise that amount to `1` and the
+spring tide stops happening outside Summer altogether.
 
 ---
 

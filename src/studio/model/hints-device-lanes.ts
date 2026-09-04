@@ -23,7 +23,7 @@ export const DEVICE_LANE_HINTS: Record<string, Hint> = {
   "lane.device": ["Device lane", "when this device fires — click the name to open it"],
   "lane.device.lane": ["Device lane", "drag a clip to move it, its white edges to resize — writes the device's when"],
   "lane.device.clip": ["Clip", "one per year — drag to move it, the white edges to resize"],
-  "lane.device.pulse": ["Moon pulse", "one per cycle — click opens the cycle editor; dimmed where a gate mutes it"],
+  "lane.device.pulse": ["Moon pulse", "one per cycle — click opens the cycle editor; dimmed outside a gate's source"],
   "lane.device.band": ["Season band", "read-only here — edit the season in Calendar"],
   "lane.device.bar": ["Era", "read-only here — edit the span in the Eras lane"],
   "lane.device.window": ["Spell window", "the device fires somewhere inside — starts and duration are knobs in the window"],

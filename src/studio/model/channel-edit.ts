@@ -410,6 +410,109 @@ export function jitterParam(param: string): string | null {
   return isCurvePath(sd) ? sd : null;
 }
 
+// ---------------------------------------------------------------------------
+// Station-absolute knobs (PLAN D18)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seam for a knob that **shows an absolute station quantity and stores a
+ * delta** (PLAN D18).
+ *
+ * Day jitter σ and gust are not felt as "how far off the station am I" — they
+ * are felt as "how twitchy is this place", which is a number the station
+ * already has and the channel's own summary card already prints. So the knob
+ * face carries `station + delta`, the arc grows from the track's minimum
+ * (the spec drops `neutral`, `knob.ts arcAngles` then sweeps from `min`), and
+ * what is *written* is unchanged: the same `layer:` modifier, the same value,
+ * the same bytes on disk. Nothing here touches storage, the grammar or a
+ * golden — this is a lens over `read`/`write`, applied at the DOM edge the
+ * same way `format.ts` applies `settings.units` (H-1384: read and write edges
+ * convert, the value in between stays in one system).
+ *
+ * `neutral` is the *stored* layer's no-op: `0` for an `offset` layer (jitter),
+ * `1` for a `scale` one (gust). That single number is what makes one mapping
+ * serve both — the delta an op carries is `stored − neutral`, signed and
+ * additive in display units either way, so a gust at rest reads the station's
+ * own ×1.30 rather than a bare ×1.00 that describes nothing.
+ *
+ * **Scope.** Both knobs live only in the all-year scope (`CHANNEL_KNOBS`), and
+ * both station quantities are annual anyway: `wind.wetDayScale` is a scalar in
+ * the record and has no seasonal form at all, so the annual figure is the only
+ * one there is. A season-scoped station knob would need the scope's own value
+ * here; there is none to have.
+ */
+export interface StationDisplay {
+  /** the station's own value of the quantity the knob shows */
+  station: number;
+  /** the stored layer's no-op value — `0` for an `offset` layer, `1` for a `scale` one */
+  neutral: number;
+  /** stored delta → the number on the knob face */
+  toDisplay(stored: number): number;
+  /** the number on the knob face (dragged or typed) → the delta to store */
+  fromDisplay(shown: number): number;
+}
+
+/** Where one station-absolute knob reads its station figure, and what its layer's no-op is. */
+interface StationSource {
+  read: (z: ZoneProfile) => number | null;
+  neutral: number;
+}
+
+/**
+ * The station quantity each such knob mirrors.
+ *
+ * - **jitter** — `temperature.sd`, the record's own day-to-day spread, which is
+ *   the very curve the knob's `offset` layer moves.
+ * - **gust** — `wind.wetDayScale`, the multiplier a wet day puts on the speed:
+ *   the prototype's `gust on wet days` knob (`Component.js KNOB.gust`, ×1–1.6)
+ *   and the number the WIND card already prints as `Wet days blow ×1.30
+ *   harder`.
+ */
+const STATION_KNOBS: Partial<Record<Channel, Partial<Record<KnobId, StationSource>>>> = {
+  temperature: { jitter: { read: (z) => stationMean(z, "temperature.sd"), neutral: 0 } },
+  wind: { gust: { read: (z) => z.climate.wind.wetDayScale, neutral: 1 } },
+};
+
+/**
+ * The mean of a parameter's **station** curve — the record as the atlas wrote
+ * it, with no `layer:` on top, sampled at the twelve month centres the cards
+ * average everything else at (`meanOf`, which reads the *effective* curve).
+ */
+function stationMean(z: ZoneProfile, param: string): number | null {
+  if (!isCurvePath(param)) return null;
+  const curve: Curve | undefined = getPath(z.climate, param);
+  if (curve === undefined || curve === null) return null;
+  let sum = 0;
+  for (let m = 0; m < MONTHS; m++) sum += evalCurve(curve, monthCentrePhase(m));
+  const mean = sum / MONTHS;
+  return Number.isFinite(mean) ? mean : null;
+}
+
+/** Whether this knob shows a station absolute rather than its own stored delta (PLAN D18). */
+export function mirrorsStation(channel: Channel, knob: KnobId): boolean {
+  return STATION_KNOBS[channel]?.[knob] !== undefined;
+}
+
+/**
+ * The display lens for one knob, or `null` when the knob shows its stored
+ * value directly (every knob but jitter and gust) or when the zone's record
+ * carries no such quantity — a station the panel cannot read falls back to the
+ * plain delta rather than showing a number built on nothing.
+ */
+export function stationDisplay(z: ZoneProfile, channel: Channel, knob: KnobId): StationDisplay | null {
+  const src = STATION_KNOBS[channel]?.[knob];
+  if (src === undefined) return null;
+  const station = src.read(z);
+  if (station === null || !Number.isFinite(station)) return null;
+  const neutral = src.neutral;
+  return {
+    station,
+    neutral,
+    toDisplay: (stored) => station + (stored - neutral),
+    fromDisplay: (shown) => neutral + (shown - station),
+  };
+}
+
 /**
  * Every knob's current value, by id.
  *

@@ -36,7 +36,7 @@ import { colourOf, shapeable, tagColour, tagSources } from "./geometry";
 import { iconButton } from "./icon-button";
 import { togglePhase } from "./when-moon";
 
-/** The prototype's `srcAmtDown`: 120 px of upward drag is the whole [0, 1] dimmer. */
+/** The prototype's `srcAmtDown`: 120 px of upward drag is the whole [0, 1] gate strength. */
 const AMOUNT_PX = 120;
 
 /**
@@ -204,7 +204,7 @@ function buildPhaseChips(c: DeviceWindowContext, row: HTMLElement, named: Readon
   if (!named.some((p) => selected.includes(p.name))) c.addPart(createChip(row, { label: "custom range", dot: false, hint: deviceHint("device.when.phase") }));
 }
 
-/** `⚑ Harvest 72% ×` — drag the chip to dim, click the `×` to drop the source (`0699` l.60). */
+/** `⚑ Harvest 72% ×` — drag the chip to set the gate's strength, click the `×` to drop the source (`0699` l.60). */
 function buildSourceChip(c: DeviceWindowContext, row: HTMLElement, gate: ModGate, gi: number, seasons: ReadonlyArray<{ name: string }>): void {
   const chip = row.createDiv({
     cls: "wadjet-studio-device-src",

@@ -224,24 +224,33 @@ describe("spans: row `moon {name, phase}` — one pulse per cycle", () => {
     expect(spans({ moon: { name: "Sable", phase: [0.3, 0.3] } }, YEAR)).toEqual([]);
   });
 
-  test("a season gate at amount 0 dims the pulses it mutes, and only those", () => {
-    const gates = [{ source: "season:Winter", amount: 0 }];
+  test("a hard season gate dims the pulses OUTSIDE its source, and only those (D19)", () => {
+    const gates = [{ source: "season:Winter", amount: 1 }];
     const out = spans(when, YEAR, { gates });
-    expect(out.filter((s) => s.dim === true)).toHaveLength(3); // the three cycles whose midpoint is in Winter
-    for (const s of out.filter((x) => x.dim === true)) expect(s.from).toBeGreaterThan(1500.75);
-    expect(out.filter((s) => s.dim !== true)).toHaveLength(9);
+    // the three cycles whose midpoint is in Winter are the ones the gate lets through
+    expect(out.filter((s) => s.dim !== true)).toHaveLength(3);
+    for (const s of out.filter((x) => x.dim !== true)) expect(s.from).toBeGreaterThan(1500.75);
+    expect(out.filter((s) => s.dim === true)).toHaveLength(9);
   });
 
-  test("an era gate at amount 0 dims every pulse the era covers", () => {
-    const gates = [{ source: "era:Long Night", amount: 0 }];
-    expect(spans(when, YEAR, { gates }).every((s) => s.dim === true)).toBe(true);
-    // year 1300 is before the era begins
-    expect(spans(when, { a: 1300, b: 1301 }, { gates }).some((s) => s.dim === true)).toBe(false);
+  test("an era gate leaves the pulses the era covers alone and dims the years outside it", () => {
+    const gates = [{ source: "era:Long Night", amount: 1 }];
+    expect(spans(when, YEAR, { gates }).some((s) => s.dim === true)).toBe(false);
+    // year 1300 is before the era begins, so every pulse there is outside the source
+    const before = spans(when, { a: 1300, b: 1301 }, { gates });
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.every((s) => s.dim === true)).toBe(true);
   });
 
-  test("a gate that only dims (amount > 0) or names a disabled era does not dim", () => {
-    expect(spans(when, YEAR, { gates: [{ source: "season:Winter", amount: 0.5 }] }).some((s) => s.dim === true)).toBe(false);
-    expect(spans(when, { a: 1050, b: 1051 }, { gates: [{ source: "era:Sunken", amount: 0 }] }).some((s) => s.dim === true)).toBe(false);
+  test("the dim threshold is half strength, and amount 0 is no gate at all", () => {
+    const dimmed = (amount: number) => spans(when, YEAR, { gates: [{ source: "season:Winter", amount }] }).filter((s) => s.dim === true).length;
+    expect(dimmed(0)).toBe(0); // no gate: nothing dims, inside Winter or out
+    expect(dimmed(0.4)).toBe(0); // 1 − 0.4 = 0.6 is still more than half strength
+    expect(dimmed(0.5)).toBe(9); // exactly half: the nine pulses outside Winter read as gated
+    // a disabled era tags nothing, so every pulse is outside its source
+    const sunken = spans(when, { a: 1050, b: 1051 }, { gates: [{ source: "era:Sunken", amount: 1 }] });
+    expect(sunken.length).toBeGreaterThan(0);
+    expect(sunken.every((s) => s.dim === true)).toBe(true);
   });
 });
 

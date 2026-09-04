@@ -157,7 +157,8 @@ const GATE_FIELDS = ["source", "amount"];
 
 /**
  * Mod-matrix gates: daily stage only, source is a non-empty tag (never a moon —
- * a moon is a carrier, not a gate), amount a dimmer in [0, 1].
+ * a moon is a carrier, not a gate), amount the gate's STRENGTH in [0, 1] — 1
+ * restricts the device to its source, 0 is no gate (PLAN §0 D19).
  */
 function validateGates(mods: ModGate[], stage: "climate" | "daily", path: string, issues: ValidationIssue[]): void {
   if (stage === "climate") issues.push({ level: "error", path, message: "gates (mods) are daily-stage only; a climate-stage modifier is unconditional" });
@@ -173,7 +174,7 @@ function validateGates(mods: ModGate[], stage: "climate" | "daily", path: string
     }
     if (typeof g.source !== "string" || !g.source) issues.push({ level: "error", path: `${where}.source`, message: "must be a non-empty string (a tag, never a moon)" });
     else if (g.source.startsWith("moon:")) issues.push({ level: "error", path: `${where}.source`, message: "a gate is a tag; a moon is the carrier (use when.moon)" });
-    if (typeof g.amount !== "number" || !(g.amount >= 0 && g.amount <= 1)) issues.push({ level: "error", path: `${where}.amount`, message: "amount must be between 0 and 1 (a gate dims, it never amplifies)" });
+    if (typeof g.amount !== "number" || !(g.amount >= 0 && g.amount <= 1)) issues.push({ level: "error", path: `${where}.amount`, message: "amount must be between 0 and 1 (gate strength: 1 restricts to the source, 0 is no gate)" });
     for (const k of Object.keys(g)) if (!GATE_FIELDS.includes(k)) issues.push({ level: "warning", path: `${where}.${k}`, message: "unknown field (ignored)" });
   });
 }
@@ -277,10 +278,27 @@ export function canonicalJson(v: unknown): string {
   return JSON.stringify(norm(v));
 }
 
+/**
+ * Modifier keys that are display-only (never read by the engine) and must be
+ * excluded from the provenance hash, so flipping one doesn't move the hash
+ * (D20). Extend this list, don't touch `canonicalJson` itself — it has other
+ * callers (UI diffing, store dirty checks) that must keep hashing every key.
+ */
+const HASH_EXCLUDED_MODIFIER_KEYS = ["badge"] as const;
+
+/** `modifiers`, stripped of display-only keys, for hashing only. */
+function modifiersForHash(mods: readonly Modifier[]): unknown[] {
+  return mods.map((m) => {
+    const copy = { ...m } as Record<string, unknown>;
+    for (const k of HASH_EXCLUDED_MODIFIER_KEYS) delete copy[k];
+    return copy;
+  });
+}
+
 export function profileHash(z: ZoneProfile): string {
   // `automation` enters the canonical input ONLY when non-empty, so every hash
   // written before automation existed still reproduces (history protection, D5).
-  const s = canonicalJson({ climate: z.climate, regimes: z.regimes, modifiers: z.modifiers ?? [], ...(z.automation?.length ? { automation: z.automation } : {}) });
+  const s = canonicalJson({ climate: z.climate, regimes: z.regimes, modifiers: modifiersForHash(z.modifiers ?? []), ...(z.automation?.length ? { automation: z.automation } : {}) });
   const a = hash32(s, 0x57414a45).toString(16).padStart(8, "0");
   const b = hash32(s, 0x54454a49).toString(16).padStart(8, "0");
   return `wh1:${a}${b}`;

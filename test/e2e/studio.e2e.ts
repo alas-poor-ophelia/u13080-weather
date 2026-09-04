@@ -7161,7 +7161,7 @@ describe("climate studio · device lanes", () => {
     console.log(`  · lane-spell: 1 clip + ${runs.length} rolled run(s) in Y ${epoch + 4}`);
   });
 
-  test("device lanes 4: a moon device is pulses, dimmed where a season gate mutes it", async () => {
+  test("device lanes 4: a moon device is pulses, dimmed OUTSIDE its season gate's source (D19)", async () => {
     await revealStudio();
     const epoch = await epochYear();
     await seedDeviceLanes([
@@ -7169,7 +7169,9 @@ describe("climate studio · device lanes", () => {
         id: "lane-moon",
         stage: "daily",
         when: { moon: { name: "Moon", phase: [0, 0.08] } },
-        mods: [{ source: "season:Winter", amount: 0 }],
+        // D19: a gate RESTRICTS the device to its source. 0.72 leaves 0.28 outside
+        // Winter — under the lane's half-strength threshold, so those pulses read dim.
+        mods: [{ source: "season:Winter", amount: 0.72 }],
         apply: LANE_APPLY,
       },
     ]);
@@ -7181,15 +7183,16 @@ describe("climate studio · device lanes", () => {
     expect(probe.kind).toBe("pulse");
     expect(probe.editable).toBe(false);
     expect(probe.spans.every((s) => s.kind === "pulse" && !s.editable)).toBe(true);
-    // Winter is the last quarter of the year: the pulses inside it are muted.
+    // Winter is the last quarter of the year: the gate restricts the device to it,
+    // so the pulses INSIDE Winter are the full ones and everything else is dim.
     const inWinter = (s: DeviceLaneSpanProbe): boolean => {
       const mid = (s.from + s.to) / 2;
       return mid - Math.floor(mid) >= 0.75;
     };
     expect(probe.spans.some(inWinter)).toBe(true);
     expect(probe.spans.some((s) => !inWinter(s))).toBe(true);
-    for (const s of probe.spans) expect(s.dim).toBe(inWinter(s));
-    console.log(`  · lane-moon: ${probe.spans.length} pulses, ${probe.spans.filter((s) => s.dim).length} dimmed by season:Winter x 0`);
+    for (const s of probe.spans) expect(s.dim).toBe(!inWinter(s));
+    console.log(`  · lane-moon: ${probe.spans.length} pulses, ${probe.spans.filter((s) => s.dim).length} dimmed OUTSIDE season:Winter (gate 0.72)`);
   });
 
   test("device lanes 5: removing the device removes its row", async () => {
@@ -7372,6 +7375,27 @@ function keyframeSpread(kfs: Array<{ at: number; value: number }>): number {
 
 function keyframeMean(kfs: Array<{ at: number; value: number }>): number {
   return kfs.reduce((a, k) => a + k.value, 0) / kfs.length;
+}
+
+/**
+ * The station's own day-to-day σ on the walk's zone: the mean of the fixture's
+ * `climate.temperature.sd` over the twelve month centres, which is what the
+ * jitter knob's face carries at rest (PLAN D18, `channel-edit.ts
+ * stationDisplay`). Frozen here because the fixture is.
+ */
+const STATION_SIGMA = 2.8670728588633114;
+
+/** The zone draft's `temperature.sd` keyframes — the record the jitter knob shows and must never write. */
+async function stationSigmaKeyframes(): Promise<Array<{ at: number; value: number }>> {
+  return withApp(
+    ob.page,
+    (app, type: string) => {
+      const leaf = app.workspace.getLeavesOfType(type)[0];
+      const s = leaf.view.store.get();
+      return s.zones[s.view.zoneId].climate.temperature.sd;
+    },
+    VIEW_TYPE,
+  );
 }
 
 /** The zone's own base `temperature.mean` keyframes, straight off the draft. */
@@ -7557,7 +7581,10 @@ describe("climate studio · temperature editor", () => {
     expect(probe.scope).toBe("all");
     // Knob labels are the prototype's words, not the model's ids (F10a).
     expect(probe.knobs).toEqual(["offset", "seasonal swing", "day jitter σ"]);
-    expect(probe.knobValues).toEqual(["0.0 °C", "×1.00", "0.0 °C"]);
+    // PLAN D18: jitter shows the STATION's own day-to-day σ (the fixture's
+    // `temperature.sd`, `STATION_SIGMA` below) rather than the zero delta it
+    // stores, so it is lit at rest. Offset and swing are deltas and are not.
+    expect(probe.knobValues).toEqual(["0.0 °C", "×1.00", "2.9 °C"]);
     // A1 (O-2): the prototype hangs the degree sign on the number itself
     // (`0250-temperature-editor`'s `20°`), and every rung it prints is one the
     // axis actually contains — a tick on the frame is a number with no side.
@@ -7635,6 +7662,40 @@ describe("climate studio · temperature editor", () => {
     const ids = layers.map((m: any) => m.id);
     expect(ids.indexOf(TEMP_SWING_LAYER)).toBeGreaterThan(ids.indexOf("layer:temperature.mean"));
     console.log(`  · offset +3 °C: swing keyframe mean ${meanBefore.toFixed(2)} → ${keyframeMean(after.apply[0].value).toFixed(2)} °C, spread unchanged`);
+  });
+
+  test("temperature editor 3b: the jitter knob shows the station σ and stores only the delta (D18)", async () => {
+    await resetChannelWalk();
+    await openChannelWindow();
+
+    const sigmaBefore = await stationSigmaKeyframes();
+    const shownBefore = (await probeChannel()).knobValues[2];
+    expect(shownBefore).toBe("2.9 °C");
+    expect((await temperatureLayers()).map((m: any) => m.id)).toEqual([]);
+
+    // 0–5 °C over 150 px: 30 px up is exactly +1.0 °C on the FACE, which
+    // rounds to the step from the station's own 2.867 — so the readout goes
+    // 2.9 → 3.9 and the layer stores the difference from the station, not 3.9.
+    await dragKnobDial('[data-part="channel-knob-jitter"] .wadjet-studio-knob-dial', -30);
+
+    const shownAfter = (await probeChannel()).knobValues[2];
+    expect(shownAfter).toBe("3.9 °C");
+
+    const layers = await temperatureLayers();
+    expect(layers.map((m: any) => m.id)).toEqual(["layer:temperature.sd"]);
+    const sd = layers[0];
+    expect(sd.stage).toBe("climate");
+    expect(sd.apply.length).toBe(1);
+    expect(sd.apply[0].param).toBe("temperature.sd");
+    expect(sd.apply[0].op).toBe("offset");
+    // The DRAFT's delta moved by what the face moved by — 3.9 − 2.867 — and is
+    // nowhere near the 3.9 the knob shows.
+    expect(sd.apply[0].value).toBeCloseTo(3.9 - STATION_SIGMA, 6);
+    expect(sd.apply[0].value).toBeLessThan(3.9);
+
+    // …and the station itself never moved: the record is what it always was.
+    expect(await stationSigmaKeyframes()).toEqual(sigmaBefore);
+    console.log(`  · jitter σ ${shownBefore} → ${shownAfter}: station ${STATION_SIGMA.toFixed(2)} °C untouched, layer stores +${sd.apply[0].value.toFixed(2)}`);
   });
 
   test("temperature editor 4: a Winter offset writes when.tag and moves Winter days only", async () => {
@@ -8761,7 +8822,10 @@ describe("climate studio · channel parity", () => {
     expect(probe.seriesOptions).toEqual([]);
     expect(probe.roseSectors).toBeGreaterThan(0);
     expect(probe.knobs).toEqual(["wind", "gust spread", "calm days"]);
-    expect(probe.knobValues).toEqual(["0.0 km/h", "×1.00", "0.00"]);
+    // PLAN D18: gust shows the station's `wind.wetDayScale` — the same ×1.30
+    // the card prints as `Wet days blow ×1.30 harder` — not the ×1.00 no-op of
+    // the layer it writes.
+    expect(probe.knobValues).toEqual(["0.0 km/h", "×1.30", "0.00"]);
     expect(probe.writes).toContain("layer:wind.*");
 
     await seedDayZoom(epoch);

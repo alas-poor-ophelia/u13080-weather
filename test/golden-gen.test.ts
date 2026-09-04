@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { GENERATOR_VERSION } from "../src/core/version";
 import type { Preset } from "../src/core/types";
 import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "./golden/golden-gen";
-import stored from "./golden/gen-0.0.2.json";
+import stored from "./golden/gen-0.0.3.json";
 
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 
 describe("golden master (generator)", () => {
-  test("gen-0.0.2.json matches the live generator on fjord-coast across block boundaries", () => {
+  test("gen-0.0.3.json matches the live generator on fjord-coast across block boundaries", () => {
     expect(compareGoldenGen(stored as GoldenGen, buildGoldenGen(fjord))).toEqual([]);
   });
 

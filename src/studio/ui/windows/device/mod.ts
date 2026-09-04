@@ -68,7 +68,7 @@ export function buildMod(c: DeviceWindowContext, d: Device): void {
   for (const { op, i } of envelopes) buildEnvelope(c, sec.content, op, i);
 }
 
-/** The season/era gate chips — `⚑ Harvest 72% ×`, with the dimmer on its own small knob. */
+/** The season/era gate chips — `⚑ Harvest 72% ×`, with the gate's strength on its own small knob. */
 function buildGates(c: DeviceWindowContext, row: HTMLElement, d: Device): void {
   const seasons = c.calendar()?.seasons ?? [];
   d.mods.forEach((gate, i) => {
@@ -88,7 +88,10 @@ function buildGates(c: DeviceWindowContext, row: HTMLElement, d: Device): void {
       min: 0,
       max: 1,
       step: 0.01,
-      neutral: 1,
+      // 0 is the no-op end under D19 (no gate at all), so the power arc grows
+      // out of it with the gate's strength. Arc origin only — `neutral` never
+      // touches how a drag maps to a value.
+      neutral: 0,
       value: gate.amount,
       size: "sm",
       fmt: (v) => gatePercent(v),

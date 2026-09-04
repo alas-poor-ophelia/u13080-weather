@@ -182,7 +182,8 @@ export function laneSub(m: Modifier, cal: SpanCalendar): string {
  * The caption a MOON lane prints inside itself, at its left edge (the
  * prototype's `sable full ↻ 29.5 d · gated by Harvest`) — three facts a row
  * of pulses cannot say on its own: which moon and which phase the pulses are,
- * how long its cycle is, and which tag dims it.
+ * how long its cycle is, and which tag it is gated to. A gate at `amount: 0`
+ * is no gate at all under D19, so it is not claimed in the caption.
  *
  * `""` for every other lane shape: a clip already says its days in the caption
  * `ui/rows/device-rows.ts` prints beside it, and a band or a bar is named by

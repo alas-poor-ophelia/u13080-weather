@@ -55,12 +55,20 @@ export interface SpanOptions {
    * 1100-year window never iterates 13 000 moon cycles.
    */
   maxSpans?: number;
-  /** the device's mod-matrix gates; a gate with `amount: 0` dims the pulses it mutes */
+  /** the device's mod-matrix gates; they dim the pulses they hold OUTSIDE the source (D19) */
   gates?: ReadonlyArray<ModGate>;
 }
 
 /** Default `SpanOptions.maxSpans` (SPEC §4 has no lane worth drawing past this). */
 export const DEFAULT_MAX_SPANS = 400;
+
+/**
+ * A pulse reads as gated once the gates have taken it to half strength or less
+ * (the prototype's rule: dim when 1 − amount ≤ 0.5, i.e. a single gate at
+ * `amount` ≥ 0.5). A threshold, not a per-pulse opacity, so the DOM a lane
+ * builds is the same whatever the amount is.
+ */
+export const GATE_DIM_AT = 0.5;
 
 /** Fractional years are `epochYear + fraction`, so widths lose a few ULPs to cancellation. */
 const EPS = 1e-9;
@@ -239,8 +247,8 @@ function dayOfYearSpans(range: readonly [number, number], cal: SpanCalendar, w: 
  * year the moon enters phase `a`, `to` where it leaves `b` (wrapping when
  * `a > b`). Cycle index `k` is absolute (`phase a` recurs at
  * `(k + a − phaseAtEpoch)·cycleDays`), so ids survive panning. A pulse is
- * dimmed when a gate with `amount: 0` is muting the device at the pulse's
- * midpoint. Not editable — the CYCLE editor and the MOD gates own it.
+ * dimmed where the device's gates hold it at `GATE_DIM_AT` or below at the
+ * pulse's midpoint — that is, outside the source (D19). Not editable — the CYCLE editor and the MOD gates own it.
  */
 function moonSpans(m: { name: string; phase: readonly [number, number] }, cal: SpanCalendar, opts: SpanOptions, max: number): Derived {
   const moon = cal.moons.find((x) => x.name === m.name);
@@ -265,7 +273,7 @@ function moonSpans(m: { name: string; phase: readonly [number, number] }, cal: S
     const from = fractionalYear(startDay, cal);
     const to = fractionalYear(startDay + lengthDays, cal);
     if (!overlaps(from, to, w)) continue;
-    const dim = gateMutesAt((from + to) / 2, cal, opts.gates);
+    const dim = gateFactorAt((from + to) / 2, cal, opts.gates) <= GATE_DIM_AT;
     spans.push({ id: `moon:${m.name}:${k}`, from, to, kind: "pulse", editable: false, ...(dim ? { dim: true } : {}) });
   }
   return timed(spans);
@@ -311,18 +319,27 @@ function eraSpans(name: string, cal: SpanCalendar, w: Window): Derived {
   return timed([{ id: `era:${name}`, from: w.a, to: w.b, kind: "bar", editable: false, label: name }]);
 }
 
-/** A gate with `amount: 0` whose `season:`/`era:` tag is on the day at fractional year `t`. */
-function gateMutesAt(t: number, cal: SpanCalendar, gates: SpanOptions["gates"]): boolean {
-  if (!gates) return false;
-  for (const g of gates) {
-    if (g.amount !== 0) continue;
-    if (g.source.startsWith("season:")) {
-      if (seasonNameAt(t, cal) === g.source.slice("season:".length)) return true;
-    } else if (g.source.startsWith("era:")) {
-      const era = cal.eras.find((e) => e.name === g.source.slice("era:".length));
-      const year = Math.floor(t);
-      if (era && era.enabled !== false && era.from <= year && (era.to === undefined || era.to >= year)) return true;
-    }
+/**
+ * The engine's `gateFactor` read off the calendar at fractional year `t`
+ * (PLAN §0 D19): a gate is ×1 on a day carrying its source tag and
+ * ×(1 − amount) on every other day, and gates multiply. Sources the lane
+ * cannot resolve from the calendar (a tag written by another device) are
+ * treated as absent, the same way the engine sees them on a day without them.
+ */
+function gateFactorAt(t: number, cal: SpanCalendar, gates: SpanOptions["gates"]): number {
+  if (!gates) return 1;
+  let f = 1;
+  for (const g of gates) if (!gateSourceOnDay(g.source, t, cal)) f *= 1 - g.amount;
+  return f;
+}
+
+/** Is a gate's `season:`/`era:` tag on the day at fractional year `t`? */
+function gateSourceOnDay(source: string, t: number, cal: SpanCalendar): boolean {
+  if (source.startsWith("season:")) return seasonNameAt(t, cal) === source.slice("season:".length);
+  if (source.startsWith("era:")) {
+    const era = cal.eras.find((e) => e.name === source.slice("era:".length));
+    const year = Math.floor(t);
+    return era !== undefined && era.enabled !== false && era.from <= year && (era.to === undefined || era.to >= year);
   }
   return false;
 }
