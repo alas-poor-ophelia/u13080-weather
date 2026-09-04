@@ -90,8 +90,9 @@ describe("format: signed", () => {
   test("positive values get a leading +", () => {
     expect(format(5, "temperature", "metric", { signed: true }).text).toBe("+5.0");
   });
-  test("zero gets a leading + too (matches the knob fmt convention)", () => {
-    expect(format(0, "temperature", "metric", { signed: true }).text).toBe("+0.0");
+  test("zero gets NO sign — the prototype's knob fmt is `v > 0 ? '+' : ''`", () => {
+    expect(format(0, "temperature", "metric", { signed: true }).text).toBe("0.0");
+    expect(format(-0, "temperature", "metric", { signed: true }).text).toBe("0.0");
   });
   test("negative values keep the real minus and no +", () => {
     expect(format(-5, "temperature", "metric", { signed: true }).text).toBe(`${MINUS}5.0`);

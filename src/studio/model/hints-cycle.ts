@@ -23,12 +23,12 @@ export const CYCLE_HINTS: Record<string, Hint> = {
   "cycle.remove": ["Remove phase", "merges it into the phase before it"],
   "cycle.split": ["Split phase", "halves the longest phase and names the new half"],
   "cycle.preview": ["Phase preview", "the disc shows the moon's lit shape at the last-touched boundary"],
-  "cycle.period": ["Period", "days in one full cycle — set by the calendar, not editable here"],
-  "cycle.epoch": ["Phase at epoch", "where the moon stands on day 0 — set by the calendar, not editable here"],
   "cycle.source": ["Calendar source", "which calendar owns these phases"],
-  "cycle.world": ["World scope", "moons are world-level — every zone sees this"],
   "cycle.edit": ["Edit elsewhere", "this calendar belongs to another plugin"],
 };
+// Gone with the controls they belonged to (World B 3.2/3.3): `cycle.period`
+// now rides in the title bar's caption, which carries no `data-hint`, and the
+// panel no longer shows an epoch readout or a `world · N zones` chip at all.
 
 /**
  * The keys `src/studio/ui/windows/cycle.ts` uses. The unit test scans that
@@ -44,10 +44,7 @@ export const CYCLE_HINT_KEYS: readonly string[] = [
   "cycle.remove",
   "cycle.split",
   "cycle.preview",
-  "cycle.period",
-  "cycle.epoch",
   "cycle.source",
-  "cycle.world",
   "cycle.edit",
 ];
 

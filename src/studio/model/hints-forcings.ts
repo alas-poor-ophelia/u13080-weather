@@ -21,6 +21,7 @@ export const FORCINGS_HINTS: Record<string, Hint> = {
   "forcings.trim": ["Trim", "a constant °C on top of the lane — writes forcings:temperature.mean"],
   "forcings.total": ["Total into TEMP", "trim plus the lane at the centre year — what the temperature chain receives"],
   "forcings.wetness": ["Wetness", "scales both wet-day probabilities — writes forcings:precipitation"],
+  "forcings.koppen": ["Köppen class", "the zone's climate class, read from its own curves — a diagnostic, never an input"],
 
   // --- the FRC · warmth playlist row (SPEC §3.2) ---
   "forcings.row": ["FRC · warmth", "the zone's warmth over the years — opens the forcings window"],
@@ -35,7 +36,7 @@ export const FORCINGS_HINTS: Record<string, Hint> = {
  * left behind by a deleted control) fails the unit gate rather than showing a
  * raw key in the hint bar.
  */
-export const FORCINGS_HINT_KEYS: readonly string[] = ["forcings.lane", "forcings.trim", "forcings.total", "forcings.wetness", "forcings.row", "forcings.points"];
+export const FORCINGS_HINT_KEYS: readonly string[] = ["forcings.lane", "forcings.trim", "forcings.total", "forcings.wetness", "forcings.koppen", "forcings.row", "forcings.points"];
 
 /**
  * The `data-hint` attribute value for `key`. An unknown key falls back to the

@@ -146,8 +146,13 @@ export function tabular(n: number, digits: number): string {
   return withMinus(fixed);
 }
 
+/**
+ * `+` only on a POSITIVE value. Zero is neither raised nor lowered, and the
+ * prototype's readouts say so — `0.0 °C`, not `+0.0 °C` (`1230-vst-macro.html`;
+ * `Component.js`'s knob formatter is `v > 0 ? "+" : ""`).
+ */
 function signPrefix(text: string, value: number, signed: boolean): string {
-  return signed && value >= 0 ? `+${text}` : text;
+  return signed && value > 0 ? `+${text}` : text;
 }
 
 /**

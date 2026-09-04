@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CASCADE_ORIGIN, CASCADE_STEP, cascadePosition, clampRect } from "../src/studio/model/clamp";
+import { CASCADE_ORIGIN, CASCADE_STEP, cascadePosition, clampRect, defaultPosition, PROTO_BOX_H, PROTO_BOX_W } from "../src/studio/model/clamp";
 
 describe("clamp: clampRect", () => {
   test("leaves a rect that already fits untouched", () => {
@@ -50,5 +50,30 @@ describe("clamp: cascadePosition", () => {
     expect(p.y).toBeLessThanOrEqual(150);
     expect(p.x).toBeGreaterThanOrEqual(0);
     expect(p.y).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("clamp: defaultPosition", () => {
+  test("a prototype point in the prototype's own box is unchanged", () => {
+    // Forcings' DEFPOS (`Component.DEFPOS` l.155) at 1560x960 is itself.
+    expect(defaultPosition(640, 330, PROTO_BOX_W, PROTO_BOX_H)).toEqual({ x: 640, y: 330 });
+  });
+
+  test("the point scales with the box, so the arrangement survives a smaller leaf", () => {
+    // Half the prototype's width and height: every start point halves too.
+    expect(defaultPosition(640, 330, PROTO_BOX_W / 2, PROTO_BOX_H / 2)).toEqual({ x: 320, y: 165 });
+    expect(defaultPosition(390, 60, 780, 480)).toEqual({ x: 195, y: 30 });
+  });
+
+  test("scaling rounds to whole pixels rather than leaving a fractional left/top", () => {
+    // 720/1560 x 1000 = 461.53…
+    expect(defaultPosition(720, 130, 1000, 500)).toEqual({ x: 462, y: 68 });
+  });
+
+  test("a point that scales past a tiny box is still clamped inside it", () => {
+    const p = defaultPosition(1500, 900, 200, 150);
+    expect(p.x).toBeLessThanOrEqual(200);
+    expect(p.y).toBeLessThanOrEqual(150);
+    expect(p).toEqual({ x: 192, y: 141 });
   });
 });

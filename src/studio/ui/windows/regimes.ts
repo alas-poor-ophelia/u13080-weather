@@ -180,7 +180,9 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
 
   // Small-caps head, lower-case tail: the tail is the §6 vocabulary lesson
   // (`how often × how long` is literally what the bar computes) and reads as
-  // prose, not as another label.
+  // prose, not as another label. Two spans, ONE run of text — the prototype
+  // types the whole line into a single div, so both wear the same tracking and
+  // the flex gap between them is only as wide as the space it replaces.
   const shareHead = body.createDiv({ cls: "wadjet-studio-regimes-label", attr: { "data-hint": regimeHint("regimes.share") } });
   shareHead.createSpan({ cls: "wadjet-studio-regimes-label-text", text: "Share of the year" });
   shareHead.createSpan({ cls: "wadjet-studio-regimes-label-tail", text: "· how often × how long" });

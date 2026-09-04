@@ -381,71 +381,110 @@ export interface StationPoint {
   anchor: "start" | "end";
 }
 
+/**
+ * The map's stations, hand-placed.
+ *
+ * The prototype does not compute this scatter: `Component.STATIONS`
+ * (`proto-markup/1397-logic-class-Component.js`) is a CURATED table of ten
+ * records with x/y chosen by hand in the map's own 480 × 380 space, each one
+ * inside the ellipse its Köppen group draws and each label already clear of
+ * its neighbours'. Twenty-six computed dots do not spread that comfortably —
+ * they collide, and some land outside their own blob — so the MAP keeps the
+ * prototype's table verbatim while the LIST and the search keep every shipped
+ * station (`stations()`).
+ *
+ * Each prototype station has an exact shipped counterpart — same place, same
+ * Köppen class — so this is a straight rename of the prototype's own ids to
+ * the shipped preset slugs. Nothing is substituted or approximated.
+ */
+export const MAP_STATIONS: readonly { id: string; x: number; y: number }[] = [
+  { id: "fjord-coast", x: 348, y: 222 }, // bergen · Bergen, Cfb
+  { id: "southern-oceanic", x: 300, y: 236 }, // hobart · Hobart, Cfb
+  { id: "atlantic-green", x: 262, y: 196 }, // coruna · A Coruña, Csb
+  { id: "equatorial-rainforest", x: 402, y: 66 }, // singapore · Singapore, Af
+  { id: "savanna", x: 330, y: 96 }, // darwin · Darwin, Aw
+  { id: "red-desert", x: 92, y: 128 }, // undoolya · Undoolya, BWh
+  { id: "silk-road-basin", x: 148, y: 182 }, // lanzhou · Lanzhou, BSk
+  { id: "taiga", x: 176, y: 306 }, // sodankyla · Sodankylä, Dfc
+  { id: "tundra", x: 96, y: 344 }, // nyalesund · Ny-Ålesund, ET
+  { id: "alpine-pass", x: 240, y: 322 }, // fremont · Fremont Pass, Dfc
+];
+
 /** Roughly how wide a label is in map units, at the 10 the map draws them at. */
 function labelWidth(name: string): number {
   return name.length * 5.2 + 4;
 }
 
+/** The box a label occupies, for the guest's de-collision pass below. */
+function labelBox(x: number, y: number, name: string, anchor: "start" | "end"): { x0: number; y0: number; x1: number; y1: number } {
+  const w = labelWidth(name);
+  const x0 = anchor === "start" ? x : x - w;
+  return { x0, y0: y - 9, x1: x0 + w, y1: y + 2 };
+}
+
 /**
- * Every station placed in climate space, names de-collided.
- *
- * Twenty-six stations do not spread as comfortably as the prototype's ten, so
- * each label takes the first of six offsets — right or left of the dot, on the
- * dot's line or one line above or below it — that clears every label already
- * placed. Deterministic: the order is the station list's, so the same set of
- * stations always draws the same map.
+ * Where the guest's label may sit, best first: the prototype's own placement,
+ * then BELOW the dot rather than beside it — the dot itself never moves,
+ * because its position is the reading. The left-anchored pair is a last
+ * resort for a wet station near the right edge, where a right-anchored label
+ * would run off the map entirely.
  */
-export function climateSpace(): StationPoint[] {
-  // The four blob captions are on the map first and never move, so a station
-  // name gives way to them rather than printing across one.
-  const placed: Array<{ x0: number; y0: number; x1: number; y1: number }> = CLIMATE_BLOBS.map((b) => {
-    const w = labelWidth(b.label);
-    return { x0: b.labelX - w / 2, y0: b.labelY - 9, x1: b.labelX + w / 2, y1: b.labelY + 2 };
+const GUEST_OFFSETS: readonly { dx: number; dy: number; anchor: "start" | "end" }[] = [
+  { dx: 10, dy: -6, anchor: "start" },
+  { dx: 10, dy: 13, anchor: "start" },
+  { dx: 10, dy: 23, anchor: "start" },
+  { dx: -10, dy: -6, anchor: "end" },
+  { dx: -10, dy: 13, anchor: "end" },
+  { dx: -10, dy: 23, anchor: "end" },
+];
+
+/**
+ * The stations the map draws: the curated ten, in the prototype's own places
+ * and with the prototype's own label offset — `x + 10, y - 6`, anchored left,
+ * for every dot (`atlasLabelEls`). No de-collision pass among them: the
+ * table's coordinates already avoid it.
+ *
+ * `selected` adds ONE guest: sixteen shipped stations are not on the curated
+ * map, and a selection that vanishes when it is picked from the list is worse
+ * than a scatter. The guest is drawn at its COMPUTED climate-space position
+ * (`spaceX`/`spaceY` — the same reading its class is printed from), so the
+ * curated ten are untouched and only the selection is ever added. Its label
+ * takes the first placement that clears every curated label and every blob
+ * caption; the dot stays where the numbers put it.
+ */
+export function climateSpace(selected?: string | null): StationPoint[] {
+  const points: StationPoint[] = MAP_STATIONS.flatMap((m) => {
+    const s = stationOf(m.id);
+    return s === null ? [] : [{ id: s.id, name: s.name, group: s.group, x: m.x, y: m.y, labelX: m.x + 10, labelY: m.y - 6, anchor: "start" as const }];
   });
-  const offsets = [
-    { dx: 9, dy: 3.4 },
-    { dx: -9, dy: 3.4 },
-    { dx: 9, dy: -6.6 },
-    { dx: -9, dy: -6.6 },
-    { dx: 9, dy: 13.4 },
-    { dx: -9, dy: 13.4 },
-    { dx: 9, dy: -16.6 },
-    { dx: -9, dy: -16.6 },
-    { dx: 9, dy: 23.4 },
-    { dx: -9, dy: 23.4 },
+  const guest = selected === undefined || selected === null || points.some((p) => p.id === selected) ? null : stationOf(selected);
+  if (guest === null) return points;
+
+  const x = spaceX(guest.rainMm);
+  const y = spaceY(guest.meanC);
+  const taken = [
+    ...CLIMATE_BLOBS.map((b) => labelBox(b.labelX - labelWidth(b.label) / 2, b.labelY, b.label, "start")),
+    ...points.map((p) => labelBox(p.labelX, p.labelY, p.name, p.anchor)),
   ];
-  return STATIONS.map((s) => {
-    const x = spaceX(s.rainMm);
-    const y = spaceY(s.meanC);
-    const w = labelWidth(s.name);
-    const base = { id: s.id, name: s.name, group: s.group, x, y };
-    let chosen: StationPoint | null = null;
-    let fallback: StationPoint | null = null;
-    let fallbackBox = { x0: x, y0: y, x1: x + w, y1: y };
-    for (const o of offsets) {
-      const anchor: "start" | "end" = o.dx > 0 ? "start" : "end";
-      const lx = x + o.dx;
-      const x0 = anchor === "start" ? lx : lx - w;
-      const box = { x0, y0: y + o.dy - 9, x1: x0 + w, y1: y + o.dy + 2 };
-      if (box.x0 < 0 || box.x1 > SPACE_W) continue;
-      const point: StationPoint = { ...base, labelX: lx, labelY: y + o.dy, anchor };
-      if (fallback === null) {
-        fallback = point;
-        fallbackBox = box;
-      }
-      if (placed.every((p) => box.x1 <= p.x0 || box.x0 >= p.x1 || box.y1 <= p.y0 || box.y0 >= p.y1)) {
-        placed.push(box);
-        chosen = point;
-        break;
-      }
-    }
-    if (chosen !== null) return chosen;
-    if (fallback !== null) {
-      placed.push(fallbackBox);
-      return fallback;
-    }
-    return { ...base, labelX: x + 9, labelY: y + 3.4, anchor: "start" as const };
-  });
+  const clear = (box: { x0: number; y0: number; x1: number; y1: number }): boolean =>
+    box.x0 >= 0 && box.x1 <= SPACE_W && taken.every((t) => box.x1 <= t.x0 || box.x0 >= t.x1 || box.y1 <= t.y0 || box.y0 >= t.y1);
+  const at = GUEST_OFFSETS.find((o) => clear(labelBox(x + o.dx, y + o.dy, guest.name, o.anchor))) ?? GUEST_OFFSETS[0]!;
+  points.push({ id: guest.id, name: guest.name, group: guest.group, x, y, labelX: x + at.dx, labelY: y + at.dy, anchor: at.anchor });
+  return points;
+}
+
+/**
+ * The card's sentence, in the prototype's form: the preset's character with
+ * the wet-day count the stats line prints, ending in a period —
+ * `Fjord Coast — mild, grey, rain 223 d/yr.` A character that quotes a day
+ * count of its own (`wet 230 days a year`, a curator's round number) has that
+ * clause dropped, so the card prints ONE wet-day figure and it is the one
+ * `annualOf` computes. `wetDays` is passed already formatted, so it is
+ * literally the string the stats line above it carries.
+ */
+export function stationDescription(s: Station, wetDays: string): string {
+  const character = s.character.replace(/,?\s*(?:wet|rain)\s+\d+\s+days? a year/i, "");
+  return `${s.presetName} — ${character}, rain ${wetDays} d/yr.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +516,12 @@ export function latitudeForBaselineC(target: number, south: boolean): number {
  * rainfall — the dot moves straight down the column its terrain names, by
  * exactly the latitude and altitude correction the match is about to apply.
  * `null` when no station ships to match.
+ *
+ * The record's own point is where the CURATED table put it (`MAP_STATIONS`),
+ * so the dashed link lands on the dot the user can actually see; a station the
+ * map does not draw falls back to its computed place. The zone then hangs off
+ * that point by the correction alone — the y axis is `SPACE_Y_PER_C` units per
+ * degree, and colder is further down.
  */
 export function zonePoint(geo: Geography): { x: number; y: number; matchId: string; matchX: number; matchY: number } | null {
   const candidate = candidatesFor(geo, 1)[0];
@@ -484,12 +529,14 @@ export function zonePoint(geo: Geography): { x: number; y: number; matchId: stri
   const station = stationOf(candidate.preset.id);
   if (station === null) return null;
   const adj = tierAAdjustment(geo, candidate.preset.match);
+  const at = climateSpace(station.id).find((p) => p.id === station.id);
+  const matchY = at?.y ?? spaceY(station.meanC);
   return {
     x: spaceXForTerrain(geo.orographic),
-    y: spaceY(station.meanC + adj.latitudeDeltaC + adj.altitudeDeltaC),
+    y: clampTo(matchY - (adj.latitudeDeltaC + adj.altitudeDeltaC) * SPACE_Y_PER_C, SPACE_Y_RANGE[0], SPACE_Y_RANGE[1]),
     matchId: station.id,
-    matchX: spaceX(station.rainMm),
-    matchY: spaceY(station.meanC),
+    matchX: at?.x ?? spaceX(station.rainMm),
+    matchY,
   };
 }
 

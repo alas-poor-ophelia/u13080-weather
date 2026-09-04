@@ -10,17 +10,18 @@
  * Four things worth knowing before editing this file:
  *
  *  - **Moons are world scope** (SPEC §2). Every edit here reaches every zone
- *    in the vault, so the panel wears a `world · N zones` badge and the first
- *    world edit of a session goes through the confirm in
- *    `model/world-confirm.ts`.
+ *    in the vault, so the first world edit of a session goes through the
+ *    confirm in `model/world-confirm.ts`. The prototype shows no `world · N
+ *    zones` badge on this panel — the confirm is the warning.
  *  - **A plugin calendar is a mirror, not an editor** (SPEC §8). When the
  *    active adapter describes itself as `readOnly`, the ring draws the
  *    *description's* phases, every edit affordance is gone, and the footer
  *    says where the calendar is actually edited.
- *  - **The period and the epoch are readouts, not controls.** The prototype
- *    exposes the period as a title chip and has no epoch control at all; both
- *    are facts about the calendar, and under a plugin adapter they are not
- *    ours to change. Editing them was the plugin's own invention.
+ *  - **The period is a title readout; the epoch is not shown at all.** The
+ *    prototype states the period once, in the title bar (`↻ 29.53 d`), and has
+ *    no epoch control *or* readout. Both are facts about the calendar, and
+ *    under a plugin adapter they are not ours to change — editing them, and
+ *    the body's `29.53 d · epoch 0.000` line, were the plugin's own invention.
  *  - **The disc is hand-drawn SVG, not the Chart.** `ChartKind: "disc"` draws
  *    boundary spokes and drag handles but no ring arcs, no labels and no moon,
  *    and this window needs all three (plus double-click-an-arc-to-split).
@@ -51,7 +52,7 @@ import {
 import { grammar } from "../../model/copy";
 import { DEFAULT_MOON_PHASES } from "../../model/devices";
 import { cycleHint } from "../../model/hints-cycle";
-import { litShapePath, phaseLabelTint, phaseTint } from "../../model/moon-shape";
+import { litShapePath, phaseColour, phaseLabelColour } from "../../model/moon-shape";
 import type { StudioState } from "../../model/state";
 import { ledLevel, studioRules, unitKey, type StudioIssue } from "../../model/validation";
 import { needsWorldConfirm } from "../../model/world-confirm";
@@ -173,21 +174,19 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     const side = main.createDiv({ cls: "wadjet-studio-cycle-side" });
 
-    // The calendar the phases come from, and the reach of an edit to them.
-    const head = side.createDiv({ cls: "wadjet-studio-cycle-head" });
-    const sourceChip: ChipComponent = createChip(head, { label: "internal calendar", color: "var(--wadjet-studio-wind)", hint: cycleHint("cycle.source") });
-    const worldChip: ChipComponent = createChip(head, { label: "world · 0 zones", color: "var(--wadjet-studio-gold)", hint: cycleHint("cycle.world") });
-    sourceChip.el.addClass("is-source");
+    // The calendar the phases come from. The prototype puts this pill in the
+    // TITLE BAR, directly after the `↻ 29.53 d` readout and with no `flex:1`
+    // between them (`0811-vst-sablemoon.html` l.8) — so it goes into the
+    // chrome's head slot un-tailed, beside the caption. Built detached here
+    // and handed over by `head` below.
+    const sourceChip: ChipComponent = createChip(createDiv(), { label: "internal calendar", color: "var(--wadjet-studio-wind)", hint: cycleHint("cycle.source"), dot: false });
+    sourceChip.el.addClass("wadjet-studio-cycle-source");
     sourceChip.el.setAttr("data-part", "cycle-source");
-    worldChip.el.setAttr("data-part", "cycle-world");
 
     const caption = side.createDiv({ cls: "wadjet-studio-cycle-caption" });
     const list = side.createDiv({ cls: "wadjet-studio-cycle-list", attr: { "data-part": "cycle-list" } });
     const actions = side.createDiv({ cls: "wadjet-studio-cycle-actions" });
     const previewLine = side.createDiv({ cls: "wadjet-studio-cycle-preview", attr: { "data-hint": cycleHint("cycle.preview"), "data-part": "cycle-preview" } });
-    const readouts = side.createDiv({ cls: "wadjet-studio-cycle-readouts" });
-    const periodOut = readouts.createSpan({ cls: "wadjet-studio-cycle-readout wadjet-studio-num", attr: { "data-hint": cycleHint("cycle.period"), "data-part": "cycle-period" } });
-    const epochOut = readouts.createSpan({ cls: "wadjet-studio-cycle-readout wadjet-studio-num", attr: { "data-hint": cycleHint("cycle.epoch"), "data-part": "cycle-epoch" } });
     const editLine = side.createDiv({ cls: "wadjet-studio-cycle-editin", attr: { "data-hint": cycleHint("cycle.edit"), "data-part": "cycle-editin" } });
 
     // --- state readers -----------------------------------------------------
@@ -226,11 +225,6 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     function cycleDays(): number {
       if (readOnly()) return mirrorMoon()?.cycleDays ?? DEFAULT_CYCLE_DAYS;
       return draftMoon(ctx.store.get())?.cycleDays ?? DEFAULT_CYCLE_DAYS;
-    }
-
-    function phaseAtEpoch(): number {
-      if (readOnly()) return mirrorMoon()?.phaseAtEpoch ?? 0;
-      return draftMoon(ctx.store.get())?.phaseAtEpoch ?? 0;
     }
 
     /** The previewed phase: whatever was last touched, else the last boundary. */
@@ -338,7 +332,7 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
             ? svg.createSvg("circle", { cls: "wadjet-studio-cycle-arc", attr: { ...attrs, cx: CENTRE, cy: CENTRE, r: RING_R } })
             : svg.createSvg("path", { cls: "wadjet-studio-cycle-arc", attr: { ...attrs, d: arcPath(angleOf(seg.from), angleOf(seg.to) - 0.5, RING_R) } });
         // The ring lightens from new to full, the way the prototype's hsl ramp does.
-        arc.setCssProps({ "--wadjet-studio-cycle-tint": phaseTint(mid).toFixed(3) });
+        arc.setCssProps({ "--wadjet-studio-cycle-color": phaseColour(mid) });
         arc.addEventListener("dblclick", (ev: MouseEvent) => {
           if (readOnly()) return;
           ev.preventDefault();
@@ -354,7 +348,7 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
           cls: "wadjet-studio-cycle-label",
           attr: { x: at.x.toFixed(2), y: at.y.toFixed(2), "text-anchor": "middle", "dominant-baseline": "middle", "data-index": String(i), "data-name": seg.name, "data-hint": cycleHint("cycle.name") },
         });
-        label.setCssProps({ "--wadjet-studio-cycle-tint": phaseLabelTint(mid).toFixed(3) });
+        label.setCssProps({ "--wadjet-studio-cycle-color": phaseLabelColour(mid) });
         label.setText(seg.name);
         label.addEventListener("dblclick", (ev: MouseEvent) => {
           ev.preventDefault();
@@ -368,6 +362,11 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
       // go — the arcs are the data, the handles are the edit.
       if (readOnly()) return;
       list_.forEach((mark, i) => {
+        // The prototype's `moonBounds` filters `b.i > 0`: the first boundary is
+        // the origin of the cycle, and dragging it would move where the cycle
+        // starts rather than where a phase does. Its arc and its row stay; only
+        // the grab handle goes, which is also why the row has no × (`drawList`).
+        if (i === 0) return;
         const end = polar(angleOf(mark.at), RING_R);
         const handle = svg.createSvg("circle", {
           cls: "wadjet-studio-cycle-handle",
@@ -422,7 +421,7 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
       segs.forEach((seg, i) => {
         const row = list.createDiv({ cls: "wadjet-studio-cycle-row", attr: { "data-index": String(i), "data-name": seg.name, "data-part": "cycle-row" } });
         const swatch = row.createSpan({ cls: "wadjet-studio-cycle-swatch", attr: { "aria-hidden": "true" } });
-        swatch.setCssProps({ "--wadjet-studio-cycle-tint": phaseTint(seg.from + seg.length / 2).toFixed(3) });
+        swatch.setCssProps({ "--wadjet-studio-cycle-color": phaseColour(seg.from + seg.length / 2) });
         const name = row.createSpan({ cls: "wadjet-studio-cycle-rowname", text: seg.name, attr: { "data-hint": cycleHint("cycle.name"), "data-part": "cycle-name" } });
         if (editable) name.addEventListener("dblclick", () => beginRename(i, name));
         // The prototype's row readout: the span this phase covers, then its
@@ -467,17 +466,14 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     function repaint(force: boolean): void {
       // An open rename input is the user's, not the renderer's.
       if (editing !== null && !force) return;
-      const state = ctx.store.get();
       const list_ = marks();
       const ro = readOnly();
-      const key = `${JSON.stringify(list_)}|${cycleDays()}|${phaseAtEpoch()}|${String(ro)}|${sourceLabel()}|${Object.keys(state.zones).length}`;
+      const key = `${JSON.stringify(list_)}|${cycleDays()}|${String(ro)}|${sourceLabel()}`;
       if (!force && key === signature) return;
       signature = key;
 
       root.toggleClass("is-readonly", ro);
       sourceChip.update({ label: sourceLabel(), color: ro ? "var(--wadjet-studio-gold)" : "var(--wadjet-studio-wind)" });
-      const zones = Object.keys(state.zones).length;
-      worldChip.update({ label: `world · ${zones} zones` });
 
       caption.setText(`PHASES · ${list_.length}`);
       drawDisc(list_);
@@ -486,9 +482,6 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
       splitButton.toggleClass("is-hidden", ro);
       setDisabled(splitButton, list_.length >= PHASE_LIMITS.max);
-
-      periodOut.setText(`↻ ${cycleDays().toFixed(2)} d`);
-      epochOut.setText(`epoch ${phaseAtEpoch().toFixed(3)}`);
 
       const d = description();
       const hint = d !== null && d.readOnly ? (d.editHint ?? `edit in ${d.label}`) : "";
@@ -538,10 +531,16 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
       width: 452 + LABEL_PAD * 2,
       badge: "CYCLE",
       badgeColor: "var(--wadjet-studio-moon)",
-      // The prototype's `↻ 29.53 d` title readout — the period is a fact, not a control.
+      // The prototype's `↻ 29.53 d` title readout — the period is a fact, not a
+      // control, and the ONLY place it is stated (the body has no readout line).
+      // Read once at open, like every other `WindowBuild` caption: a calendar
+      // swap rebuilds this window rather than repainting it.
       caption: `↻ ${cycleDays().toFixed(2)} d`,
+      head: (slot) => slot.appendChild(sourceChip.el),
       body: root,
-      led: { on: true, scope: "device" },
+      // The prototype's title lamp is the moon's own #cdd9ee, not the generic
+      // ok-green — the same identity-coloured lamp a channel window wears.
+      led: { on: true, scope: "device", color: "var(--wadjet-studio-moon)" },
       level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "moon", name: moonName }))),
       writes,
       issues,
@@ -551,7 +550,6 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
         unsubscribe?.();
         unsubscribe = null;
         sourceChip.destroy();
-        worldChip.destroy();
         root.remove();
       },
     };

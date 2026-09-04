@@ -1737,13 +1737,15 @@ interface CycleProbe {
   title: string;
   badge: string;
   source: string;
-  world: string;
+  /** the `world · N zones` chip and the `epoch 0.000` readout the prototype has NEITHER of — counted so their absence is asserted, not assumed */
+  worldChips: number;
+  epochReadouts: number;
   arcs: number;
   handles: number;
   labels: string[];
   rows: string[];
+  /** the title bar's `↻ 29.53 d` — the panel's only statement of the period */
   period: string;
-  epoch: string;
   /** the disc's own phase readout — `disc preview · phase 0.00 · d0.0 of the cycle` */
   preview: string;
   editIn: string;
@@ -1765,14 +1767,16 @@ async function probeCycle(): Promise<CycleProbe> {
         title: text(panel, ".wadjet-studio-window-title"),
         badge: text(panel, ".wadjet-studio-window-badge"),
         source: text(panel, '[data-part="cycle-source"] .wadjet-studio-chip-label'),
-        world: text(panel, '[data-part="cycle-world"] .wadjet-studio-chip-label'),
+        worldChips: all('[data-part="cycle-world"]').length,
+        epochReadouts: all('[data-part="cycle-epoch"]').length,
         arcs: all(".wadjet-studio-cycle-arc").length,
         handles: all(".wadjet-studio-cycle-handle").length,
         labels: all(".wadjet-studio-cycle-label").map((n) => (n.textContent ?? "").trim()),
         rows: all('[data-part="cycle-row"]').map((n) => (n.textContent ?? "").replace(/\s+/g, " ").trim()),
-        // Plain readout spans now (F8), not knobs: `↻ 29.53 d`, `epoch 0.000`.
-        period: text(panel, '[data-part="cycle-period"]'),
-        epoch: text(panel, '[data-part="cycle-epoch"]'),
+        // The period is stated once, in the title bar (World B 3.1/3.3): the
+        // prototype has no body readout line, so there is no `cycle-period`
+        // element left to read and the chrome's caption is the source.
+        period: text(panel, ".wadjet-studio-window-caption"),
         preview: text(panel, '[data-part="cycle-preview"]'),
         editIn: text(panel, '[data-part="cycle-editin"]'),
         writes: text(panel, ".wadjet-studio-writes-body"),
@@ -1833,7 +1837,7 @@ async function passWorldConfirm(): Promise<boolean> {
 }
 
 describe("climate studio · cycle window", () => {
-  test("step 30: a moon with five named phases opens a CYCLE panel with five arcs and its period", async () => {
+  test("step 30: a moon with five named phases opens a CYCLE panel with five arcs, four handles and its period", async () => {
     await revealStudio();
     // Seed the moon the way the settings tab would, straight into the world
     // draft — the fixture vault's calendar carries whatever the last run left.
@@ -1867,18 +1871,25 @@ describe("climate studio · cycle window", () => {
     expect(probe.open).toBe(true);
     expect(probe.title).toBe(CYCLE_MOON);
     expect(probe.badge).toBe("CYCLE");
+    // The window still names its moon, its period and where its phases come
+    // from — but the period is now stated only in the title bar, and the two
+    // things the prototype does not have are asserted GONE rather than
+    // reworded: the `world · N zones` chip (the world-edit confirm is the
+    // warning) and the `epoch 0.000` readout (never a control here either).
     expect(probe.source).toBe("internal calendar");
-    expect(probe.world).toMatch(/^world · \d+ zones$/);
+    expect(probe.period).toBe("↻ 29.53 d");
+    expect(probe.worldChips).toBe(0);
+    expect(probe.epochReadouts).toBe(0);
     expect(probe.arcs).toBe(5);
-    expect(probe.handles).toBe(5);
+    // Five boundaries, four handles: the first is the origin of the cycle and
+    // carries no grab handle (the prototype filters it out).
+    expect(probe.handles).toBe(4);
     expect([...probe.labels].sort()).toEqual(["Crescent", "Full", "Gibbous", "Half", "New"]);
     expect(probe.rows.length).toBe(5);
-    expect(probe.period).toBe("↻ 29.53 d");
-    expect(probe.epoch).toBe("epoch 0.000");
     expect(probe.preview).toContain("phase");
     expect(probe.editIn).toBe("");
     expect(probe.writes).toContain("calendar.moons[");
-    console.log(`  · ${CYCLE_WINDOW}: ${probe.arcs} arcs / ${probe.handles} handles, period "${probe.period}", ${probe.world}, writes "${probe.writes}"`);
+    console.log(`  · ${CYCLE_WINDOW}: ${probe.arcs} arcs / ${probe.handles} handles, period "${probe.period}" (title bar), no world chip, no epoch readout, writes "${probe.writes}"`);
   });
 
   test("step 31: split the longest adds a sixth phase, behind the world-edit confirm", async () => {
@@ -5974,9 +5985,9 @@ describe("climate studio · forcings", () => {
     expect(opened.open).toBe(true);
     expect(opened.title).toBe("Forcings");
     expect(opened.badge).toBe("ZONE");
-    expect(opened.trim).toBe("+0.0 °C");
+    expect(opened.trim).toBe("0.0 °C");
     expect(opened.wetness).toBe("×1.00");
-    expect(opened.total).toBe("+0.0 °C");
+    expect(opened.total).toBe("0.0 °C");
 
     // 150 px covers the knob's whole ±8 °C range: 19 px up is 2.0 °C at step 0.1.
     await dragKnobDial('[data-part="forcings-trim"] .wadjet-studio-knob-dial', -19);
@@ -5985,7 +5996,7 @@ describe("climate studio · forcings", () => {
     const draft = await forcingsDraft();
     expect(after.trim).toBe("+2.0 °C");
     expect(after.total).toBe("+2.0 °C");
-    expect(after.lane).toBe("+0.0 °C");
+    expect(after.lane).toBe("0.0 °C");
     expect(draft.trim).toEqual({ id: "forcings:temperature.mean", stage: "climate", apply: [{ param: "temperature.mean", op: "offset", value: 2 }] });
     expect(after.writes).toContain("forcings:temperature.mean");
     console.log(`  · trim drag: ${after.trim} into TEMP · writes ${after.writes}`);
@@ -7516,7 +7527,7 @@ describe("climate studio · temperature editor", () => {
     expect(probe.scope).toBe("all");
     // Knob labels are the prototype's words, not the model's ids (F10a).
     expect(probe.knobs).toEqual(["offset", "seasonal swing", "day jitter σ"]);
-    expect(probe.knobValues).toEqual(["+0.0 °C", "×1.00", "+0.0 °C"]);
+    expect(probe.knobValues).toEqual(["0.0 °C", "×1.00", "0.0 °C"]);
     // A1 (O-2): the prototype hangs the degree sign on the number itself
     // (`0250-temperature-editor`'s `20°`), and every rung it prints is one the
     // axis actually contains — a tick on the frame is a number with no side.
@@ -8720,7 +8731,7 @@ describe("climate studio · channel parity", () => {
     expect(probe.seriesOptions).toEqual([]);
     expect(probe.roseSectors).toBeGreaterThan(0);
     expect(probe.knobs).toEqual(["wind", "gust spread", "calm days"]);
-    expect(probe.knobValues).toEqual(["+0.0 km/h", "×1.00", "+0.00"]);
+    expect(probe.knobValues).toEqual(["0.0 km/h", "×1.00", "0.00"]);
     expect(probe.writes).toContain("layer:wind.*");
 
     await seedDayZoom(epoch);
@@ -8799,7 +8810,7 @@ describe("climate studio · channel parity", () => {
     expect(probe.seriesOptions).toEqual(["cloud.dry", "cloud.wet", "humidity.dry", "humidity.wet"]);
     expect(probe.series).toBe("cloud.dry");
     expect(probe.knobs).toEqual(["cloud cover", "humidity"]);
-    expect(probe.knobValues).toEqual(["+0.00", "+0.00"]);
+    expect(probe.knobValues).toEqual(["0.00", "0.00"]);
     expect(probe.writes).toContain("layer:cloud.*");
     expect(probe.writes).toContain("layer:humidity.*");
     // A1 (O-1/O-3): the humidity plot draws the dry/wet pair, and the pair is

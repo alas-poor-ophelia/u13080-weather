@@ -31,6 +31,7 @@
  *    the mixer re-reads it in its own render pass.
  */
 import { laneValue } from "../../../core/automation";
+import { describeKoppen, koppenOfClimate } from "../../../core/koppen";
 import type { ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
 import { ensureLane } from "../../model/automation-edit";
@@ -53,6 +54,19 @@ export const FORCINGS_WINDOW = "forcings";
 const TRIM_SPEC = { min: -8, max: 8, step: 0.1, neutral: 0 } as const;
 /** Wetness scales both wet-day probabilities; ×1 is "no forcing". */
 const WETNESS_SPEC = { min: 0.5, max: 1.5, step: 0.01, neutral: 1 } as const;
+
+/**
+ * The prototype's Köppen hues, by group letter (`Component.js` l.511-515:
+ * temperate/tropical green, continental moon, tundra precip-blue, humid
+ * subtropical gold). Arid has no prototype entry; gold is the dry hue there.
+ */
+const KOPPEN_COLOUR: Record<string, string> = {
+  A: "var(--wadjet-studio-wind)",
+  B: "var(--wadjet-studio-gold)",
+  C: "var(--wadjet-studio-wind)",
+  D: "var(--wadjet-studio-moon)",
+  E: "var(--wadjet-studio-precip)",
+};
 
 /** `+2.0 °C` / `−1.5 °C` — a temperature *delta*, so no +32 offset in imperial. */
 function warmthText(v: number, units: Units): string {
@@ -125,6 +139,12 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
   // --- the body ------------------------------------------------------------
 
   const root = createDiv({ cls: "wadjet-studio-forcings" });
+
+  // The title bar's Köppen readout (`1230-vst-macro.html` l.9): the zone's own
+  // class, in its group's hue, at the right end of the bar before the ×. It is
+  // a *reading* of the zone, not a control — so it lives in the chrome's head
+  // slot rather than in the body, exactly where the prototype puts it.
+  const koppenEl = createSpan({ cls: "wadjet-studio-forcings-koppen wadjet-studio-num is-tail", attr: { "data-part": "forcings-koppen" } });
 
   // TEMPERATURE — the offset stack: a drawn lane, a constant, and their sum.
   const tempSection = root.createDiv({ cls: "wadjet-studio-forcings-section", attr: { "data-channel": "temperature" } });
@@ -224,9 +244,18 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
     const t = z === null ? 0 : getTrim(z);
     const lane = z === null ? 0 : laneValue(getWarmthLane(z), year);
     const wet = z === null ? 1 : getWetness(z);
-    const key = `${z?.id ?? ""}|${t}|${lane}|${wet}|${u}`;
+    // Cheap enough to compute every tick (60 curve samples): a curve edited in
+    // a channel window moves the class without touching anything else in the
+    // key, so it has to be part of the key rather than read after it.
+    const koppen = z === null ? null : koppenOfClimate(z.climate);
+    const key = `${z?.id ?? ""}|${t}|${lane}|${wet}|${u}|${koppen?.code ?? ""}`;
     if (!force && key === signature) return;
     signature = key;
+
+    koppenEl.setText(koppen?.code ?? "");
+    koppenEl.setCssProps({ "--wadjet-studio-koppen-colour": koppen === null ? "var(--wadjet-studio-text-dim)" : (KOPPEN_COLOUR[koppen.group] ?? "var(--wadjet-studio-text-dim)") });
+    if (koppen === null) koppenEl.removeAttribute("data-hint");
+    else koppenEl.setAttr("data-hint", forcingsHint("forcings.koppen", `${koppen.code} · ${describeKoppen(koppen.code)} — read from the zone's own curves, not from the forcings`));
 
     laneRow.value.setText(warmthText(lane, u));
     trimRow.value.setText(warmthText(t, u));
@@ -276,6 +305,7 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
     // Prototype width (`proto-markup/`): a design constant, not a function of the content.
     width: 390,
     badge: "ZONE",
+    head: (slot) => slot.appendChild(koppenEl),
     body: root,
     led: { on: true, scope: "chain" },
     level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "forcings" }))),
@@ -286,6 +316,7 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
       unsubscribe = null;
       trim.destroy();
       wetness.destroy();
+      koppenEl.remove();
       root.remove();
     },
   };

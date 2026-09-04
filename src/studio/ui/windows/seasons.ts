@@ -137,11 +137,12 @@ function withWorldConfirm(ctx: SurfaceContext, run: () => void): void {
 export const buildSeasonsWindow: WindowBuilder = (ctx) => {
   const body = createDiv({ cls: "wadjet-studio-seasons" });
 
-  // The source badge belongs in the title bar's right end (SPEC §3.4), which
-  // the Window component has no slot for yet — so it is positioned there from
-  // this section's CSS. Swap it for a real chrome slot when one lands.
-  const sourceChip: ChipComponent = createChip(body, { label: "internal calendar", hint: seasonsHint("seasons.source"), dot: false });
-  sourceChip.el.addClass("wadjet-studio-seasons-source");
+  // The source badge belongs at the title bar's RIGHT end (SPEC §3.4;
+  // `0853-vst-seasons.html` l.7 puts a `flex:1` before it) — so it goes into
+  // the chrome's head slot as an `is-tail` child. Built detached here and
+  // handed over by `head` below.
+  const sourceChip: ChipComponent = createChip(createDiv(), { label: "internal calendar", hint: seasonsHint("seasons.source"), dot: false });
+  sourceChip.el.addClasses(["wadjet-studio-seasons-source", "is-tail"]);
   sourceChip.el.setAttr("data-part", "source");
 
   const barWrap = body.createDiv({ cls: "wadjet-studio-seasons-barwrap" });
@@ -341,7 +342,11 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
 
       if (!view.readOnly) {
         const remove = row.createSpan({ cls: "wadjet-studio-seasons-segment-remove", text: "×", attr: { role: "button", tabindex: "0", "aria-label": `Merge ${m.name}`, "data-hint": seasonsHint("seasons.merge") } });
-        setDisabled(remove, marks.length <= SEASON_LIMITS.min);
+        // `merge` folds a season into the one BEFORE it, so the first row has
+        // nothing to merge into — it is the year's origin, the same boundary
+        // `renderFlags` refuses to draw a handle on. The prototype dims its ×
+        // rather than dropping it, so the four rows keep one shape.
+        setDisabled(remove, index === 0 || marks.length <= SEASON_LIMITS.min);
         remove.addEventListener("click", (ev) => {
           ev.stopPropagation();
           if (remove.hasClass("is-disabled")) return;
@@ -452,6 +457,7 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
     width: 380,
     badge: "CALENDAR",
     badgeColor: "var(--wadjet-studio-gold)",
+    head: (slot) => slot.appendChild(sourceChip.el),
     body,
     led: { on: true, scope: "device" },
     level: (byUnit) => ledLevel(byUnit.get(unitKey({ kind: "seasons" }))),

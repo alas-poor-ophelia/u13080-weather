@@ -40,6 +40,6 @@ describe("studio cycle hints", () => {
   test("cycleHint round-trips through parseHint, and an unknown key is visible", () => {
     for (const key of Object.keys(CYCLE_HINTS)) expect(parseHint(cycleHint(key))).toEqual(CYCLE_HINTS[key]!);
     expect(cycleHint("cycle.nope")).toBe("cycle.nope");
-    expect(parseHint(cycleHint("cycle.period", "custom detail"))).toEqual(["Period", "custom detail"]);
+    expect(parseHint(cycleHint("cycle.split", "custom detail"))).toEqual(["Split phase", "custom detail"]);
   });
 });

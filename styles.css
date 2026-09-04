@@ -685,6 +685,11 @@
    label under the dial without moving anything in the DOM. */
 .wadjet-studio-knob {
   --wadjet-studio-knob-size: 36px;
+  /* The pointer is the prototype's 2.5 px bar at EVERY size, so its width in
+     the shared 100x100 viewBox has to scale with the dial: 2.5 x 100 /
+     (size - 2 px of rim + 12 px of overhang). A flat 4 drew the 30 px knob's tick as a
+     1.7 px hairline that antialiasing washed out to half its hue (audit A6). */
+  --wadjet-studio-knob-tick: 5.44;
   position: relative;
   display: inline-flex;
   flex-direction: column;
@@ -693,9 +698,11 @@
 }
 .wadjet-studio-knob[data-size="sm"] {
   --wadjet-studio-knob-size: 30px;
+  --wadjet-studio-knob-tick: 6.25;
 }
 .wadjet-studio-knob[data-size="lg"] {
   --wadjet-studio-knob-size: 44px;
+  --wadjet-studio-knob-tick: 4.63;
 }
 .wadjet-studio-knob-dial {
   order: 1;
@@ -738,7 +745,7 @@
 }
 .wadjet-studio-knob-indicator {
   stroke: var(--wadjet-studio-knob-color, var(--wadjet-studio-accent));
-  stroke-width: 4;
+  stroke-width: var(--wadjet-studio-knob-tick, 4);
   stroke-linecap: round;
 }
 .wadjet-studio-knob-label {
@@ -786,11 +793,15 @@
    fixed strip, 7 px beside an op, 9 px in a window title bar (set with the
    window chrome below). `.is-muted` is lit-but-held-back: colour, no glow. */
 .wadjet-studio-led {
-  width: 10px;
-  height: 10px;
+  /* A 9 px SOLID disc with no ring — every lamp in the prototype's markup is
+     `width:9px; height:9px; border-radius:50%` with a background and a glow and
+     nothing else (`0250-temperature-editor.html` l.5, `1028`/`0853`/`1230` title
+     lamps). The 1 px #17181a rim the studio used to draw read as a socket at
+     this size, and a 10 px disc with it read a size too large. */
+  width: 9px;
+  height: 9px;
   flex-shrink: 0;
   border-radius: 50%;
-  border: 1px solid #17181a;
   /* Unpowered is a SOLID grey disc, not a hollow ring: the prototype's `devLed`
      / `nrLed` fall back to #54585e, and #24262a against the bar read as an
      empty socket (gap2 A14). */
@@ -798,6 +809,13 @@
 }
 .wadjet-studio-led[role="button"] {
   cursor: pointer;
+}
+/* The prototype's rack/mixer unit lamp is the one that is bigger than 9 px
+   (`0556-mixer-rail.html` l.58, l.78: `width:10px`); the fixed strip's fx lamp
+   is 8 px (l.44) and an op's is 7 px. Sizes only — none of them draw a rim. */
+.wadjet-studio-led[data-scope="device"] {
+  width: 10px;
+  height: 10px;
 }
 .wadjet-studio-led[data-scope="chain"] {
   width: 8px;
@@ -1277,6 +1295,15 @@
   flex: 0 0 auto;
   align-items: center;
 }
+/* An unfilled slot still eats one of the bar's 8 px gaps, which is what put
+   an era's title row 8 px right of the prototype's. A slot with nothing in it
+   is not there. */
+.wadjet-studio-window-led:empty,
+.wadjet-studio-window-caption:empty,
+.wadjet-studio-window-head:empty,
+.wadjet-studio-window-preset:empty {
+  display: none;
+}
 .wadjet-studio-window-led .wadjet-studio-led {
   width: 9px;
   height: 9px;
@@ -1349,6 +1376,28 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* The bar's free slot (SPEC §3.4's `…`): a Köppen readout, a calendar-source
+   pill, or an era's whole title row. Empty on most windows, where an unfilled
+   flex box costs nothing. A child marked `is-tail` hangs at the RIGHT end the
+   way the prototype's source pill does (`0853-vst-seasons.html` l.7 puts a
+   `flex:1` before it) — the spacer's growth moves into the slot so the auto
+   margin has free space left to absorb. */
+.wadjet-studio-window-head {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wadjet-studio-window-head:has(> .is-tail) {
+  flex: 1 1 auto;
+}
+.wadjet-studio-window-head > .is-tail {
+  margin-left: auto;
+}
+.wadjet-studio-window-bar:has(.wadjet-studio-window-head > .is-tail) .wadjet-studio-window-spacer {
+  display: none;
 }
 .wadjet-studio-window-spacer {
   flex: 1 1 auto;
@@ -2969,7 +3018,10 @@
   flex-direction: column;
   gap: 1px;
   max-height: 128px;
+  /* Scrolls, but without the chrome: a thumb over a 26-row list reads as a
+     defect against the prototype's ten. */
   overflow-y: auto;
+  scrollbar-width: none;
 }
 .wadjet-studio-atlas-station {
   display: flex;
@@ -3052,7 +3104,6 @@
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
-.wadjet-studio-atlas-cardyears,
 .wadjet-studio-atlas-matchdistance {
   flex: 0 0 auto;
   color: var(--wadjet-studio-text-mute);
@@ -3176,8 +3227,11 @@
 /* ── Studio windows (floating panels, SPEC §3.4, and their popovers) ── */
 /* Moon CYCLE window (SPEC 3.4 "Sable · CYCLE") — the prototype's 452 px panel
    plus the disc's label gutter: a 212 px ring with the lit moon inside it on
-   the left, the phase list on the right. `--wadjet-studio-cycle-tint` is how lit a phase is (model/
-   moon-shape.ts) — the ring, the swatches and the names all ramp on it. */
+   the left, the phase list on the right. `--wadjet-studio-cycle-color` is the
+   shade of one phase (model/moon-shape.ts `phaseColour`) — the arcs, the row
+   dots and the names all ramp on it, as the prototype's own hsl ramp does.
+   It is a colour rather than an opacity on purpose: alpha over this panel
+   greys out at the new-moon end (see that file's doc). */
 .wadjet-studio-cycle {
   display: flex;
   flex-direction: column;
@@ -3215,13 +3269,12 @@
 /* One phase, as a thick arc on the ring rather than a pie wedge. */
 .wadjet-studio-cycle-arc {
   fill: none;
-  stroke: var(--wadjet-studio-moon);
-  stroke-opacity: var(--wadjet-studio-cycle-tint, 0.4);
+  stroke: var(--wadjet-studio-cycle-color, var(--wadjet-studio-moon));
   stroke-width: 7;
   cursor: pointer;
 }
 .wadjet-studio-cycle-arc:hover {
-  stroke-opacity: 1;
+  stroke: var(--wadjet-studio-moon);
 }
 .wadjet-studio-cycle-handle {
   fill: var(--wadjet-studio-bg-alt);
@@ -3233,14 +3286,13 @@
   fill: var(--wadjet-studio-accent);
 }
 .wadjet-studio-cycle-label {
-  fill: var(--wadjet-studio-moon);
-  fill-opacity: var(--wadjet-studio-cycle-tint, 0.7);
+  fill: var(--wadjet-studio-cycle-color, var(--wadjet-studio-moon));
   font-size: 10px;
   cursor: text;
   user-select: none;
 }
 .wadjet-studio-cycle-label:hover {
-  fill-opacity: 1;
+  fill: var(--wadjet-studio-moon);
 }
 .wadjet-studio-cycle-side {
   display: flex;
@@ -3249,16 +3301,14 @@
   gap: 5px;
   min-width: 0;
 }
-.wadjet-studio-cycle-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-}
-/* The calendar-source badge is the prototype's green-outlined pill. */
-.wadjet-studio-cycle-head .wadjet-studio-chip.is-source {
+/* The calendar-source pill lives in the TITLE BAR's head slot (SPEC §3.4),
+   directly after the `↻ 29.53 d` caption — where the prototype puts it
+   (`0811-vst-sablemoon.html` l.8, no `flex:1` in between). */
+.wadjet-studio-cycle-source {
   color: var(--wadjet-studio-wind);
-  border-color: var(--wadjet-studio-wind);
+  background: #101a16;
+  border-color: #1c2f28;
+  font-size: var(--wadjet-studio-fs-caption);
 }
 .wadjet-studio-cycle-caption {
   color: var(--wadjet-studio-text-mute);
@@ -3281,9 +3331,8 @@
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  background: var(--wadjet-studio-moon);
+  background: var(--wadjet-studio-cycle-color, var(--wadjet-studio-moon));
   border-radius: 50%;
-  opacity: var(--wadjet-studio-cycle-tint, 0.5);
 }
 .wadjet-studio-cycle-rowname {
   flex: 0 0 auto;
@@ -3367,13 +3416,6 @@
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
-/* Period and epoch are facts about the calendar, so they read, never edit. */
-.wadjet-studio-cycle-readouts {
-  display: flex;
-  gap: 8px;
-  color: var(--wadjet-studio-text-mute);
-  font-size: 10px;
-}
 .wadjet-studio-cycle-editin {
   color: var(--wadjet-studio-text-mute);
   font-size: 10.5px;
@@ -3393,18 +3435,19 @@
    handle standing on each movable boundary; the names, start days and ×
    live in the list below it. Season hues are --wadjet-studio-season-*, at a
    third strength in the ribbon and full strength on the flags and labels. */
+/* The prototype's seasons body is inset 16 px, one more than the 13 px every
+   other panel uses, which puts the ribbon's ends 17 px inside the window's
+   own border. The 3 px is added here rather than on the shared window body,
+   so no other panel moves. */
 .wadjet-studio-seasons {
   display: flex;
   flex-direction: column;
+  padding: 0 3px;
 }
-/* The source badge belongs at the right end of the TITLE BAR (SPEC §3.4).
-   The Window component has no right-hand slot yet, so it is lifted out of
-   the body and placed over the bar; `.wadjet-studio-window` is the nearest
-   positioned ancestor. Replace with a chrome slot when one lands. */
+/* The source badge sits at the RIGHT end of the TITLE BAR (SPEC §3.4;
+   `0853-vst-seasons.html` l.7 puts a `flex:1` before it), which is what the
+   head slot's `is-tail` gives it. */
 .wadjet-studio-seasons-source {
-  position: absolute;
-  top: 7px;
-  right: 30px;
   color: var(--wadjet-studio-wind);
   background: #101a16;
   border-color: #1c2f28;
@@ -3424,7 +3467,13 @@
   border-radius: 4px;
   overflow: hidden;
   cursor: copy;
-  background: var(--wadjet-studio-bg-alt);
+  /* The bands are the season hue composited at a third (windows/seasons.ts
+     `tint`), so what shows through them is the ribbon's own backing. The
+     prototype has no backing at all — the panel itself — and reading the four
+     bands off its capture (#466559 / #695e3f / #6c4b40 / #3b5b71) only
+     reproduces over the panel tone. Over the darker `bg-alt` every band came
+     out muddy. */
+  background: var(--wadjet-studio-panel);
   touch-action: none;
 }
 .wadjet-studio-seasons-band {
@@ -3500,13 +3549,18 @@
 .wadjet-studio-seasons-caption {
   display: flex;
   align-items: baseline;
-  gap: 5px;
+  /* One text run in the prototype (`0853-vst-seasons.html` l.30: `SEASONS ·
+     each stamps tag season:name`), so the gap is the space between them. */
+  column-gap: 3px;
   margin: 12px 0 5px;
   font-size: var(--wadjet-studio-fs-micro);
   color: var(--wadjet-studio-text-mute);
 }
-.wadjet-studio-seasons-caption-text {
+.wadjet-studio-seasons-caption-text,
+.wadjet-studio-seasons-caption-tail {
   letter-spacing: 0.08em;
+}
+.wadjet-studio-seasons-caption-text {
   text-transform: uppercase;
 }
 .wadjet-studio-seasons-list,
@@ -3651,14 +3705,18 @@
   flex-direction: column;
   gap: 4px;
 }
+/* 7 px, not 5: the prototype's name is an `<input>` and ours a span, so the
+   row came out 4 px short of its 64 px pitch (`1028-vst-regimes.html`).
+   The rule is TRANSPARENT until the row is selected — an unselected state
+   reads as a fill alone there, with no rule around it. */
 .wadjet-studio-regimes-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 7px 8px;
   cursor: pointer;
   background: var(--wadjet-studio-bg-alt);
-  border: 1px solid var(--wadjet-studio-border);
+  border: 1px solid transparent;
   border-radius: 2px;
 }
 /* A selected row is a LIGHTER FILL with a full bright border — not an
@@ -3768,14 +3826,22 @@
 .wadjet-studio-regimes-label {
   display: flex;
   align-items: center;
-  gap: 5px;
+  /* Head and tail are ONE text run in the prototype (`1028-vst-regimes.html`
+     l.29: `SHARE OF THE YEAR · how often × how long` in a single div), so the
+     gap between the two spans stands in for the space that separated them —
+     3 px at 9 px, not the 5 px chip gutter it used to wear. */
+  column-gap: 3px;
   margin: 12px 0 5px;
   font-size: var(--wadjet-studio-fs-micro);
   color: var(--wadjet-studio-text-mute);
 }
-/* The head is small-caps; the tail beside it is prose and stays as typed. */
-.wadjet-studio-regimes-label-text {
+/* The head is small-caps; the tail beside it is prose, but it is the same run
+   of text and carries the same tracking (audit A2). */
+.wadjet-studio-regimes-label-text,
+.wadjet-studio-regimes-label-tail {
   letter-spacing: 0.08em;
+}
+.wadjet-studio-regimes-label-text {
   text-transform: uppercase;
 }
 /* The selected state names itself in its own colour, as a swatch + label —
@@ -3783,6 +3849,9 @@
 .wadjet-studio-regimes-label-who {
   display: inline-flex;
   align-items: center;
+  /* The prototype's `WHAT CHANGES · while in` row is `gap:6px` (l.36) — the
+     label's own column-gap is a space, so the chip buys the rest back. */
+  margin-left: 3px;
   gap: 5px;
   font-size: var(--wadjet-studio-fs-chip);
   font-weight: 600;
@@ -3940,35 +4009,50 @@
 }
 
 
-/* Era window (SPEC §3.4 "Era"). One title row, drawn full-bleed in the body
-   (see era.ts's own header comment for why): the chrome keeps `title`/`badge`
-   for the e2e/aria contract but is visually reduced to a slim drag strip
-   carrying only the close × — hidden here, not in the shared component
-   section, so every other window's chrome is untouched. */
+/* Era window (SPEC §3.4 "Era"). ONE 37 px title row (see era.ts's own header
+   comment for why it is authored there): the chrome keeps `title`/`badge` for
+   the e2e/aria contract but hides them, and the panel's own head goes into the
+   chrome's head slot as an `is-tail` child, so it fills the bar and its
+   `delete` keeps the prototype's right end. Hidden here, not in the shared
+   component section, so every other window's chrome is untouched. */
 .wadjet-studio-window:has(.wadjet-studio-era) .wadjet-studio-window-bar {
-  padding: 4px 12px;
-  border-bottom: none;
+  /* The bar carries only the close × on its own, so it would collapse to
+     30 px; the head it hosts is the prototype's 37 px. */
+  min-height: 37px;
 }
 .wadjet-studio-window:has(.wadjet-studio-era) .wadjet-studio-window-title,
 .wadjet-studio-window:has(.wadjet-studio-era) .wadjet-studio-window-badge {
   display: none;
 }
 .wadjet-studio-era {
+  /* The prototype's recessed year fields (`0973-vst-era.html` l.15): a well
+     darker than --wadjet-studio-bg with a near-black rim, a pair the palette
+     carries nowhere else. */
+  --wadjet-studio-era-well: #17181a;
+  --wadjet-studio-era-well-edge: #101112;
   display: flex;
   flex-direction: column;
 }
-/* The real title row: LED · name · ERA · world · N zones · delete. Negative
-   margins cancel the body's own 12/13 px padding so it reaches every edge,
-   exactly like the prototype's title bar (same gradient, same 8×12 padding). */
+/* The real title row: LED · name · ERA · world · N zones · delete, filling the
+   chrome bar's head slot (the bar keeps the gradient, the drag and the close
+   ×). The ERA pill and the `world · N zones` chip carry no handler, so the
+   bar's drag still starts on them — which is exactly what the prototype does,
+   where the drag lives on the bar and only the lamp, the name and delete carry
+   a handler of their own. */
 .wadjet-studio-era-head {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
-  margin: -12px -13px 8px;
-  padding: 8px 12px;
-  background: linear-gradient(180deg, #34373b, #2b2e32);
-  border-bottom: 1px solid #1b1d20;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  min-width: 0;
+}
+/* The prototype's `world · N zones` chip is an OUTLINE on the bar — the bar's
+   own gradient shows through it, not the panel's bg-alt fill — and its rim is
+   the bright border (`0973-vst-era.html` l.8: `#3d4147`), not the dimmer one a
+   chip wears in a body. */
+.wadjet-studio-era-head .wadjet-studio-chip {
+  background: transparent;
+  border-color: var(--wadjet-studio-border-bright);
 }
 .wadjet-studio-era-head .wadjet-studio-led {
   width: 9px;
@@ -3981,6 +4065,12 @@
   flex: 0 1 auto;
   width: 120px;
   min-width: 40px;
+  /* Obsidian's `--input-height` (30 px) is the tallest thing in the bar, and in
+     the head slot it sets the bar's own height — 48 px instead of the
+     prototype's 37 (the same trap the year wells fell into below). The line box
+     is the height here. */
+  height: auto !important;
+  line-height: 20px;
   padding: 0 !important;
   color: var(--wadjet-studio-text) !important;
   font: inherit;
@@ -4044,17 +4134,27 @@
 .wadjet-studio-era-span-dash {
   color: var(--wadjet-studio-text-mute);
 }
+/* Obsidian's own `input[type="number"]` base rule outweighs a single class
+   selector — the same reason `.wadjet-studio-era-name` above needs
+   `!important`. Without it these read as its stock #2e2e2e box with white
+   digits, not the prototype's lit year wells. `border-box` so the 66 px the
+   prototype measures INCLUDES the 6 px side padding and the rim. */
 .wadjet-studio-era-span-from,
 .wadjet-studio-era-span-to {
-  width: 52px;
-  padding: 3px 6px;
-  color: #ffc978;
+  box-sizing: border-box;
+  width: 66px;
+  /* Obsidian's `--input-height` (30 px) is a third taller than the
+     prototype's 23 px well; the padding is the height here. */
+  height: auto !important;
+  padding: 3px 6px !important;
+  color: var(--wadjet-studio-readout) !important;
   font: inherit;
+  font-size: var(--wadjet-studio-fs-body);
   font-variant-numeric: tabular-nums;
-  background: #17181a;
-  border: 1px solid #101112;
-  border-radius: 2px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7);
+  background: var(--wadjet-studio-era-well) !important;
+  border: 1px solid var(--wadjet-studio-era-well-edge) !important;
+  border-radius: 2px !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7) !important;
   outline: none;
 }
 .wadjet-studio-era-span-years {
@@ -4098,23 +4198,18 @@
 .wadjet-studio-era-op-x:hover {
   color: var(--wadjet-studio-text-dim);
 }
-.wadjet-studio-era-op-gloss {
-  display: flex;
+/* The mute lamp shares the knob's LABEL line (era.ts puts it there): the
+   prototype's stack is knob · LED + label · value, three lines, not four. */
+.wadjet-studio-era-op .wadjet-studio-knob-label {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 100%;
-  color: var(--wadjet-studio-text-mute);
-  font-size: var(--wadjet-studio-fs-micro);
 }
-.wadjet-studio-era-op-gloss .wadjet-studio-led {
-  width: 6px;
-  height: 6px;
+.wadjet-studio-era-op .wadjet-studio-knob-label .wadjet-studio-led {
+  width: 7px;
+  height: 7px;
   flex: 0 0 auto;
-}
-.wadjet-studio-era-op-gloss-text {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .wadjet-studio-era-op-add {
   display: flex;
@@ -5027,6 +5122,15 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+/* The title bar's Köppen readout (`1230-vst-macro.html` l.9): 11 px tabular
+   text in the class's own hue, no pill — it is a reading, not a chip. */
+.wadjet-studio-forcings-koppen {
+  flex: 0 0 auto;
+  font-size: var(--wadjet-studio-fs-chip);
+  white-space: nowrap;
+  color: var(--wadjet-studio-koppen-colour, var(--wadjet-studio-text-dim));
+  cursor: help;
 }
 .wadjet-studio-forcings-section {
   display: flex;

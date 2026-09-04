@@ -8,11 +8,19 @@
  * half ellipse whose horizontal radius shrinks to nothing at the quarters and
  * flips sign past them — and it is the prototype's `moonPath` exactly.
  *
- * The tints are the prototype's `hsl(222, 26%, 28 + mid*45%)` ramp, restated
- * as an *opacity* of `--wadjet-studio-moon` over the panel. The studio keeps
- * every colour in `styles.css` (SPEC §9, BRIEF), so a data-driven shade
- * arrives as a number the stylesheet multiplies a palette token by, never as
- * a colour string built in TypeScript.
+ * The ramp comes in two forms, because it is asked two different questions.
+ *
+ *  - `phaseColour` / `phaseLabelColour` are the prototype's ramp verbatim —
+ *    `hsl(222, 26%, 28 + phase*45%)` for the ring and its dots, a brighter
+ *    `48 + phase*30%` for the names. Alpha cannot stand in for it: an opacity
+ *    of `--wadjet-studio-moon` over a near-neutral dark panel desaturates as
+ *    it darkens, so the new-moon end of the ring came out grey where the
+ *    prototype is still blue. A data-driven *shade* is data, not chrome, so it
+ *    is built here and handed to the stylesheet as a custom property — the
+ *    same route `windows/seasons.ts` takes for its band tints.
+ *  - `phaseTint` is the opacity form, still what the day card's moon and the
+ *    moon modifier's phase chips want: those sit on their own surfaces and
+ *    read as "how lit", not as a position on the ring.
  *
  * Pure: no Obsidian imports, no DOM (PLAN D3).
  */
@@ -35,17 +43,24 @@ export function litShapePath(phase: number, cx: number, cy: number, r: number): 
 }
 
 /**
- * How lit a phase *looks* on the ring, as an opacity of the moon colour over
- * the panel: 0.12 at new, 0.88 at full. The prototype ramps the ring's HSL
- * lightness 28% → 73% across the cycle; over the studio's panel (#2a2d31,
- * L 18%) with the moon token (#cdd9ee, L 86%) those two lightnesses are
- * roughly these two opacities, so the ring reads the same without a colour
- * leaving the stylesheet. The ends are pushed a little further apart than the
- * arithmetic asks for, because the moon token is less saturated than the
- * prototype's blue and needs the extra lightness range to separate as clearly.
+ * How lit a phase *looks*, as an opacity of the moon colour over whatever it
+ * is drawn on: 0.12 at new, 0.88 at full. The day card's moon and the moon
+ * modifier's phase chips use this; the CYCLE ring uses `phaseColour` instead
+ * (see the file doc).
  */
 export function phaseTint(phase: number): number {
   return 0.12 + clamp(phase) * 0.76;
+}
+
+/**
+ * The colour of one phase on the CYCLE ring — the prototype's `moonSegEls`
+ * ramp exactly: hue and saturation fixed at the moon's own blue, lightness
+ * 28% at new to 73% at full. Callers pass a segment MIDPOINT, so the default
+ * five-phase ring runs 32% (`#3c4967`) to 70% (`#9fabc6`) rather than the full
+ * span — those are the two shades the prototype capture shows.
+ */
+export function phaseColour(phase: number): string {
+  return ringColour(28 + clamp(phase) * 45);
 }
 
 /**
@@ -53,8 +68,13 @@ export function phaseTint(phase: number): number {
  * brighter (lightness 48% → 78%) so every label stays readable — including
  * the one on the new-moon arc.
  */
-export function phaseLabelTint(phase: number): number {
-  return 0.44 + clamp(phase) * 0.44;
+export function phaseLabelColour(phase: number): string {
+  return ringColour(48 + clamp(phase) * 30);
+}
+
+/** One rung of the ring ramp: the moon's hue and saturation at `lightness` percent. */
+function ringColour(lightness: number): string {
+  return `hsl(222, 26%, ${lightness.toFixed(1)}%)`;
 }
 
 /**

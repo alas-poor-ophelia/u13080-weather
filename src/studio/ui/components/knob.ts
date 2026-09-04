@@ -55,6 +55,40 @@ export interface KnobProps {
 const CENTRE = 50;
 const ARC_R = 47;
 
+/**
+ * The pointer bar's endpoints, per size, in SVG user units. The prototype
+ * draws it as an absolutely positioned rect inside the dial's PADDING box —
+ * `top:3px; height:7|9|12px` on a 30 / 36 / 44 px dial with a 1 px rim — so it
+ * spans 0.76…0.82 of the face radius outward and starts around 0.27 inward.
+ * One 100×100 viewBox over three different dial diameters means one pair of
+ * y's cannot serve all three: 17 → 35 reached 0.98 of a 30 px face, which is
+ * the small knob's pointer running off the edge of its own body (audit A6).
+ * `stroke-linecap: round` adds half the 4-unit stroke at each end, so the
+ * geometry is inset by 2 units from the visible extent.
+ */
+/**
+ * `units` is user units per px at that size (the viewBox spans the dial plus
+ * its 12 px of overhang); `out`/`in` are the visible ends in px from the face
+ * centre. The stroke is the prototype's 2.5 px at every size (`--wadjet-studio-
+ * knob-tick` in styles.css), and `linecap: round` puts half of it past each
+ * geometric end — so the geometry is inset by that half.
+ */
+function ends(dial: number, out: number, into: number): { y1: number; y2: number } {
+  // `inset: -6px` is measured from the dial's PADDING box, so the 1 px bevel rim
+  // comes off each side before the overhang is added: the viewBox spans
+  // `dial - 2 + 12`, not `dial + 12`. Assuming the latter made every pointer
+  // 4.8 % short and every stroke 4.8 % thin.
+  const units = 100 / (dial + 10);
+  const cap = (2.5 * units) / 2;
+  return { y1: CENTRE - (out * units - cap), y2: CENTRE - (into * units + cap) };
+}
+
+const POINTER: Record<KnobSize, { y1: number; y2: number }> = {
+  sm: ends(30, 11.4, 4.0),
+  md: ends(36, 14.0, 5.0),
+  lg: ends(44, 18.0, 6.0),
+};
+
 function polar(deg: number, r: number): { x: number; y: number } {
   const rad = ((deg - 90) * Math.PI) / 180;
   return { x: CENTRE + r * Math.cos(rad), y: CENTRE + r * Math.sin(rad) };
@@ -86,8 +120,9 @@ export function createKnob(parent: HTMLElement, initial: KnobProps): KnobCompone
   svg.createSvg("path", { cls: "wadjet-studio-knob-track", attr: { d: arcPath(-135, 135, ARC_R) } });
   const arc = svg.createSvg("path", { cls: "wadjet-studio-knob-arc" });
   // The pointer is a short bar just inside the body's top edge, rotated about
-  // the face centre — the prototype's 2.5 × 11 px tick.
-  const ind = svg.createSvg("line", { cls: "wadjet-studio-knob-indicator", attr: { x1: CENTRE, y1: 17, x2: CENTRE, y2: 35 } });
+  // the face centre — the prototype's 2.5 px tick. Its ends are set per size
+  // in `paint()` (see `POINTER`), because one viewBox covers three diameters.
+  const ind = svg.createSvg("line", { cls: "wadjet-studio-knob-indicator", attr: { x1: CENTRE, x2: CENTRE } });
 
   const label = el.createSpan({ cls: "wadjet-studio-knob-label", text: props.label });
   const readout = el.createSpan({ cls: "wadjet-studio-knob-value" });
@@ -102,10 +137,12 @@ export function createKnob(parent: HTMLElement, initial: KnobProps): KnobCompone
   function paint(): void {
     const { spec, value, color } = props;
     el.toggleClass("is-disabled", props.disabled === true);
-    el.setAttr("data-size", props.size ?? "md");
+    const size = props.size ?? "md";
+    el.setAttr("data-size", size);
     el.setCssProps({ "--wadjet-studio-knob-color": color ?? "var(--wadjet-studio-accent)" });
     const a = arcAngles(value, spec);
     arc.setAttr("d", a ? arcPath(a.from, a.to, ARC_R) : "");
+    ind.setAttrs({ y1: POINTER[size].y1.toFixed(2), y2: POINTER[size].y2.toFixed(2) });
     ind.setAttr("transform", `rotate(${valueToAngle(value, spec).toFixed(2)} ${CENTRE} ${CENTRE})`);
     readout.setText(props.fmt(value));
     // Obsidian's setAttr drops an attribute when handed `false`, so booleans go in as strings.

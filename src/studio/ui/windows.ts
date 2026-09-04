@@ -24,7 +24,7 @@
  * makes `restore()` possible: `view.openWindows` holds ids, not panels.
  */
 import { createWindow, type LedLevel, type LedProps, type WindowComponent, type WindowIssue, type WindowPreset } from "./components";
-import { CASCADE_ORIGIN, cascadePosition } from "../model/clamp";
+import { CASCADE_ORIGIN, cascadePosition, defaultPosition } from "../model/clamp";
 import type { StudioState } from "../model/state";
 import { issuesByUnit, issuesFor, type StudioIssue } from "../model/validation";
 import type { ZoneProfile } from "../../core/types";
@@ -49,6 +49,12 @@ export interface WindowBuild {
   badgeColor?: string;
   /** the dim caption after the kind pill — the unit's place in the signal path (`slot 00 · every chain`) */
   caption?: string;
+  /**
+   * Fills the bar's free slot between the caption and the spacer, once, at
+   * open — a Köppen readout, a calendar-source pill, an era's whole title row
+   * (`components/window.ts`'s `head`). The panel owns what it puts there.
+   */
+  head?: (slot: HTMLElement) => void;
   /**
    * The panel's width in px, from the prototype. Set at open and never
    * re-read: a panel's width is a design constant, not a function of its
@@ -101,6 +107,37 @@ interface OpenWindow {
 }
 
 const issueLevel = (level: StudioIssue["level"]): WindowIssue["level"] => (level === "error" ? "error" : "warn");
+
+/**
+ * Where a panel with no remembered position opens, in the prototype's own
+ * 1560×960 coordinates (`Component.DEFPOS`, `1397-logic-class-Component.js`
+ * l.155): forcings low and central under the playlist, atlas high and left,
+ * the four channel editors stepped down the left margin. `defaultPosition`
+ * scales the point into whatever box this leaf actually has.
+ *
+ * Ids with a `:` are matched on their PREFIX, because the prototype has one
+ * entry for the one moon / era / channel it ships and this studio has many.
+ * Anything with no entry — every device panel — keeps the cascade, which is
+ * the right behaviour for a set whose size the prototype never fixed.
+ */
+const DEFAULT_POS: ReadonlyArray<readonly [string, { x: number; y: number }]> = [
+  ["forcings", { x: 640, y: 330 }],
+  ["regimes", { x: 720, y: 130 }],
+  ["seasons", { x: 680, y: 120 }],
+  ["atlas", { x: 390, y: 60 }],
+  ["cycle:", { x: 500, y: 110 }],
+  ["era:", { x: 540, y: 110 }],
+  ["channel:temperature", { x: 36, y: 64 }],
+  ["channel:precipitation", { x: 48, y: 58 }],
+  ["channel:wind", { x: 60, y: 76 }],
+  ["channel:sky", { x: 54, y: 70 }],
+];
+
+/** The prototype's start point for `id`, or `null` when it has none. */
+export function defaultPosFor(id: string): { x: number; y: number } | null {
+  for (const [key, at] of DEFAULT_POS) if (key.endsWith(":") ? id.startsWith(key) : id === key) return at;
+  return null;
+}
 
 /** `state.view.zoneId`'s draft, or `null` off-zone — every window validates the same one the mixer and header do. */
 function zoneOf(state: StudioState): ZoneProfile | null {
@@ -216,10 +253,15 @@ export function createWindowManager(): WindowManager {
 
       const built = builder(context);
       const remembered = context.store.get().view.windowPos[id];
-      const cascade = cascadePosition(open.size, context.shell.windows.clientWidth, context.shell.windows.clientHeight);
+      const boxW = context.shell.windows.clientWidth;
+      const boxH = context.shell.windows.clientHeight;
+      // A remembered position always wins; failing that, the prototype's own
+      // start point for this panel; failing that, the cascade.
+      const proto = defaultPosFor(id);
+      const start = proto === null ? cascadePosition(open.size, boxW, boxH) : defaultPosition(proto.x, proto.y, boxW, boxH);
       const pos = {
-        x: remembered?.x ?? cascade.x,
-        y: remembered?.y ?? cascade.y,
+        x: remembered?.x ?? start.x,
+        y: remembered?.y ?? start.y,
         z: topZ(),
       };
       const byUnit = deriveByUnit(context.store.get());
@@ -232,6 +274,7 @@ export function createWindowManager(): WindowManager {
         ...(badge !== undefined ? { badge } : {}),
         ...(built.badgeColor !== undefined ? { badgeColor: built.badgeColor } : {}),
         ...(built.caption !== undefined ? { caption: built.caption } : {}),
+        ...(built.head !== undefined ? { head: built.head } : {}),
         ...(built.width !== undefined ? { width: built.width } : {}),
         ...(built.preset !== undefined ? { preset: built.preset } : {}),
         ...(built.onRename !== undefined ? { onRename: built.onRename } : {}),

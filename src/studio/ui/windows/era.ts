@@ -16,17 +16,21 @@
  *    carrying its remembered position across — the same reason
  *    `registerEraWindows` re-registers every open tick, so a lane clip or a
  *    mixer unit can always `ctx.windows.open("era:" + currentName)`.
- *  - **The one title row is drawn in the body, chrome supplies only the ×.**
+ *  - **The one title row is drawn here and handed to the chrome's head slot.**
  *    The prototype's row (LED · name · ERA · world · N zones · delete · ×) is
  *    fully interactive — a live power LED and a click-to-edit name — and the
  *    chrome's own LED/title/badge (`components/window.ts`) are static: `led`
  *    is captured once at open and never re-reads `on`, and `title`/`badge`
- *    are plain text. So this file paints the whole row itself, full-bleed
- *    across the body's own padding, and still hands the chrome `title`/
- *    `badge` the same strings (`name`/`"ERA"`) so the e2e's chrome probes and
- *    a screen reader's dialog label stay correct — the era section of
- *    `styles.css` hides those two chrome nodes visually, keeping only the
- *    close × and a slim drag strip above the real row.
+ *    are plain text. So this file paints the whole row itself, and still hands
+ *    the chrome `title`/`badge` the same strings (`name`/`"ERA"`) so the e2e's
+ *    chrome probes and a screen reader's dialog label stay correct. The era
+ *    section of `styles.css` hides those two chrome nodes and the head goes
+ *    into the chrome's own head slot (`components/window.ts`'s `head`), so the
+ *    panel wears ONE 37 px bar rather than a dead strip above a second one.
+ *    It is REAL bar content now rather than a `pointer-events: none` overlay,
+ *    which is what gives the `world` chip its hint reach back; the bar's drag
+ *    skips the head's own controls instead, which is what keeps the bar
+ *    draggable and its close × clickable underneath.
  */
 import { Menu } from "obsidian";
 import { ERA_TAG_PREFIX } from "../../../core/eras";
@@ -107,7 +111,9 @@ export function buildEraWindow(name: string): WindowBuilder {
     const root = createDiv({ cls: "wadjet-studio-era" });
 
     // --- the ONE title row (SPEC §3.4): LED · name · ERA · world · N zones · delete ---
-    const head = root.createDiv({ cls: "wadjet-studio-era-head" });
+    // Built detached and handed to the chrome's head slot by `head` below, so
+    // it IS the bar's content rather than an overlay floated across it.
+    const head = createDiv({ cls: "wadjet-studio-era-head is-tail" });
     const enabledLed: LedComponent = createLed(head, {
       on: true,
       level: "ok",
@@ -285,7 +291,9 @@ export function buildEraWindow(name: string): WindowBuilder {
       opsList.querySelectorAll(".wadjet-studio-era-op").forEach((el) => el.remove());
       const apply = era?.apply ?? [];
       apply.forEach((op, i) => {
-        const col = createDiv({ cls: "wadjet-studio-era-op", attr: { "data-index": String(i), "data-part": "era-op" } });
+        // `offset · temperature.mean` is the column's HINT, not a fourth line
+        // of gloss under the value (prototype `data-hint="{{ ap.field }}"`).
+        const col = createDiv({ cls: "wadjet-studio-era-op", attr: { "data-index": String(i), "data-part": "era-op", "data-hint": opGloss(op) } });
         opsList.insertBefore(col, addOpButton);
         const remove = col.createDiv({
           cls: "wadjet-studio-era-op-x",
@@ -312,15 +320,17 @@ export function buildEraWindow(name: string): WindowBuilder {
               if (phase !== "drag") ctx.store.snapshot();
             }),
         });
-        const glossRow = col.createDiv({ cls: "wadjet-studio-era-op-gloss" });
-        const led = createLed(glossRow, {
+        // The mute lamp rides ON the knob's own label line, ahead of the label
+        // (prototype: knob · LED + label · value), not on a line of its own.
+        const labelEl = knob.el.querySelector<HTMLElement>(".wadjet-studio-knob-label")!;
+        const led = createLed(labelEl, {
           on: op.enabled !== false,
           level: "ok",
           scope: "op",
           hint: eraHint("era.opLed"),
           onToggle: (on) => guarded(() => ctx.store.update((s) => setOpEnabled(s.world, name, i, on), { history: true })),
         });
-        glossRow.createSpan({ cls: "wadjet-studio-era-op-gloss-text", text: opGloss(op) });
+        labelEl.insertBefore(led.el, labelEl.firstChild);
         const fireRemove = (): void => guarded(() => ctx.store.update((s) => removeOp(s.world, name, i), { history: true }));
         remove.addEventListener("click", fireRemove);
         remove.addEventListener("keydown", (ev) => {
@@ -456,6 +466,7 @@ export function buildEraWindow(name: string): WindowBuilder {
       // Prototype width (`proto-markup/`): a design constant, not a function of the content.
       width: 352,
       badge: "ERA",
+      head: (slot) => slot.appendChild(head),
       body: root,
       writes,
       issues,
@@ -464,6 +475,7 @@ export function buildEraWindow(name: string): WindowBuilder {
         unsubscribe = null;
         enabledLed.destroy();
         worldChip.destroy();
+        head.remove();
         for (const row of opRows) {
           row.led.destroy();
           row.knob.destroy();

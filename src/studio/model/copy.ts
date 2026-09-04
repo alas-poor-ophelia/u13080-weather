@@ -193,6 +193,13 @@ export function kindColor(badge: string): string {
       return "var(--wadjet-studio-wind)";
     case "TRIM":
       return "var(--wadjet-studio-sky)";
+    // The prototype's STATES pill is #b9c2cf — a dimmed neutral, one step
+    // below the full-strength badge text every other studio kind wears
+    // (`1028-vst-regimes.html`). --wadjet-studio-text-dim is the palette's
+    // nearest ratified grey; --wadjet-studio-sky IS #b9c2cf but is reserved
+    // for the sky channel's data (SPEC §9).
+    case "STATES":
+      return "var(--wadjet-studio-text-dim)";
     default:
       return "var(--wadjet-studio-text)";
   }

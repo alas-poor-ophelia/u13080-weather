@@ -49,6 +49,18 @@ export interface WindowProps {
    */
   caption?: string;
   /**
+   * The bar's free slot, between the caption and the spacer — SPEC §3.4's `…`
+   * in `LED · name · KIND badge · … · preset ▾ · ×`. The prototype hangs a
+   * Köppen readout there (`1230-vst-macro.html`), a calendar-source pill
+   * (`0811-vst-sablemoon.html`, `0853-vst-seasons.html`) or, on an era, the
+   * whole title row (`0973-vst-era.html`). Called ONCE, with the slot: the
+   * caller owns what it puts in and repaints it itself, which is what a live
+   * lamp or an editable name needs and a plain `caption` string cannot give.
+   * A child marked `is-tail` takes the spacer's growth and hangs at the right
+   * end of the bar, the way the prototype's source pill does.
+   */
+  head?: (slot: HTMLElement) => void;
+  /**
    * The panel's width in px, from the prototype (372 device, 380 seasons,
    * 420 regimes, 452 cycle, 720 atlas, 1078 channel). A window MUST set this:
    * without it the widest child — always the WRITES footer — dictates the
@@ -104,6 +116,7 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
   const titleEl = bar.createSpan({ cls: "wadjet-studio-window-title" });
   const badgeEl = bar.createSpan({ cls: "wadjet-studio-window-badge" });
   const captionEl = bar.createSpan({ cls: "wadjet-studio-window-caption" });
+  const headEl = bar.createDiv({ cls: "wadjet-studio-window-head" });
   // The title no longer grows (styles.css): an explicit spacer is what keeps
   // the kind pill beside the name and the preset ▾ / × pair at the right end.
   bar.createDiv({ cls: "wadjet-studio-window-spacer" });
@@ -149,6 +162,12 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
   function onBarDown(ev: PointerEvent): void {
     if (!props.draggable || ev.button !== 0) return;
     if (closeEl.contains(ev.target as Node) || presetSlot.contains(ev.target as Node) || ledSlot.contains(ev.target as Node)) return;
+    // The head slot's own CONTROLS are controls, not grab handles: the drag's
+    // preventDefault would swallow the click on an era's lamp and the focus on
+    // its name field. Inert content there — a pill, a Köppen readout — stays a
+    // grab handle, so the bar can still be dragged across it (and keeps its
+    // `data-hint` reach, which a `pointer-events: none` overlay does not).
+    if (headEl.contains(ev.target as Node) && (ev.target as HTMLElement).closest("input, [role='button'], [role='slider']") !== null) return;
     // A renameable title is a control, not a grab handle: the drag's
     // preventDefault would swallow the click that opens the field.
     if (props.onRename !== undefined && titleEl.contains(ev.target as Node)) return;
@@ -352,6 +371,8 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
   titleEl.addEventListener("click", onTitleClick);
   titleEl.addEventListener("keydown", onTitleKey);
   paintPreset();
+  // Once, at construction: the slot's content is the caller's to repaint.
+  props.head?.(headEl);
   paint();
 
   return {

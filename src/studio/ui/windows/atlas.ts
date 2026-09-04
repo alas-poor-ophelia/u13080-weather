@@ -64,6 +64,7 @@ import {
   SPACE_W,
   spaceXForTerrain,
   sparkOf,
+  stationDescription,
   stationOf,
   stations,
   terrainForSpaceX,
@@ -268,8 +269,6 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
   const cardHead = card.createDiv({ cls: "wadjet-studio-atlas-cardhead" });
   const cardName = cardHead.createSpan({ cls: "wadjet-studio-atlas-cardname", attr: { "data-part": "atlas-card-name" } });
   const cardKoppen = cardHead.createSpan({ cls: "wadjet-studio-atlas-koppen" });
-  cardHead.createDiv({ cls: "wadjet-studio-atlas-fill" });
-  const cardYears = cardHead.createSpan({ cls: "wadjet-studio-atlas-cardyears" });
   const cardStats = card.createDiv({ cls: "wadjet-studio-atlas-cardstats" });
   const cardText = card.createDiv({ cls: "wadjet-studio-atlas-cardtext" });
   const cardSpark = card.createSvg("svg", { cls: "wadjet-studio-atlas-spark", attr: { viewBox: `0 0 ${SPARK_W} ${SPARK_H}`, preserveAspectRatio: "none", "data-hint": atlasHint("atlas.spark"), "data-part": "atlas-spark" } });
@@ -461,7 +460,10 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
     }
 
     const highlight = mode === "geography" ? (previewMatch(place())?.candidate.preset.id ?? null) : selected;
-    const points = climateSpace();
+    // The map is the curated ten plus, when the panel is pointing at one of
+    // the other sixteen, that station as a guest: what the panel is about is
+    // never off the map (the list can reach every shipped station).
+    const points = climateSpace(highlight);
     let zoneX = 0;
     let zoneY = 0;
     let linkTo: { x: number; y: number } | null = null;
@@ -470,7 +472,9 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
       if (p !== null) {
         zoneX = p.x;
         zoneY = p.y;
-        linkTo = { x: p.matchX, y: p.matchY };
+        // Only ever to a dot the map draws. The match is the highlight, so it
+        // is on the map either way — curated or as the guest above.
+        linkTo = points.some((q) => q.id === p.matchId) ? { x: p.matchX, y: p.matchY } : null;
       }
     } else {
       const at = points.find((p) => p.id === selected);
@@ -564,13 +568,13 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
     cardName.setText(station?.name ?? "No station selected");
     cardKoppen.setText(station?.koppen ?? "—");
     cardKoppen.setCssProps({ "--wadjet-studio-atlas-color": station === null ? "var(--wadjet-studio-text-dim)" : GROUP_COLOR[station.group] });
-    cardYears.setText(station === null ? "" : `${format(station.years, "count", units).text} yr`);
-    cardStats.setText(
-      station === null
-        ? "—"
-        : grammar(rangeText(station.minC, station.maxC, units), `wet ${format(station.wetDays, "count", units).text} d/yr`, `${station.country} · ${station.koppenDescription}`),
-    );
-    cardText.setText(station === null ? "" : `${station.presetName} — ${station.character}`);
+    // The prototype's card title line is the name and the class, nothing else,
+    // and its stats line is ONE line: the temperature pair and the wet days.
+    // The years of record and the country stay on the record, off the card.
+    const wet = station === null ? "" : format(station.wetDays, "count", units).text;
+    cardStats.setText(station === null ? "—" : grammar(rangeText(station.minC, station.maxC, units), `wet ${wet} d/yr`));
+    // One sentence, ending in a period, quoting the SAME wet-day figure.
+    cardText.setText(station === null ? "" : stationDescription(station, wet));
 
     paintSpark(cardSpark, basePreset === null ? null : sparkOf(basePreset), preset === null ? null : sparkOf(preset), station === null ? "var(--wadjet-studio-text-dim)" : GROUP_COLOR[station.group]);
     const by = `mean ${unitLabel("temperature", units)} by month`;

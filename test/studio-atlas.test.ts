@@ -27,6 +27,7 @@ import {
   koppenGroup,
   latitudeForBaselineC,
   matchByGeography,
+  MAP_STATIONS,
   matchParts,
   presetOf,
   previewMatch,
@@ -39,6 +40,7 @@ import {
   spaceX,
   spaceXForTerrain,
   spaceY,
+  stationDescription,
   stationOf,
   stations,
   terrainForSpaceX,
@@ -294,38 +296,145 @@ describe("studio atlas · the climate space", () => {
     for (const o of ["leeward", "none", "windward"] as const) expect(terrainForSpaceX(spaceXForTerrain(o))).toBe(o);
   });
 
-  test("every station is placed, inside the map, with a de-collided label", () => {
+  test("the map is the curated table of ten; the list is still every shipped station", () => {
     const points = climateSpace();
-    expect(points.map((p) => p.id)).toEqual(stations().map((s) => s.id));
+    // The MAP is hand-placed and short; the LIST and the search stay complete.
+    expect(points.length).toBe(10);
+    expect(points.map((p) => p.id)).toEqual(MAP_STATIONS.map((m) => m.id));
+    expect(stations().length).toBe(26);
+    expect(points.length).toBeLessThan(stations().length);
+    // Every curated id resolves to a shipped preset, at the place the
+    // prototype's own station named.
+    const placeOf = new Map(points.map((p) => [p.id, p.name]));
+    expect(placeOf.get("fjord-coast")).toBe("Bergen");
+    expect(placeOf.get("southern-oceanic")).toBe("Hobart");
+    expect(placeOf.get("atlantic-green")).toBe("A Coruña");
+    expect(placeOf.get("equatorial-rainforest")).toBe("Singapore");
+    expect(placeOf.get("savanna")).toBe("Darwin");
+    expect(placeOf.get("red-desert")).toBe("Undoolya");
+    expect(placeOf.get("silk-road-basin")).toBe("Lanzhou");
+    expect(placeOf.get("taiga")).toBe("Sodankylä");
+    expect(placeOf.get("tundra")).toBe("Ny-Ålesund");
+    expect(placeOf.get("alpine-pass")).toBe("Fremont Pass");
+    for (const m of MAP_STATIONS) {
+      expect(presetOf(m.id)).not.toBeNull();
+      expect(stationOf(m.id)).not.toBeNull();
+    }
     for (const p of points) {
       expect(p.x).toBeGreaterThan(0);
       expect(p.x).toBeLessThan(SPACE_W);
       expect(p.y).toBeGreaterThan(0);
       expect(p.y).toBeLessThan(SPACE_H);
-      expect(p.name.length).toBeGreaterThan(0);
-      expect(Math.abs(p.labelX - p.x)).toBeCloseTo(9, 6);
-      expect(["start", "end"]).toContain(p.anchor);
+      // The prototype's own label offset, for every dot.
+      expect(p.labelX).toBe(p.x + 10);
+      expect(p.labelY).toBe(p.y - 6);
+      expect(p.anchor).toBe("start");
     }
-    // Deterministic: the same set of stations always draws the same map.
     expect(climateSpace()).toEqual(points);
   });
 
-  test("stations land in the blob their Köppen group names", () => {
-    const blob = (g: string) => CLIMATE_BLOBS.find((b) => b.group === g)!;
+  test("no label collides with another, or with a blob caption", () => {
+    // Both are drawn at 10px; ~5.2 units a character is the same estimate the
+    // de-collision pass used to place them with.
+    const width = (name: string) => name.length * 5.2 + 4;
+    const boxes = [
+      ...CLIMATE_BLOBS.map((b) => ({ what: b.label, x0: b.labelX - width(b.label) / 2, x1: b.labelX + width(b.label) / 2, y0: b.labelY - 9, y1: b.labelY + 2 })),
+      ...climateSpace().map((p) => ({ what: p.name, x0: p.labelX, x1: p.labelX + width(p.name), y0: p.labelY - 9, y1: p.labelY + 2 })),
+    ];
+    for (const b of boxes) {
+      expect(b.x0).toBeGreaterThanOrEqual(0);
+      expect(b.x1).toBeLessThanOrEqual(SPACE_W);
+    }
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!;
+        const b = boxes[j]!;
+        const clear = a.x1 <= b.x0 || b.x1 <= a.x0 || a.y1 <= b.y0 || b.y1 <= a.y0;
+        expect(`${a.what} / ${b.what}: ${clear}`).toBe(`${a.what} / ${b.what}: true`);
+      }
+    }
+  });
+
+  test("an off-map selection is drawn as an eleventh dot, at its computed place", () => {
+    const curated = climateSpace();
+    // Selecting one of the curated ten adds nothing.
+    expect(climateSpace("fjord-coast")).toEqual(curated);
+    expect(climateSpace(null)).toEqual(curated);
+    expect(climateSpace(undefined)).toEqual(curated);
+
+    // Sixteen shipped stations are not on the curated map; each one, selected,
+    // is drawn as exactly one guest at its own climate-space reading.
+    const offMap = stations().filter((st) => !MAP_STATIONS.some((m) => m.id === st.id));
+    expect(offMap.length).toBe(16);
+    for (const st of offMap) {
+      const points = climateSpace(st.id);
+      expect(points.length).toBe(11);
+      expect(points.slice(0, 10)).toEqual(curated);
+      const guest = points[10]!;
+      expect(guest.id).toBe(st.id);
+      expect(guest.name).toBe(st.name);
+      expect(guest.group).toBe(st.group);
+      // The DOT is the reading, never nudged: only the label moves.
+      expect(guest.x).toBe(spaceX(st.rainMm));
+      expect(guest.y).toBe(spaceY(st.meanC));
+      expect(guest.x).toBeGreaterThan(0);
+      expect(guest.x).toBeLessThan(SPACE_W);
+      expect(guest.y).toBeGreaterThan(0);
+      expect(guest.y).toBeLessThan(SPACE_H);
+      // A label that would collide goes BELOW its dot, never above the
+      // prototype's own offset — the placements are ordered that way.
+      expect(guest.labelY).toBeGreaterThanOrEqual(guest.y - 6);
+      expect(Math.abs(guest.labelX - guest.x)).toBeCloseTo(10, 9);
+    }
+  });
+
+  test("an off-map selection's label clears every curated label and blob caption", () => {
+    const width = (name: string) => name.length * 5.2 + 4;
+    const box = (x: number, y: number, name: string, anchor: string) => {
+      const x0 = anchor === "start" ? x : x - width(name);
+      return { x0, x1: x0 + width(name), y0: y - 9, y1: y + 2 };
+    };
+    const fixed = [
+      ...CLIMATE_BLOBS.map((b) => box(b.labelX - width(b.label) / 2, b.labelY, b.label, "start")),
+      ...climateSpace().map((p) => box(p.labelX, p.labelY, p.name, p.anchor)),
+    ];
+    for (const st of stations().filter((x) => !MAP_STATIONS.some((m) => m.id === x.id))) {
+      const guest = climateSpace(st.id)[10]!;
+      const g = box(guest.labelX, guest.labelY, guest.name, guest.anchor);
+      expect(`${st.id} on the map: ${g.x0 >= 0 && g.x1 <= SPACE_W}`).toBe(`${st.id} on the map: true`);
+      for (const f of fixed) {
+        const clear = g.x1 <= f.x0 || f.x1 <= g.x0 || g.y1 <= f.y0 || f.y1 <= g.y0;
+        expect(`${st.id}: ${clear}`).toBe(`${st.id}: true`);
+      }
+    }
+  });
+
+  test("every curated dot lands inside the blob its Köppen group names", () => {
     const inside = (p: { x: number; y: number }, g: string): boolean => {
-      const b = blob(g);
+      const b = CLIMATE_BLOBS.find((x) => x.group === g)!;
       return ((p.x - b.cx) / b.rx) ** 2 + ((p.y - b.cy) / b.ry) ** 2 <= 1;
     };
-    const by = new Map(climateSpace().map((p) => [p.id, p]));
-    // One representative per group, checked against its own ellipse.
-    expect(inside(by.get("equatorial-rainforest")!, "A")).toBe(true);
-    expect(inside(by.get("savanna")!, "A")).toBe(true);
-    expect(inside(by.get("red-desert")!, "B")).toBe(true);
-    expect(inside(by.get("silk-road-basin")!, "B")).toBe(true);
-    expect(inside(by.get("fjord-coast")!, "C")).toBe(true);
-    expect(inside(by.get("atlantic-green")!, "C")).toBe(true);
-    expect(inside(by.get("taiga")!, "D-E")).toBe(true);
-    expect(inside(by.get("tundra")!, "D-E")).toBe(true);
+    for (const p of climateSpace()) {
+      const group = p.group === "D" || p.group === "E" ? "D-E" : p.group;
+      expect(`${p.id} in ${group}: ${inside(p, group)}`).toBe(`${p.id} in ${group}: true`);
+    }
+  });
+
+  test("the card's sentence ends in a period, quoting the stats line's own wet days", () => {
+    const bergen = stationOf("fjord-coast")!;
+    const desc = stationDescription(bergen, "223");
+    expect(desc.startsWith("Fjord Coast — ")).toBe(true);
+    expect(desc.endsWith("rain 223 d/yr.")).toBe(true);
+    // The curator's round 230 is dropped: the card prints ONE wet-day figure,
+    // and it is the one the stats line above it prints.
+    expect(bergen.character).toContain("230 days a year");
+    expect(desc).not.toContain("230");
+    expect(desc.match(/d\/yr/g)!.length).toBe(1);
+    for (const s of stations()) {
+      const line = stationDescription(s, "99");
+      expect(line.endsWith("rain 99 d/yr.")).toBe(true);
+      expect(line.startsWith(`${s.presetName} — `)).toBe(true);
+    }
   });
 
   test("koppenGroup is the class's first letter, and anything odd reads as temperate", () => {
@@ -357,12 +466,18 @@ describe("studio atlas · geography on the map", () => {
     expect(home.y).toBeCloseTo(home.matchY, 6);
     expect(home.x).toBe(spaceXForTerrain(bergen.orographic));
 
-    // A kilometre higher is colder, so the dot drops.
+    // The link lands on the dot the curated map actually draws.
+    const onMap = climateSpace().find((p) => p.id === "fjord-coast")!;
+    expect(home.matchX).toBe(onMap.x);
+    expect(home.matchY).toBe(onMap.y);
+
+    // A kilometre higher is colder, so the dot drops below the record's dot.
     const high = zonePoint({ latitude: bergen.latitude, altitude: bergen.altitude + 1000, orographic: bergen.orographic })!;
+    expect(high.y).toBeGreaterThan(high.matchY);
+    // Tier A adjusts temperature only, so the record's own point never moves.
     const highStation = stationOf(high.matchId)!;
-    expect(high.y).toBeGreaterThan(spaceY(highStation.meanC));
-    // Tier A adjusts temperature only, so x is always the match's own rainfall column.
-    expect(high.matchX).toBe(spaceX(highStation.rainMm));
+    const highOnMap = climateSpace().find((p) => p.id === high.matchId);
+    expect(high.matchX).toBe(highOnMap?.x ?? spaceX(highStation.rainMm));
   });
 
   test("matchParts is exactly what describeTierA joins, and the sparks bracket the adjustment", () => {
