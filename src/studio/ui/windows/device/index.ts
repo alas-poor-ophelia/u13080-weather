@@ -356,6 +356,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       body,
       calendar,
       mutate,
+      current,
       gesture,
       beginLive,
       endGesture: () => {

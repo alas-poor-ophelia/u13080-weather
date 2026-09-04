@@ -54,6 +54,8 @@ export interface DeviceWindowContext {
   modifierId: string;
   body: HTMLElement;
   calendar(): CalendarDescription | null;
+  /** The device as the draft holds it right now — for a part refreshing itself mid-gesture, while rebuilds are held. */
+  current(): Device | null;
   mutate(fn: (d: Device) => void, history: boolean): void;
   gesture(phase: "drag" | "end" | "key" | "type", fn: (d: Device) => void): void;
   beginLive(): void;

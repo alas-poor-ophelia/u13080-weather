@@ -18,7 +18,7 @@ import { createChart, createChip } from "../../components";
 import { ENVELOPE_H, ENVELOPE_W } from "./constants";
 import type { DeviceWindowContext } from "./context";
 import { envelopeEdits } from "./env-moon";
-import { colourOf, tagColour, tagSources } from "./geometry";
+import { colourOf, shapeable, tagColour, tagSources } from "./geometry";
 import { iconButton } from "./icon-button";
 import { buildBindCards } from "./mod-moon";
 
@@ -60,6 +60,19 @@ export function buildMod(c: DeviceWindowContext, d: Device): void {
     cls: "wadjet-studio-device-add",
     onClick: (ev) => openGateMenu(c, ev, d),
   });
+  // The prototype only shapes onsets on the moon path, but the engine samples
+  // any op's envelope at the world's first moon when the device names none
+  // (`core/modifiers.ts` `carrierPhase`), and `＋ mod` above promises "a gate
+  // or an envelope" — so every other kind gets an entry point too. Same
+  // default as the moon card's mode toggle: the op starts on `Ease in`.
+  const addEnvelope = iconButton(sec.head, {
+    text: "＋ envelope",
+    label: "Add an envelope",
+    hint: deviceHint("device.envelope.add"),
+    cls: "wadjet-studio-device-add",
+    onClick: (ev) => openEnvelopeMenu(c, ev, d),
+  });
+  addEnvelope.setAttr("data-part", "add-envelope");
 
   const row = sec.content.createDiv({ cls: "wadjet-studio-device-mod-row" });
   row.createSpan({ cls: "wadjet-studio-device-mod-label", text: "MOD" });
@@ -122,6 +135,17 @@ function openGateMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): void {
   menu.showAtMouseEvent(ev);
 }
 
+/** The ops an envelope could shape: `offset` and `scale` (`shapeable`), and not already carrying one. */
+function openEnvelopeMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): void {
+  const menu = new Menu();
+  const open = d.apply.map((op, i) => ({ op, i })).filter((o) => shapeable(o.op) && o.op.envelope === undefined);
+  for (const { op, i } of open) {
+    menu.addItem((item) => item.setTitle(`${paramName(op.param)} · ${opGloss(op)}`).onClick(() => c.mutate((x) => setEnvelope(x, i, envelopeShape("Ease in")), true)));
+  }
+  if (open.length === 0) menu.addItem((item) => item.setTitle("No offset or scale op left to shape").setDisabled(true));
+  menu.showAtMouseEvent(ev);
+}
+
 function openGateSourceMenu(c: DeviceWindowContext, anchor: HTMLElement, index: number): void {
   const menu = new Menu();
   for (const source of gateSources(c, [])) menu.addItem((item) => item.setTitle(source).onClick(() => c.mutate((x) => setGateSource(x, index, source), true)));
@@ -160,6 +184,7 @@ function buildEnvelope(c: DeviceWindowContext, parent: HTMLElement, op: Modifier
   // The point edits are the moon overlay's too (`env-moon.ts`): same field,
   // same `setEnvelope`, and only the first handle's floor differs.
   const edits = envelopeEdits(c, index, points);
+  const seriesFor = (pts: ReadonlyArray<readonly [number, number]>) => [{ points: pts.map((p): [number, number] => [p[0], p[1]]), color: "var(--wadjet-studio-accent)" }];
 
   const chart = createChart(box, {
     kind: "automation",
@@ -168,8 +193,14 @@ function buildEnvelope(c: DeviceWindowContext, parent: HTMLElement, op: Modifier
     height: ENVELOPE_H,
     yRange: [0, 1],
     editable: true,
-    series: [{ points: points.map((p): [number, number] => [p[0], p[1]]), color: "var(--wadjet-studio-accent)" }],
-    onPoint: (at, x, y, phase) => c.gesture(phase, edits.move(at, x, y)),
+    series: seriesFor(points),
+    onPoint: (at, x, y, phase) => {
+      c.gesture(phase, edits.move(at, x, y));
+      // The panel holds every rebuild while a gesture is live (`index.ts`
+      // `render`), which is what lets a knob draw itself; the plot has to do
+      // the same, or the curve sits still until the pointer lifts (wadjet-jug).
+      if (phase === "drag") chart.update({ series: seriesFor(c.current()?.apply[index]?.envelope ?? points) });
+    },
     onAdd: (x, y) => edits.add(x, y),
     onRemove: (at) => edits.remove(at),
   });

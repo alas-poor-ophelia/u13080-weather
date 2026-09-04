@@ -2686,6 +2686,39 @@ async function dragKnobDial(selector: string, dy: number): Promise<void> {
   await nextFrame();
 }
 
+/**
+ * A chart handle dragged and HELD: pointer down, one move of `dy`, then the
+ * handle's `cy` read again before the pointer lifts. The device panel holds
+ * rebuilds for the length of a gesture, so this is the only way to prove the
+ * plot tracks the hand rather than waiting for pointer up (wadjet-jug).
+ */
+async function dragHandleHeld(selector: string, dy: number): Promise<{ before: number; held: number; after: number }> {
+  const out = await withApp(
+    ob.page,
+    (app, a: { type: string; selector: string; dy: number }) => {
+      const leaf = app.workspace.getLeavesOfType(a.type)[0];
+      const el: HTMLElement = leaf.view.containerEl;
+      const cy = (): number => Number(el.querySelector(a.selector)?.getAttribute("cy") ?? "NaN");
+      const handle = el.querySelector(a.selector);
+      if (handle === null) throw new Error(`no chart handle at ${a.selector}`);
+      const r = handle.getBoundingClientRect();
+      const x = Math.round(r.left + r.width / 2);
+      const y = Math.round(r.top + r.height / 2);
+      const base = { pointerId: 1, pointerType: "mouse", isPrimary: true, bubbles: true, cancelable: true, view: window };
+      const before = cy();
+      handle.dispatchEvent(new PointerEvent("pointerdown", { ...base, button: 0, buttons: 1, clientX: x, clientY: y }));
+      window.dispatchEvent(new PointerEvent("pointermove", { ...base, button: -1, buttons: 1, clientX: x, clientY: y + a.dy }));
+      // A repaint replaces the circle, so the handle is looked up afresh.
+      const held = cy();
+      window.dispatchEvent(new PointerEvent("pointerup", { ...base, button: 0, buttons: 0, clientX: x, clientY: y + a.dy }));
+      return { before, held, after: cy() };
+    },
+    { type: VIEW_TYPE, selector, dy },
+  );
+  await nextFrame();
+  return out;
+}
+
 /** Undo / redo the way the leaf's own Mod+Z scope does. */
 async function studioHistory(which: "undo" | "redo"): Promise<boolean> {
   const did = await withApp(
@@ -4038,17 +4071,35 @@ describe("climate studio · device window", () => {
     expect(await devicePanel().locator(".wadjet-studio-device-mod-row").count()).toBe(0);
     expect(await devicePanel().locator(".wadjet-studio-device-add-mod").count()).toBe(0);
 
-    // The `∿` chip toggles one card open, and only that one.
+    // The `∿` chip toggles one card open, and only that one. On a card still
+    // in phases mode it also writes the default envelope (wadjet-l0j): the
+    // prototype's chip opens the editor on every click, and here curve mode
+    // IS the envelope, so an inert chip was the deviation.
     expect(cards.map((b) => b.shapeOpen)).toEqual([false, false]);
+    expect(cards.map((b) => b.mode)).toEqual(["▦ phases", "▦ phases"]);
     await devicePanel().locator('[data-part="shape-0"]').click();
     await nextFrame();
-    expect((await probeBinds()).map((b) => b.shapeOpen)).toEqual([true, false]);
+    const openedByChip = await probeBinds();
+    expect(openedByChip.map((b) => b.shapeOpen)).toEqual([true, false]);
+    expect(openedByChip.map((b) => b.mode)).toEqual(["∿ curve", "▦ phases"]);
+    expect(openedByChip[0]!.shape).toBe("∿ Ease in");
+    expect(await devicePanel().locator(".wadjet-studio-device-env").count()).toBe(1);
+    const chipWrote = await draftModifier(DEVICE_ID);
+    expect(Array.isArray(chipWrote.apply[0].envelope)).toBe(true);
+    expect(chipWrote.apply[1].envelope).toBeUndefined();
+    // Closing the overlay keeps the envelope — only the mode toggle drops it.
     await devicePanel().locator('[data-part="shape-0"]').click();
     await nextFrame();
     expect((await probeBinds()).map((b) => b.shapeOpen)).toEqual([false, false]);
+    expect(await devicePanel().locator(".wadjet-studio-device-env").count()).toBe(0);
+    expect(Array.isArray((await draftModifier(DEVICE_ID)).apply[0].envelope)).toBe(true);
 
-    // `▦ phases` → `∿ curve` writes an envelope on THAT op and no other.
-    expect(cards.map((b) => b.mode)).toEqual(["▦ phases", "▦ phases"]);
+    // `∿ curve` → `▦ phases` drops the envelope; `▦ phases` → `∿ curve`
+    // writes one on THAT op and no other.
+    await devicePanel().locator('[data-part="mod-mode-0"]').click();
+    await nextFrame();
+    expect((await probeBinds()).map((b) => b.mode)).toEqual(["▦ phases", "▦ phases"]);
+    expect((await draftModifier(DEVICE_ID)).apply[0].envelope).toBeUndefined();
     await devicePanel().locator('[data-part="mod-mode-0"]').click();
     await nextFrame();
     const curved = await probeBinds();
@@ -4145,15 +4196,16 @@ describe("climate studio · device window", () => {
     // overlay — a header that names the binding, five preset chips with the
     // matching one lit, and a plot of the last third of the cycle.
     await seedMoonBindings();
-    // No envelope, no overlay: the chip toggles `envOpen`, but there is nothing
-    // to draw until the mode toggle writes points.
-    await devicePanel().locator('[data-part="mod-mode-0"]').click();
-    await nextFrame();
-    expect(Array.isArray((await draftModifier(DEVICE_ID)).apply[0].envelope)).toBe(true);
+    // A fresh binding has no envelope and no overlay: the chip alone writes
+    // the default and opens it (wadjet-l0j), the way the prototype's chip
+    // opens the editor on every click.
+    expect((await draftModifier(DEVICE_ID)).apply[0].envelope).toBeUndefined();
     expect(await devicePanel().locator(".wadjet-studio-device-env").count()).toBe(0);
 
     await devicePanel().locator('[data-part="shape-0"]').click();
     await nextFrame();
+    expect(Array.isArray((await draftModifier(DEVICE_ID)).apply[0].envelope)).toBe(true);
+    expect((await probeBinds())[0]!.mode).toBe("∿ curve");
     const opened = await probeEnvelope();
     expect(opened.count).toBe(1);
     // The header names the binding in the same `macro` vocabulary the card does.
@@ -4180,8 +4232,11 @@ describe("climate studio · device window", () => {
     expect((await probeEnvelope()).handles).toBe(3);
 
     // Dragging the peak down is what makes a shape `custom` — nothing stores
-    // the name, `envelopeShapeName` recognises the points.
-    await dragKnobDial('[data-part="env-chart-0"] .wadjet-studio-chart-point[data-index="1"]', 20);
+    // the name, `envelopeShapeName` recognises the points. The handle follows
+    // the hand while it is still down, not only on release (wadjet-jug).
+    const peak = await dragHandleHeld('[data-part="env-chart-0"] .wadjet-studio-chart-point[data-index="1"]', 20);
+    expect(peak.held).toBeGreaterThan(peak.before);
+    expect(peak.after).toBe(peak.held);
     const drawn = (await draftModifier(DEVICE_ID)).apply[0].envelope as Array<[number, number]>;
     expect(drawn[1]![1]).toBeLessThan(0.9);
     expect((await probeBinds())[0]!.shape).toBe("∿ custom");
@@ -4335,6 +4390,47 @@ describe("climate studio · device window", () => {
     const draft = await draftModifier(DEVICE_ID);
     expect(draft.mods).toEqual([{ source: "season:Winter", amount: 0.5 }]);
     console.log(`  · ＋ gate season:Winter, dragged to ${dimmed.gateAmount} → mods ${JSON.stringify(draft.mods)}`);
+  });
+
+  test("step 55a: ＋ envelope shapes one op's onset on a device with no moon, and its × takes it back off", async () => {
+    // The prototype only shapes onsets on the moon path, but the engine samples
+    // any op's envelope at the world's first moon (`core/modifiers.ts`
+    // `carrierPhase`), and `＋ mod` promises "a gate or an envelope" — so the
+    // MOD head offers `＋ envelope` beside `＋ gate` on every other kind.
+    await openDeviceWindow(DEVICE_ID);
+    const before = await draftModifier(DEVICE_ID);
+    expect(before.apply.every((o: { envelope?: unknown }) => o.envelope === undefined)).toBe(true);
+    expect(await devicePanel().locator(".wadjet-studio-device-envelope").count()).toBe(0);
+
+    await devicePanel().locator('[data-part="add-envelope"]').click();
+    await pickDeviceMenuItem(/./);
+    const shaped = await draftModifier(DEVICE_ID);
+    const at = shaped.apply.findIndex((o: { envelope?: unknown }) => o.envelope !== undefined);
+    expect(at).toBeGreaterThanOrEqual(0);
+    // The same default the moon card's mode toggle writes.
+    expect(shaped.apply[at].envelope).toEqual([
+      [0.78, 0],
+      [0.88, 0.5],
+      [0.94, 1],
+      [0.999, 1],
+    ]);
+    expect(await devicePanel().locator(".wadjet-studio-device-envelope").count()).toBe(1);
+    expect((await devicePanel().locator(".wadjet-studio-device-envelope .wadjet-studio-device-toggle").textContent())?.trim()).toBe("∿ Ease in");
+    expect(await devicePanel().locator(`[data-part="envelope-${at}"] .wadjet-studio-chart-point`).count()).toBe(4);
+
+    // The card's plot tracks a held drag too, the same as the moon overlay's.
+    const peak = await dragHandleHeld(`[data-part="envelope-${at}"] .wadjet-studio-chart-point[data-index="2"]`, 15);
+    expect(peak.held).toBeGreaterThan(peak.before);
+    expect(peak.after).toBe(peak.held);
+    const dragged = (await draftModifier(DEVICE_ID)).apply[at].envelope as Array<[number, number]>;
+    expect(dragged[2]![1]).toBeLessThan(1);
+
+    // The card's × removes it, and the walk leaves step 56 the draft it expects.
+    await devicePanel().locator(".wadjet-studio-device-envelope .wadjet-studio-device-remove").click();
+    await nextFrame();
+    expect((await draftModifier(DEVICE_ID)).apply[at].envelope).toBeUndefined();
+    expect(await devicePanel().locator(".wadjet-studio-device-envelope").count()).toBe(0);
+    console.log(`  · ＋ envelope on apply[${at}] → Ease in, 4 handles; × removed it`);
   });
 
   test("step 56: save as preset writes the device's shape into the world draft", async () => {

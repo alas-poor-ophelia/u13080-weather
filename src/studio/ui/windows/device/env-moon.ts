@@ -137,9 +137,15 @@ function buildHead(c: DeviceWindowContext, box: HTMLElement, op: ModifierOp, ind
  * copy sits under the editable one and the two lines coincide.
  */
 function buildPlot(c: DeviceWindowContext, box: HTMLElement, index: number, points: ReadonlyArray<readonly [number, number]>): void {
-  const line = points.map((p): [number, number] => [p[0], p[1]]);
-  const last = line[line.length - 1];
-  const skirted: Array<[number, number]> = line.length === 0 ? [] : [[ENV_X0, 0], ...line, ...(last !== undefined && last[1] > OPEN_END ? [[1, last[1]] as [number, number]] : [])];
+  const seriesFor = (pts: ReadonlyArray<readonly [number, number]>) => {
+    const line = pts.map((p): [number, number] => [p[0], p[1]]);
+    const last = line[line.length - 1];
+    const skirted: Array<[number, number]> = line.length === 0 ? [] : [[ENV_X0, 0], ...line, ...(last !== undefined && last[1] > OPEN_END ? [[1, last[1]] as [number, number]] : [])];
+    return [
+      { points: line, color: "var(--wadjet-studio-accent)", width: 1.8 },
+      { points: skirted, color: "var(--wadjet-studio-accent)", width: 1.8, fill: true },
+    ];
+  };
   const edits = envelopeEdits(c, index, points, ENV_X0);
   const plot = box.createDiv({ cls: "wadjet-studio-device-env-plot" });
 
@@ -152,10 +158,7 @@ function buildPlot(c: DeviceWindowContext, box: HTMLElement, index: number, poin
     xRange: [ENV_X0, 1],
     yRange: [0, 1],
     editable: true,
-    series: [
-      { points: line, color: "var(--wadjet-studio-accent)", width: 1.8 },
-      { points: skirted, color: "var(--wadjet-studio-accent)", width: 1.8, fill: true },
-    ],
+    series: seriesFor(points),
     ticks: [
       { value: 0, label: "0" },
       { value: 1, label: "1" },
@@ -167,7 +170,13 @@ function buildPlot(c: DeviceWindowContext, box: HTMLElement, index: number, poin
       { value: 0.9, label: "0.90" },
       { value: 1, label: "full ●", color: "var(--wadjet-studio-moon)" },
     ],
-    onPoint: (at, x, y, phase) => c.gesture(phase, edits.move(at, x, y)),
+    onPoint: (at, x, y, phase) => {
+      c.gesture(phase, edits.move(at, x, y));
+      // Rebuilds are held for the length of a gesture (`index.ts` `render`),
+      // so the plot redraws itself from the draft each frame, as the card's
+      // chart in `mod.ts` does — otherwise the curve waits for pointer up.
+      if (phase === "drag") chart.update({ series: seriesFor(c.current()?.apply[index]?.envelope ?? points) });
+    },
     onAdd: (x, y) => edits.add(x, y),
     onRemove: (at) => edits.remove(at),
   });

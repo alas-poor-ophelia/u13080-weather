@@ -58,6 +58,7 @@ export const DEVICE_HINTS: Record<string, Hint> = {
   "device.gate.drag": ["Gate amount", "drag up or down to restrict the device to this tag"],
   "device.gate.remove": ["Remove gate", "the device runs everywhere again"],
   "device.gate.add": ["Add a gate", "pick a season or era to restrict the device to"],
+  "device.envelope.add": ["Add an envelope", "pick an offset or scale op whose onset to shape over the moon cycle"],
   "device.envelope": ["Envelope", "drag the onset shape across the moon cycle"],
   "device.envelope.shape": ["Onset shape", "a named curve, or the points you drew"],
   "device.envelope.remove": ["Remove envelope", "the op returns to full strength"],

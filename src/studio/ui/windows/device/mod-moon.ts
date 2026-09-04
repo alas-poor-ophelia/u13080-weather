@@ -102,7 +102,13 @@ function buildHead(c: DeviceWindowContext, card: HTMLElement, op: ModifierOp, i:
     cls: "wadjet-studio-device-shape",
     onClick: () => {
       c.setEnvOpen(open ? null : i);
-      c.invalidate();
+      // The prototype's chip opens the editor on every click (`1397`
+      // `openEnv` / `envEditor`): every binding there always carries an
+      // envelope. Here curve mode IS the envelope, so a card still in phases
+      // mode has nothing to draw — opening it writes the same default the
+      // mode toggle below does, or the chip reads as dead (wadjet-l0j).
+      if (!open && op.envelope === undefined) c.mutate((x) => setEnvelope(x, i, envelopeShape("Ease in")), true);
+      else c.invalidate();
     },
   });
   shape.setAttrs({ "data-part": `shape-${i}`, "aria-pressed": open ? "true" : "false" });
