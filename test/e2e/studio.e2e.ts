@@ -8654,6 +8654,69 @@ describe("climate studio · windows and touch", () => {
     await closeStudioWindows();
   });
 
+  test("step 2a: the window box is the whole studio, a panel may sit over the header, and the strip clears Obsidian's status bar", async () => {
+    // The Guildmaster's call (2026-09-04): floating panels may overlap any of
+    // the studio's own chrome, so the box is the root, not the playlist body.
+    // The one edge the box does NOT reach is the bottom, where Obsidian's
+    // `position: fixed` status bar sits over the workspace: `view.ts`
+    // measures its reach into the root and pads the strip clear of it.
+    const geom = await withApp(
+      ob.page,
+      (app, a: { type: string }) => {
+        const leaf = app.workspace.getLeavesOfType(a.type)[0];
+        const el: HTMLElement = leaf.view.containerEl;
+        const root = el.querySelector(".wadjet-studio") as HTMLElement;
+        const box = el.querySelector(".wadjet-studio-windows") as HTMLElement;
+        const strip = el.querySelector(".wadjet-studio-audition") as HTMLElement;
+        const bar = el.ownerDocument.querySelector(".status-bar");
+        const rect = (e: Element | null) => {
+          if (e === null) return null;
+          const r = e.getBoundingClientRect();
+          return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height };
+        };
+        return {
+          root: rect(root)!,
+          box: rect(box)!,
+          strip: rect(strip)!,
+          header: rect(el.querySelector(".wadjet-studio-header"))!,
+          statusBar: rect(bar),
+          inset: root.style.getPropertyValue("--wadjet-studio-status-h"),
+          paddingBottom: getComputedStyle(root).paddingBottom,
+        };
+      },
+      { type: VIEW_TYPE },
+    );
+    // Top and sides are the root's own edges.
+    expect(Math.abs(geom.box.top - geom.root.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(geom.box.left - geom.root.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(geom.box.right - geom.root.right)).toBeLessThanOrEqual(1);
+    // The bottom is the root's minus the status bar's reach, and the strip ends there too.
+    const reach = Number.parseFloat(geom.inset);
+    expect(Number.isFinite(reach)).toBe(true);
+    expect(geom.paddingBottom).toBe(geom.inset);
+    expect(Math.abs(geom.box.bottom - (geom.root.bottom - reach))).toBeLessThanOrEqual(1);
+    expect(geom.strip.bottom).toBeLessThanOrEqual(geom.root.bottom - reach + 1);
+    if (geom.statusBar !== null && geom.statusBar.height > 0 && geom.statusBar.left < geom.root.right) {
+      // Desktop Obsidian draws one: nothing of the studio may end behind it.
+      expect(reach).toBeGreaterThanOrEqual(Math.max(0, geom.root.bottom - geom.statusBar.top) - 1);
+      expect(geom.strip.bottom).toBeLessThanOrEqual(geom.statusBar.top + 1);
+    }
+
+    // A panel dragged to the top-left corner sits over the header, where the
+    // playlist-body box used to stop it.
+    await openWindowAt(REGIMES_WINDOW_ID, 300, 300, 61);
+    await dragWindowTitle("Regimes", -5000, -5000);
+    const corner = await probeWindowGeom(REGIMES_WINDOW_ID, "Regimes");
+    expect(corner.pos).toEqual(expect.objectContaining({ x: 0, y: 0 }));
+    expect(Math.abs(corner.panelRect!.top - geom.header.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(corner.panelRect!.left - geom.root.left)).toBeLessThanOrEqual(1);
+    console.log(
+      `  · box = root ${Math.round(geom.root.right - geom.root.left)}×${Math.round(geom.root.bottom - geom.root.top)} less ${geom.inset} for the status bar (${geom.statusBar === null ? "none" : `${Math.round(geom.statusBar.height)} px tall, top ${Math.round(geom.statusBar.top)}`}); Regimes parked at (0, 0) over the header`,
+    );
+
+    await closeStudioWindows();
+  });
+
   test("step 3: opening Forcings, then clicking the Regimes title bar, raises Regimes' z above it", async () => {
     await openWindowAt(REGIMES_WINDOW_ID, 24, 24, 62);
     await openWindowAt(FORCINGS_WINDOW_ID, 320, 24, 63);

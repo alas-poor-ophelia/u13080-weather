@@ -241,7 +241,27 @@ export class StudioView extends ItemView {
   }
 
   override onResize(): void {
+    this.insetStatusBar();
     this.render();
+  }
+
+  /**
+   * Obsidian's status bar is `position: fixed` at the bottom of the window,
+   * over whatever leaf is there, and it exposes no height token. Measure how
+   * far it reaches into the studio and pad the root by that much, so the
+   * audition strip never ends behind it. Zero when the bar is hidden, when the
+   * studio is in a popout window, or when another leaf sits below this one.
+   */
+  private insetStatusBar(): void {
+    const root = this.shell?.root;
+    if (root === undefined) return;
+    root.style.setProperty("--wadjet-studio-status-h", "0px");
+    const bar = root.ownerDocument.querySelector(".status-bar");
+    const b = bar?.getBoundingClientRect();
+    const r = root.getBoundingClientRect();
+    const overlaps = b !== undefined && b.height > 0 && b.left < r.right && b.right > r.left;
+    const reach = overlaps ? Math.max(0, r.bottom - b.top) : 0;
+    root.style.setProperty("--wadjet-studio-status-h", `${Math.ceil(reach)}px`);
   }
 
   // --- shell ---------------------------------------------------------------
@@ -279,6 +299,7 @@ export class StudioView extends ItemView {
     // An edit outside the studio (settings, a pin, a command) rebuilds the world.
     this.unsubscribeSettings = this.plugin.api.on("profiles-changed", () => this.refreshFromSettings());
 
+    this.insetStatusBar();
     this.render();
   }
 

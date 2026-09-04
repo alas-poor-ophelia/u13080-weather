@@ -252,6 +252,10 @@
   min-width: 1100px;
   container-type: inline-size;
   overflow: hidden;
+  /* Obsidian's status bar (word count, sync) is `position: fixed` over the
+     bottom of the workspace and is core chrome people keep. `view.ts` measures
+     how far it reaches into this box and pads the audition strip clear of it. */
+  padding-bottom: var(--wadjet-studio-status-h, 0px);
   font-family: var(--font-interface);
   font-size: 12px;
   color: var(--wadjet-studio-text);
@@ -659,10 +663,8 @@
    chip row keeps wrapping at every width: a rack chip is a readout
    (`storm odds ×1.50`) and half of one says nothing. */
 @container (max-width: 1300px) {
-  /* On the overlay too: its right edge is the rail's left edge, and a
-     container query cannot re-declare the property on the container itself. */
-  .wadjet-studio-mixer,
-  .wadjet-studio-windows {
+  /* A container query cannot re-declare the property on the container itself. */
+  .wadjet-studio-mixer {
     --wadjet-studio-rail-w: 240px;
   }
 }
@@ -1740,22 +1742,23 @@
   display: none;
 }
 
-/* Floating-window overlay: the PLAYLIST BODY, not the whole studio
-   (proto-win-macro.png — a panel's top edge sits under the hint bar and its
-   left edge inside the lane body; windows never cover the header, the hint
-   bar, the lane-label column or the mixer rail). `inset: 0` made
-   clientWidth/clientHeight the studio's own, so `clampRect` let a panel park
-   on top of the chrome. Every inset below is a shell block's own border-box
-   size, named once in the root block so a block that changes height moves this
-   box with it: header + hint bar above, the pinned audition strip below, the
-   label column + its axis gutter left, the rail right. Transparent to the
-   pointer so the surfaces underneath stay live. */
+/* Floating-window overlay: the WHOLE studio. gap2-shell had it inset to the
+   playlist body so no panel could cover the header, the hint bar, the label
+   column or the rail; the Guildmaster reversed that (2026-09-04): a panel may
+   overlap any of the studio's own chrome, and `clampRect` keeps it inside the
+   studio itself. Transparent to the pointer so the surfaces underneath stay
+   live. */
 .wadjet-studio-windows {
   position: absolute;
-  top: calc(var(--wadjet-studio-header-h) + var(--wadjet-studio-hint-h));
-  right: var(--wadjet-studio-rail-w);
-  bottom: var(--wadjet-studio-audition-h);
-  left: calc(var(--wadjet-studio-label-w) + var(--wadjet-studio-axis-w));
+  /* The whole studio, not the playlist body: a panel may sit over the header,
+     the hint bar, the label column, the rail or the audition strip (the
+     Guildmaster's call, 2026-09-04, reversing gap2-shell's clamp finding).
+     The bottom stays clear of Obsidian's status bar, which `view.ts`
+     measures into `--wadjet-studio-status-h`. */
+  top: 0;
+  right: 0;
+  bottom: var(--wadjet-studio-status-h, 0px);
+  left: 0;
   z-index: 5;
   overflow: hidden;
   pointer-events: none;
