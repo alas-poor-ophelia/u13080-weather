@@ -459,7 +459,7 @@ export const HEADLINE_ROLE: Record<Channel, SeriesRole> = {
  * The values a channel's y axis is labelled at, inside `[lo, hi]`.
  * Temperature steps 2 / 5 / 10 °C by how much range there is (the
  * prototype's own ladder); precipitation always marks the half; wind marks
- * every 6 km/h. Fractions never exceed the axis, so a flat row still gets a
+ * every 5 km/h. Fractions never exceed the axis, so a flat row still gets a
  * line to read against.
  */
 export function axisTicks(channel: Channel, lo: number, hi: number): number[] {
@@ -476,7 +476,10 @@ export function axisTicks(channel: Channel, lo: number, hi: number): number[] {
     case "precipitation":
       return [0.25, 0.5, 0.75].filter((v) => v > lo && v < hi);
     case "wind":
-      return every(6, 4).filter((v) => v > lo && v < hi);
+      // The prototype's speed ladder is 5 / 10 / 15 / 20 km/h — four rungs on
+      // its 0–24 axis (`proto-markup/1397-logic-class-Component.js`
+      // `weGridEls`), and never the zero, which is the plot's own floor.
+      return every(5, 5).filter((v) => v > Math.max(lo, 0) && v < hi);
     case "sky":
       return [];
   }

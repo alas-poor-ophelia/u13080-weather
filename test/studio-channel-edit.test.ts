@@ -46,12 +46,19 @@ import {
   seasonMarkers,
   seasonScope,
   spreadPoints,
+  spreadSamples,
   setEnvelopePoint,
   setKeyframe,
   stageCaption,
   stationPoints,
+  stationSamples,
   swungPoints,
+  swungSamples,
   wetDayPoints,
+  wetDaySamples,
+  curveSamples,
+  plotSamples,
+  LINE_SAMPLES,
   write,
   writers,
   writtenLayers,
@@ -336,6 +343,107 @@ describe("the drawn curve", () => {
     const moons = [{ name: "Sable", phases: [{ name: "New", at: 0 }, { name: "Full", at: 0.5 }] }];
     expect(seasonBands(moonScope("Sable"), { seasons: CALENDAR.seasons, moons }).map((b) => b.name)).toEqual(["New", "Full"]);
     expect(seasonBands(moonScope("Umber"), { seasons: CALENDAR.seasons, moons })).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("the drawn line is dense, the handles are not", () => {
+  test("curveSamples is the SAME evalCurve the generator reads, at every sampled x", () => {
+    const z = zone();
+    const samples = curveSamples(z, TEMP, ALL_SCOPE);
+    const base = effectiveBase(z, TEMP);
+    expect(samples.length).toBe(LINE_SAMPLES);
+    // no second smoothing: every point is on the engine's own interpolant
+    for (const [at, v] of samples) expect(Math.abs(v - evalCurve(base, at))).toBeLessThan(1e-9);
+  });
+
+  test("the samples span the whole year and close the loop, so no seam is left at either edge", () => {
+    const z = zone();
+    const samples = curveSamples(z, TEMP, ALL_SCOPE);
+    expect(samples[0]?.[0]).toBe(0);
+    expect(samples[samples.length - 1]?.[0]).toBe(1);
+    // a year is periodic: the last sample IS the first one, so the ink meets itself
+    expect(samples[samples.length - 1]?.[1]).toBeCloseTo(samples[0]![1], 12);
+    // evenly spaced, so the density is the same at the edges as in the middle
+    samples.forEach((p, i) => expect(p[0]).toBeCloseTo(i / (LINE_SAMPLES - 1), 12));
+  });
+
+  test("the handles stay on the keyframes, whatever the line is drawn from", () => {
+    const z = zone();
+    expect(curvePoints(z, TEMP, ALL_SCOPE).length).toBe(12);
+    curvePoints(z, TEMP, ALL_SCOPE).forEach((p, m) => expect(p[0]).toBeCloseTo(monthCentrePhase(m), 12));
+    // an edit still lands on the handle it was aimed at, and the dense line follows
+    expect(setKeyframe(z, TEMP, 3, 20)).toBe(true);
+    expect(curvePoints(z, TEMP, ALL_SCOPE).length).toBe(12);
+    expect(curvePoints(z, TEMP, ALL_SCOPE)[3]?.[1]).toBeCloseTo(20, 6);
+    const base = effectiveBase(z, TEMP);
+    for (const [at, v] of curveSamples(z, TEMP, ALL_SCOPE)) expect(Math.abs(v - evalCurve(base, at))).toBeLessThan(1e-9);
+    // a keyframe added or removed moves the handle count, never the sample count
+    expect(addKeyframe(z, TEMP, 0.5, 9)).toBe(true);
+    expect(curvePoints(z, TEMP, ALL_SCOPE).length).toBe(13);
+    expect(curveSamples(z, TEMP, ALL_SCOPE).length).toBe(LINE_SAMPLES);
+  });
+
+  test("a monotone run of keyframes is still monotone between them", () => {
+    const z = zone();
+    for (let m = 0; m < 12; m++) expect(setKeyframe(z, TEMP, m, m * 2)).toBe(true);
+    const [lo, hi] = [monthCentrePhase(0), monthCentrePhase(11)];
+    const run = curveSamples(z, TEMP, ALL_SCOPE).filter((p) => p[0] >= lo && p[0] <= hi);
+    expect(run.length).toBeGreaterThan(50);
+    // Fritsch–Carlson never overshoots, so a rising run of keys rises all the way
+    run.forEach((p, i) => {
+      if (i > 0) expect(p[1]).toBeGreaterThanOrEqual(run[i - 1]![1] - 1e-12);
+    });
+  });
+
+  test("every reference line has a dense twin, and the twins agree with the handles", () => {
+    const z = zone();
+    setSwing(z, TEMP, 0.6);
+    const swung = swungSamples(z, TEMP, ALL_SCOPE);
+    const handleMean = curvePoints(z, TEMP, ALL_SCOPE).reduce((a, p) => a + p[1], 0) / 12;
+    expect(swung.length).toBe(LINE_SAMPLES);
+    // the drawn swing pivots about the handles' own mean, not a second one
+    curveSamples(z, TEMP, ALL_SCOPE).forEach((p, i) => expect(swung[i]?.[1]).toBeCloseTo(handleMean + (p[1] - handleMean) * 0.6, 9));
+
+    const station = stationSamples(z, TEMP, ALL_SCOPE);
+    expect(station.length).toBe(LINE_SAMPLES);
+    for (const [at, v] of station) expect(v).toBeCloseTo(evalCurve(z.climate.temperature.mean, at), 9);
+
+    const spread = spreadSamples(z, TEMP, ALL_SCOPE);
+    expect(spread.length).toBe(LINE_SAMPLES);
+    for (const [at, v] of spread) expect(v).toBeCloseTo(Math.abs(evalCurve(z.climate.temperature.diurnalRange, at)) / 2, 9);
+    // and a twin is absent exactly where its handle list is
+    expect(spreadPoints(z, "precipitation.pwd", ALL_SCOPE)).toEqual([]);
+    expect(spreadSamples(z, "precipitation.pwd", ALL_SCOPE)).toEqual([]);
+    expect(stationSamples(z, TEMP, moonScope("Sable"))).toEqual([]);
+
+    const ghost = wetDaySamples(z, TEMP, ALL_SCOPE);
+    expect(ghost.length).toBe(wetDayPoints(z, TEMP, ALL_SCOPE).length === 0 ? 0 : LINE_SAMPLES);
+    const flat = zone();
+    flat.climate.temperature.wetDayOffset = 0;
+    expect(wetDaySamples(flat, TEMP, ALL_SCOPE)).toEqual([]);
+  });
+
+  test("the derived wet share is dense too, and is still wetFraction of the same pair", () => {
+    const z = zone();
+    const share = plotSamples(z, PRECIP_WET_SHARE, ALL_SCOPE);
+    expect(share.length).toBe(LINE_SAMPLES);
+    const pwd = effectiveBase(z, "precipitation.pwd");
+    const pww = effectiveBase(z, "precipitation.pww");
+    for (const [at, v] of share) expect(v).toBeCloseTo(wetFraction(evalCurve(pwd, at), evalCurve(pww, at)), 9);
+    // an ordinary series is just its own curve, densely
+    expect(plotSamples(z, TEMP, ALL_SCOPE)).toEqual(curveSamples(z, TEMP, ALL_SCOPE));
+    // …and the handle list is untouched by any of it
+    expect(plotPoints(z, PRECIP_WET_SHARE, ALL_SCOPE).length).toBe(12);
+  });
+
+  test("a ☾ envelope is never densified: each of its points is a handle", () => {
+    const z = zone();
+    const scope = moonScope("Sable");
+    expect(curveSamples(z, TEMP, scope)).toEqual(curvePoints(z, TEMP, scope));
+    expect(plotSamples(z, TEMP, scope)).toEqual(curvePoints(z, TEMP, scope));
+    expect(swungSamples(z, TEMP, scope)).toEqual(curvePoints(z, TEMP, scope));
   });
 });
 

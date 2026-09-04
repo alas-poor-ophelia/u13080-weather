@@ -435,6 +435,15 @@ describe("channel series · the row readout and its axis", () => {
     expect(axisTicks("temperature", 0, 40)).toEqual([0, 10, 20, 30, 40]);
   });
 
+  test("wind's speed ladder is the prototype's 5 / 10 / 15 / 20, never the zero", () => {
+    // `proto-markup/1397-logic-class-Component.js` `weGridEls`: [5, 10, 15, 20]
+    // over the wind editor's 0–24 km/h speed axis.
+    expect(axisTicks("wind", 0, 24)).toEqual([5, 10, 15, 20]);
+    // The plot's own padded domain overshoots the data on both sides; the
+    // ladder is the same four rungs and still skips the floor.
+    expect(axisTicks("wind", -1.2, 25.9)).toEqual([5, 10, 15, 20]);
+  });
+
   test("every axis value lands inside the range it was asked for", () => {
     for (const channel of ["temperature", "precipitation", "wind"] as const) {
       for (const v of axisTicks(channel, -3.5, 17.5)) {
@@ -451,7 +460,7 @@ describe("channel series · the row readout and its axis", () => {
 
   test("only temperature prints every value; the others label their middle tick", () => {
     expect(axisLabelled("temperature", [0, 5, 10])).toEqual([0, 5, 10]);
-    expect(axisLabelled("wind", [6, 12, 18])).toEqual([12]);
+    expect(axisLabelled("wind", [5, 10, 15, 20])).toEqual([10]);
     expect(axisLabelled("precipitation", [0.25, 0.5, 0.75])).toEqual([0.5]);
     expect(axisLabelled("sky", [])).toEqual([]);
   });

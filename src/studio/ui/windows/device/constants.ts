@@ -8,22 +8,34 @@ import type { Channel } from "../../../model/compile";
 /** Year length to draw with when the active adapter does not describe itself (SPEC §8). */
 export const DEFAULT_YEAR_LENGTH = 365;
 
-/** Prototype width (`proto-markup/1095-vst-device.html`): a design constant, not a function of the content. */
-export const PANEL_W = 372;
+/**
+ * Prototype width (`proto-markup/1095-vst-device.html` l.2): a design constant,
+ * not a function of the content.
+ *
+ * Every panel width here is an OUTER box. The prototype's `width:372px` is a
+ * default-`content-box` number that its own `border:1px solid #565b61` then
+ * grows to 374 on screen; the studio's panel is `border-box` (Obsidian sets
+ * that globally), so the width it is handed IS the outer size. The +2 on each
+ * of these three is that border, stated once here rather than measured wrong
+ * seven times (bead wadjet-9f9.48.11).
+ */
+export const PANEL_W = 374;
 
 /**
  * The spell path is narrower (`0905-vst-ashfall.html` l.2): its body is two
- * dials, a lane and an apply row, and the prototype draws it 320 wide. Per-kind
- * widths are what PLAN.md D16 allows — the chrome is shared, the box is not.
+ * dials, a lane and an apply row, and the prototype draws it 320 wide — 322
+ * outer, per the border note above. Per-kind widths are what PLAN.md D16
+ * allows — the chrome is shared, the box is not.
  */
-export const PANEL_W_SPELL = 320;
+export const PANEL_W_SPELL = 322;
 
 /**
  * The tag path is narrower still (`1213-vst-neverain.html` l.2): the prototype
- * draws Neverain 300 wide around a body that is one summary line. Same licence
- * as the spell width above — the chrome is shared, the box is not (PLAN D16).
+ * draws Neverain 300 wide (302 outer) around a body that is one summary line.
+ * Same licence as the spell width above — the chrome is shared, the box is not
+ * (PLAN D16).
  */
-export const PANEL_W_TAG = 300;
+export const PANEL_W_TAG = 302;
 
 /** The moon gate disc (`proto-markup/0699-vst-stormtide.html`): an 88-unit box, a 34-unit face. */
 export const DISC = 88;

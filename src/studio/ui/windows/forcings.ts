@@ -302,8 +302,11 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
 
   return {
     title: "Forcings",
-    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
-    width: 390,
+    // Prototype width (`proto-markup/1230-vst-macro.html` l.2: `width:390px`
+    // + its 1 px rim = 392 outer — the prototype is content-box, this panel is
+    // border-box; bead wadjet-9f9.48.11): a design constant, not a function of
+    // the content.
+    width: 392,
     badge: "ZONE",
     head: (slot) => slot.appendChild(koppenEl),
     body: root,

@@ -3,7 +3,8 @@
  *
  * One panel per signal chain, opened by its row label on the playlist
  * (SPEC law 2 — the row *is* the channel, so the row opens it). It is
- * landscape and two-columned, at the prototype's 1078 px:
+ * landscape and two-columned, at the prototype's 1078 px (1080 outer, once its
+ * own 1 px rim is counted — see `WINDOW_W`):
  *
  * LEFT — the plots and nothing else. One block per plot, stacked:
  *
@@ -62,7 +63,7 @@
 import { Notice } from "obsidian";
 import type { ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
-import { addEnvelopePoint, addKeyframe, ALL_SCOPE, channelStat, chartPlots, clearDirection, curvePoints, directionLayer, directionRose, knobsFor, layerGlob, MOON_GLYPH, parseScope, plotPoints, pointWhen, PRECIP_WET_SHARE, primarySeries, read, removeEnvelopePoint, removeKeyframe, scopeChips, seasonBands, seasonDirections, seasonScope, setEnvelopePoint, setKeyframe, spreadPoints, stageCaption, stationPoints, swungPoints, wetDayPoints, write, writers, writtenLayers, type ChannelStat, type KnobId, type WriterRow } from "../../model/channel-edit";
+import { addEnvelopePoint, addKeyframe, ALL_SCOPE, channelStat, chartPlots, clearDirection, curvePoints, curveSamples, directionLayer, directionRose, knobsFor, layerGlob, MOON_GLYPH, parseScope, plotPoints, plotSamples, pointWhen, PRECIP_WET_SHARE, primarySeries, read, removeEnvelopePoint, removeKeyframe, scopeChips, seasonBands, seasonDirections, seasonScope, setEnvelopePoint, setKeyframe, spreadSamples, stageCaption, stationPoints, stationSamples, swungPoints, swungSamples, wetDayPoints, wetDaySamples, write, writers, writtenLayers, type ChannelStat, type KnobId, type WriterRow } from "../../model/channel-edit";
 import { axisTicks as seriesAxisTicks } from "../../model/channel-series";
 import type { Channel } from "../../model/compile";
 import { grammar } from "../../model/copy";
@@ -88,8 +89,13 @@ export function channelWindowId(channel: Channel): string {
 /** The kind badge every channel editor wears in its title bar. */
 const BADGE = "CHANNEL";
 
-/** The panel, in CSS pixels — the prototype's landscape channel editor. */
-const WINDOW_W = 1078;
+/**
+ * The panel's OUTER box, in CSS pixels — the prototype's landscape channel
+ * editor (`0250-temperature-editor.html` l.3: `width:1078px` plus its own
+ * `border:1px solid #565b61`). The prototype is content-box, the studio's
+ * panel is border-box, so the outer size is 1080 (bead wadjet-9f9.48.11).
+ */
+const WINDOW_W = 1080;
 /** The plot column, in CSS pixels (`proto-markup/0250-temperature-editor.html`: 770 wide). */
 const CHART_W = 770;
 /** WIND spends part of that column on the rose, so its plots are narrower (the prototype's 560). */
@@ -317,14 +323,16 @@ const WIND: ChannelWindowSpec = {
   rose: true,
   axis: { "wind.speed": "speed", "wind.calmFraction": "percent" },
   plots: [
-    { caption: "speed", quantity: "speed", height: 200, spread: true },
+    // `0415`'s speed plot: 180 px (its rose is the 216 px square beside it).
+    { caption: "speed", quantity: "speed", height: 180, spread: true },
     {
       caption: "calm days",
       // A share of days is read aloud as a percentage — the card next to it
       // already says "wet 61% of days" — so the axis marks its half `50%`, the
       // prototype's one calm-day tick (`weCalmGridEls`). Stored as a fraction.
+      // `0415`'s calm-days plot: 80 px.
       quantity: "percent",
-      height: 96,
+      height: 80,
       yRange: [0, 0.7],
       series: { "wind.calmFraction": { color: "var(--wadjet-studio-moon)", width: 1.3, fill: true } },
     },
@@ -351,9 +359,10 @@ const SKY: ChannelWindowSpec = {
   axis: { "cloud.dry": "percent", "cloud.wet": "percent", "humidity.dry": "percent", "humidity.wet": "percent" },
   plots: [
     {
+      // `0480`'s cloud plot: 160 px.
       caption: "cloud cover · okta fraction",
       quantity: "fraction",
-      height: 190,
+      height: 160,
       yRange: [0, 1],
       series: {
         "cloud.dry": { label: "on dry days" },
@@ -366,9 +375,10 @@ const SKY: ChannelWindowSpec = {
       // The caption is the prototype's `same pairing` (`0480` l.19) rather than
       // a second unit: the plot above already named the dry/wet split, and this
       // one is that split again.
+      // `0480`'s humidity plot: 120 px.
       caption: "humidity · same pairing",
       quantity: "fraction",
-      height: 140,
+      height: 120,
       yRange: [0, 1],
       series: {
         "humidity.dry": { color: "var(--wadjet-studio-gold)", width: 1.8, label: "on dry days" },
@@ -760,6 +770,11 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
           // `plotPoints`, not `curvePoints`: a derived line (the wet-day share)
           // is computed from the curves it reads, and has none of its own.
           points: plotPoints(z, p, scope),
+          // …and `line` is the same series sampled densely, because a channel
+          // curve is a monotone cubic between its keys and a twelve-point
+          // polyline draws that curve's chords instead (worst on WIND's V).
+          // The handles stay on `points`, so the keyframe count does not move.
+          line: plotSamples(z, p, scope),
           color: paint?.color ?? color,
           width: p === param ? 2.2 : (paint?.width ?? 1.6),
           ...(paint?.dash === undefined ? {} : { dash: paint.dash }),
@@ -769,13 +784,17 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       if (!owns) return out;
       const drawn = out[0]?.points ?? [];
       const swung = swungPoints(z, param, scope);
-      if (swung.some((p, i) => Math.abs(p[1] - (drawn[i]?.[1] ?? p[1])) > 1e-6)) out.push({ points: swung, color: "var(--wadjet-studio-accent)" });
+      // Every reference line is sampled the same way as the one it is read
+      // against: a smooth curve compared against a chorded ghost reads as two
+      // different kinds of thing rather than as the same one, twice.
+      if (swung.some((p, i) => Math.abs(p[1] - (drawn[i]?.[1] ?? p[1])) > 1e-6))
+        out.push({ points: swung, line: swungSamples(z, param, scope), color: "var(--wadjet-studio-accent)" });
       // The same parameter as it reads on a wet day — dashed, in the precip hue,
       // because "wet" is what makes it differ.
       const wet = wetDayPoints(z, param, scope);
-      if (wet.length > 0) out.push({ points: wet, color: "var(--wadjet-studio-precip)", dash: "4 4", width: 1.1 });
+      if (wet.length > 0) out.push({ points: wet, line: wetDaySamples(z, param, scope), color: "var(--wadjet-studio-precip)", dash: "4 4", width: 1.1 });
       const station = stationPoints(z, param, scope);
-      if (station.length > 0) out.push({ points: station, color: "var(--wadjet-studio-text-mute)", dash: "5 3", width: 1.3 });
+      if (station.length > 0) out.push({ points: station, line: stationSamples(z, param, scope), color: "var(--wadjet-studio-text-mute)", dash: "5 3", width: 1.3 });
       return out;
     }
 
@@ -843,9 +862,12 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       }
       const lines = z === null ? [] : seriesForPlot(z, view);
       // mean ± the plot's own spread, as a translucent ribbon behind the line.
+      // Dense samples, not the twelve keys: the ribbon has no handles of its
+      // own — it is pure area — so it takes the drawn form of both its edges
+      // and stays parallel to the line it is wrapped around.
       const ribbonParam = view.params[0] ?? primarySeries(channel);
-      const spread = z === null || view.spec.spread !== true || isCycle ? [] : spreadPoints(z, ribbonParam, scope);
-      const mid = z === null || spread.length === 0 ? [] : curvePoints(z, ribbonParam, scope);
+      const spread = z === null || view.spec.spread !== true || isCycle ? [] : spreadSamples(z, ribbonParam, scope);
+      const mid = z === null || spread.length === 0 ? [] : curveSamples(z, ribbonParam, scope);
       const ribbon = spread.flatMap((sp, i) => {
         const m = mid[i]?.[1];
         return m === undefined ? [] : [m - sp[1], m + sp[1]];

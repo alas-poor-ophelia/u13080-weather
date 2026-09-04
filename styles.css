@@ -682,14 +682,21 @@
    knob). The disc is CSS; the SVG carries only the track, the power arc and
    the pointer, and overhangs the disc by 6 px on every side so the arc sweeps
    OUTSIDE the body. DOM order is dial · label · value; `order` paints the
-   label under the dial without moving anything in the DOM. */
+   label under the dial without moving anything in the DOM.
+
+   `--wadjet-studio-knob-size` is an OUTER size. The prototype's dials are
+   `width:44px` (etc.) under the browser's default `content-box`, and its own
+   `border:1px solid #17181a` then grows that to a 46 px disc on screen; the
+   studio is `border-box` (Obsidian sets it globally), so the number here IS
+   the outer disc. Hence 32 / 38 / 46 rather than the prototype's own literals
+   — same disc, stated the way this box model reads it (bead wadjet-9f9.48.11). */
 .wadjet-studio-knob {
-  --wadjet-studio-knob-size: 36px;
+  --wadjet-studio-knob-size: 38px;
   /* The pointer is the prototype's 2.5 px bar at EVERY size, so its width in
      the shared 100x100 viewBox has to scale with the dial: 2.5 x 100 /
      (size - 2 px of rim + 12 px of overhang). A flat 4 drew the 30 px knob's tick as a
      1.7 px hairline that antialiasing washed out to half its hue (audit A6). */
-  --wadjet-studio-knob-tick: 5.44;
+  --wadjet-studio-knob-tick: 5.21;
   position: relative;
   display: inline-flex;
   flex-direction: column;
@@ -697,12 +704,12 @@
   gap: 3px;
 }
 .wadjet-studio-knob[data-size="sm"] {
-  --wadjet-studio-knob-size: 30px;
-  --wadjet-studio-knob-tick: 6.25;
+  --wadjet-studio-knob-size: 32px;
+  --wadjet-studio-knob-tick: 5.95;
 }
 .wadjet-studio-knob[data-size="lg"] {
-  --wadjet-studio-knob-size: 44px;
-  --wadjet-studio-knob-tick: 4.63;
+  --wadjet-studio-knob-size: 46px;
+  --wadjet-studio-knob-tick: 4.46;
 }
 .wadjet-studio-knob-dial {
   order: 1;
@@ -1161,6 +1168,14 @@
 }
 .wadjet-studio-rack-unit.is-off {
   opacity: 0.55;
+}
+/* …with one exception (0556 l.54 `u.bd`, bead wadjet-9f9.48.16): the card whose
+   window is open is ringed in its own accent, so the rail says which card the
+   panel on the canvas belongs to. Only an era sets `--wadjet-studio-unit-accent`
+   to something of its own — the prototype's bright border on a device card is
+   hover/drag feedback, not "this window is up". */
+.wadjet-studio-rack-unit.is-open {
+  border-color: var(--wadjet-studio-unit-accent, var(--wadjet-studio-border-bright));
 }
 .wadjet-studio-rack-head {
   display: flex;
@@ -3962,13 +3977,16 @@
 .wadjet-studio-regimes-op-remove:hover {
   color: var(--wadjet-studio-text);
 }
-/* The ＋ is a knob-sized dashed disc with a dim `apply` caption beneath it */
+/* The ＋ is a knob-sized dashed disc with a dim `apply` caption beneath it.
+   46, not the prototype's `width:44px` (`1028-vst-regimes.html` l.47), for the
+   same reason the lg knob is 46: that 44 is content-box and its 1 px dashed
+   rim makes the disc 46 on screen (bead wadjet-9f9.48.11). */
 .wadjet-studio-regimes-op-add {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   font-size: 18px;
   color: var(--wadjet-studio-text-mute);
   background: var(--wadjet-studio-bg-alt);
@@ -4219,12 +4237,16 @@
   gap: 3px;
   cursor: pointer;
 }
+/* The ＋ sits OUTSIDE any `.wadjet-studio-knob`, so it never inherits the
+   knob's own size variable — the fallback is the real number, and it is the lg
+   knob's outer 46 (`0973-vst-era.html` l.47's content-box 44 + its 1 px dashed
+   rim; bead wadjet-9f9.48.11). */
 .wadjet-studio-era-op-add-glyph {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--wadjet-studio-knob-size, 44px);
-  height: var(--wadjet-studio-knob-size, 44px);
+  width: var(--wadjet-studio-knob-size, 46px);
+  height: var(--wadjet-studio-knob-size, 46px);
   color: var(--wadjet-studio-text-mute);
   font-size: 18px;
   background: var(--wadjet-studio-bg-alt);
@@ -5413,6 +5435,19 @@
 .wadjet-studio-channel-win-chart svg {
   max-width: 100%;
   height: auto;
+}
+/* The season tint is the plot's own rectangle, and in a channel editor it runs
+   the FULL height of the plot — the prototype's band rects are `h: 330` on the
+   330 px mean, `h: 180 / 80` on WIND and `h: 160 / 120` on SKY, drawn from
+   y = 0 (`proto-markup/1397-logic-class-Component.js` `teBandRects`,
+   `peBandRects`, `weBandRects`, `skBandRects`). The shared chart insets its
+   tint by the plot's top/bottom pad, which is right for a playlist lane (the
+   lane's pad carries its x labels) but reads as an eight-percent-short plot
+   here: a 330 px mean tinted only 298 px. Geometry set in CSS rather than in
+   `chart.ts` so only the channel editor's plots change. */
+.wadjet-studio-channel-win-chart .wadjet-studio-chart-tint {
+  y: 0;
+  height: 100%;
 }
 .wadjet-studio-channel-win-card {
   padding: 12px;

@@ -463,8 +463,11 @@ export function buildEraWindow(name: string): WindowBuilder {
 
     return {
       title: name,
-      // Prototype width (`proto-markup/`): a design constant, not a function of the content.
-      width: 352,
+      // Prototype width (`proto-markup/0973-vst-era.html` l.2: `width:352px`
+      // + its 1 px rim = 354 outer — the prototype is content-box, this panel
+      // is border-box; bead wadjet-9f9.48.11): a design constant, not a
+      // function of the content.
+      width: 354,
       badge: "ERA",
       head: (slot) => slot.appendChild(head),
       body: root,

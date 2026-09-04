@@ -41,6 +41,19 @@ export type ChartPhase = "drag" | "end";
 export interface ChartSeries {
   points: Array<[number, number]>;
   color: string;
+  /**
+   * The x/y pairs the LINE (and its fill, and a band's edge) is stroked
+   * through, when they are not the same as the handles.
+   *
+   * `points` is the keyed set: one circle per entry, one drag index per entry,
+   * and the `automation` kind's `onPoint` reports that index. A curve between
+   * those keys is not a chord — the studio's channel curves are the monotone
+   * cubic `core/curve.ts` evaluates — so a caller that knows the interpolant
+   * hands over a dense sample of it here and the corners go away without the
+   * handle count moving. Unset, the line is drawn through `points`, which is
+   * what every caller that has no interpolant to sample wants.
+   */
+  line?: Array<[number, number]>;
   fill?: boolean;
   /** SVG `stroke-dasharray` — a reference or comparison line, drawn dashed. */
   dash?: string;
@@ -198,7 +211,7 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
   function xRange(): [number, number] {
     if (props.xRange) return props.xRange;
     if (props.domain !== "history") return [0, 1];
-    const xs = props.series.flatMap((s) => s.points.map((p) => p[0]));
+    const xs = props.series.flatMap((s) => strokeOf(s).map((p) => p[0]));
     if (xs.length === 0) return [0, 1];
     const lo = Math.min(...xs);
     const hi = Math.max(...xs);
@@ -207,7 +220,9 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
 
   function yRange(): [number, number] {
     if (props.yRange) return props.yRange;
-    const ys = props.series.flatMap((s) => s.points.map((p) => p[1]));
+    // The stroked set, not the handles: a dense sample of an interpolant rises
+    // between two keys, and an axis fitted to the keys alone would clip it.
+    const ys = props.series.flatMap((s) => strokeOf(s).map((p) => p[1]));
     if (ys.length === 0) return [0, 1];
     const lo = Math.min(...ys);
     const hi = Math.max(...ys);
@@ -258,6 +273,9 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
    * (its `poly` samples the whole [0,1] domain). The wrapped value is the same
    * at x = 0 and x = 1, so carrying the ink to both edges leaves no seam.
    * Handles are drawn from `points`, never from this, so keyframes still count.
+   * A series that brought dense `line` samples already spans the whole domain,
+   * and the `first[0] <= 0` guard below leaves it alone: the seam is closed by
+   * the real interpolant rather than by this straight chord across the wrap.
    */
   function edged(pts: Array<[number, number]>): Array<[number, number]> {
     if (props.domain !== "year" || pts.length < 2) return pts;
@@ -269,8 +287,13 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
     return [[0, y], ...pts, [1, y]];
   }
 
+  /** What a series is STROKED through: its dense samples if it brought any, else its handles. */
+  function strokeOf(s: ChartSeries): Array<[number, number]> {
+    return s.line !== undefined && s.line.length > 1 ? s.line : s.points;
+  }
+
   function drawSeries(s: ChartSeries): void {
-    const pts = edged(s.points);
+    const pts = edged(strokeOf(s));
     const first = pts[0];
     const last = pts[pts.length - 1];
     if (!first || !last) return;
@@ -392,10 +415,10 @@ export function createChart(parent: HTMLElement, initial: ChartProps): ChartComp
       props.series.forEach(drawSeries);
       return;
     }
-    const up = edged(lo.points).map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
-    const down = [...edged(hi.points)].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const up = edged(strokeOf(lo)).map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
+    const down = [...edged(strokeOf(hi))].reverse().map((p) => `${sx(p[0]).toFixed(2)} ${sy(p[1]).toFixed(2)}`);
     svg.createSvg("path", { cls: "wadjet-studio-chart-band", attr: { d: `M ${up.join(" L ")} L ${down.join(" L ")} Z`, fill: lo.color } });
-    svg.createSvg("polyline", { cls: "wadjet-studio-chart-line", attr: { points: polyline(edged(hi.points)), stroke: hi.color } });
+    svg.createSvg("polyline", { cls: "wadjet-studio-chart-line", attr: { points: polyline(edged(strokeOf(hi))), stroke: hi.color } });
   }
 
   /** Compass bearing (degrees clockwise from north) to a point on the rose. */

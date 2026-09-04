@@ -23,6 +23,18 @@ export interface RackUnitProps {
   linked?: boolean;
   /** Zone count for a world-scoped unit; renders the `world · N zones` badge. */
   world?: number;
+  /**
+   * The outline colour the card takes while `open` is true (0556 l.54 `u.bd`).
+   * Absent means the card never rings, whatever its window is doing — which is
+   * every card except an era's in the prototype.
+   */
+  accent?: string;
+  /**
+   * This unit's window is up, so the card is ringed in `accent`. Nothing else
+   * about the card changes: the ring is the only "you are looking at this one"
+   * mark the rail carries.
+   */
+  open?: boolean;
   chips: ChipProps[];
   led: LedProps;
   grip?: boolean;
@@ -91,6 +103,7 @@ export function createRackUnit(parent: HTMLElement, initial: RackUnitProps): Rac
 
   function paint(): void {
     el.setCssProps({ "--wadjet-studio-unit-color": props.color });
+    el.setCssProps({ "--wadjet-studio-unit-accent": props.accent ?? props.color });
     slotEl.setText(props.slot);
     nameEl.setText(props.name);
     kindEl.setText(props.kind);
@@ -101,6 +114,7 @@ export function createRackUnit(parent: HTMLElement, initial: RackUnitProps): Rac
     worldEl.toggleClass("is-hidden", props.world === undefined);
     grip.toggleClass("is-hidden", props.grip === false);
     el.toggleClass("is-off", props.dim === true);
+    el.toggleClass("is-open", props.open === true && props.accent !== undefined);
     led.update(props.led);
   }
 

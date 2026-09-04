@@ -715,8 +715,11 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
 
   return {
     title: "Regimes",
-    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
-    width: 420,
+    // Prototype width (`proto-markup/1028-vst-regimes.html` l.2: `width:420px`
+    // + its 1 px rim = 422 outer — the prototype is content-box, this panel is
+    // border-box; bead wadjet-9f9.48.11): a design constant, not a function of
+    // the content.
+    width: 422,
     badge: "STATES",
     // SPEC §6's one statement of where states sit in the signal path, and the
     // only place the user meets it.

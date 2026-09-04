@@ -687,8 +687,11 @@ export const buildAtlasWindow: WindowBuilder = (ctx: SurfaceContext): WindowBuil
 
   return {
     title: "Atlas",
-    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
-    width: 720,
+    // Prototype width (`proto-markup/1267-vst-atlas.html` l.2: `width:720px`
+    // + its 1 px rim = 722 outer — the prototype is content-box, this panel is
+    // border-box; bead wadjet-9f9.48.11): a design constant, not a function of
+    // the content.
+    width: 722,
     // A reader, not a snapshot. `mode` is window-local, so the chrome would
     // otherwise keep the badge it was opened with — and worse, any later
     // `update()` (a `writes` tick) re-stamps the badge from `props`, undoing

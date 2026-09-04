@@ -210,6 +210,11 @@ export function createMixerSurface(): Surface {
     ctx?.windows.open(id);
   }
 
+  /** The window a card's name opens — `era:<name>` as-is, a device behind its prefix. */
+  function windowIdFor(card: UnitCard): string {
+    return isEraUnit(card) ? card.id : DEVICE_WINDOW_PREFIX + card.id;
+  }
+
   /** Gate a world-scoped write behind the session's one confirm (SPEC §2). */
   function withWorldConfirm(run: () => void): void {
     const c = ctx;
@@ -408,8 +413,13 @@ export function createMixerSurface(): Surface {
    * One card per unit. Eras carry the `world` badge and never drag, but their
    * LED is real power (`world.eras[i].enabled`, guarded behind the world
    * confirm) — not read-only.
+   *
+   * `openIds` is `view.openWindows`: the card whose window is up is ringed in
+   * its own accent (0556 l.54 `u.bd`). Only an era carries an accent, which is
+   * exactly the prototype's rule — a device card's bright border there is
+   * hover/drag feedback (`S.hl`/`S.dragUnit`), never "your window is open".
    */
-  function paintRack(b: ChainBlock, cards: readonly UnitCard[], byUnit: Map<string, StudioIssue[]>): void {
+  function paintRack(b: ChainBlock, cards: readonly UnitCard[], byUnit: Map<string, StudioIssue[]>, openIds: readonly string[]): void {
     for (const unit of b.units) unit.destroy();
     b.units = [];
     b.cards = cards;
@@ -427,6 +437,8 @@ export function createMixerSurface(): Surface {
         color,
         linked: card.linked,
         ...(card.world === undefined ? {} : { world: card.world }),
+        ...(card.accent === undefined ? {} : { accent: card.accent }),
+        open: openIds.includes(windowIdFor(card)),
         // Every card keeps the grip column, draggable or not: 0556 dims the
         // glyph on an era card rather than dropping it, so the slot marker,
         // LED and name stay on the device cards' left edge. `grip: false`
@@ -437,7 +449,7 @@ export function createMixerSurface(): Surface {
         led: era
           ? { on, level, scope: "device", hint: mixerHint("mixer.era.led"), onToggle: (next) => withWorldConfirm(() => ctx?.store.update((s) => setEnabled(s.world, eraNameOf(card), next), { history: true })) }
           : { on, level, scope: card.linked ? "chain" : "device", hint: mixerHint("mixer.unit.led"), onToggle: (next) => editZone((z) => setChainMute(z, card.id, b.chain, !next)) },
-        onOpen: () => openWindow(era ? card.id : DEVICE_WINDOW_PREFIX + card.id),
+        onOpen: () => openWindow(windowIdFor(card)),
         ...grip,
       });
       unit.el.setAttrs({ "data-unit": card.id, "data-slot": card.slot });
@@ -494,8 +506,12 @@ export function createMixerSurface(): Surface {
     b.rack.toggleClass("is-hidden", cards.length === 0);
     b.empty.toggleClass("is-hidden", cards.length > 0);
 
-    // Rebuild the cards only when the model behind them actually moved.
-    const key = JSON.stringify({ open, strip, cards, levels, u, regimes: zone.regimes, colours: state.view.colours.regimes, unitLevels: cards.map((card) => ledLevel(byUnit.get(isEraUnit(card) ? card.id : `device:${card.id}`))) });
+    // Rebuild the cards only when the model behind them actually moved — which
+    // now includes "one of these cards' windows went up or came down", since
+    // that is what the `is-open` ring reads.
+    const openIds = state.view.openWindows;
+    const ringed = cards.map((card) => openIds.includes(windowIdFor(card)));
+    const key = JSON.stringify({ open, strip, cards, levels, u, regimes: zone.regimes, colours: state.view.colours.regimes, ringed, unitLevels: cards.map((card) => ledLevel(byUnit.get(isEraUnit(card) ? card.id : `device:${card.id}`))) });
     if (key === b.key) return;
     b.key = key;
     if (open) paintFixedRack(b, zone, strip, levels, u, state.view.colours.regimes);
@@ -503,7 +519,7 @@ export function createMixerSurface(): Surface {
       for (const unit of b.fixedUnits) unit.destroy();
       b.fixedUnits = [];
     }
-    paintRack(b, cards, byUnit);
+    paintRack(b, cards, byUnit, openIds);
   }
 
   function paintMaster(zone: ZoneProfile | null, state: StudioState, byUnit: Map<string, StudioIssue[]>): void {

@@ -525,10 +525,13 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     return {
       title: moonName,
-      // Prototype width (`proto-markup/`): a design constant, not a function
-      // of the content — plus the label gutter the disc now owns on each side
-      // (`LABEL_PAD`), so the phase table keeps the prototype's 204 px.
-      width: 452 + LABEL_PAD * 2,
+      // Prototype width (`proto-markup/0811-vst-sablemoon.html` l.2:
+      // `width:452px` + its 1 px rim = 454 outer, since the prototype is
+      // content-box and this panel is border-box — bead wadjet-9f9.48.11): a
+      // design constant, not a function of the content — plus the label gutter
+      // the disc now owns on each side (`LABEL_PAD`), so the phase table keeps
+      // the prototype's 204 px.
+      width: 454 + LABEL_PAD * 2,
       badge: "CYCLE",
       badgeColor: "var(--wadjet-studio-moon)",
       // The prototype's `↻ 29.53 d` title readout — the period is a fact, not a

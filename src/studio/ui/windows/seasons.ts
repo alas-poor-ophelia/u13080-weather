@@ -453,8 +453,11 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
 
   const build: WindowBuild = {
     title: "Seasons",
-    // Prototype width (`proto-markup/`): a design constant, not a function of the content.
-    width: 380,
+    // Prototype width (`proto-markup/0853-vst-seasons.html` l.2: `width:380px`
+    // + its 1 px rim = 382 outer — the prototype is content-box, this panel is
+    // border-box; bead wadjet-9f9.48.11): a design constant, not a function of
+    // the content.
+    width: 382,
     badge: "CALENDAR",
     badgeColor: "var(--wadjet-studio-gold)",
     head: (slot) => slot.appendChild(sourceChip.el),

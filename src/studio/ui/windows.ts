@@ -56,7 +56,9 @@ export interface WindowBuild {
    */
   head?: (slot: HTMLElement) => void;
   /**
-   * The panel's width in px, from the prototype. Set at open and never
+   * The panel's OUTER width in px: the prototype's `width:` plus its 1 px rim,
+   * since the prototype is content-box and the panel is border-box (see
+   * `components/window.ts`). Set at open and never
    * re-read: a panel's width is a design constant, not a function of its
    * content. Omitting it lets the widest child size the panel, which is the
    * defect the F1 pass exists to close — every window should name one.

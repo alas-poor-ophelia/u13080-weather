@@ -93,6 +93,13 @@ export interface UnitCard {
   linked: boolean;
   /** era units only: the zone count behind the `world · N zones` badge */
   world?: number;
+  /**
+   * The card's own outline colour while its window is up (0556 l.54 `u.bd`).
+   * Only an era carries one — the prototype rings the era card in the era's
+   * own swatch when `S.era === e.id && S.vsts.includes("era")`, and leaves
+   * every device, Regimes and Forcings card on the flat border tone.
+   */
+  accent?: string;
   chips: UnitChip[];
   /** device power (`Modifier.enabled`) */
   enabled: boolean;
@@ -380,6 +387,7 @@ export function unitsFor(
   eras.forEach((e, i) => {
     const ops = (e.apply ?? []).filter((o) => channelOrNull(o.param) === chain);
     if (ops.length === 0) return;
+    const swatch = cycleColour(eraColours[i] ?? i, ERA_CYCLE);
     out.push({
       slot: ERA_SLOT,
       id: ERA_UNIT + e.name,
@@ -390,7 +398,8 @@ export function unitsFor(
       // both era cards). World scope is the `world · N zones` badge, not this.
       linked: chainsOf({ apply: e.apply ?? [] }).size > 1,
       world: zoneCount,
-      chips: [{ label: eraSpanLabel(e), color: cycleColour(eraColours[i] ?? i, ERA_CYCLE) }, ...opChips(ops, chain, "era", units)],
+      accent: swatch,
+      chips: [{ label: eraSpanLabel(e), color: swatch }, ...opChips(ops, chain, "era", units)],
       enabled: e.enabled !== false,
       mutedInChain: ops.every((o) => o.enabled === false),
       reorderable: false,

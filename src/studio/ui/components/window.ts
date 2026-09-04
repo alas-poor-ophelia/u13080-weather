@@ -61,8 +61,10 @@ export interface WindowProps {
    */
   head?: (slot: HTMLElement) => void;
   /**
-   * The panel's width in px, from the prototype (372 device, 380 seasons,
-   * 420 regimes, 452 cycle, 720 atlas, 1078 channel). A window MUST set this:
+   * The panel's OUTER width in px: the prototype's own `width:` plus the 1 px
+   * rim it draws on each side, because the prototype is content-box and this
+   * panel is border-box (374 device, 382 seasons, 422 regimes, 454 cycle,
+   * 722 atlas, 1080 channel — bead wadjet-9f9.48.11). A window MUST set this:
    * without it the widest child — always the WRITES footer — dictates the
    * size, which is how a raw JSON dump blew the panels out to 1500 px.
    * Capped by the studio box in CSS, so a narrow leaf still fits.

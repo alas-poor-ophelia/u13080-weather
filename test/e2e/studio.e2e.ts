@@ -3452,7 +3452,31 @@ describe("climate studio · era window", () => {
     expect(probe.knobValues[0]).toContain("−8.0");
     expect(probe.note).toBe("");
     expect(probe.writes).toContain("world.eras[");
-    console.log(`  · era:Ice Age opened: span ${probe.from}–${probe.to}, knob "${probe.knobValues[0]}", ${probe.world}`);
+
+    // 0556 l.54 `u.bd`: while the era's window is up the rail rings the matching
+    // card in the era's own swatch — `--wadjet-studio-precip` (#5cb8f0) for the
+    // first era, which is exactly what `proto-win-ice` shows and what the plugin
+    // was missing (bead wadjet-9f9.48.16). Only an era rings: the prototype's
+    // bright border on a device card is hover/drag feedback, not window state.
+    const eraCard = mixerChain("temperature").locator(`.wadjet-studio-rack-unit[data-unit="${eraWindowIdFor(eraName)}"]`);
+    const ringed = () => eraCard.evaluate((el: Element) => el.classList.contains("is-open"));
+    await expect.poll(ringed).toBe(true);
+    const ringColour = await eraCard.evaluate((el: Element) => getComputedStyle(el).borderTopColor);
+    expect(ringColour).toBe("rgb(92, 184, 240)");
+    // …and it comes off the moment the window does.
+    await withApp(
+      ob.page,
+      (app, a: { type: string; id: string }) => {
+        app.workspace.getLeavesOfType(a.type)[0].view.windows.close(a.id);
+      },
+      { type: VIEW_TYPE, id: eraWindowIdFor(eraName) },
+    );
+    await nextFrame();
+    await expect.poll(ringed).toBe(false);
+    // Put it back: the rest of this describe reads the open panel.
+    await openEraWindow(eraWindowIdFor(eraName));
+    await expect.poll(ringed).toBe(true);
+    console.log(`  · era:Ice Age opened: span ${probe.from}–${probe.to}, knob "${probe.knobValues[0]}", ${probe.world}; rail card ringed ${ringColour}`);
   });
 
   test("step 47: setting To to 1950 updates the draft, behind the world-edit confirm", async () => {
@@ -4484,10 +4508,14 @@ describe("climate studio · device window", () => {
     console.log(`  · ashfall: 3 ops → ${values.length} columns ${JSON.stringify(values)}; nudge wrote both (${nudged.apply[0].value}), × left ${JSON.stringify(dropped.apply.map((o: any) => o.param))}`);
   });
 
-  test("step 60: the spell path opens 320 wide, dials first, WINDOWS then APPLY, lane full width, no ＋ mod", async () => {
+  test("step 60: the spell path opens 322 wide, dials first, WINDOWS then APPLY, lane full width, no ＋ mod", async () => {
     // `0905-vst-ashfall.html`: a 320 px window whose body is the two spell
     // dials uncaptioned, `WINDOWS · repeat yearly`, `APPLY · while running`,
-    // and nothing else (gap2 C5, C9, C10).
+    // and nothing else (gap2 C5, C9, C10). 322, not 320, because
+    // `getBoundingClientRect()` measures the OUTER box: the prototype's
+    // `width:320px` is content-box and its `border:1px solid #565b61` grows it
+    // to 322 on screen, which is what `PANEL_W_SPELL` now states directly
+    // (bead wadjet-9f9.48.11).
     await seedAshfall();
     await openDeviceWindow("ashfall");
 
@@ -4525,7 +4553,7 @@ describe("climate studio · device window", () => {
       VIEW_TYPE,
     );
 
-    expect(shape.width).toBe(320);
+    expect(shape.width).toBe(322);
     expect(shape.sections).toEqual(["when", "spell", "windows", "apply"]);
     // The dials come before APPLY, which is the whole point of the reorder.
     expect(shape.marks.indexOf("spell-starts")).toBeGreaterThan(-1);
@@ -4779,17 +4807,19 @@ describe("climate studio · device window", () => {
     );
   }
 
-  test("step 63: the curse shape opens 300 wide on one summary line, with the tags and APPLY behind a disclosure", async () => {
+  test("step 63: the curse shape opens 302 wide on one summary line, with the tags and APPLY behind a disclosure", async () => {
     // `1213-vst-neverain.html` l.2, l.10: a 300 px box whose whole body is
     // `precip ×0 while active` on the left and a right-aligned
     // `gate: era:Drought` on the right (gap2 D3, D4, D5). The tag chips and the
     // APPLY grid are not gone — they are behind the summary row, which on this
-    // shape IS the disclosure.
+    // shape IS the disclosure. 302, not 300: the probe measures the OUTER box,
+    // and the prototype's content-box `width:300px` plus its 1 px rim is 302 on
+    // screen — what `PANEL_W_TAG` now states (bead wadjet-9f9.48.11).
     await seedCurse(CURSE_MODIFIER);
     await openDeviceWindow(CURSE_ID);
 
     const shut = await probeCurse();
-    expect(shut.width).toBe(300);
+    expect(shut.width).toBe(302);
 
     // The narrowest bar in the studio has to CONTAIN every control it carries.
     // A fixed 118 px name field plus a `<select>` sized to its widest option

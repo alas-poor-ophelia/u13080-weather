@@ -349,8 +349,9 @@ export function chartSeries(channel: Channel): string[] {
 }
 
 /**
- * The points a drawn line is made of: a curve's own (`curvePoints`), or — for a
+ * The points a series is KEYED on: a curve's own (`curvePoints`), or — for a
  * derived series — the value computed from the curves it is a function of.
+ * These are the handles; `plotSamples` is what the line is drawn from.
  *
  * The wet-day share is `wetFraction(pwd, pww)` read at the *pwd* keyframes, so
  * the two curves are sampled at one set of phases even when only one of them
@@ -358,8 +359,18 @@ export function chartSeries(channel: Channel): string[] {
  */
 export function plotPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
   if (param !== PRECIP_WET_SHARE) return curvePoints(z, param, scope);
+  return wetShare(z, curvePoints(z, PRECIP_PWD, scope));
+}
+
+/** `plotPoints` as a drawn line — the dense samples the chart strokes, handles aside. */
+export function plotSamples(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  if (param !== PRECIP_WET_SHARE) return curveSamples(z, param, scope);
+  return wetShare(z, curveSamples(z, PRECIP_PWD, scope));
+}
+
+function wetShare(z: ZoneProfile, pwd: ReadonlyArray<[number, number]>): Array<[number, number]> {
   const wet = effectiveBase(z, "precipitation.pww");
-  return curvePoints(z, PRECIP_PWD, scope).map(([at, pwd]) => [at, wetFraction(pwd, evalCurve(wet, at))] as [number, number]);
+  return pwd.map(([at, v]) => [at, wetFraction(v, evalCurve(wet, at))] as [number, number]);
 }
 
 /**
@@ -602,6 +613,39 @@ export const MIN_KEYFRAMES = 3;
 /** Calendar months, the phases the drawn curve starts life on. */
 const MONTHS = 12;
 
+/**
+ * How many x's a drawn LINE is made of.
+ *
+ * A channel curve is a monotone cubic between its keyframes (`core/curve.ts`),
+ * so a polyline through the twelve keyframes is not the curve — it is the
+ * curve's chords, and the corners show worst where the slope turns hardest
+ * (WIND's V). The prototype has no such corners because it samples the
+ * interpolant ~130 times across the plot; this is that count, rounded.
+ *
+ * The handles stay on the keyframes: `curvePoints` is the handle list and
+ * `curveSamples` is the drawn one, and only the latter is dense.
+ */
+export const LINE_SAMPLES = 128;
+
+/**
+ * The phases a drawn line is sampled at: the whole year, both ends INCLUDED.
+ *
+ * A year is a loop, and `evalCurve` wraps, so the sample at x = 1 is the same
+ * value as the one at x = 0 — carrying the ink to both plot edges closes the
+ * seam that month-centre keyframes leave (the chart's `edged()` used to fake
+ * this with a straight chord across the wrap; a dense sample needs no fake).
+ */
+function samplePhases(count: number = LINE_SAMPLES): number[] {
+  const n = Math.max(2, Math.floor(count));
+  return Array.from({ length: n }, (_, i) => i / (n - 1));
+}
+
+/** The phases the HANDLES sit at: the drawn curve's own keyframes, else the 12 month centres. */
+function handlePhases(z: ZoneProfile, param: string): number[] {
+  const drawn = sortedKeyframes(getCurveLayer(z, param));
+  return drawn !== null ? drawn.map((k) => k.at) : Array.from({ length: MONTHS }, (_, m) => monthCentrePhase(m));
+}
+
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
 function sortedKeyframes(c: Curve | null): Keyframe[] | null {
@@ -628,9 +672,25 @@ export function curvePoints(z: ZoneProfile, param: string, scope: string): Array
     return points.map((p) => [wrapPhase(p[0]), clamp01(p[1])] as [number, number]).sort((a, b) => a[0] - b[0]);
   }
   const base = effectiveBase(z, param);
-  const drawn = sortedKeyframes(getCurveLayer(z, param));
-  const phases = drawn !== null ? drawn.map((k) => k.at) : Array.from({ length: MONTHS }, (_, m) => monthCentrePhase(m));
-  return phases.map((at) => [at, evalCurve(base, at)] as [number, number]);
+  return handlePhases(z, param).map((at) => [at, evalCurve(base, at)] as [number, number]);
+}
+
+/**
+ * The same series `curvePoints` describes, sampled densely enough to be DRAWN.
+ *
+ * Same evaluator, same curve: every sample is `evalCurve(effectiveBase, x)`,
+ * so the line on the chart is the line the generator reads day by day and not
+ * a second smoothing invented for the picture (SPEC law 4). Only the x's
+ * differ — `LINE_SAMPLES` of them across the whole year instead of the twelve
+ * the handles sit on.
+ *
+ * A ☾ envelope is returned unchanged: its points are the dimmer's own
+ * boundaries, not samples of a curve, and each one is a handle.
+ */
+export function curveSamples(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  if (parseScope(scope).kind === "cycle") return curvePoints(z, param, scope);
+  const base = effectiveBase(z, param);
+  return samplePhases().map((at) => [at, evalCurve(base, at)] as [number, number]);
 }
 
 /**
@@ -641,19 +701,41 @@ export function curvePoints(z: ZoneProfile, param: string, scope: string): Array
 export function swungPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
   const points = curvePoints(z, param, scope);
   if (parseScope(scope).kind === "cycle") return points;
+  return swing(z, param, points, swingMean(points));
+}
+
+/** `swungPoints` as a drawn line — the same k about the same mean, at the dense x's. */
+export function swungSamples(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  if (parseScope(scope).kind === "cycle") return curvePoints(z, param, scope);
+  // The mean stays the HANDLES' mean, so the drawn swing and the handle swing
+  // pivot about one number rather than about two that differ by a rounding.
+  return swing(z, param, curveSamples(z, param, scope), swingMean(curvePoints(z, param, scope)));
+}
+
+const swingMean = (points: ReadonlyArray<[number, number]>): number => points.reduce((a, p) => a + p[1], 0) / (points.length || 1);
+
+function swing(z: ZoneProfile, param: string, points: ReadonlyArray<[number, number]>, mean: number): Array<[number, number]> {
   const k = getSwing(z, param);
-  const mean = points.reduce((a, p) => a + p[1], 0) / (points.length || 1);
   return points.map((p) => [p[0], mean + (p[1] - mean) * k] as [number, number]);
 }
 
 /** The station's own curve, undimmed by any layer — the dim reference line under the drawn one. */
 export function stationPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  return stationOn(z, param, scope, () => curvePoints(z, param, scope));
+}
+
+/** `stationPoints` as a drawn line: the same untouched curve at the dense x's. */
+export function stationSamples(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  return stationOn(z, param, scope, () => curveSamples(z, param, scope));
+}
+
+function stationOn(z: ZoneProfile, param: string, scope: string, xs: () => Array<[number, number]>): Array<[number, number]> {
   if (parseScope(scope).kind === "cycle") return [];
   if (!isCurvePath(param)) return [];
   // `getPath` is typed non-optional, but the optional curves (sdHigh/sdLow/…) really can be absent.
   const curve: Curve | undefined = getPath(z.climate, param);
   if (curve === undefined) return [];
-  return curvePoints(z, param, scope).map((p) => [p[0], evalCurve(curve, p[0])] as [number, number]);
+  return xs().map((p) => [p[0], evalCurve(curve, p[0])] as [number, number]);
 }
 
 /**
@@ -708,11 +790,23 @@ const SPREAD_OF: Record<string, { param: string; halve: boolean }> = {
 };
 
 export function spreadPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  return spreadOn(z, param, scope, () => curvePoints(z, param, scope));
+}
+
+/**
+ * `spreadPoints` at the dense x's — the ribbon is an AREA, and an area between
+ * two twelve-point chords has the same corners its edges do.
+ */
+export function spreadSamples(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  return spreadOn(z, param, scope, () => curveSamples(z, param, scope));
+}
+
+function spreadOn(z: ZoneProfile, param: string, scope: string, xs: () => Array<[number, number]>): Array<[number, number]> {
   const spread = SPREAD_OF[param];
   if (spread === undefined || parseScope(scope).kind === "cycle") return [];
   const curve: Curve | undefined = isCurvePath(spread.param) ? getPath(z.climate, spread.param) : undefined;
   if (curve === undefined) return [];
-  return curvePoints(z, param, scope).map((p) => [p[0], Math.abs(evalCurve(curve, p[0])) / (spread.halve ? 2 : 1)] as [number, number]);
+  return xs().map((p) => [p[0], Math.abs(evalCurve(curve, p[0])) / (spread.halve ? 2 : 1)] as [number, number]);
 }
 
 /**
@@ -732,13 +826,23 @@ export function spreadPoints(z: ZoneProfile, param: string, scope: string): Arra
 const WET_DAY_OFFSET_OF: Record<string, string> = { "temperature.mean": "temperature.wetDayOffset" };
 
 export function wetDayPoints(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  return wetDayOn(z, param, scope, () => curvePoints(z, param, scope));
+}
+
+/** `wetDayPoints` at the dense x's — the dashed ghost is a line like any other. */
+export function wetDaySamples(z: ZoneProfile, param: string, scope: string): Array<[number, number]> {
+  return wetDayOn(z, param, scope, () => curveSamples(z, param, scope));
+}
+
+function wetDayOn(z: ZoneProfile, param: string, scope: string, xs: () => Array<[number, number]>): Array<[number, number]> {
   const path = WET_DAY_OFFSET_OF[param];
   if (path === undefined || parseScope(scope).kind === "cycle") return [];
   const curve: Curve | undefined = isCurvePath(path) ? getPath(z.climate, path) : undefined;
   if (curve === undefined) return [];
-  const drawn = curvePoints(z, param, scope);
-  if (drawn.every((p) => Math.abs(evalCurve(curve, p[0])) < EPS)) return [];
-  return drawn.map((p) => [p[0], p[1] + evalCurve(curve, p[0])] as [number, number]);
+  // The "is there any offset at all" test stays on the HANDLE phases, so the
+  // ghost appears and disappears at the same moment on both lists.
+  if (curvePoints(z, param, scope).every((p) => Math.abs(evalCurve(curve, p[0])) < EPS)) return [];
+  return xs().map((p) => [p[0], p[1] + evalCurve(curve, p[0])] as [number, number]);
 }
 
 /**
