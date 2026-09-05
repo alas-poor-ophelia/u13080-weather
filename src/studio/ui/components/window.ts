@@ -375,6 +375,11 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
   paintPreset();
   // Once, at construction: the slot's content is the caller's to repaint.
   props.head?.(headEl);
+  // A head with an `is-tail` child takes the spacer's growth itself (styles.css);
+  // the flag lives on the head and the bar because the scanner rejects `:has()`.
+  const tailed = headEl.querySelector(":scope > .is-tail") !== null;
+  headEl.toggleClass("is-tailed", tailed);
+  bar.toggleClass("is-tailed", tailed);
   paint();
 
   return {

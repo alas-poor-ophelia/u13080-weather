@@ -3486,6 +3486,27 @@ describe("climate studio · era window", () => {
     expect(probe.note).toBe("");
     expect(probe.writes).toContain("world.eras[");
 
+    // 0.3.1: the window is kind-scoped by `data-kind` (the store scanner rejects
+    // `:has()`), the era head is flagged `is-tailed` so the bar's spacer yields,
+    // and the era inputs beat Obsidian's input rules on specificity alone (the
+    // scanner rejects `!important` too). Computed style is the property here.
+    const eraWin = ob.page.locator('.wadjet-studio-window[data-kind="era"]');
+    expect(await eraWin.count()).toBe(1);
+    expect(await eraWin.locator(".wadjet-studio-window-bar.is-tailed .wadjet-studio-window-spacer").evaluate((el: Element) => getComputedStyle(el).display)).toBe("none");
+    const nameStyle = await eraWin.locator('[data-part="era-name"]').evaluate((el: Element) => {
+      const c = getComputedStyle(el);
+      return { bg: c.backgroundColor, border: c.borderTopStyle, radius: c.borderTopLeftRadius, h: (el as HTMLElement).offsetHeight };
+    });
+    expect(nameStyle).toEqual({ bg: "rgba(0, 0, 0, 0)", border: "none", radius: "0px", h: nameStyle.h });
+    expect(nameStyle.h).toBeLessThan(30); // Obsidian's --input-height would make it 30
+    const fromStyle = await eraWin.locator('[data-part="era-from"]').evaluate((el: Element) => {
+      const c = getComputedStyle(el);
+      return { radius: c.borderTopLeftRadius, w: (el as HTMLElement).offsetWidth, h: (el as HTMLElement).offsetHeight };
+    });
+    expect(fromStyle.radius).toBe("2px");
+    expect(fromStyle.w).toBe(66);
+    expect(fromStyle.h).toBeLessThan(30);
+
     // 0556 l.54 `u.bd`: while the era's window is up the rail rings the matching
     // card in the era's own swatch — `--wadjet-studio-precip` (#5cb8f0) for the
     // first era, which is exactly what `proto-win-ice` shows and what the plugin

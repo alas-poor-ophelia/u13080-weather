@@ -1365,14 +1365,14 @@
    instead of sliding with the title's length. Scoped with `:has` because only
    the device panel's prototype pins it — a channel window's title still sizes
    to its text. */
-.wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-title {
+.wadjet-studio-window[data-kind="device"] .wadjet-studio-window-title {
   /* A BASIS, not a fixed width: the 300 px curse panel has no 118 px to spare
      once the badge, the preset chip and the × have taken theirs, and a
      non-shrinking name is what pushed all three past the right border. The
      base rule's `min-width: 0` lets it ellipsise the rest of the way. */
   flex: 0 1 118px;
 }
-.wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-title-input {
+.wadjet-studio-window[data-kind="device"] .wadjet-studio-window-title-input {
   width: 100%;
 }
 .wadjet-studio-window-badge {
@@ -1407,13 +1407,13 @@
   gap: 8px;
   min-width: 0;
 }
-.wadjet-studio-window-head:has(> .is-tail) {
+.wadjet-studio-window-head.is-tailed {
   flex: 1 1 auto;
 }
 .wadjet-studio-window-head > .is-tail {
   margin-left: auto;
 }
-.wadjet-studio-window-bar:has(.wadjet-studio-window-head > .is-tail) .wadjet-studio-window-spacer {
+.wadjet-studio-window-bar.is-tailed .wadjet-studio-window-spacer {
   display: none;
 }
 .wadjet-studio-window-spacer {
@@ -1476,7 +1476,7 @@
 }
 /* The prototype's device body ends 13 px above the WRITES footer, one more
    than its 12 px top edge. Device-scoped: no other panel's body moves. */
-.wadjet-studio-window:has(.wadjet-studio-device) .wadjet-studio-window-body {
+.wadjet-studio-window[data-kind="device"] .wadjet-studio-window-body {
   padding-bottom: 13px;
 }
 .wadjet-studio-window-foot {
@@ -4036,13 +4036,13 @@
    chrome's head slot as an `is-tail` child, so it fills the bar and its
    `delete` keeps the prototype's right end. Hidden here, not in the shared
    component section, so every other window's chrome is untouched. */
-.wadjet-studio-window:has(.wadjet-studio-era) .wadjet-studio-window-bar {
+.wadjet-studio-window[data-kind="era"] .wadjet-studio-window-bar {
   /* The bar carries only the close × on its own, so it would collapse to
      30 px; the head it hosts is the prototype's 37 px. */
   min-height: 37px;
 }
-.wadjet-studio-window:has(.wadjet-studio-era) .wadjet-studio-window-title,
-.wadjet-studio-window:has(.wadjet-studio-era) .wadjet-studio-window-badge {
+.wadjet-studio-window[data-kind="era"] .wadjet-studio-window-title,
+.wadjet-studio-window[data-kind="era"] .wadjet-studio-window-badge {
   display: none;
 }
 .wadjet-studio-era {
@@ -4080,9 +4080,11 @@
   height: 9px;
 }
 /* Obsidian's own `input[type="text"]` base rule outweighs a single class
-   selector, which is why this needs `!important`: without it the name reads
-   as the boxed, off-palette input the fidelity pass exists to remove. */
-.wadjet-studio-era-name {
+   selector, so this one is (0,3,1) — root, kind-scoped window, element +
+   class — and wins on specificity; the store scanner rejects `!important`.
+   Without it the name reads as the boxed, off-palette input the fidelity
+   pass exists to remove. */
+.wadjet-studio .wadjet-studio-window[data-kind="era"] input.wadjet-studio-era-name {
   flex: 0 1 auto;
   width: 120px;
   min-width: 40px;
@@ -4090,24 +4092,24 @@
      the head slot it sets the bar's own height — 48 px instead of the
      prototype's 37 (the same trap the year wells fell into below). The line box
      is the height here. */
-  height: auto !important;
+  height: auto;
   line-height: 20px;
-  padding: 0 !important;
-  color: var(--wadjet-studio-text) !important;
+  padding: 0;
+  color: var(--wadjet-studio-text);
   font: inherit;
   font-size: var(--wadjet-studio-fs-title);
   font-weight: 600;
-  background: transparent !important;
-  border: none !important;
-  border-bottom: 1px solid transparent !important;
-  border-radius: 0 !important;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
   outline: none;
-  box-shadow: none !important;
+  box-shadow: none;
   -webkit-appearance: none;
   appearance: none;
 }
-.wadjet-studio-era-name:focus {
-  border-bottom-color: #565b61 !important;
+.wadjet-studio .wadjet-studio-window[data-kind="era"] input.wadjet-studio-era-name:focus {
+  border-bottom-color: #565b61;
 }
 .wadjet-studio-era-badge {
   flex: 0 0 auto;
@@ -4156,26 +4158,26 @@
   color: var(--wadjet-studio-text-mute);
 }
 /* Obsidian's own `input[type="number"]` base rule outweighs a single class
-   selector — the same reason `.wadjet-studio-era-name` above needs
-   `!important`. Without it these read as its stock #2e2e2e box with white
+   selector, so these win on specificity the same way `.wadjet-studio-era-name`
+   above does. Without that they read as its stock #2e2e2e box with white
    digits, not the prototype's lit year wells. `border-box` so the 66 px the
    prototype measures INCLUDES the 6 px side padding and the rim. */
-.wadjet-studio-era-span-from,
-.wadjet-studio-era-span-to {
+.wadjet-studio .wadjet-studio-window[data-kind="era"] input.wadjet-studio-era-span-from,
+.wadjet-studio .wadjet-studio-window[data-kind="era"] input.wadjet-studio-era-span-to {
   box-sizing: border-box;
   width: 66px;
   /* Obsidian's `--input-height` (30 px) is a third taller than the
      prototype's 23 px well; the padding is the height here. */
-  height: auto !important;
-  padding: 3px 6px !important;
-  color: var(--wadjet-studio-readout) !important;
+  height: auto;
+  padding: 3px 6px;
+  color: var(--wadjet-studio-readout);
   font: inherit;
   font-size: var(--wadjet-studio-fs-body);
   font-variant-numeric: tabular-nums;
-  background: var(--wadjet-studio-era-well) !important;
-  border: 1px solid var(--wadjet-studio-era-well-edge) !important;
-  border-radius: 2px !important;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7) !important;
+  background: var(--wadjet-studio-era-well);
+  border: 1px solid var(--wadjet-studio-era-well-edge);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7);
   outline: none;
 }
 .wadjet-studio-era-span-years {
@@ -5301,7 +5303,7 @@
    as lighter than the body, not darker. Scoped to this window family, not
    the shared component section, so world/device window chrome — verified
    at #2c2f33 to #2a2d31 — is untouched. */
-.wadjet-studio-window:has(.wadjet-studio-channel-win) {
+.wadjet-studio-window[data-kind="channel"] {
   background: linear-gradient(180deg, #26282c, #1f2124);
 }
 /* A channel panel is as tall as its own content, the way the prototype draws
@@ -5318,7 +5320,7 @@
 /* The channel body ends 8 px above the WRITES footer, not the shared 12: the
    prototype's is `padding:12px 0 8px` (`0250` l.11) and the columns carry
    their own side padding. Four of the budget's pixels. */
-.wadjet-studio-window:has(.wadjet-studio-channel-win) .wadjet-studio-window-body {
+.wadjet-studio-window[data-kind="channel"] .wadjet-studio-window-body {
   padding-bottom: 8px;
 }
 .wadjet-studio-channel-win {

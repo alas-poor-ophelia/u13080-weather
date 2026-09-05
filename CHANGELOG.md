@@ -2,6 +2,21 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
+## 0.3.1
+
+Housekeeping for the community-plugin store scan of 0.3.0. Nothing about a day's weather or a
+zone's JSON changes.
+
+- `styles.css` no longer uses `:has()` or `!important`. Per-kind window chrome is scoped on a
+  `data-kind` attribute the window carries from its id, a head with a right-hanging tail is
+  flagged on the head and bar, and the era name and year inputs override Obsidian's input rules
+  by specificity.
+- Dev dependency `electron` moves to 40, which drops `extract-zip` (advisory GHSA-jmr9-qjv8-65gv,
+  no patched version exists). The e2e harness is the only consumer; the shipped plugin never
+  depended on it.
+- `bun run lint:scanner` now also checks `styles.css` for the two CSS rules above, so the store's
+  verdict is known before a tag.
+
 ## 0.3.0
 
 ### Climate Studio
@@ -21,8 +36,7 @@ world changes until you change it.
 
 ### Schema
 
-New optional fields, all in [docs/API.md](https://github.com/alas-poor-ophelia/u13080-weather/blob/0.3.0/docs/API.md). Absent means exactly the behaviour
-0.2.0 had, so existing worlds, presets and hashes are untouched.
+New optional fields, all in [docs/API.md](https://github.com/alas-poor-ophelia/u13080-weather/blob/0.3.0/docs/API.md). Absent means exactly the behaviour 0.2.0 had, so existing worlds, presets and hashes are untouched.
 
 - `enabled` on a modifier, an op or an era (a power switch); `mods` gates on a daily modifier;
   `envelope` on an `offset`/`scale` op; `automation` lanes and `flipSeasons` on a zone; named
@@ -88,3 +102,16 @@ First alpha.
 - Settings on the Obsidian 1.13 declarative settings API; requires Obsidian 1.13.0.
 - Public API (`window.Wadjet`, `wadjet:ready`) with time-adapter and zone-resolver hooks for
   other plugins.
+
+
+Pssst. Hey. You. 
+
+You ever wanted full weather forecasts for your fantasy world, some weirdo released a plugin for it, but they wanted you to edit complex JSON files to do anything, like some kind of nerd?
+
+Have you thought to yourself, "wow, I really think the streamlined and modern UI of music production would apply great to tweaking climate data"?
+
+...No? Damn.
+
+---
+
+Bit aside, I've added a new UI tentatively called the Climate Studio to U+13080, which allows for actual visualization and tweaking of your data. I **promise** that it's actually pretty good, even if I sound like an insane person. I've added a bunch of video recordings to the README, including [a walkthrough of creating a region for Mordor](https://github.com/alas-poor-ophelia/u13080-weather/blob/0.3.0/media/t1-first-region.mp4) from scratch, because why not. There's also [an overview video here](https://github.com/alas-poor-ophelia/u13080-weather/blob/0.3.0/media/studio-overview.mp4) showing a broader view of the concept.

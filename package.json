@@ -1,6 +1,6 @@
 {
   "name": "wadjet",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Deterministic, data-driven weather for TTRPG worldbuilding in Obsidian",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "bun test",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "lint": "eslint . --max-warnings 0",
-    "lint:scanner": "eslint --config eslint.scanner-replica.mjs src --max-warnings 0",
+    "lint:scanner": "eslint --config eslint.scanner-replica.mjs src --max-warnings 0 && bun run scripts/lint-css.ts styles.css",
     "bump": "bun run scripts/bump-version.ts",
     "golden": "bun run scripts/golden.ts --write",
     "golden:check": "bun run scripts/golden.ts",
@@ -23,7 +23,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@typescript-eslint/parser": "^8.67.0",
-    "electron": "33.4.11",
+    "electron": "40.10.6",
     "esbuild": "^0.24.0",
     "eslint": "^9",
     "eslint-plugin-obsidianmd": "0.4.1",

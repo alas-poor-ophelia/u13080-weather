@@ -293,6 +293,10 @@ export function createWindowManager(): WindowManager {
           persist(id, { x, y, z: current?.z ?? pos.z }, true);
         },
       });
+      // The window's KIND, for the stylesheet: the id prefix (`device:x` → `device`,
+      // `channel:wind` → `channel`, `atlas` → `atlas`). styles.css scopes per-kind
+      // chrome on `[data-kind]` — the store scanner rejects `:has()`.
+      component.el.setAttr("data-kind", id.split(":")[0] ?? id);
 
       const entry: OpenWindow = { build: built, component, writes: built.writes?.() ?? "", issues: "", level, badge: badge ?? "", presetKey: built.preset === undefined ? "" : presetKeyOf(built.preset) };
       open.set(id, entry);
