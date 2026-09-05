@@ -12,6 +12,14 @@ import { describe, expect, test } from "bun:test";
 
 const SOURCE = await Bun.file(new URL("../src/studio/ui/windows/channel.ts", import.meta.url)).text();
 
+/**
+ * The prototype markup lives under `docs/handoff`, which is gitignored: it is
+ * on a maintainer's checkout and not on CI. The cross-check against it runs
+ * only where it exists; the spec-versus-table check below runs everywhere.
+ */
+const PROTO_DIR = new URL("../docs/handoff/climate-studio/audit/proto-markup/", import.meta.url);
+const HAVE_PROTO_MARKUP = await Bun.file(new URL("0250-temperature-editor.html", PROTO_DIR)).exists();
+
 /** The prototype editor each channel's window is drawn from. */
 const PROTO_FILE: Record<string, string> = {
   TEMPERATURE: "0250-temperature-editor.html",
@@ -36,7 +44,7 @@ const PROTO_PLOT_HEIGHTS: Record<string, number[]> = {
 const PLOT_SVG_WIDTHS = new Set([770, 560]);
 
 async function markupPlotHeights(file: string): Promise<number[]> {
-  const html = await Bun.file(new URL(`../docs/handoff/climate-studio/audit/proto-markup/${file}`, import.meta.url)).text();
+  const html = await Bun.file(new URL(file, PROTO_DIR)).text();
   const out: number[] = [];
   for (const m of html.matchAll(/<svg width="(\d+)" height="(\d+)"/g)) {
     if (PLOT_SVG_WIDTHS.has(Number(m[1]))) out.push(Number(m[2]));
@@ -68,7 +76,7 @@ function chartPad(height: number): { top: number; bottom: number } {
 }
 
 describe("studio channel editor plots", () => {
-  test("the transcribed table is what the prototype markup actually says", async () => {
+  test.skipIf(!HAVE_PROTO_MARKUP)("the transcribed table is what the prototype markup actually says (maintainer checkout only)", async () => {
     for (const [name, file] of Object.entries(PROTO_FILE)) {
       expect([name, await markupPlotHeights(file)]).toEqual([name, PROTO_PLOT_HEIGHTS[name]!]);
     }
