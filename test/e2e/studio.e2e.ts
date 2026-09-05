@@ -5300,6 +5300,27 @@ describe("climate studio · eras lane", () => {
     console.log(`  · eras lane: ${probe.spans.map((s) => `${s.id}@row${s.row}`).join(", ")} over ${Math.round(probe.stripWidth)}px`);
   });
 
+  test("step 1b: a real click on a clip opens its era window (wadjet-bqr)", async () => {
+    await revealStudio();
+    // Playwright's click is the browser's own pointerdown → pointerup → click,
+    // not a dispatched MouseEvent: it is the only way to catch the click the
+    // browser DROPS when the pressed node is repainted out from under it,
+    // which is exactly what the lane did on a plain press before wadjet-bqr.
+    await closeErasWindow("era:Thaw");
+    expect(await erasWindowOpen("era:Thaw")).toBe(false);
+    const clip = ob.page
+      .locator(".wadjet-studio-row")
+      .filter({ has: ob.page.locator(".wadjet-studio-row-name", { hasText: /^Eras$/ }) })
+      .locator('.wadjet-studio-span[data-id="era:Thaw"]');
+    await clip.click();
+    await nextFrame();
+    expect(await erasWindowOpen("era:Thaw")).toBe(true);
+    console.log("  · a real click on the Thaw clip opened era:Thaw");
+    // Leave the lane as step 1 left it: a floating panel over the playlist
+    // would intercept step 2's create-drag.
+    await closeErasWindow("era:Thaw");
+  });
+
   test("step 2: click-drag on empty lane adds an era over the years under the cursor", async () => {
     await revealStudio();
     const before = await allEras();

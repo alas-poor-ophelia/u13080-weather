@@ -263,13 +263,13 @@ export class StudioView extends ItemView {
   private insetStatusBar(): void {
     const root = this.shell?.root;
     if (root === undefined) return;
-    root.style.setProperty("--wadjet-studio-status-h", "0px");
+    root.setCssProps({ "--wadjet-studio-status-h": "0px" });
     const bar = root.ownerDocument.querySelector(".status-bar");
     const b = bar?.getBoundingClientRect();
     const r = root.getBoundingClientRect();
     const overlaps = b !== undefined && b.height > 0 && b.left < r.right && b.right > r.left;
     const reach = overlaps ? Math.max(0, r.bottom - b.top) : 0;
-    root.style.setProperty("--wadjet-studio-status-h", `${Math.ceil(reach)}px`);
+    root.setCssProps({ "--wadjet-studio-status-h": `${Math.ceil(reach)}px` });
   }
 
   // --- shell ---------------------------------------------------------------

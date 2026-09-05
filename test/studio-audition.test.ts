@@ -180,6 +180,18 @@ describe("rollYear", () => {
     expect(diff).toBe(true);
   });
 
+  test("powering a device off changes the key and the roll (wadjet-3bv)", () => {
+    // The mixer LED writes `Modifier.enabled = false`; `profileHash` keeps that
+    // key, so the cache must miss and the engine must skip the device.
+    const gust = { id: "gust", apply: [{ param: "wind.speed" as const, op: "offset" as const, value: 12 }] };
+    const on = rollYear(baseInput({ zone: zone({ modifiers: [gust] }) }));
+    const off = rollYear(baseInput({ zone: zone({ modifiers: [{ ...gust, enabled: false }] }) }));
+    expect(off.key).not.toBe(on.key);
+    expect(off.days.length).toBe(on.days.length);
+    const diff = off.days.some((d, idx) => JSON.stringify(d.report.wind) !== JSON.stringify(on.days[idx]!.report.wind));
+    expect(diff).toBe(true);
+  });
+
   test("a pinned day is marked and its report carries the patch", () => {
     const i = baseInput();
     const firstDay = firstDayOfYear(i.adapter, i.year);

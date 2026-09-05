@@ -118,20 +118,29 @@ export function createLane(parent: HTMLElement, initial: LaneProps): LaneCompone
     }
   }
 
+  /**
+   * A press that never crosses the drag threshold must leave the DOM alone.
+   * `paint()` empties and rebuilds the span nodes, and the browser only fires a
+   * `click` when the pointerdown target is still attached at pointerup — so a
+   * repaint from a plain press on a clip swallowed the click that opens it
+   * (wadjet-bqr). The three gestures below repaint only once `moved` is true.
+   */
   function startResize(ev: PointerEvent, span: Span, zone: "start" | "end", g: LaneGeometry): void {
     ev.preventDefault();
     cancelDrag = beginDrag(ev, {
       capture: el,
-      onMove: (move) => {
+      onMove: (move, _dx, _dy, moved) => {
+        if (!moved) return;
         preview = resizeSpan(span, zone, pxToYear(localX(move), g), minLength(), bounds());
         paint();
       },
       onEnd: (end, _dx, _dy, moved) => {
         cancelDrag = null;
+        if (!moved) return;
         const next = resizeSpan(span, zone, pxToYear(localX(end), g), minLength(), bounds());
         preview = null;
         paint();
-        if (moved) props.onResize?.(span, zone, zone === "start" ? next.from : next.to);
+        props.onResize?.(span, zone, zone === "start" ? next.from : next.to);
       },
     });
   }
@@ -140,16 +149,18 @@ export function createLane(parent: HTMLElement, initial: LaneProps): LaneCompone
     ev.preventDefault();
     cancelDrag = beginDrag(ev, {
       capture: el,
-      onMove: (move) => {
+      onMove: (move, _dx, _dy, moved) => {
+        if (!moved) return;
         preview = moveSpan(span, pxToYear(localX(move), g) - pxToYear(x0, g), bounds());
         paint();
       },
       onEnd: (end, _dx, _dy, moved) => {
         cancelDrag = null;
+        if (!moved) return;
         const next = moveSpan(span, pxToYear(localX(end), g) - pxToYear(x0, g), bounds());
         preview = null;
         paint();
-        if (moved) props.onMove?.(span, next.from);
+        props.onMove?.(span, next.from);
       },
     });
   }
@@ -159,16 +170,18 @@ export function createLane(parent: HTMLElement, initial: LaneProps): LaneCompone
     ev.preventDefault();
     cancelDrag = beginDrag(ev, {
       capture: el,
-      onMove: (move) => {
+      onMove: (move, _dx, _dy, moved) => {
+        if (!moved) return;
         ghost = { from: startYear, to: pxToYear(localX(move), g) };
         paint();
       },
       onEnd: (end, _dx, _dy, moved) => {
         cancelDrag = null;
+        if (!moved) return;
         const endYear = pxToYear(localX(end), g);
         ghost = null;
         paint();
-        if (moved) props.onCreate?.(Math.min(startYear, endYear), Math.max(startYear, endYear));
+        props.onCreate?.(Math.min(startYear, endYear), Math.max(startYear, endYear));
       },
     });
   }
