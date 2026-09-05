@@ -8,7 +8,7 @@ decade, and then you can pin the day the party got caught in the blizzard (excep
 
 And it has a TypeScript API+an adapter system so other plugins can integrate with it, if they want. 
 
-**This is stochastic generation, not simulation.** "Stochastic" meaning *driven by
+**This is stochastic generation, as opposed to true simulation.** "Stochastic" meaning *driven by
 probabilities*. Each zone is a statistical portrait of a real climate (taken from public weather station data): how often it rains, how much, how warm the seasons run, etc and the plugin rolls those odds forward one day at a time. It does not move air masses around, track moisture across your map, or read your heightmap, and two zones next to each other do not know about each other. See [`NON-GOALS.md`](NON-GOALS.md) for the full list of things it will not do.
 
 _During alpha, capabilities may change somewhat, but broadly I plan on the above staying true_
@@ -43,9 +43,7 @@ All these odds are drawn from a  real weather station's thirty-year record (see 
 
 ## Install
 
-If you’re reading this really early, it may not be available for download in the Community Store yet, but it will be. If it is, do that. 
-
-If it’s not:
+The best way to install U+13080 is direct from the Obsidian Community Plugin store. However, you can also install in the following ways.
 
 - **BRAT:** add `https://github.com/alas-poor-ophelia/u13080-weather` as a beta plugin.
 - **Manual:** download `main.js`, `manifest.json` and `styles.css` from the latest release into
@@ -368,6 +366,7 @@ zone profile, the calendar and the day number, and nothing else. Nothing runs in
 Changing the seed, the year length, a zone's climate, the calendar's moons or the eras does change past weather; I have tried to make it clear where this is the case.
 
 > **Q**: So will the generator just constantly be getting breaking changes? Can I not take advantage of new features without risking my weather changing?
+> 
 > **A**: During the alpha, honestly.... yeah, probably. I'll do my best, but there may be some flex out of necessity. After the alpha, I expect it to be very rare. Think of this as a safety lever you hopefully don't need
 
 ## Other Plugins (API)
