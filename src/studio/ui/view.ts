@@ -136,6 +136,14 @@ export class StudioView extends ItemView {
   readonly windows: WindowManager = createWindowManager();
   private unsubscribeStore: (() => void) | null = null;
   private unsubscribeSettings: (() => void) | null = null;
+  /**
+   * The tab label the leaf is currently showing. Obsidian reads
+   * `getDisplayText()` when the header is built and caches it, so switching
+   * the pointed-at zone (or renaming it) left the tab and the window title on
+   * the zone the leaf OPENED with (bead wadjet-afm). `render` compares against
+   * this and asks for a refresh only when the answer actually changed.
+   */
+  private headerText: string | null = null;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -308,6 +316,8 @@ export class StudioView extends ItemView {
     this.unsubscribeStore = null;
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
+    // A rebuilt leaf must push its label again, whatever the old one said.
+    this.headerText = null;
     for (const surface of this.surfaces) surface.destroy();
     this.surfaces = [];
     this.windows.destroy();
@@ -318,8 +328,28 @@ export class StudioView extends ItemView {
   private render(): void {
     if (this.shell === null) return;
     const state = this.store.get();
+    this.refreshHeader();
     for (const surface of this.surfaces) surface.render(state);
     this.windows.renderAll(state);
+  }
+
+  /**
+   * Push a changed `getDisplayText()` to the tab and the window title.
+   *
+   * `updateHeader` is Obsidian's own re-read of a leaf's icon and title, but
+   * it is not in the published typings — the same structural cast
+   * `studio/ui/open.ts` uses for `app.setting`, and optional so a build that
+   * drops it degrades to the stale label rather than throwing every frame.
+   */
+  private refreshHeader(): void {
+    const text = this.getDisplayText();
+    if (text === this.headerText) return;
+    this.headerText = text;
+    (this.leaf as unknown as { updateHeader?: () => void }).updateHeader?.();
+    // The tab strip and the window's own title bar are two surfaces: the first
+    // is the leaf's header, the second is `Workspace`'s document title, which
+    // only re-reads the active leaf when it is told to.
+    (this.app.workspace as unknown as { updateTitle?: () => void }).updateTitle?.();
   }
 
   // --- state ---------------------------------------------------------------

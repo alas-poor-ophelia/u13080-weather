@@ -16,6 +16,20 @@ _During alpha, capabilities may change somewhat, but broadly I plan on the above
 Requires Obsidian **1.13** or later. Desktop; mobile is not marked unsupported but has not been
 tested extensively, yet (alpha).
 
+![The climate studio: a day card, the playlist and mixer, an era drawn across the years, and a day pinned in the audition strip](media/sizzle.gif)
+
+*Thirty seconds of it end to end; the overview below walks the same ground slowly.*
+
+<details>
+<summary>▶ Watch the two-minute overview of the Climate Studio</summary>
+
+[![The climate studio: the playlist over the calendar ruler, the mixer, and the audition strip](media/studio-overview.poster.png)](media/studio-overview.mp4)
+
+A pass through the whole studio: the playlist and its lanes, the mixer's channel chains, regimes,
+devices, forcings, eras, pinned days, and Save. It is silent, with captions on screen.
+
+</details>
+
 ## How does it work?
 
 U+13080 Weather uses a model called WGEN (and its descendants). This is the same model that agricultural scientists have used since the 1980s to make synthetic weather for crop and erosion studies. For each day:
@@ -99,6 +113,12 @@ For various reasons, generated weather is never stored, rather it is recomputed 
 
 This is for one off storytelling events. Party got lost in a blizzard, the moon fell and there was a bunch of dust…. Etc.
 
+Pinning from the studio is a right-click on a day in the audition strip; the day card takes the
+edits and its tags, a re-roll leaves the pinned days where they are, and the JSON drawer lists
+them as overrides.
+
+![Pinning a day in the studio's audition strip, editing its day card, re-rolling the year, and unpinning it](media/g5-pins.gif)
+
 ## Zones and climates
 
 A zone is a climate you define. When you pick a preset it is **copied** into the zone, so if a plugin update changes the climate data (which shouldn’t really happen, but if it does), your pre-existing weather won’t change.
@@ -162,6 +182,8 @@ If none of the names fits what you’re picturing, you may attempt to define the
 
 The notice after adding tells you exactly what was done and which station you ended up with.
 
+The [first-region tutorial](media/t1-first-region.mp4) adds a zone this way and then matches it in the Atlas.
+
 ### Modifiers
 
 Zones can carry *modifiers*: It’s worldbuilding detail, allowed to bend the rules, a way to hopefully support a wide variety of settings and worlds without needing to add in specific support for everything. They are how you get a stormy moon, a volcano's ash season, or a cursed valley where it never rains.
@@ -218,6 +240,11 @@ Reading them:
 - **`tag`** is added to the day's conditions while the rule is active, so it shows in the card
   and other rules can react to it. A modifier with a tag and no `apply` is pure flavour.
 
+The studio builds the same rules without the JSON. The stormtide above, inserted on PRECIP as a
+moon-bound device, given the phases it fires on, and saved as a preset:
+
+![Inserting a moon-bound device on the PRECIP chain, setting its phases, applying it, and saving it as a preset](media/g2-moon-bound-device.gif)
+
 Under the modifiers sits a **regime** layer you normally never touch: a few background weather
 patterns (settled, unsettled, stormy…) that persist for days at a time and nudge the odds, so
 weather arrives in stretches the way real weather does.
@@ -250,6 +277,11 @@ year spans (JSON, comments allowed):
 - Eras are steps, not cycles: you write the arc of history and the generator follows it. Nothing
   drifts on its own. Changing eras changes past weather (they are part of the calendar hash).
 
+Eras can be drawn instead of typed. At the studio's *Era* zoom they are clips on their own lane:
+drag one out, name it, give it a span, apply it, and the temperature curve drops for its years.
+
+![Drawing an era at Era zoom, naming and spanning it, applying it, and watching the temperature dip](media/g4-eras.gif)
+
 More recipes — seasons, moons, eras, curses — in [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
 ## Climate studio
@@ -260,6 +292,12 @@ eleven centuries, a **mixer** with a chain per channel (TEMP, PRECIP, WIND, SKY)
 floating **editor windows** for whatever you clicked, and a live **audition strip** along the
 bottom showing one seeded year rolled through the whole path.
 
+Clicking a channel row opens its editor: offset, swing and jitter, scoped to the whole year or to
+one season, with the Writers stack underneath listing everything else already touching that
+channel.
+
+![The channel editor: offset, swing and jitter knobs, a season scope, the Writers stack, and the Writes footer](media/g1-shape-a-channel.gif)
+
 **It is an editor, not a simulator.** It writes the same zone JSON the settings editor does —
 anything you build in it you could have typed by hand, and *Zones → Edit* is still there for when
 you'd rather type. It invents nothing: every climate number still comes from the shipped station
@@ -269,6 +307,12 @@ already would — the same knobs, the same rules, and the same warning that you 
 **Opening it.** *Settings → U+13080 Weather → Zones → Open in studio* on a zone row, or the *Open
 climate studio* command (which asks which zone if you have more than one). There is one studio
 tab; opening another zone re-points it rather than piling up tabs.
+
+**Your first region.** The tutorial below builds one from nothing: add a zone by describing its
+geography, match it to a station in the Atlas, lay in a regimes preset and rename its moods,
+insert three device presets, audition the year, and Save.
+
+[![Building a first region in the climate studio](media/t1-first-region.poster.png)](media/t1-first-region.mp4)
 
 **The signal path.** The lanes and the chains are laid out in the order the generator runs:
 
@@ -285,6 +329,12 @@ tab; opening another zone re-points it rather than piling up tabs.
 7. **Eras** — the world's spans of history, which bend every zone.
 8. **Pins** — days you fixed by hand (right-click a day in the audition strip).
 9. **The roll** — the weather itself. Audited, never drawn on.
+
+Step 4 has a window like anything else. A mood is added, told how often it comes up and how long
+it holds, given what it changes, and muted per channel with the lamp on its row; the share bar
+keeps the whole set adding up.
+
+![The regimes window: adding a mood, HOW OFTEN and HOW LONG, the share bar, WHAT CHANGES, the regimes lane, and a per-channel mute lamp](media/g3-regimes.gif)
 
 **Every window shows what it writes.** Each editor window carries a `Writes →` footer with the
 exact JSON it produces, and `{ } JSON` in the header opens a read-only drawer with the whole zone

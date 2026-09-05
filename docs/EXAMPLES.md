@@ -13,6 +13,9 @@ U+13080 is flexible and powerful even in its alpha state, but the visibility of 
   what the studio would have written. The two are interchangeable — paste a recipe and the studio
   will show it as a device on save, or build it in the studio and read the JSON back out of the
   `{ } JSON` drawer.
+- If you would rather watch first, the [studio overview](../media/studio-overview.mp4) walks the
+  whole editor and the [first-region tutorial](../media/t1-first-region.mp4) builds a zone from
+  nothing.
 
 Parameter cheat-sheet, for reading the `apply` lists:
 
@@ -37,6 +40,8 @@ Parameter cheat-sheet, for reading the `apply` lists:
 The internal calendar's seasons (*Settings → Calendar*) become tags: `season:Spring`, and so on. You do not have to define seasons; if you'd rather not, `yearPhase` ranges do the same job without names: `0` is the first day of the year, `0.5` is midsummer in a northern-hemisphere preset.
 
 Integrating with an external calendar from another plugin, once such integrations exist, may modify this. That will be up to that plugin+the data you enter into it.
+
+![The channel editor scoped to a season: offset, swing and jitter, the Writers stack, and the Writes footer](../media/g1-shape-a-channel.gif)
 
 **In the studio:** `＋` on a chain → *Tag-gated* for a named season, or *Spell* for a season-shaped
 run of days; set the window with the year-window mini-lane and the `apply` knobs. To edit the
@@ -106,6 +111,8 @@ season that starts early and ends late (*Settings → Calendar*).
 Moons are declared in *Settings → Calendar* (name, cycle in days, phase at day 0). Phase runs 0 (new) →
 0.5 (full) → 1 (new again); ranges wrap, so `[0.9, 0.1]` is "around new". The moon's *name* in
 the modifier must match the calendar exactly.
+
+![Inserting a moon-bound device on the PRECIP chain, setting its phases, applying it, and saving it as a preset](../media/g2-moon-bound-device.gif)
 
 **In the studio:** `＋` on a chain → *Moon-bound*, or the shipped **Spring-tide** preset, then pick
 the moon and the phases it fires on. The device gets its own lane of pulses in the playlist; click
@@ -240,6 +247,8 @@ spring tide stops happening outside Summer altogether.
 
 Eras are world-wide and keyed on the calendar's year numbers (note: again, this may vary with non-internal calendars). Each one tags its days with `era:<name>`, and `apply` affects every zone. Zones can then add their own reaction with an ordinary
 modifier on the tag. Eras are steps, not cycles.
+
+![Drawing an era at Era zoom, naming and spanning it, applying it, and resizing it](../media/g4-eras.gif)
 
 **In the studio:** switch the zoom to *Era* and the eras become clips on their own lane — drag an
 empty stretch to create one, drag its body to move it, its edges to resize, right-click to delete,

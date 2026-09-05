@@ -145,7 +145,7 @@ function resetWorkspaceState(): void {
   }
 }
 
-export async function launchObsidian(): Promise<Obsidian> {
+export async function launchObsidian(o: { extraArgs?: string[] } = {}): Promise<Obsidian> {
   const asar = obsidianAsar();
   if (!existsSync(asar)) throw new Error(`Obsidian app.asar not found at ${asar}`);
   if (!existsSync(VAULT)) throw new Error(`vault not found: ${VAULT}`);
@@ -171,7 +171,7 @@ export async function launchObsidian(): Promise<Obsidian> {
 
   const quiet = process.env["WADJET_E2E_VISIBLE"] ? [] : ["--require", path.join(HERE, "quiet-launch.cjs"), "--disable-features=CalculateNativeWinOcclusion"];
   process.env["ELECTRON_DISABLE_SECURITY_WARNINGS"] = "true";
-  const app = await electron.launch({ timeout: 60_000, args: [...quiet, asar, `--user-data-dir=${dataDir}`, `obsidian://open?vault=${hash}`] });
+  const app = await electron.launch({ timeout: 60_000, args: [...quiet, ...(o.extraArgs ?? []), asar, `--user-data-dir=${dataDir}`, `obsidian://open?vault=${hash}`] });
   const page = await app.firstWindow();
   await page.waitForLoadState("domcontentloaded");
 
