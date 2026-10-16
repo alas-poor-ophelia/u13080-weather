@@ -16,7 +16,7 @@ import { GENERATOR_VERSION, RNG_VERSION, SCHEMA_VERSION } from "../core/version"
 import type { WadjetEvent, WadjetEventPayloads } from "./events";
 import { InterpreterRegistry, codedError, type InterpretContext, type InterpreterInfo, type WeatherInterpreter } from "./interpreters";
 import type { CalendarDescription, TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
-import { assertInteger, type World, type ZoneLocator, type ZoneResolver } from "./world";
+import { assertDayInRange, assertInteger, type World, type ZoneLocator, type ZoneResolver } from "./world";
 
 /** Bumps whenever members are added to WadjetAPI. */
 export const API_VERSION = 1 as const;
@@ -82,6 +82,18 @@ export interface ApiHost {
 }
 
 export const UNLOADED_CODE = "wadjet-unloaded";
+/** `registerTimeAdapter` refuses this id: it belongs to the plugin's own calendar. */
+export const RESERVED_ADAPTER_ID = "internal";
+export const RESERVED_ID_CODE = "wadjet-reserved-id";
+
+/** A deep copy for an interpreter; values structuredClone refuses (functions) fall back to a one-level copy. */
+function copyForInterpreter<T extends object>(v: T): T {
+  try {
+    return structuredClone(v);
+  } catch {
+    return { ...v };
+  }
+}
 
 export class ApiController {
   readonly api: WadjetAPI;
@@ -108,16 +120,20 @@ export class ApiController {
     this.host.world.emit("ready");
   }
 
-  /** Fire `time-changed` for the active adapter (no-op after unload). */
-  emitTimeChanged(): void {
+  /**
+   * Fire `time-changed` (no-op after unload). For the active adapter by
+   * default; a queued `setNow` passes the adapter it actually moved, so a
+   * calendar switch while it was in flight can't take the credit.
+   */
+  emitTimeChanged(adapter: TimeAdapter | undefined = this.host.time.active): void {
     if (this.dead) return;
     let current: number | null = null;
     try {
-      current = this.host.world.now()?.dayOrdinal ?? null;
+      current = adapter?.now()?.dayOrdinal ?? null;
     } catch (e) {
-      console.error("U+13080 Weather: the active calendar's now() threw.", e);
+      console.error(`U+13080 Weather: time adapter "${adapter?.id ?? "?"}" now() threw.`, e);
     }
-    this.host.world.emit("time-changed", { current, adapterId: this.host.time.active?.id ?? "internal" });
+    this.host.world.emit("time-changed", { current, adapterId: adapter?.id ?? "internal" });
   }
 
   /**
@@ -192,7 +208,11 @@ export class ApiController {
     };
   }
 
-  /** Move the active calendar to `target()` (computed inside the queue, so back-to-back advances add up). */
+  /**
+   * Move the active calendar to `target()` (computed inside the queue, so
+   * back-to-back advances add up). A target outside ±MAX_DAY_ORDINAL rejects
+   * with RangeError.
+   */
   private moveTo(target: () => number | null): Promise<boolean> {
     return this.enqueue(async () => {
       if (this.dead) return false;
@@ -200,6 +220,7 @@ export class ApiController {
       if (!adapter || typeof adapter.setNow !== "function") return false;
       const day = target();
       if (day === null) return false;
+      assertDayInRange(day, "The target day");
       try {
         await adapter.setNow(day);
       } catch (e) {
@@ -208,7 +229,7 @@ export class ApiController {
       }
       if (this.dead) return false;
       // An adapter that reports its own changes (the internal calendar does) has already fired time-changed through syncActiveSubscription.
-      if (typeof adapter.subscribe !== "function") this.emitTimeChanged();
+      if (typeof adapter.subscribe !== "function") this.emitTimeChanged(adapter);
       return true;
     });
   }
@@ -263,6 +284,7 @@ export class ApiController {
       setNow: async (d) => {
         live();
         assertInteger(d, "dayOrdinal");
+        assertDayInRange(d, "dayOrdinal");
         return this.moveTo(() => d);
       },
       advance: async (n) => {
@@ -274,7 +296,11 @@ export class ApiController {
         });
       },
 
-      registerTimeAdapter: (a) => (live(), this.once(time.register(a))),
+      registerTimeAdapter: (a) => {
+        live();
+        if (typeof a === "object" && a !== null && a.id === RESERVED_ADAPTER_ID) throw codedError(RESERVED_ID_CODE, `The time adapter id "${RESERVED_ADAPTER_ID}" is reserved for the built-in calendar; choose another id.`);
+        return this.once(time.register(a));
+      },
       registerZoneResolver: (r) => (live(), this.once(world.registerZoneResolver(r))),
       resolveZone: (l) => (live(), world.resolveZone(l)),
       resolveZoneAsync: async (l) => {
@@ -308,13 +334,14 @@ export class ApiController {
         live();
         if (!this.interpreters.get(id)) throw new RangeError(`Unknown interpreter "${id}".`);
         const base = world.timeAt(report.dayOrdinal, world.getZone(report.zoneId) ? report.zoneId : undefined);
+        // Each call gets its own copies, so one interpreter can't change what another (or the card) sees.
         const ctx: InterpretContext = {
           zoneId: report.zoneId,
           classification: classify(report),
           time: report.hour !== undefined ? { ...base, hour: report.hour } : base,
-          ...(options !== undefined ? { options } : {}),
+          ...(options !== undefined ? { options: copyForInterpreter(options) } : {}),
         };
-        return this.interpreters.run(id, report, ctx) as T;
+        return this.interpreters.run(id, copyForInterpreter(report), ctx) as T;
       },
 
       on: (event, cb) => (live(), this.once(world.on(event, cb))),

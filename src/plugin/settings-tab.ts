@@ -21,6 +21,7 @@ import { generatedPatch } from "./pins";
 import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
+import { MAX_DAY_ORDINAL } from "./world";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
 
 const MAIN_PRESETS = PRESETS.filter((p) => !(p as { alternate?: boolean }).alternate);
@@ -101,7 +102,7 @@ export class WadjetSettingTab extends PluginSettingTab {
           {
             name: "Current day",
             desc: `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
-            control: { type: "number", key: "currentDayOrdinal", step: 1, validate: (v) => (Number.isInteger(v) ? undefined : "Whole days only.") },
+            control: { type: "number", key: "currentDayOrdinal", step: 1, validate: (v) => (!Number.isSafeInteger(v) ? "Whole days only." : Math.abs(v) > MAX_DAY_ORDINAL ? `Between ${withMinus(-MAX_DAY_ORDINAL)} and ${MAX_DAY_ORDINAL} only.` : undefined) },
           },
           {
             name: "Days in a year",
@@ -247,7 +248,7 @@ export class WadjetSettingTab extends PluginSettingTab {
       case "currentDayOrdinal": {
         // The row validates whole days; anything else is left as it was.
         const d = Number(value);
-        if (!Number.isInteger(d)) return;
+        if (!Number.isSafeInteger(d) || Math.abs(d) > MAX_DAY_ORDINAL) return;
         return this.plugin.setInternalDay(d);
       }
       case "calendar.yearLength":

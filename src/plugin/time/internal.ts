@@ -6,6 +6,7 @@ import { hash32 } from "../../core/rng";
 import type { InternalCalendarConfig } from "../settings";
 import type { CalendarDescription, TimeAdapter, TimeContext } from "./adapter";
 import { seasonAtPhase } from "./seasons";
+import { assertDayInRange, assertInteger } from "../world";
 
 export class InternalCalendar implements TimeAdapter {
   readonly id = "internal";
@@ -22,11 +23,12 @@ export class InternalCalendar implements TimeAdapter {
 
   /**
    * Move the current day: store it through `write`, then tell subscribers.
-   * Integers only; the plugin validates before it gets here, this is the
-   * last line.
+   * Safe integers within ±MAX_DAY_ORDINAL only; the plugin validates before
+   * it gets here, this is the last line.
    */
   async setNow(dayOrdinal: number): Promise<void> {
-    if (!Number.isInteger(dayOrdinal)) throw new TypeError(`dayOrdinal must be an integer (got ${String(dayOrdinal)}).`);
+    assertInteger(dayOrdinal, "dayOrdinal");
+    assertDayInRange(dayOrdinal, "dayOrdinal");
     if (!this.write) throw new Error("The internal calendar has no place to store the current day.");
     await this.write(dayOrdinal);
     for (const cb of [...this.listeners]) {

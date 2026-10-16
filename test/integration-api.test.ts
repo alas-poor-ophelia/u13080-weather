@@ -13,7 +13,9 @@ import { frontmatterResolver } from "../src/plugin/frontmatter-resolver";
 import { formatInterpretation, type WeatherInterpreter } from "../src/plugin/interpreters";
 import { TimeRegistry, type TimeAdapter } from "../src/plugin/time/adapter";
 import { InternalCalendar } from "../src/plugin/time/internal";
-import { World, MAX_RANGE_DAYS, type WorldState } from "../src/plugin/world";
+import { World, MAX_DAY_ORDINAL, MAX_RANGE_DAYS, type WorldState } from "../src/plugin/world";
+import { SaveQueue, setAndSave } from "../src/plugin/persist";
+import { glyph as coreGlyph } from "../src/core/glyphs";
 import { zoneFromPreset } from "../src/plugin/zones";
 import { PRESETS } from "../src/generated/presets";
 import type { WeatherReport } from "../src/core/report";
@@ -71,6 +73,39 @@ function harness(opts: { state?: Partial<WorldState>; writeDelay?: Promise<void>
   return { api: controller.api, controller, world, time, cal, day, saves, events };
 }
 
+/**
+ * The members of the `interface WadjetAPI { ... }` block in `text`, one
+ * normalised `name:signature` string each, in written order: line comments
+ * dropped, members split on top-level `;`, whitespace removed around
+ * punctuation and collapsed elsewhere. All three files write members in
+ * property syntax, so the strings compare directly.
+ */
+function wadjetApiMembers(text: string): string[] {
+  const block = text.match(/interface WadjetAPI \{([\s\S]*?)\n\}/);
+  if (!block) throw new Error("no interface WadjetAPI block");
+  const body = block[1]!.replace(/\/\/[^\n]*/g, "");
+  const members: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of body) {
+    if ("({[<".includes(ch)) depth++;
+    else if (")}]".includes(ch) || (ch === ">" && !cur.endsWith("="))) depth--;
+    if (ch === ";" && depth === 0) {
+      members.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  members.push(cur);
+  return members
+    .map((m) =>
+      m
+        .replace(/\s+/g, " ")
+        .replace(/\s*([(){}[\]<>:;,|&?=])\s*/g, "$1")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
 /** What a promise rejected with (undefined if it resolved). */
 const rejection = (p: Promise<unknown>): Promise<unknown> => p.then(() => undefined, (e: unknown) => e);
 
@@ -95,19 +130,22 @@ describe("surface", () => {
     expect(API_VERSION).toBe(1);
   });
 
-  test("docs/API.md and README.md WadjetAPI blocks list exactly the d.ts members", async () => {
+  test("docs/API.md and README.md WadjetAPI blocks match the d.ts member for member, signature for signature", async () => {
     const dts = await Bun.file(new URL("../types/wadjet.d.ts", import.meta.url)).text();
-    const members = (text: string) => {
-      const block = text.match(/interface WadjetAPI \{([\s\S]*?)\n\}/);
-      expect(block).not.toBeNull();
-      return [...block![1]!.matchAll(/^\s+([A-Za-z]+)\??\s*[:(<]/gm)].map((m) => m[1]!).sort();
-    };
-    const expected = members(dts);
-    expect(expected).toEqual([...API_KEYS].sort());
+    const expected = wadjetApiMembers(dts);
+    expect(expected.map((m) => m.slice(0, m.indexOf(":"))).sort()).toEqual([...API_KEYS].sort());
     for (const doc of ["../docs/API.md", "../README.md"]) {
       const text = await Bun.file(new URL(doc, import.meta.url)).text();
-      expect({ doc, members: members(text) }).toEqual({ doc, members: expected });
+      expect({ doc, members: wadjetApiMembers(text) }).toEqual({ doc, members: expected });
     }
+  });
+
+  test("the signature normaliser sees a changed type, not only a changed name", () => {
+    const block = (sig: string) => `interface WadjetAPI {\n  format: ${sig}; // a comment\n  interpret: <T = unknown>(id: string, options?: { a: number; b?: string }) => T;\n  now: () => TimeContext | null;\n}`;
+    const base = wadjetApiMembers(block("(dayOrdinal: number) => string"));
+    expect(base).toHaveLength(3);
+    expect(wadjetApiMembers(block("( dayOrdinal :number )=>\n    string"))).toEqual(base);
+    expect(wadjetApiMembers(block("(dayOrdinal: number) => string | null"))).not.toEqual(base);
   });
 });
 
@@ -616,5 +654,289 @@ describe("interpreters", () => {
     expect(formatInterpretation(mood as WeatherInterpreter, { mood: "grim" })).toBe("grim");
     expect(formatInterpretation({ id: "a", label: "A", facet: "f", interpret: () => 0 }, { a: 1 })).toBe('{"a":1}');
     expect(formatInterpretation({ id: "a", label: "A", facet: "f", interpret: () => 0, format: () => { throw new Error("x"); } }, 1)).toBe("(format failed: x)");
+  });
+});
+
+describe("review fixes", () => {
+  test("profiles-changed: an internal calendar edit means all; an adapter switch does not", () => {
+    const cfg = { yearLength: 360, epochYear: 1, moons: [], seasons: SEASONS };
+    const h = harness();
+    const last = () => of(h, "profiles-changed").at(-1)!;
+    const state: WorldState = { seed: "s", zones: [zoneNamed("Greywold"), zoneNamed("Ashfall Coast", { flipSeasons: true })], overrides: [] };
+    h.world.setState(state);
+    expect(last()).toEqual({ type: "profiles-changed", all: false, zoneIds: [] });
+
+    const edits = [{ ...cfg, yearLength: 365 }, { ...cfg, yearLength: 365, epochYear: 7 }, { ...cfg, yearLength: 365, epochYear: 7, seasons: SEASONS.slice(0, 2) }, { ...cfg, yearLength: 365, epochYear: 7, seasons: SEASONS.slice(0, 2), moons: [{ name: "Ember", cycleDays: 29, phaseAtEpoch: 0 }] }];
+    for (const edit of edits) {
+      h.cal.update(edit);
+      h.world.setState(state);
+      expect(last()).toEqual({ type: "profiles-changed", all: true, zoneIds: ["greywold", "ashfall-coast"] });
+    }
+    h.world.setState(state);
+    expect(last().all).toBe(false); // nothing moved since
+
+    const ext: TimeAdapter = { id: "ext", now: () => null, toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 10, source: "ext" }), configHash: () => "ext-1" };
+    h.time.register(ext);
+    h.time.setActive("ext");
+    h.world.setState(state);
+    expect(last()).toEqual({ type: "profiles-changed", all: false, zoneIds: [] }); // a switch is time-changed/adapters-changed, not profiles-changed
+    ext.configHash = () => "ext-2";
+    h.world.setState(state);
+    expect(last().all).toBe(true); // the active third-party calendar's own config moved
+  });
+
+  test("SaveQueue: one write at a time, the last write carries the newest state, even when writes settle out of order", async () => {
+    const settings = { n: 0 };
+    const written: number[] = [];
+    const resolvers: Array<() => void> = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const q = new SaveQueue(
+      (data) => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const n = (data as { n: number }).n;
+        return new Promise<void>((resolve) =>
+          resolvers.push(() => {
+            inFlight--;
+            written.push(n);
+            resolve();
+          }),
+        );
+      },
+      () => ({ ...settings }),
+      () => true,
+    );
+    const tick = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    settings.n = 1;
+    const a = q.save();
+    await tick();
+    settings.n = 2;
+    const b = q.save();
+    settings.n = 3;
+    const c = q.save(); // coalesces with b: neither has started
+    expect(c).toBe(b);
+    // A host whose promises would settle out of order: resolve every pending write newest-first.
+    // Only one is ever pending, so nothing can overtake.
+    let settled = false;
+    const all = Promise.all([a, b, c]).then(() => (settled = true));
+    for (let round = 0; !settled && round < 50; round++) {
+      await tick();
+      for (const r of resolvers.splice(0).reverse()) r();
+    }
+    await all;
+    expect(maxInFlight).toBe(1);
+    expect(written).toEqual([1, 3]);
+    expect(written.at(-1)).toBe(settings.n);
+  });
+
+  test("SaveQueue: a failed write rejects its callers and the next save still runs; nothing starts once dead", async () => {
+    let alive = true;
+    let fail = true;
+    const written: unknown[] = [];
+    const q = new SaveQueue(
+      (d) => {
+        if (fail) return Promise.reject(new Error("disk full"));
+        written.push(d);
+        return Promise.resolve();
+      },
+      () => "snap",
+      () => alive,
+    );
+    expect(await rejection(q.save())).toMatchObject({ message: "disk full" });
+    fail = false;
+    await q.save();
+    expect(written).toEqual(["snap"]);
+    alive = false;
+    await q.save();
+    expect(written).toEqual(["snap"]);
+  });
+
+  test("a failed save of the internal calendar's day rolls it back: setNow resolves false, no time-changed", async () => {
+    const settings = { currentDayOrdinal: 100 };
+    let failNext = false;
+    const q = new SaveQueue(
+      () => (failNext ? Promise.reject(new Error("write failed")) : Promise.resolve()),
+      () => settings,
+      () => true,
+    );
+    const write = (d: number) =>
+      setAndSave(
+        () => settings.currentDayOrdinal,
+        (v) => (settings.currentDayOrdinal = v),
+        d,
+        () => q.save(),
+      );
+    const cal = new InternalCalendar({ yearLength: 360, epochYear: 1, moons: [], seasons: SEASONS }, () => settings.currentDayOrdinal, write);
+    const time = new TimeRegistry("internal");
+    time.register(cal);
+    const world = new World({ seed: "s", zones: [zoneNamed("Greywold")], overrides: [] }, time);
+    const controller = new ApiController({ version: "9.9.9", world, time, units: () => "metric" });
+    controller.syncActiveSubscription();
+    const fired: unknown[] = [];
+    world.on("time-changed", (p) => fired.push(p));
+
+    failNext = true;
+    expect(await controller.api.setNow(250)).toBe(false);
+    expect(settings.currentDayOrdinal).toBe(100);
+    expect(controller.api.now()!.dayOrdinal).toBe(100);
+    expect(fired).toEqual([]);
+
+    failNext = false;
+    expect(await controller.api.advance(2)).toBe(true);
+    expect(settings.currentDayOrdinal).toBe(102);
+    expect(fired).toEqual([{ type: "time-changed", current: 102, adapterId: "internal" }]);
+  });
+
+  test("setAndSave leaves a value someone else set meanwhile", async () => {
+    let v = 1;
+    let fail!: (e: Error) => void;
+    const p = setAndSave(
+      () => v,
+      (x) => (v = x),
+      2,
+      () => new Promise<void>((_, reject) => (fail = reject)),
+    );
+    v = 5;
+    fail(new Error("no"));
+    expect(await rejection(p)).toMatchObject({ message: "no" });
+    expect(v).toBe(5);
+  });
+
+  test("day arguments: safe integers only, the stored day within plus or minus MAX_DAY_ORDINAL", async () => {
+    const h = harness();
+    expect(MAX_DAY_ORDINAL).toBe(10_000_000);
+    expect(await rejection(h.api.setNow(2 ** 53))).toBeInstanceOf(TypeError);
+    expect(await rejection(h.api.advance(2 ** 53))).toBeInstanceOf(TypeError);
+    expect(() => h.api.getReport("greywold", { dayOrdinal: 2 ** 53 })).toThrow(TypeError);
+    expect(() => h.api.timeAt(-(2 ** 53))).toThrow(TypeError);
+    expect(await rejection(h.api.setNow(MAX_DAY_ORDINAL + 1))).toBeInstanceOf(RangeError);
+    expect(await rejection(h.api.setNow(-MAX_DAY_ORDINAL - 1))).toBeInstanceOf(RangeError);
+    expect(await h.api.setNow(MAX_DAY_ORDINAL)).toBe(true);
+    expect(await rejection(h.api.advance(1))).toBeInstanceOf(RangeError); // the target, not the argument, is out of range
+    expect(h.day.value).toBe(MAX_DAY_ORDINAL);
+    expect(await h.api.advance(-1)).toBe(true);
+    expect(await h.api.setNow(-MAX_DAY_ORDINAL)).toBe(true);
+    expect(await rejection(h.cal.setNow(MAX_DAY_ORDINAL + 1))).toBeInstanceOf(RangeError); // the internal calendar's own last line
+    expect(h.day.value).toBe(-MAX_DAY_ORDINAL);
+  });
+
+  test("a queued setNow names the adapter it moved, even if the calendar source switched meanwhile", async () => {
+    const h = harness();
+    let current = 10;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const ext: TimeAdapter = {
+      id: "ext",
+      now: () => ({ dayOrdinal: current, yearPhase: 0, yearLength: 10, source: "ext" }),
+      toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 10, source: "ext" }),
+      configHash: () => "ext",
+      setNow: async (d) => {
+        await gate;
+        current = d;
+      },
+    };
+    h.time.register(ext);
+    h.time.setActive("ext");
+    h.events.length = 0;
+    const pending = h.api.setNow(20);
+    await Promise.resolve();
+    await Promise.resolve();
+    h.time.setActive("internal");
+    release();
+    expect(await pending).toBe(true);
+    expect(of(h, "time-changed")).toEqual([{ type: "time-changed", current: 20, adapterId: "ext" }]);
+  });
+
+  test("registerTimeAdapter refuses the id internal with wadjet-reserved-id", () => {
+    const h = harness();
+    let err: unknown;
+    try {
+      h.api.registerTimeAdapter({ id: "internal", now: () => null, toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 1, source: "internal" }), configHash: () => "x" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toMatchObject({ code: "wadjet-reserved-id" });
+    expect(h.time.get("internal")).toBe(h.cal);
+  });
+
+  test("interpreter unregister uses the id it registered under", () => {
+    const h = harness();
+    const i: WeatherInterpreter = { id: "t.one", label: "One", facet: "f", interpret: () => 1 };
+    const off = h.api.registerInterpreter(i);
+    i.id = "t.renamed";
+    i.facet = "g";
+    off();
+    expect(h.api.getInterpreter("t.one")).toBeNull();
+    expect(of(h, "interpreters-changed").map((p) => p.facet)).toEqual(["f", "f"]);
+  });
+
+  test("interpreters get their own copies of the report and options", () => {
+    const h = harness();
+    h.api.registerInterpreter({
+      id: "t.vandal",
+      label: "Vandal",
+      facet: "f",
+      interpret: (r, ctx) => {
+        r.temperature.mean = 999;
+        r.conditions.push("vandalised");
+        (ctx.options!["nested"] as { x: number }).x = 999;
+        return null;
+      },
+    });
+    let seen: number | undefined;
+    h.api.registerInterpreter({ id: "t.reader", label: "Reader", facet: "f", interpret: (r) => (seen = r.temperature.mean) });
+    const r = h.api.getReport("greywold", { dayOrdinal: 5 });
+    const before = JSON.stringify(r);
+    const options = { nested: { x: 1 } };
+    h.api.interpret("t.vandal", r, options);
+    h.api.interpret("t.reader", r);
+    expect(JSON.stringify(r)).toBe(before);
+    expect(options.nested.x).toBe(1);
+    expect(seen).toBe(r.temperature.mean);
+    const fnOpt = { cb: () => 1 }; // structuredClone refuses functions: a one-level copy instead
+    let gotCb: unknown;
+    h.api.registerInterpreter({ id: "t.fn", label: "Fn", facet: "f", interpret: (_r, ctx) => (gotCb = ctx.options?.["cb"]) });
+    h.api.interpret("t.fn", r, fnOpt);
+    expect(gotCb).toBe(fnOpt.cb);
+  });
+
+  test("an async listener's rejection is logged like a throw", async () => {
+    const h = harness();
+    let ran = false;
+    // A listener that returns a promise, as an async function would.
+    const asyncListener: unknown = () => Promise.reject(new Error("async boom"));
+    h.api.on("time-changed", asyncListener as () => void);
+    h.api.on("time-changed", () => (ran = true));
+    await h.api.setNow(3);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(ran).toBe(true);
+    expect(errSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes('"time-changed" listener threw') && String(c[1]).includes("async boom"))).toBe(true);
+  });
+
+  test("glyph(report, null) and classify of non-finite numbers never throw", () => {
+    const h = harness();
+    const r = h.api.getReport("greywold", { dayOrdinal: 5 });
+    expect(h.api.glyph(r, null as unknown as undefined)).toContain("<svg");
+    expect(coreGlyph("rain", null)).toBe(coreGlyph("rain"));
+    const nan: WeatherReport = {
+      ...r,
+      humidity: Number.NaN,
+      cloudCover: Number.NaN,
+      visibilityKm: Number.NaN,
+      wind: { speedKph: Number.NaN, directionDeg: Number.NaN },
+      precipitation: { ...r.precipitation, type: "rain", amountMm: Number.NaN },
+      temperature: { ...r.temperature, mean: Number.NaN, current: 30 },
+    };
+    const c = h.api.classify(nan);
+    expect(c).toMatchObject({ beaufort: 0, beaufortLabel: "Calm", compass: "N", oktas: 0, visibility: "moderate", precipitation: "very-light" });
+    expect(c.feelsLike.mean).toBeNaN();
+    expect(c.feelsLike.current).toBe(30); // no heat index without a humidity
+    const inf = h.api.classify({ ...nan, wind: { speedKph: Infinity, directionDeg: -Infinity }, visibilityKm: Infinity, cloudCover: Infinity, precipitation: { ...nan.precipitation, amountMm: Infinity }, temperature: { ...nan.temperature, mean: 5 } });
+    expect(inf).toMatchObject({ beaufort: 12, compass: "N", visibility: "excellent", oktas: 8, precipitation: "extremely-heavy" });
+    expect(inf.feelsLike.mean).toBe(5); // no wind chill from an infinite wind
+    expect(h.api.glyphKey(nan)).toBe("rain");
   });
 });

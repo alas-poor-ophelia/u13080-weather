@@ -68,9 +68,9 @@ export function beaufort(speedKph: number): number {
   return force;
 }
 
-/** 16-point compass name for a direction in degrees (0 = N, clockwise). */
+/** 16-point compass name for a direction in degrees (0 = N, clockwise). A non-finite direction reads as "N". */
 export function compassPoint(directionDeg: number): string {
-  return compassPointImpl(directionDeg);
+  return compassPointImpl(Number.isFinite(directionDeg) ? directionDeg : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ export function compassPoint(directionDeg: number): string {
 //   moderate    15.6–64.4    extremely heavy ≥ 204.5
 // "none" is a day whose precipitation type is none. Lower bounds are
 // inclusive (half-open intervals), so every amount lands in one class; a wet
-// day with an amount below 0.1 mm reads as very light.
+// day with an amount below 0.1 mm, or a NaN amount, reads as very light.
 // ---------------------------------------------------------------------------
 export const PRECIPITATION_MM: ReadonlyArray<{ from: number; cls: PrecipitationClass }> = [
   { from: -Infinity, cls: "very-light" },
@@ -109,7 +109,8 @@ export function precipitationClass(report: Pick<WeatherReport, "precipitation">)
 //   moderate  4–10 km    excellent  ≥ 40 km
 // Lower bounds inclusive. The stock generator caps visibility at 40 km, so
 // "excellent" occurs only at exactly 40 km or through an override. Fog is a
-// condition (report.conditions), not a visibility class.
+// condition (report.conditions), not a visibility class. NaN reads as
+// "moderate", the middle of the scale (±Infinity land at its two ends).
 // ---------------------------------------------------------------------------
 export const VISIBILITY_KM: ReadonlyArray<{ from: number; cls: VisibilityClass }> = [
   { from: -Infinity, cls: "very-poor" },
@@ -120,7 +121,11 @@ export const VISIBILITY_KM: ReadonlyArray<{ from: number; cls: VisibilityClass }
   { from: 40, cls: "excellent" },
 ];
 
+/** The class for a NaN visibility: the middle of the scale, neither a hazard nor a clear day. */
+export const VISIBILITY_NAN_CLASS: VisibilityClass = "moderate";
+
 export function visibilityClass(km: number): VisibilityClass {
+  if (Number.isNaN(km)) return VISIBILITY_NAN_CLASS;
   let cls: VisibilityClass = "very-poor";
   for (const row of VISIBILITY_KM) if (km >= row.from) cls = row.cls;
   return cls;
@@ -197,11 +202,20 @@ const HEAT_INDEX_FROM_F = 80;
  * Apparent temperature, °C (unrounded): wind chill when T ≤ 10 °C and wind
  * > 4.8 km/h; heat index when T ≥ 80 °F; otherwise the air temperature.
  * `humidity` is a fraction 0..1, as in WeatherReport.
+ *
+ * The heat index switches on in one step at 80 °F, and at low humidity the
+ * NWS algorithm reads BELOW the air temperature, so feels-like can drop as
+ * the air crosses 80 °F. That is the published algorithm, kept as is.
+ *
+ * Non-finite inputs never throw: a non-finite temperature is returned as is;
+ * a non-finite wind gives no wind chill and a non-finite humidity no heat
+ * index (the air temperature instead).
  */
 export function apparentTemperature(tempC: number, humidity: number, windKph: number): number {
-  if (tempC <= 10 && windKph > 4.8) return windChill(tempC, windKph);
+  if (!Number.isFinite(tempC)) return tempC;
+  if (tempC <= 10 && Number.isFinite(windKph) && windKph > 4.8) return windChill(tempC, windKph);
   const tF = cToF(tempC);
-  if (tF >= HEAT_INDEX_FROM_F) return fToC(heatIndexF(tF, Math.min(100, Math.max(0, humidity * 100))));
+  if (tF >= HEAT_INDEX_FROM_F && Number.isFinite(humidity)) return fToC(heatIndexF(tF, Math.min(100, Math.max(0, humidity * 100))));
   return tempC;
 }
 

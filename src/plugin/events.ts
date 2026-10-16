@@ -11,7 +11,7 @@ export interface ReadyPayload {
 }
 export interface ProfilesChangedPayload {
   readonly type: "profiles-changed";
-  /** true when the seed, the era timeline or the descriptor bands changed: every zone's weather may have moved */
+  /** true when the seed, the era timeline, the descriptor bands or the active calendar's configuration changed: every zone's weather may have moved */
   readonly all: boolean;
   /** zones whose weather may have changed (added and removed zones included); every current id when `all` is true */
   readonly zoneIds: readonly string[];

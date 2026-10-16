@@ -9,6 +9,7 @@
     "dev": "bun run esbuild.config.mjs",
     "build": "tsc --noEmit -p tsconfig.json && bun run esbuild.config.mjs production",
     "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p types/tsconfig.json",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "lint": "eslint . --max-warnings 0",
     "lint:scanner": "eslint --config eslint.scanner-replica.mjs src --max-warnings 0 && bun run scripts/lint-css.ts styles.css",

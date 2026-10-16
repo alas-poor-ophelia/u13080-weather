@@ -1,0 +1,18 @@
+{
+  // types/wadjet.d.ts on its own, as a consumer with skipLibCheck off would compile it. The main
+  // tsconfig has skipLibCheck on, which skips every .d.ts (this one included): an undefined name
+  // here would only be caught there indirectly, through test/types/conformance.ts.
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": false,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "files": ["wadjet.d.ts"]
+}

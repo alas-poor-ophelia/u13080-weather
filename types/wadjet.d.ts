@@ -205,6 +205,7 @@ export interface ReadyPayload {
 }
 export interface ProfilesChangedPayload {
   readonly type: "profiles-changed";
+  /** every zone's weather may have moved (seed, eras, descriptor bands, or the active calendar's configuration changed) */
   readonly all: boolean;
   readonly zoneIds: readonly string[];
 }

@@ -78,8 +78,8 @@ interface WadjetAPI {
   listTimeAdapters: () => Array<{ id: string; label: string; active: boolean }>;
 
   describe: (report: WeatherReport, style?: "short" | "prose") => string;
-  units: () => "metric" | "imperial";
-  convert: (report: WeatherReport, units?: "metric" | "imperial") => ConvertedReport;
+  units: () => Units; // "metric" | "imperial"
+  convert: (report: WeatherReport, units?: Units) => ConvertedReport;
 
   classify: (report: WeatherReport) => Classification;
   glyphKey: (report: WeatherReport) => GlyphKey;
@@ -145,8 +145,8 @@ getReport(zoneId: string, time?: TimeContext | { dayOrdinal: number; hour?: numb
 
 **Throws:**
 - `Error("The active calendar has no current day; pass a time.")` — `time` omitted and `now()` is `null`.
-- `TypeError` naming the bad value — `time` is not an object, `dayOrdinal` is not an integer
-  (`1.5`, `NaN`, `Infinity`, a string, missing), or `hour` is not a finite number. **Behaviour
+- `TypeError` naming the bad value — `time` is not an object, `dayOrdinal` is not a safe integer
+  (`1.5`, `NaN`, `Infinity`, `2 ** 53`, a string, missing), or `hour` is not a finite number. **Behaviour
   change in API 1:** a non-integer `dayOrdinal` used to be passed through.
 - `RangeError` — `hour` outside `[0, 24)`.
 - `RangeError("Unknown zone \"<id>\".")` — no zone with that id exists.
@@ -258,10 +258,20 @@ Move the **active** calendar's current day. See "Time control" in §5 for the co
   goes back). Both resolve `true` when the day moved and `false` (never a rejection) when the
   active adapter has no `setNow`, `now()` is `null` (advance only), the adapter's `setNow` threw or
   rejected (logged with the adapter id), or the plugin unloaded while the call was in flight.
-- Both **reject with `TypeError`** for a non-integer or non-finite argument.
+- Both **reject with `TypeError`** for an argument that is not a safe integer
+  (`Number.isSafeInteger`).
+- **Day range.** A calendar's current day is kept within **±10,000,000** (`MAX_DAY_ORDINAL`,
+  about 27,000 years of 365 days). `setNow(d)` with `|d|` above that, or an `advance(n)` whose
+  target day (`now() + n`, computed when the call's turn in the queue comes) would be, **rejects
+  with `RangeError`** and the day does not move. Reading weather (`getReport`, `getRange`,
+  `timeAt`) is not limited to this range.
 - Calls are **serialised**: each starts after every earlier `setNow`/`advance` (and Wadjet's own
   day edits) has settled, so `advance(1)` twice in a row moves two days.
-- On success `time-changed` fires once (§2).
+- On success `time-changed` fires once (§2). When Wadjet fires it itself (an adapter without
+  `subscribe`), `adapterId` names the adapter whose day moved, the one that was active when the
+  call's turn came, even if *Calendar source* switched while it ran.
+- If the internal calendar cannot save the new day (the write to `data.json` fails), the day
+  goes back to what it was, the call resolves `false`, and no event fires.
 
 ```ts
 if (wadjet.canSetNow()) await wadjet.advance(1);
@@ -274,7 +284,8 @@ registerTimeAdapter(adapter: TimeAdapter): () => void
 ```
 
 Registers a `TimeAdapter` (see §5) under `adapter.id`. If an adapter with the same `id` is
-already registered, it is replaced. Every register **and** unregister fires `"adapters-changed"`
+already registered, it is replaced. The id `"internal"` is **reserved** for the built-in
+calendar: registering it throws an `Error` with `code: "wadjet-reserved-id"`. Every register **and** unregister fires `"adapters-changed"`
 (§2); if `adapter.id` matches the currently *active* adapter id in settings, it additionally fires
 `"time-changed"` (the active calendar's effective `now()`/`toContext()` just changed). Also
 refreshes the settings tab if it's open (the "Calendar source" dropdown lists registered
@@ -426,7 +437,7 @@ glyph(keyOrReport: GlyphKey | WeatherReport, opts?: { size?: number; title?: str
 a key (or for a report, via `glyphKey`) as a string: monochrome `currentColor` strokes, square
 `viewBox="0 0 24 24"`, no scripts and no external references, so it is safe to parse with
 `DOMParser` or `sanitizeHTMLToDom`. `size` sets the width and height (default 24); `title` adds an
-accessible `<title>`. An unknown key throws `RangeError`. Use your own art by mapping `glyphKey(report)` to it.
+accessible `<title>`; `opts` may be omitted or `null`. An unknown key throws `RangeError`. Use your own art by mapping `glyphKey(report)` to it.
 
 ### `registerInterpreter(interpreter)`, `listInterpreters(facet?)`, `getInterpreter(id)`, `interpret(id, report, options?)` *(API 1)*
 
@@ -449,7 +460,11 @@ The registry other plugins use to say what weather means for their game. See "In
 - `listInterpreters` returns `{ id, label, facet, description? }` for every registered
   interpreter, in registration order, filtered to one `facet` when given.
 - `getInterpreter` returns the registered object itself, or `null`.
-- `interpret` builds the `InterpretContext` and calls the interpreter synchronously. **Throws**
+- `interpret` builds the `InterpretContext` and calls the interpreter synchronously. The
+  interpreter receives its **own deep copies** of `report` and `options` (`structuredClone`;
+  `options` holding values that can't be cloned, such as functions, is copied one level deep),
+  so an interpreter that mutates its arguments changes nothing the caller, the card or another
+  interpreter sees. **Throws**
   `RangeError` for an unknown id; an interpreter that throws is rethrown as
   `Error('Interpreter "<id>" failed: <message>')` with the original error as `cause`.
 
@@ -461,7 +476,9 @@ on<E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => voi
 
 Subscribes to an event (see §2). The callback receives one frozen payload object; callbacks
 written for the old no-argument form keep working. **Returns** an unregister function. A listener
-that throws is logged with `console.error` and does not stop other listeners or the emitter.
+that throws is logged with `console.error` and does not stop other listeners or the emitter; an
+`async` listener (one that returns a promise) is not awaited, and a rejection is logged the same
+way.
 
 ---
 
@@ -475,7 +492,7 @@ event name. *(API 1: before, callbacks got no argument.)*
 | Event | Payload | Fires when |
 |---|---|---|
 | `"ready"` | `{ type }` | Once, from inside `onload()`, immediately after `api.ready` is set to `true` and just before the `wadjet:ready` workspace event. Only useful if you obtained the API object before the plugin finished loading; otherwise wait on the workspace event below. |
-| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt (zones, overrides, the seed, eras, descriptor bands; an edit in settings, a pin, a studio save). `zoneIds` lists the zones whose output may have changed — profile, name, `flipSeasons`, or that zone's pinned days — including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed; `zoneIds` is then every current zone. It can fire with `zoneIds: []` when a save touched nothing in the world state. |
+| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt (zones, overrides, the seed, eras, descriptor bands; an edit in settings, a pin, a studio save). `zoneIds` lists the zones whose output may have changed — profile, name, `flipSeasons`, or that zone's pinned days — including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed, or when the active calendar's configuration changed in a way that changes reports (its `configHash()`, i.e. `provenance.calendarHash`, moved; for the internal calendar, any edit to year length, epoch year, moons or seasons); `zoneIds` is then every current zone. It fires on **every** save, with `all: false` and `zoneIds: []` when the save touched nothing that changes weather. |
 | `"time-changed"` | `{ type, current: number \| null, adapterId: string }` | Whenever the active calendar's "now" or its shape changes: `setNow`/`advance`, the *Advance/Rewind the calendar one day* commands, editing *Current day* in settings (while the internal calendar is active), switching *Calendar source*, editing the internal calendar's year length, moons or seasons while it is active, registering an adapter whose id is the active setting, unregistering the active adapter (fallback to the internal calendar), or the active adapter's own `subscribe` callback. `current` is `now()?.dayOrdinal` at that moment; `adapterId` is the active adapter. |
 | `"adapters-changed"` | `{ type }` | Whenever the set of registered time adapters changes — every `registerTimeAdapter` call and every call to the unregister function it returns, active or not — and when *Calendar source* switches to another adapter. Use this to refresh a UI that lists adapters (`listTimeAdapters()`); use `"time-changed"` for one that only cares about the active calendar. |
 | `"resolvers-changed"` | `{ type }` | A zone resolver was registered or unregistered. |
@@ -484,7 +501,12 @@ event name. *(API 1: before, callbacks got no argument.)*
 
 **Switching the active calendar** fires `time-changed` and `adapters-changed`, not
 `profiles-changed`: zone profiles did not change, and every report carries the calendar in
-`provenance.calendarHash`.
+`provenance.calendarHash`. **Editing the active calendar** is different: when the same adapter
+stays active and its `configHash()` changes (seen at the next save), `profiles-changed` fires with
+`all: true`, because every report moved. For the internal calendar that save is the edit itself,
+and `time-changed` fires too (what "today" means moved). A third-party adapter whose
+configuration changes on its own side is noticed at Wadjet's next save; key caches on
+`provenance.calendarHash` to see it at once.
 
 ### Workspace events
 
@@ -680,6 +702,20 @@ interface Classification {
 Lower bounds are inclusive throughout (half-open intervals), so every value lands in exactly one
 class.
 
+`classify` never throws on a numeric field that is `NaN` or infinite (a hand-built report); it
+falls back as follows:
+
+| Field | Non-finite value | Result |
+|---|---|---|
+| `wind.speedKph` | `NaN` | Beaufort 0, "Calm"; no wind chill |
+| `wind.speedKph` | `Infinity` | Beaufort 12; no wind chill |
+| `wind.directionDeg` | `NaN`, `±Infinity` | compass `"N"` |
+| `cloudCover` | `NaN` | 0 oktas (`Infinity` is 8, `-Infinity` 0) |
+| `visibilityKm` | `NaN` | `"moderate"`, the middle of the scale (`Infinity` is `"excellent"`, `-Infinity` `"very-poor"`) |
+| `precipitation.amountMm` | `NaN` on a wet day | `"very-light"` (`Infinity` is `"extremely-heavy"`); a `none` day is `"none"` whatever the amount |
+| `humidity` | `NaN`, `±Infinity` | no heat index: feels like the air temperature |
+| `temperature.mean` / `.current` | `NaN`, `±Infinity` | `feelsLike` is that same value |
+
 **Beaufort** — the WMO Beaufort scale (WMO Manual on Marine Meteorological Services, WMO-No. 558;
 Guide to Instruments and Methods of Observation, WMO-No. 8), on `wind.speedKph`:
 
@@ -729,8 +765,11 @@ hourly report) `temperature.current`, using the report's daily `humidity` and `w
 - wind chill, the joint NWS / Environment Canada index (JAG/TI 2001), when T ≤ 10 °C and wind
   > 4.8 km/h;
 - heat index, the full NWS algorithm (NWS Weather Prediction Center, "The Heat Index Equation";
-  Rothfusz 1990, SR 90-23): Steadman's simple form first, then the Rothfusz regression with its
-  low- and high-humidity adjustments when the simple result is 80 °F or more;
+  Rothfusz 1990, SR 90-23), when T ≥ 80 °F (≈ 26.7 °C): Steadman's simple form first, then the
+  Rothfusz regression with its low- and high-humidity adjustments when the simple result is
+  80 °F or more. The heat index switches on in **one step at 80 °F**, and in dry air it reads
+  **below** the air temperature, as the NWS equation does (at 80 °F and 10 % humidity it gives
+  about 79 °F), so feels-like can drop as the air warms across 80 °F;
 - otherwise the air temperature.
 
 **Glyphs.** `GlyphKey` is a closed set: `clear`, `partly-cloudy`, `cloudy`, `overcast`, `fog`,

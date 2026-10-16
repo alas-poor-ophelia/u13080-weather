@@ -59,12 +59,14 @@ export class InterpreterRegistry {
     if (typeof i.interpret !== "function") throw new TypeError(`Interpreter "${i.id}" needs an interpret function.`);
     if (i.format !== undefined && typeof i.format !== "function") throw new TypeError(`Interpreter "${i.id}": format must be a function.`);
     if (this.byId.has(i.id)) throw codedError("wadjet-duplicate-id", `An interpreter with id "${i.id}" is already registered; unregister it first.`);
-    this.byId.set(i.id, i);
-    this.changed(i.facet);
+    // Keyed on the id and facet as registered: a later mutation of the object can't strand or misreport the entry.
+    const { id, facet } = i;
+    this.byId.set(id, i);
+    this.changed(facet);
     return () => {
-      if (this.byId.get(i.id) !== i) return;
-      this.byId.delete(i.id);
-      this.changed(i.facet);
+      if (this.byId.get(id) !== i) return;
+      this.byId.delete(id);
+      this.changed(facet);
     };
   }
 

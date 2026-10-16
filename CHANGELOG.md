@@ -40,7 +40,26 @@ Additions for plugins that build on the weather. Nothing about a day's weather c
 - A zone resolver's `resolve` is optional when it has `resolveAsync`; a resolver with neither is
   refused. Listener errors are now logged instead of swallowed.
 - Switching the calendar source fires `time-changed` and `adapters-changed` instead of
-  `profiles-changed`.
+  `profiles-changed`. Editing the active calendar (year length, epoch year, moons, seasons) fires
+  `profiles-changed` with `all: true`, since every report moved.
+- `profiles-changed` now fires on every settings save; `zoneIds` is empty when nothing that
+  changes weather was touched.
+- `format(dayOrdinal)` of a non-integer now throws a `TypeError`.
+- `setNow` and `advance` keep the current day within ±10,000,000 (a `RangeError` beyond), and
+  every day argument must be a safe integer. If the internal calendar can't save a new day, the
+  day goes back and the call resolves `false`.
+- The time adapter id `"internal"` is reserved for the built-in calendar (`wadjet-reserved-id`).
+- An interpreter gets its own copies of the report and options.
+
+**Display:**
+
+- The code block shows a dry, windy day (Beaufort 6 and up, no fog) as 💨 instead of its sky
+  emoji.
+- The glyph set has a separate `cloudy` step from 60 % cloud cover, between `partly-cloudy` and
+  `overcast` (the code block's emoji for it is still ⛅).
+- `describe()` no longer repeats the precipitation type when the descriptor already names it:
+  "drizzle drizzle" is now "drizzle", and a band label that already says the type (such as
+  "heavy rain") is not followed by it again.
 
 ## 0.3.1
 

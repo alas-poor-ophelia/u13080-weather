@@ -39,9 +39,17 @@ export interface WorldState {
   bands?: DescriptorBands;
 }
 
-/** Throw a TypeError unless `v` is a finite integer. */
+/** Throw a TypeError unless `v` is a safe integer (|v| <= 2^53 - 1). */
 export function assertInteger(v: unknown, name: string): asserts v is number {
-  if (typeof v !== "number" || !Number.isInteger(v)) throw new TypeError(`${name} must be an integer (got ${typeof v === "string" ? JSON.stringify(v) : String(v)}).`);
+  if (typeof v !== "number" || !Number.isSafeInteger(v)) throw new TypeError(`${name} must be an integer (got ${typeof v === "string" ? JSON.stringify(v) : String(v)}).`);
+}
+
+/** Largest |dayOrdinal| a calendar's current day may be set to (setNow, advance, the internal calendar's Current day). */
+export const MAX_DAY_ORDINAL = 10_000_000;
+
+/** Throw a RangeError unless the integer `day` is within ±MAX_DAY_ORDINAL. */
+export function assertDayInRange(day: number, name: string): void {
+  if (Math.abs(day) > MAX_DAY_ORDINAL) throw new RangeError(`${name} must be between -${MAX_DAY_ORDINAL} and ${MAX_DAY_ORDINAL} (got ${day}).`);
 }
 
 /**
@@ -67,6 +75,8 @@ type Listener = (payload: never) => void;
 interface Keys {
   shared: string;
   zones: Map<string, string>;
+  /** the active adapter's id and calendarHash(); null when no adapter is registered */
+  calendar: { adapterId: string; hash: string } | null;
 }
 
 export class World {
@@ -97,7 +107,9 @@ export class World {
   /**
    * Replace the state and fire `profiles-changed` with the zones whose output
    * may have moved. Always fires (`zoneIds` is empty when nothing in the world
-   * state changed, e.g. a save of an unrelated setting).
+   * state changed, e.g. a save of an unrelated setting). `all` is true when
+   * the seed, eras or bands changed, or when the active adapter is the same
+   * one as last time and its calendarHash() moved (a calendar config edit).
    */
   setState(s: WorldState): void {
     this.state = s;
@@ -105,7 +117,10 @@ export class World {
     const prev = this.keys;
     const next = this.snapshotKeys();
     this.keys = next;
-    const all = prev.shared !== next.shared;
+    // A calendar edit (year length, moons, seasons, epoch) moves every report. A switch to another
+    // adapter is not a profiles change: it fires time-changed and adapters-changed instead.
+    const calendarEdited = prev.calendar !== null && next.calendar !== null && prev.calendar.adapterId === next.calendar.adapterId && prev.calendar.hash !== next.calendar.hash;
+    const all = prev.shared !== next.shared || calendarEdited;
     const zoneIds = all ? [...next.zones.keys()] : [...new Set([...prev.zones.keys(), ...next.zones.keys()])].filter((id) => prev.zones.get(id) !== next.zones.get(id));
     this.emit("profiles-changed", { all, zoneIds });
   }
@@ -118,7 +133,16 @@ export class World {
   private snapshotKeys(): Keys {
     const eras = this.state.eras ?? [];
     const shared = `${this.state.seed}|${eras.length ? erasHash(eras) : ""}|${this.state.bands ? JSON.stringify(this.state.bands) : ""}`;
-    return { shared, zones: new Map(this.state.zones.map((z) => [z.id, zoneKey(z, this.state.overrides)])) };
+    const active = this.time.active;
+    let calendar: Keys["calendar"] = null;
+    if (active) {
+      try {
+        calendar = { adapterId: active.id, hash: this.calendarHash() };
+      } catch (e) {
+        console.error(`U+13080 Weather: time adapter "${active.id}" configHash() threw.`, e);
+      }
+    }
+    return { shared, zones: new Map(this.state.zones.map((z) => [z.id, zoneKey(z, this.state.overrides)])), calendar };
   }
 
   // --- zones ------------------------------------------------------------
@@ -296,13 +320,17 @@ export class World {
       set.delete(l);
     };
   }
-  /** Fire an event with a frozen payload. A listener that throws is logged and the rest still run. */
+  /** Fire an event with a frozen payload. A listener that throws (or returns a promise that rejects) is logged and the rest still run. */
   emit<E extends WadjetEvent>(event: E, ...rest: PayloadArgs<E>): void {
     if (event === "ready") this.ready = true;
     const payload = makePayload(event, rest[0]);
     for (const cb of [...(this.listeners.get(event) ?? [])]) {
       try {
-        (cb as (p: WadjetEventPayloads[E]) => void)(payload);
+        const ret: unknown = (cb as (p: WadjetEventPayloads[E]) => unknown)(payload);
+        // An async listener's rejection is logged like a synchronous throw, not left unhandled.
+        if (typeof ret === "object" && ret !== null && typeof (ret as { then?: unknown }).then === "function") {
+          (ret as PromiseLike<unknown>).then(undefined, (e: unknown) => console.error(`U+13080 Weather: a "${event}" listener threw.`, e));
+        }
       } catch (e) {
         console.error(`U+13080 Weather: a "${event}" listener threw.`, e);
       }

@@ -126,7 +126,8 @@ function isGlyphKey(x: unknown): x is GlyphKey {
  * height in px (default 24); `title` adds an accessible <title> (escaped).
  * Unknown keys throw RangeError.
  */
-export function glyph(keyOrReport: GlyphKey | WeatherReport, opts: { size?: number; title?: string } = {}): string {
+export function glyph(keyOrReport: GlyphKey | WeatherReport, options?: { size?: number; title?: string } | null): string {
+  const opts = options ?? {}; // null reads like undefined
   let key: GlyphKey;
   if (typeof keyOrReport === "string") {
     if (!isGlyphKey(keyOrReport)) throw new RangeError(`Unknown glyph key "${String(keyOrReport)}". Known keys: ${GLYPH_KEYS.join(", ")}.`);

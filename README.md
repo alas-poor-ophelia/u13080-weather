@@ -409,8 +409,8 @@ interface WadjetAPI {
   listTimeAdapters: () => Array<{ id: string; label: string; active: boolean }>;
 
   describe: (report: WeatherReport, style?: "short" | "prose") => string;
-  units: () => "metric" | "imperial";                           // the display setting
-  convert: (report: WeatherReport, units?: "metric" | "imperial") => ConvertedReport; // keys without unit suffixes
+  units: () => Units;                                           // the display setting, "metric" | "imperial"
+  convert: (report: WeatherReport, units?: Units) => ConvertedReport; // keys without unit suffixes
 
   classify: (report: WeatherReport) => Classification;          // Beaufort, oktas, visibility, precipitation class, feels-like
   glyphKey: (report: WeatherReport) => GlyphKey;

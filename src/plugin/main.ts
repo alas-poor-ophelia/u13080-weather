@@ -8,6 +8,7 @@ import { ApiController, type WadjetAPI } from "./api";
 import { parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
+import { SaveQueue, setAndSave } from "./persist";
 import { renderCard, renderError, renderLine, renderProse, renderTable, renderValue } from "./render";
 import { convertReport, reportField } from "../core/units";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettings } from "./settings";
@@ -44,6 +45,12 @@ export default class WadjetPlugin extends Plugin {
   private dead = false;
   /** the internal calendar's configHash at the last rebuild, to tell a calendar edit from any other save */
   private internalHash = "";
+  /** Every saveData goes through here: one write at a time, each writing the settings as they are when it starts. */
+  private readonly saves = new SaveQueue(
+    (data) => this.saveData(data),
+    () => this.settings,
+    () => !this.dead,
+  );
 
   override async onload(): Promise<void> {
     const loaded: unknown = await this.loadData();
@@ -110,10 +117,10 @@ export default class WadjetPlugin extends Plugin {
     return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}) };
   }
 
-  /** Save settings to data.json; does nothing once the plugin is unloaded. */
+  /** Save settings to data.json (serialised with every other save); does nothing once the plugin is unloaded. */
   async saveSettings(): Promise<void> {
     if (this.dead) return;
-    await this.saveData(this.settings);
+    await this.saves.save();
   }
 
   /** Save and push the new state into the world (rebuilds generators lazily). */
@@ -125,16 +132,25 @@ export default class WadjetPlugin extends Plugin {
     const hash = this.internalCalendar.configHash();
     if (hash !== this.internalHash) {
       this.internalHash = hash;
-      // a year-length/season/moon edit moves what "today" means; the weather side is in profiles-changed's calendar hash
+      // A year-length/season/moon/epoch edit moves what "today" means. Its weather side is profiles-changed
+      // with all: true, which world.setState above has already fired (the shared key carries calendarHash()).
       if (this.time.active === this.internalCalendar) this.controller.emitTimeChanged();
     }
   }
 
-  /** The internal calendar's writer: store the day and save. Runs inside the API's time queue. */
+  /**
+   * The internal calendar's writer: store the day and save. Runs inside the API's time queue.
+   * A failed save puts the previous day back and rethrows, so the calendar tells no subscriber,
+   * `setNow`/`advance` resolve false, and no time-changed fires.
+   */
   private async writeCurrentDay(d: number): Promise<void> {
     if (this.dead) throw new Error("U+13080 Weather is unloaded.");
-    this.settings.currentDayOrdinal = d;
-    await this.saveSettings();
+    await setAndSave(
+      () => this.settings.currentDayOrdinal,
+      (v) => (this.settings.currentDayOrdinal = v),
+      d,
+      () => this.saveSettings(),
+    );
     if (this.dead) return;
     this.refreshSettingsTab();
   }
@@ -315,9 +331,11 @@ export default class WadjetPlugin extends Plugin {
 }
 
 /**
- * Keeps one code block current: re-renders when the note's metadata changes
- * the zone it resolves to (blocks without `zone:`), and when interpreters
- * come and go (blocks with `interpret:`). Cleaned up with the block.
+ * Keeps one code block current. A block without `zone:` re-renders when the
+ * zone it resolves to changes (the note's metadata, a zone edit, a resolver
+ * registered or removed) or the zone it shows is deleted; a block with
+ * `interpret:` re-renders when interpreters come and go. Cleaned up with the
+ * block.
  */
 class BlockWatcher extends MarkdownRenderChild {
   constructor(
@@ -330,21 +348,40 @@ class BlockWatcher extends MarkdownRenderChild {
     super(el);
   }
 
+  /** whether `shown` named an existing zone at the last render (a vanished zone re-renders once, not on every save) */
+  private shownExisted = false;
+
+  private zoneExists(id: string | undefined): boolean {
+    return id !== undefined && this.plugin.settings.zones.some((z) => z.id === id);
+  }
+
   override onload(): void {
+    this.shownExisted = this.zoneExists(this.shown);
     if (this.spec.zone === undefined) {
       this.registerEvent(
         this.plugin.app.metadataCache.on("changed", (file) => {
-          if (file.path !== this.sourcePath) return;
-          if (this.plugin.codeblockZone(this.spec, this.sourcePath) !== this.shown) this.rerender();
+          if (file.path === this.sourcePath) this.rerenderIfZoneMoved();
         }),
       );
+      if (!this.plugin.controller.unloaded) {
+        this.register(this.plugin.api.on("profiles-changed", () => this.rerenderIfZoneMoved()));
+        this.register(this.plugin.api.on("resolvers-changed", () => this.rerenderIfZoneMoved()));
+      }
     }
     if (this.spec.interpret && !this.plugin.controller.unloaded) this.register(this.plugin.api.on("interpreters-changed", () => this.rerender()));
+  }
+
+  /** Re-render when the block would now show another zone, or the zone it shows no longer exists. */
+  private rerenderIfZoneMoved(): void {
+    if (this.plugin.controller.unloaded) return;
+    const shownGone = this.shownExisted && !this.zoneExists(this.shown);
+    if (shownGone || this.plugin.codeblockZone(this.spec, this.sourcePath) !== this.shown) this.rerender();
   }
 
   private rerender(): void {
     if (this.plugin.controller.unloaded) return;
     this.containerEl.empty();
     this.shown = this.plugin.renderBlock(this.spec, this.containerEl, this.sourcePath);
+    this.shownExisted = this.zoneExists(this.shown);
   }
 }

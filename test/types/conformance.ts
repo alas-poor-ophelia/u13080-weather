@@ -5,8 +5,9 @@
  * plugin is built from: a drift on either side stops the typecheck, and with
  * it `bun run build`.
  *
- * API_KEYS is the runtime half: test/api-surface.test.ts compares it with
- * Object.keys() of a real API object. It is typed against keyof WadjetAPI in
+ * API_KEYS is the runtime half: test/integration-api.test.ts compares it with
+ * Object.keys() of a real API object (and test/typecheck.test.ts runs this
+ * typecheck inside `bun test`). It is typed against keyof WadjetAPI in
  * both directions, so it cannot fall out of step with the interface.
  */
 import type * as D from "../../types/wadjet";
