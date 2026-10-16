@@ -13,6 +13,7 @@ import {
   describe,
   diurnalTemperature,
   intensityFromMm,
+  joinDistinctWords,
   overrideKey,
   withMinus,
   precipitationWindow,
@@ -192,5 +193,31 @@ group("report: end to end with the generator", () => {
       expect(r.visibilityKm).toBeGreaterThan(0);
       expect(r.descriptors.precipitation.length).toBeGreaterThan(0);
     }
+  });
+});
+
+group("report: describe() never repeats a word (S5)", () => {
+  test("joinDistinctWords is word-aware and case-insensitive", () => {
+    expect(joinDistinctWords("steady", "rain")).toBe("steady rain");
+    expect(joinDistinctWords("heavy rain", "rain")).toBe("heavy rain");
+    expect(joinDistinctWords("drizzle", "drizzle")).toBe("drizzle");
+    expect(joinDistinctWords("Light Snow", "snow")).toBe("Light Snow");
+    expect(joinDistinctWords("rainy", "rain")).toBe("rainy rain"); // whole words only
+    expect(joinDistinctWords("snow showers", "sleet")).toBe("snow showers sleet");
+  });
+
+  test("a drizzle day reads `drizzle`, not `drizzle drizzle`, in both styles", () => {
+    const r = buildReport(rec({ precipType: "drizzle", precipMm: 0.4 }), "z", cfg);
+    expect(r.descriptors.precipitation).toBe("drizzle");
+    expect(describe(r)).toBe("Cold, drizzle, breezy from the WSW, overcast. 1.1 to 7.8 °C [stormtide].");
+    expect(describe(r, "prose")).toContain("with drizzle (0.4 mm)");
+    expect(describe(r, "prose")).not.toContain("drizzle drizzle");
+  });
+
+  test("a hand-made report whose band label already names the type", () => {
+    const base = buildReport(rec(), "z", cfg);
+    const r = { ...base, descriptors: { ...base.descriptors, precipitation: "heavy rain" } };
+    expect(describe(r)).toBe("Cold, heavy rain, breezy from the WSW, overcast. 1.1 to 7.8 °C [stormtide].");
+    expect(describe(r, "prose")).toContain("with heavy rain (6.1 mm)");
   });
 });

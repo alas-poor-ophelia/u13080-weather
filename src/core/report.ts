@@ -319,9 +319,23 @@ export function withMinus(x: number | string): string {
   return String(x).replace(/^-/, "−");
 }
 
+/**
+ * Append `tail` to `head` unless every word of `tail` is already in `head`
+ * (case-insensitive, whitespace-delimited): ("steady", "rain") → "steady rain",
+ * ("heavy rain", "rain") → "heavy rain", ("drizzle", "drizzle") → "drizzle".
+ * Used wherever an intensity word and a precipitation type are joined, since a
+ * user-editable band label may already name the type.
+ */
+export function joinDistinctWords(head: string, tail: string): string {
+  const have = new Set(head.toLowerCase().split(/\s+/).filter(Boolean));
+  const words = tail.split(/\s+/).filter(Boolean);
+  if (words.length > 0 && words.every((w) => have.has(w.toLowerCase()))) return head;
+  return `${head} ${tail}`;
+}
+
 export function describe(r: WeatherReport, style: "short" | "prose" = "short"): string {
   const d = r.descriptors;
-  const precip = r.precipitation.type === "none" ? d.precipitation : `${d.precipitation} ${r.precipitation.type}`;
+  const precip = r.precipitation.type === "none" ? d.precipitation : joinDistinctWords(d.precipitation, r.precipitation.type);
   const wind = r.wind.speedKph === 0 ? "calm" : `${d.wind} from the ${compassPoint(r.wind.directionDeg)}`;
   const extras = r.conditions.filter((c) => c !== "fog").join(", ");
   if (style === "short") {
@@ -333,7 +347,7 @@ export function describe(r: WeatherReport, style: "short" | "prose" = "short"): 
   const p =
     r.precipitation.type === "none"
       ? "and it stays dry"
-      : `with ${d.precipitation} ${r.precipitation.type}${r.precipitation.active === true ? " falling now" : r.precipitation.active === false ? " expected at some point" : ""} (${r.precipitation.amountMm} mm)`;
+      : `with ${precip}${r.precipitation.active === true ? " falling now" : r.precipitation.active === false ? " expected at some point" : ""} (${r.precipitation.amountMm} mm)`;
   const w = r.wind.speedKph === 0 ? "The air is still." : `A ${d.wind} wind blows from the ${compassPoint(r.wind.directionDeg)} at ${r.wind.speedKph} km/h.`;
   const t = r.temperature.current !== undefined ? `It is ${withMinus(r.temperature.current)} °C now; ` : "";
   return `${t}A ${d.temperature} day, ${withMinus(r.temperature.low)} to ${withMinus(r.temperature.high)} °C. ${sky}, ${p}. ${w}${extras ? ` Conditions: ${extras}.` : ""}`;

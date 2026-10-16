@@ -23,6 +23,7 @@
  * and `applyPhrase()` build that side; `describeOp()` builds the chip side.
  */
 import { format, toDisplay, type Quantity } from "./format";
+import { joinDistinctWords } from "../../core/report";
 import type { ModifierOp } from "../../core/types";
 import type { Units } from "../../core/units";
 
@@ -261,10 +262,9 @@ export interface ConditionSource {
 export function conditionOf(r: ConditionSource): string {
   if (r.conditions.includes("ashfall")) return "ashfall";
   if (r.precipitation.type !== "none") {
-    // `steady rain`, `light snow` — but never `drizzle drizzle`: the intensity
-    // band and the precipitation type share a word at the bottom of the scale.
-    const band = r.descriptors.precipitation;
-    return band === r.precipitation.type ? band : `${band} ${r.precipitation.type}`;
+    // `steady rain`, `light snow` — but never `drizzle drizzle` or `heavy rain
+    // rain`: a band label may already name the type (core's word-aware join).
+    return joinDistinctWords(r.descriptors.precipitation, r.precipitation.type);
   }
   if (r.conditions.includes("fog")) return "fog";
   return r.descriptors.sky;

@@ -1,8 +1,10 @@
 /**
  * DOM rendering for the codeblock. Uses Obsidian's HTMLElement helpers
- * (createEl / createDiv / empty), so this file is not unit-tested.
+ * (createEl / createDiv / empty), so the render functions are not
+ * unit-tested; the pure `icon()` mapping is (test/glyphs.test.ts).
  */
 import { compassPoint, describe, withMinus, type WeatherReport } from "../core/report";
+import { glyphKey, type GlyphKey } from "../core/glyphs";
 import { UNIT_LABELS, cToF, fieldText, kmToMi, kphToMph, mmToIn, type Units } from "../core/units";
 
 export type { Units } from "../core/units";
@@ -25,14 +27,28 @@ export function renderValue(el: HTMLElement, value: unknown): void {
   el.createSpan({ cls: "wadjet-value", text: fieldText(value) });
 }
 
-const ICON: Record<string, string> = { none: "☀", drizzle: "🌦", rain: "🌧", sleet: "🌨", snow: "❄" };
+/**
+ * The emoji for each glyph key. The codeblock keeps its emoji, but which one a
+ * day gets is decided by core `glyphKey` (one precedence for both). Heavy
+ * variants and the 0.6–0.8 cloud band reuse the emoji they always showed.
+ */
+export const GLYPH_EMOJI: Readonly<Record<GlyphKey, string>> = {
+  clear: "☀",
+  "partly-cloudy": "⛅",
+  cloudy: "⛅",
+  overcast: "☁",
+  fog: "🌫",
+  drizzle: "🌦",
+  rain: "🌧",
+  "heavy-rain": "🌧",
+  sleet: "🌨",
+  snow: "❄",
+  "heavy-snow": "❄",
+  windy: "💨",
+};
 
-function icon(r: WeatherReport): string {
-  if (r.conditions.includes("fog")) return "🌫";
-  if (r.precipitation.type !== "none") return ICON[r.precipitation.type] ?? "🌧";
-  if (r.cloudCover >= 0.8) return "☁";
-  if (r.cloudCover >= 0.4) return "⛅";
-  return "☀";
+export function icon(r: WeatherReport): string {
+  return GLYPH_EMOJI[glyphKey(r)];
 }
 
 export function renderCard(el: HTMLElement, r: WeatherReport, dateLabel: string, u: Units): void {
