@@ -8,6 +8,7 @@
  *   range: 7                      (table only; days from `date`)
  *   field: precipitation.amount   (value only; a ConvertedReport leaf)
  *   units: metric | imperial      (optional; default is the setting)
+ *   interpret: my-system.mood     (optional; interpreter ids, comma list)
  */
 import { isReportField, type ReportField, type Units } from "../core/units";
 
@@ -19,6 +20,8 @@ export interface CodeblockSpec {
   range: number;
   field?: ReportField;
   units?: Units;
+  /** interpreter ids whose result is shown under the card/line/prose */
+  interpret?: string[];
   errors: string[];
 }
 
@@ -67,12 +70,37 @@ export function parseCodeblock(source: string): CodeblockSpec {
         else spec.range = n;
         break;
       }
+      case "interpret": {
+        const ids = val.split(",").map((x) => x.trim()).filter(Boolean);
+        if (ids.length === 0) spec.errors.push("interpret needs at least one interpreter id");
+        else spec.interpret = ids;
+        break;
+      }
       default:
         spec.errors.push(`unknown key "${key}"`);
     }
   }
   if (spec.style === "value" && !spec.field) spec.errors.push("style: value needs a field, e.g. field: precipitation.amount");
+  if (spec.interpret && (spec.style === "table" || spec.style === "value")) spec.errors.push("interpret works with the card, line and prose styles");
   return spec;
+}
+
+/**
+ * Which zone a block shows. An explicit `zone:` wins. Otherwise the resolver
+ * chain is asked about the note itself (`{ kind: "note", path }`, which is
+ * where the built-in `weather-zone` frontmatter resolver answers), then the
+ * first zone. `viaResolver` tells the caller the answer can change when the
+ * note's metadata does.
+ */
+export function pickCodeblockZone(spec: Pick<CodeblockSpec, "zone">, sourcePath: string, resolve: (path: string) => string | null, firstZone: string | undefined): { zoneId: string | undefined; viaResolver: boolean } {
+  if (spec.zone !== undefined) return { zoneId: spec.zone, viaResolver: false };
+  let resolved: string | null = null;
+  try {
+    resolved = sourcePath ? resolve(sourcePath) : null;
+  } catch {
+    resolved = null;
+  }
+  return { zoneId: resolved ?? firstZone, viaResolver: true };
 }
 
 /** Resolve the `date` field to a dayOrdinal given "today" and an optional adapter parser. */

@@ -36,6 +36,16 @@
   font-size: 0.85em;
   color: var(--text-accent);
 }
+
+/* `interpret:` lines under a code block: one per interpreter */
+.wadjet-interpret {
+  margin-top: 0.4em;
+  font-size: 0.9em;
+}
+
+.wadjet-interpret-label {
+  font-weight: var(--font-semibold);
+}
 .wadjet-error {
   color: var(--text-error);
   font-family: var(--font-monospace);

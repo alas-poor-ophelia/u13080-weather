@@ -1,54 +1,22 @@
-import { MarkdownView, Notice, Plugin, type MarkdownPostProcessorContext } from "obsidian";
+import { MarkdownRenderChild, MarkdownView, Notice, Plugin, type MarkdownPostProcessorContext } from "obsidian";
 import type { StudioStash } from "../studio/model/stash";
 import { openStudioFromCommand } from "../studio/ui/open";
 import { StudioView, VIEW_TYPE as STUDIO_VIEW_TYPE } from "../studio/ui/view";
 import type { WeatherReport } from "../core/report";
-import { GENERATOR_VERSION, RNG_VERSION, SCHEMA_VERSION } from "../core/version";
-import { parseCodeblock, resolveDate } from "./codeblock-parse";
+import { GENERATOR_VERSION } from "../core/version";
+import { ApiController, type WadjetAPI } from "./api";
+import { parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
+import { frontmatterResolver } from "./frontmatter-resolver";
+import { formatInterpretation } from "./interpreters";
 import { renderCard, renderError, renderLine, renderProse, renderTable, renderValue } from "./render";
-import { convertReport, reportField, type ConvertedReport, type Units } from "../core/units";
+import { convertReport, reportField } from "../core/units";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettings } from "./settings";
 import { WadjetSettingTab } from "./settings-tab";
-import { TimeRegistry, type CalendarDescription, type TimeAdapter, type TimeContext } from "./time/adapter";
+import { TimeRegistry } from "./time/adapter";
 import { InternalCalendar } from "./time/internal";
-import { World, type WorldEvent, type ZoneLocator, type ZoneResolver } from "./world";
+import { World } from "./world";
 
-/**
- * Public API (DESIGN-v1.md §9). Reachable as `app.plugins.plugins.wadjet.api`
- * and `window.Wadjet`. All returned values are plain serialisable objects.
- *
- * Load order: check `api.ready`; if false, wait for the `wadjet:ready`
- * workspace event (fired once after settings and zones are loaded).
- */
-export interface WadjetAPI {
-  version: string;
-  ready: boolean;
-  schemaVersion: typeof SCHEMA_VERSION;
-  generatorVersion: typeof GENERATOR_VERSION;
-  rngVersion: typeof RNG_VERSION;
-
-  getReport(zoneId: string, time: TimeContext | { dayOrdinal: number; hour?: number }): WeatherReport;
-  getRange(zoneId: string, fromDay: number, toDay: number): WeatherReport[];
-  now(): TimeContext | null;
-  listZones(): Array<{ id: string; name: string }>;
-
-  registerTimeAdapter(adapter: TimeAdapter): () => void;
-  registerZoneResolver(resolver: ZoneResolver): () => void;
-  resolveZone(locator: ZoneLocator): string | null;
-
-  /** the active adapter's calendar description, or null if it does not describe itself */
-  calendar(): CalendarDescription | null;
-  /** every registered time adapter, with a label (from `describe()` or the id) and whether it is active */
-  listTimeAdapters(): Array<{ id: string; label: string; active: boolean }>;
-
-  describe(report: WeatherReport, style?: "short" | "prose"): string;
-  /** the user's display units setting */
-  units(): Units;
-  /** the same report in metric or imperial, unit suffixes dropped from key names (amountMm -> amount ...) */
-  convert(report: WeatherReport, units?: Units): ConvertedReport;
-  /** events: "ready" once on load, "profiles-changed"/"time-changed" on world edits, "adapters-changed" on any time adapter register/unregister */
-  on(event: WorldEvent, cb: () => void): () => void;
-}
+export type { WadjetAPI } from "./api";
 
 type WindowWithWadjet = Window & { Wadjet?: WadjetAPI };
 
@@ -58,6 +26,7 @@ export default class WadjetPlugin extends Plugin {
   internalCalendar!: InternalCalendar;
   world!: World;
   api!: WadjetAPI;
+  controller!: ApiController;
   settingTab?: WadjetSettingTab;
   /**
    * Dirty studio drafts kept across a leaf close within this session (bead
@@ -67,20 +36,49 @@ export default class WadjetPlugin extends Plugin {
    * `StudioView` constructor via `applyStash`.
    */
   studioStash?: StudioStash;
+  /**
+   * Set first thing in onunload. Every continuation after an await checks it:
+   * a disabled-then-re-enabled plugin has a NEW instance reading data.json,
+   * and a late save from this one would overwrite it.
+   */
+  private dead = false;
+  /** the internal calendar's configHash at the last rebuild, to tell a calendar edit from any other save */
+  private internalHash = "";
 
   override async onload(): Promise<void> {
-    this.settings = migrateSettings(await this.loadData());
+    const loaded: unknown = await this.loadData();
+    if (this.dead) return;
+    this.settings = migrateSettings(loaded);
     this.time = new TimeRegistry(this.settings.activeTimeAdapter);
-    this.internalCalendar = new InternalCalendar(this.settings.calendar, () => this.settings.currentDayOrdinal);
+    this.internalCalendar = new InternalCalendar(
+      this.settings.calendar,
+      () => this.settings.currentDayOrdinal,
+      (d) => this.writeCurrentDay(d),
+    );
+    this.internalHash = this.internalCalendar.configHash();
     this.time.register(this.internalCalendar);
     this.world = new World(this.worldState(), this.time);
+    this.controller = new ApiController({ version: this.manifest.version, world: this.world, time: this.time, units: () => this.settings.units });
+    this.api = this.controller.api;
     this.time.onChange((change) => {
-      if (change.id === this.settings.activeTimeAdapter) this.world.emit("time-changed");
+      if (this.dead) return;
+      this.controller.syncActiveSubscription();
+      if (change.id === this.settings.activeTimeAdapter) this.controller.emitTimeChanged();
       this.world.emit("adapters-changed");
       this.refreshSettingsTab(); // the "Calendar source" row lists registered adapters
     });
+    this.controller.syncActiveSubscription();
+    // First in the chain, registered through the public API like any other plugin's resolver.
+    this.api.registerZoneResolver(
+      frontmatterResolver(
+        (path) => {
+          const file = this.app.vault.getFileByPath(path);
+          return file ? (this.app.metadataCache.getFileCache(file)?.frontmatter ?? null) : null;
+        },
+        () => this.settings.zones,
+      ),
+    );
 
-    this.api = this.buildApi();
     (window as WindowWithWadjet).Wadjet = this.api;
 
     this.settingTab = new WadjetSettingTab(this.app, this);
@@ -95,13 +93,15 @@ export default class WadjetPlugin extends Plugin {
       new Notice(`The weather generator was updated (${this.settings.generatorVersion} → ${GENERATOR_VERSION}). Past weather stays as it was until you upgrade the world in settings.`, 10000);
     }
 
-    await this.saveData(this.settings); // persist a freshly generated seed
-    this.api.ready = true;
-    this.world.emit("ready");
+    await this.saveSettings(); // persist a freshly generated seed
+    if (this.dead) return;
+    this.controller.markReady();
     this.app.workspace.trigger("wadjet:ready");
   }
 
   override onunload(): void {
+    this.dead = true;
+    this.controller?.unload(() => this.app.workspace.trigger("wadjet:unload"));
     delete (window as WindowWithWadjet).Wadjet;
   }
 
@@ -110,15 +110,54 @@ export default class WadjetPlugin extends Plugin {
     return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}) };
   }
 
+  /** Save settings to data.json; does nothing once the plugin is unloaded. */
   async saveSettings(): Promise<void> {
+    if (this.dead) return;
     await this.saveData(this.settings);
   }
 
   /** Save and push the new state into the world (rebuilds generators lazily). */
   async saveAndRebuild(): Promise<void> {
     await this.saveSettings();
+    if (this.dead) return;
     this.internalCalendar.update(this.settings.calendar);
     this.world.setState(this.worldState());
+    const hash = this.internalCalendar.configHash();
+    if (hash !== this.internalHash) {
+      this.internalHash = hash;
+      // a year-length/season/moon edit moves what "today" means; the weather side is in profiles-changed's calendar hash
+      if (this.time.active === this.internalCalendar) this.controller.emitTimeChanged();
+    }
+  }
+
+  /** The internal calendar's writer: store the day and save. Runs inside the API's time queue. */
+  private async writeCurrentDay(d: number): Promise<void> {
+    if (this.dead) throw new Error("U+13080 Weather is unloaded.");
+    this.settings.currentDayOrdinal = d;
+    await this.saveSettings();
+    if (this.dead) return;
+    this.refreshSettingsTab();
+  }
+
+  /** The settings tab's "Current day" edit: the internal calendar's day, whichever calendar is active, through the same queue as `api.setNow`. */
+  setInternalDay(d: number): Promise<void> {
+    return this.controller.enqueue(async () => {
+      if (this.dead) return;
+      await this.internalCalendar.setNow(d);
+    });
+  }
+
+  /** The settings tab's "Calendar source" choice. Fires time-changed and adapters-changed when the effective calendar changes. */
+  async setActiveTimeAdapter(id: string): Promise<void> {
+    const before = this.time.active;
+    this.settings.activeTimeAdapter = id;
+    this.time.setActive(id);
+    this.controller.syncActiveSubscription();
+    if (this.time.active !== before) {
+      this.controller.emitTimeChanged();
+      this.world.emit("adapters-changed");
+    }
+    await this.saveSettings();
   }
 
   /**
@@ -139,80 +178,91 @@ export default class WadjetPlugin extends Plugin {
     this.settingTab?.update();
   }
 
-  private buildApi(): WadjetAPI {
-    const w = this.world;
-    return {
-      version: this.manifest.version,
-      ready: false,
-      schemaVersion: SCHEMA_VERSION,
-      generatorVersion: GENERATOR_VERSION,
-      rngVersion: RNG_VERSION,
-      getReport: (zoneId, time) => w.getReport(zoneId, time),
-      getRange: (zoneId, from, to) => w.getRange(zoneId, from, to),
-      now: () => w.now(),
-      listZones: () => w.listZones().map(({ id, name }) => ({ id, name })),
-      registerTimeAdapter: (a) => this.time.register(a),
-      registerZoneResolver: (r) => w.registerZoneResolver(r),
-      resolveZone: (l) => w.resolveZone(l),
-      calendar: () => this.time.active?.describe?.() ?? null,
-      listTimeAdapters: () => {
-        const activeId = this.time.active?.id;
-        return this.time.list().map((id) => {
-          const adapter = this.time.get(id);
-          return { id, label: adapter?.describe?.().label ?? id, active: id === activeId };
-        });
-      },
-      describe: (r, style) => w.describe(r, style),
-      units: () => this.settings.units,
-      convert: (r, units) => convertReport(r, units ?? this.settings.units),
-      on: (event, cb) => w.on(event, cb),
-    };
-  }
-
   // --- codeblock -----------------------------------------------------------
-  private renderCodeblock(src: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext): void {
+  private renderCodeblock(src: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
     const spec = parseCodeblock(src);
     if (spec.errors.length) return renderError(el, spec.errors.join("; "));
+    const shown = this.renderBlock(spec, el, ctx.sourcePath);
+    // Re-render when the answer can change under the block: a zone from the
+    // note's frontmatter, or interpreters registered after the note rendered.
+    if (spec.zone === undefined || spec.interpret) ctx.addChild(new BlockWatcher(el, this, spec, ctx.sourcePath, shown));
+  }
+
+  /** Which zone a block without `zone:` shows right now. */
+  codeblockZone(spec: CodeblockSpec, sourcePath: string): string | undefined {
+    return pickCodeblockZone(spec, sourcePath, (path) => this.world.resolveZone({ kind: "note", path }), this.settings.zones[0]?.id).zoneId;
+  }
+
+  /** Render one block into `el`; returns the zone it showed (undefined on an error before a zone was picked). */
+  renderBlock(spec: CodeblockSpec, el: HTMLElement, sourcePath: string): string | undefined {
     const zones = this.settings.zones;
-    const zoneId = spec.zone ?? zones[0]?.id;
-    if (!zoneId) return renderError(el, "No zones yet — add one in settings.");
-    if (!zones.some((z) => z.id === zoneId)) return renderError(el, `Unknown zone "${zoneId}" (have: ${zones.map((z) => z.id).join(", ") || "none"}).`);
+    const zoneId = this.codeblockZone(spec, sourcePath);
+    if (!zoneId) return void renderError(el, "No zones yet — add one in settings.");
+    if (!zones.some((z) => z.id === zoneId)) {
+      renderError(el, `Unknown zone "${zoneId}" (have: ${zones.map((z) => z.id).join(", ") || "none"}).`);
+      return zoneId;
+    }
     const adapter = this.time.active;
     const today = adapter?.now()?.dayOrdinal ?? null;
     const { day, error } = resolveDate(spec.date, today, adapter?.parse?.bind(adapter));
-    if (day === null) return renderError(el, error ?? "bad date");
+    if (day === null) {
+      renderError(el, error ?? "bad date");
+      return zoneId;
+    }
     const label = (d: number) => adapter?.format?.(d) ?? `day ${d}`;
     try {
       const u = spec.units ?? this.settings.units;
       if (spec.style === "table") {
         const reports = this.world.getRange(zoneId, day, day + spec.range - 1);
-        return renderTable(
+        renderTable(
           el,
           reports.map((r) => ({ label: label(r.dayOrdinal), r })),
           u,
         );
+        return zoneId;
       }
       const r = this.world.getReport(zoneId, spec.hour !== undefined ? { dayOrdinal: day, hour: spec.hour } : { dayOrdinal: day });
-      if (spec.style === "value") return renderValue(el, reportField(convertReport(r, u), spec.field!));
-      if (spec.style === "line") return renderLine(el, r, label(day));
-      if (spec.style === "prose") return renderProse(el, r, label(day));
-      return renderCard(el, r, label(day), u);
+      if (spec.style === "value") renderValue(el, reportField(convertReport(r, u), spec.field!));
+      else if (spec.style === "line") renderLine(el, r, label(day));
+      else if (spec.style === "prose") renderProse(el, r, label(day));
+      else renderCard(el, r, label(day), u);
+      if (spec.interpret) this.renderInterpretations(el, r, spec.interpret);
     } catch (e) {
-      return renderError(el, e instanceof Error ? e.message : String(e));
+      renderError(el, e instanceof Error ? e.message : String(e));
+    }
+    return zoneId;
+  }
+
+  /** One line per interpreter under the card/line/prose: its label and its format(result), or compact JSON. */
+  private renderInterpretations(el: HTMLElement, r: WeatherReport, ids: readonly string[]): void {
+    const box = el.createDiv({ cls: "wadjet-interpret" });
+    for (const id of ids) {
+      const interpreter = this.controller.interpreters.get(id);
+      if (!interpreter) {
+        box.createDiv({ cls: "wadjet-error", text: `Unknown interpreter "${id}".` });
+        continue;
+      }
+      try {
+        const text = formatInterpretation(interpreter, this.api.interpret(id, r));
+        const row = box.createDiv({ cls: "wadjet-interpret-row" });
+        row.createSpan({ cls: "wadjet-interpret-label", text: `${interpreter.label}: ` });
+        row.appendText(text);
+      } catch (e) {
+        box.createDiv({ cls: "wadjet-error", text: e instanceof Error ? e.message : String(e) });
+      }
     }
   }
 
   // --- commands --------------------------------------------------------------
   private registerCommands(): void {
-    const bump = async (n: number) => {
-      this.settings.currentDayOrdinal += n;
-      await this.saveSettings();
-      this.world.emit("time-changed");
-      this.refreshSettingsTab();
-      new Notice(this.internalCalendar.format(this.settings.currentDayOrdinal));
+    const step = async (n: number) => {
+      const moved = await this.api.advance(n);
+      if (!moved) return void new Notice("The active calendar can't be changed from here.");
+      const now = this.world.now();
+      if (now) new Notice(this.api.format(now.dayOrdinal));
     };
-    this.addCommand({ id: "next-day", name: "Advance the calendar one day", callback: () => void bump(1) });
-    this.addCommand({ id: "prev-day", name: "Rewind the calendar one day", callback: () => void bump(-1) });
+    this.addCommand({ id: "next-day", name: "Advance the calendar one day", callback: () => void step(1) });
+    this.addCommand({ id: "prev-day", name: "Rewind the calendar one day", callback: () => void step(-1) });
 
     this.addCommand({
       id: "insert-today",
@@ -261,5 +311,40 @@ export default class WadjetPlugin extends Plugin {
         view?.previewMode?.rerender(true);
       },
     });
+  }
+}
+
+/**
+ * Keeps one code block current: re-renders when the note's metadata changes
+ * the zone it resolves to (blocks without `zone:`), and when interpreters
+ * come and go (blocks with `interpret:`). Cleaned up with the block.
+ */
+class BlockWatcher extends MarkdownRenderChild {
+  constructor(
+    el: HTMLElement,
+    private readonly plugin: WadjetPlugin,
+    private readonly spec: CodeblockSpec,
+    private readonly sourcePath: string,
+    private shown: string | undefined,
+  ) {
+    super(el);
+  }
+
+  override onload(): void {
+    if (this.spec.zone === undefined) {
+      this.registerEvent(
+        this.plugin.app.metadataCache.on("changed", (file) => {
+          if (file.path !== this.sourcePath) return;
+          if (this.plugin.codeblockZone(this.spec, this.sourcePath) !== this.shown) this.rerender();
+        }),
+      );
+    }
+    if (this.spec.interpret && !this.plugin.controller.unloaded) this.register(this.plugin.api.on("interpreters-changed", () => this.rerender()));
+  }
+
+  private rerender(): void {
+    if (this.plugin.controller.unloaded) return;
+    this.containerEl.empty();
+    this.shown = this.plugin.renderBlock(this.spec, this.containerEl, this.sourcePath);
   }
 }

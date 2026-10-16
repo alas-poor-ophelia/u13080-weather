@@ -9,10 +9,41 @@ import { seasonAtPhase } from "./seasons";
 
 export class InternalCalendar implements TimeAdapter {
   readonly id = "internal";
+  private readonly listeners = new Set<() => void>();
+  /**
+   * @param current reads the stored current day (settings.currentDayOrdinal)
+   * @param write stores a new current day (the plugin writes the setting and saves); `setNow` needs it
+   */
   constructor(
     private cfg: InternalCalendarConfig,
     private current: () => number,
+    private write?: (dayOrdinal: number) => void | Promise<void>,
   ) {}
+
+  /**
+   * Move the current day: store it through `write`, then tell subscribers.
+   * Integers only; the plugin validates before it gets here, this is the
+   * last line.
+   */
+  async setNow(dayOrdinal: number): Promise<void> {
+    if (!Number.isInteger(dayOrdinal)) throw new TypeError(`dayOrdinal must be an integer (got ${String(dayOrdinal)}).`);
+    if (!this.write) throw new Error("The internal calendar has no place to store the current day.");
+    await this.write(dayOrdinal);
+    for (const cb of [...this.listeners]) {
+      try {
+        cb();
+      } catch (e) {
+        console.error("U+13080 Weather: an internal calendar subscriber threw.", e);
+      }
+    }
+  }
+
+  subscribe(cb: () => void): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
 
   update(cfg: InternalCalendarConfig): void {
     this.cfg = cfg;

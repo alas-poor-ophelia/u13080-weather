@@ -14,5 +14,5 @@
     "baseUrl": ".",
     "paths": { "@core/*": ["src/core/*"] }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "vitest.e2e.config.ts"]
+  "include": ["src/**/*.ts", "types/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "vitest.e2e.config.ts"]
 }

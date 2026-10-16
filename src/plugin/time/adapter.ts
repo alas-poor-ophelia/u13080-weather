@@ -29,17 +29,21 @@ export interface CalendarDescription {
 export interface TimeAdapter {
   id: string;
   /** the calendar's current date, or null if it has none */
-  now(): TimeContext | null;
+  now: () => TimeContext | null;
   /** MUST be O(1)/O(log n); MUST extrapolate (not throw) outside the calendar's defined range */
-  toContext(dayOrdinal: number): TimeContext;
+  toContext: (dayOrdinal: number) => TimeContext;
   /** identity of the adapter's configuration, for provenance (§6) */
-  configHash(): string;
+  configHash: () => string;
   /** optional: parse a calendar-native date string to a dayOrdinal */
-  parse?(text: string): number | null;
+  parse?: (text: string) => number | null;
   /** optional: human-readable date */
-  format?(dayOrdinal: number): string;
+  format?: (dayOrdinal: number) => string;
   /** optional: static description of the calendar for UIs; absent = opaque calendar */
-  describe?(): CalendarDescription;
+  describe?: () => CalendarDescription;
+  /** optional: move the calendar's current day; present = `api.canSetNow()` is true while this adapter is active */
+  setNow?: (dayOrdinal: number) => void | Promise<void>;
+  /** optional: tell Wadjet when the calendar's own current day changes; returns an unsubscribe function */
+  subscribe?: (cb: () => void) => () => void;
 }
 
 /** Registry change notification: a `TimeAdapter` was registered or unregistered. */

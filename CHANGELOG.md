@@ -2,6 +2,46 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
+## Unreleased
+
+### Plugin API (API version 1)
+
+Additions for plugins that build on the weather. Nothing about a day's weather changes.
+
+- `apiVersion: 1`, and `types/wadjet.d.ts`: a standalone declaration file for the whole API,
+  checked against the plugin by its own test suite.
+- `getReport(zoneId)` without a time means today. `timeAt(day, zoneId?)` returns the day as the
+  generator sees it (era tags, hemisphere flip); `format` and `parse` go through the active
+  calendar.
+- Time control: `canSetNow()`, `setNow(day)` and `advance(days)` move the active calendar's day.
+  Time adapters gain optional `setNow` and `subscribe`; the internal calendar implements both.
+  The next/previous-day commands now move whichever calendar is active.
+- `classify(report)`: Beaufort force, compass point, oktas, visibility class, precipitation class
+  and feels-like temperature, each from a cited published scale. `glyphKey` and `glyph` give a
+  monochrome SVG icon per report.
+- Interpreters: `registerInterpreter`, `listInterpreters`, `getInterpreter` and `interpret` let a
+  game-system plugin say what weather means for its game; Wadjet ships none. The code block gains
+  `interpret: <id>` to show a ruling under the card.
+- Zones: a note can name its zone with a `weather-zone` frontmatter key (built-in resolver
+  `wadjet.frontmatter`), and a code block without `zone:` uses it. Resolvers may be async
+  (`resolveAsync`, `resolveZoneAsync`, 2000 ms per resolver).
+- New events `resolvers-changed`, `interpreters-changed` and `unload`, and the workspace event
+  `wadjet:unload`. After unload the API object throws; get it again on the next `wadjet:ready`.
+
+**Changes to existing behaviour:**
+
+- Event callbacks now receive one payload object (`{ type, ... }`, frozen). Callbacks that take no
+  argument are unaffected. `profiles-changed` lists the zones that changed; `time-changed` carries
+  the current day and the active calendar id.
+- A non-integer `dayOrdinal` now throws a `TypeError` in `getReport`, `getRange` (also
+  `fromDay > toDay`, and spans over 3660 days, throw `RangeError`) and `timeAt`; it used to be
+  passed through. An `hour` outside `[0, 24)` throws `RangeError`.
+- `describe(report, style)` treats any style other than `"prose"` as `"short"` instead of throwing.
+- A zone resolver's `resolve` is optional when it has `resolveAsync`; a resolver with neither is
+  refused. Listener errors are now logged instead of swallowed.
+- Switching the calendar source fires `time-changed` and `adapters-changed` instead of
+  `profiles-changed`.
+
 ## 0.3.1
 
 Housekeeping for the community-plugin store scan of 0.3.0. Nothing about a day's weather or a

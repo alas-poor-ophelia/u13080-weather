@@ -24,6 +24,26 @@ else this.registerEvent(this.app.workspace.on("wadjet:ready", () => init(wadjet(
 
 The API object's own `on("ready", cb)` event fires at the same moment (see §2); the workspace event is the one you can register for before the plugin has loaded.
 
+**Unload and re-enable.** When the plugin is disabled or reloaded, the API object dies: it fires
+its own `unload` event, then the `wadjet:unload` workspace event, and from then on `ready` is
+`false`, every method throws (async methods reject) an `Error` with `code: "wadjet-unloaded"`,
+and every unsubscribe/unregister function you hold is a harmless no-op. Re-enabling builds a
+**new** API object with empty registries: drop your reference on `wadjet:unload`, and on the next
+`wadjet:ready` get the object again and register your adapters, resolvers, interpreters and
+listeners again.
+
+```ts
+this.registerEvent(this.app.workspace.on("wadjet:unload", () => (api = null)));
+this.registerEvent(this.app.workspace.on("wadjet:ready", () => init(wadjet()))); // fires again on re-enable
+```
+
+**Types.** `types/wadjet.d.ts` in the repository is a standalone, dependency-free declaration of
+everything in this document. Copy it into your plugin and `import type { WadjetAPI } from
+"./wadjet"`. The plugin's test suite fails if the shipped object stops matching it.
+
+**Feature detection.** `apiVersion` (below) bumps whenever members are added. Members this
+document marks *(API 1)* arrived with `apiVersion: 1`; on an older plugin `apiVersion` is absent.
+
 ---
 
 ## 1. `WadjetAPI`
@@ -31,39 +51,66 @@ The API object's own `on("ready", cb)` event fires at the same moment (see §2);
 ```ts
 interface WadjetAPI {
   version: string;
+  apiVersion: 1;
   ready: boolean;
   schemaVersion: 0;
   generatorVersion: string;
   rngVersion: string;
 
-  getReport(zoneId: string, time: TimeContext | { dayOrdinal: number; hour?: number }): WeatherReport;
-  getRange(zoneId: string, fromDay: number, toDay: number): WeatherReport[];
-  now(): TimeContext | null;
-  listZones(): Array<{ id: string; name: string }>;
+  getReport: (zoneId: string, time?: TimeContext | { dayOrdinal: number; hour?: number }) => WeatherReport;
+  getRange: (zoneId: string, fromDay: number, toDay: number) => WeatherReport[];
+  now: () => TimeContext | null;
+  listZones: () => Array<{ id: string; name: string }>;
+  timeAt: (dayOrdinal: number, zoneId?: string) => TimeContext;
+  format: (dayOrdinal: number) => string;
+  parse: (text: string) => number | null;
 
-  registerTimeAdapter(adapter: TimeAdapter): () => void;
-  registerZoneResolver(resolver: ZoneResolver): () => void;
-  resolveZone(locator: ZoneLocator): string | null;
+  canSetNow: () => boolean;
+  setNow: (dayOrdinal: number) => Promise<boolean>;
+  advance: (days: number) => Promise<boolean>;
 
-  calendar(): CalendarDescription | null;
-  listTimeAdapters(): Array<{ id: string; label: string; active: boolean }>;
+  registerTimeAdapter: (adapter: TimeAdapter) => () => void;
+  registerZoneResolver: (resolver: ZoneResolver) => () => void;
+  resolveZone: (locator: ZoneLocator) => string | null;
+  resolveZoneAsync: (locator: ZoneLocator) => Promise<string | null>;
 
-  describe(report: WeatherReport, style?: "short" | "prose"): string;
-  units(): "metric" | "imperial";
-  convert(report: WeatherReport, units?: "metric" | "imperial"): ConvertedReport;
-  on(event: "ready" | "profiles-changed" | "time-changed" | "adapters-changed", cb: () => void): () => void;
+  calendar: () => CalendarDescription | null;
+  listTimeAdapters: () => Array<{ id: string; label: string; active: boolean }>;
+
+  describe: (report: WeatherReport, style?: "short" | "prose") => string;
+  units: () => "metric" | "imperial";
+  convert: (report: WeatherReport, units?: "metric" | "imperial") => ConvertedReport;
+
+  classify: (report: WeatherReport) => Classification;
+  glyphKey: (report: WeatherReport) => GlyphKey;
+  glyph: (keyOrReport: GlyphKey | WeatherReport, opts?: { size?: number; title?: string }) => string;
+
+  registerInterpreter: (interpreter: WeatherInterpreter) => () => void;
+  listInterpreters: (facet?: string) => InterpreterInfo[];
+  getInterpreter: (id: string) => WeatherInterpreter | null;
+  interpret: <T = unknown>(id: string, report: WeatherReport, options?: Record<string, unknown>) => T;
+
+  on: <E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => void) => () => void;
 }
 ```
+
+Members are written in property syntax (`name: (...) => T`) so the declaration file can be
+checked for exact identity with the implementation; call them like ordinary methods.
 
 ### `version`
 
 Type: `string`. The plugin manifest's version (`this.manifest.version`), not the schema or
 generator version.
 
+### `apiVersion` *(API 1)*
+
+Type: `1`. Bumps whenever members are added to this interface. Absent on plugins older than
+API 1, so `api.apiVersion >= 1` (false for `undefined`) is the feature test.
+
 ### `ready`
 
 Type: `boolean`. `false` at construction; flipped to `true` at the end of `onload()`, immediately
-before the `wadjet:ready` workspace event fires. See §2.
+before the `wadjet:ready` workspace event fires. Back to `false` for good at unload. See §2.
 
 ### `schemaVersion`
 
@@ -82,21 +129,26 @@ Type: `string`. Currently `"wadjet-gen/0.0.2"` (`GENERATOR_VERSION`). This is th
 Type: `string`. Identifies the frozen hash/uniform substrate (`RNG_VERSION`, defined in
 `src/core/rng.ts`). Never changes without a deliberate, versioned break.
 
-### `getReport(zoneId, time)`
+### `getReport(zoneId, time?)`
 
 ```ts
-getReport(zoneId: string, time: TimeContext | { dayOrdinal: number; hour?: number }): WeatherReport
+getReport(zoneId: string, time?: TimeContext | { dayOrdinal: number; hour?: number }): WeatherReport
 ```
 
 | Parameter | Type | Description |
 |---|---|---|
 | `zoneId` | `string` | A zone id from `listZones()`. |
-| `time` | `TimeContext \| { dayOrdinal: number; hour?: number }` | Only `dayOrdinal` (and, if you want diurnal interpolation, `hour`) are read; a full `TimeContext` (e.g. from `now()`) is accepted so you don't have to destructure it. |
+| `time` | `TimeContext \| { dayOrdinal: number; hour?: number }`, optional | Only `dayOrdinal` (and, if you want diurnal interpolation, `hour`) are read; a full `TimeContext` (e.g. from `now()`) is accepted so you don't have to destructure it. Omitted: today, `now().dayOrdinal`, as a daily report (any `hour` on `now()` is dropped). |
 
-**Returns:** `WeatherReport` for that zone and day (see §4). Passing `hour` (must be `[0, 24)` to
-be meaningful) adds `temperature.current` and `precipitation.active` to the result.
+**Returns:** `WeatherReport` for that zone and day (see §4). Passing `hour` adds
+`temperature.current` and `precipitation.active` to the result.
 
 **Throws:**
+- `Error("The active calendar has no current day; pass a time.")` — `time` omitted and `now()` is `null`.
+- `TypeError` naming the bad value — `time` is not an object, `dayOrdinal` is not an integer
+  (`1.5`, `NaN`, `Infinity`, a string, missing), or `hour` is not a finite number. **Behaviour
+  change in API 1:** a non-integer `dayOrdinal` used to be passed through.
+- `RangeError` — `hour` outside `[0, 24)`.
 - `RangeError("Unknown zone \"<id>\".")` — no zone with that id exists.
 - `Error("No calendar is available.")` — no time adapter is registered (should not happen once
   `ready` is true, since the internal calendar always registers itself).
@@ -106,6 +158,7 @@ be meaningful) adds `temperature.current` and `precipitation.active` to the resu
 **Example:**
 
 ```ts
+const today = wadjet.getReport("greywold-highlands");
 const r = wadjet.getReport("greywold-highlands", { dayOrdinal: 412 });
 const rHour = wadjet.getReport("greywold-highlands", { dayOrdinal: 412, hour: 14 });
 ```
@@ -126,7 +179,9 @@ getRange(zoneId: string, fromDay: number, toDay: number): WeatherReport[]
 query are byte-for-byte identical to the same days fetched individually (§9) — no `hour` field
 on any of them (range queries are daily-only; there is no per-hour range API).
 
-**Throws:** same as `getReport` (unknown zone, no calendar, invalid profile).
+**Throws:** `TypeError` when either bound is not an integer; `RangeError` when `fromDay > toDay`
+or the span is longer than **3660 days** (ten 366-day years; ask in pieces for more); otherwise
+the same as `getReport` (unknown zone, no calendar, invalid profile).
 
 **Example:**
 
@@ -154,6 +209,63 @@ listZones(): Array<{ id: string; name: string }>
 **Returns:** every configured zone's `id` and `name`, in settings order. Does not expose
 validation issues (the internal `World.listZones()` does; the public API strips them) — call
 `getReport`/`getRange` and catch to discover a broken profile.
+
+### `timeAt(dayOrdinal, zoneId?)` *(API 1)*
+
+```ts
+timeAt(dayOrdinal: number, zoneId?: string): TimeContext
+```
+
+The `TimeContext` the generator sees for that day: the active adapter's `toContext(dayOrdinal)`
+plus the era timeline's `era:<name>` tags (§7b). With a `zoneId`, the zone's `flipSeasons` is
+applied too (§6), exactly as it is when that zone's weather is generated — so `timeAt(d, zoneId)`
+is the context a modifier's `tag`/`season` predicates were evaluated against. The generator and
+`timeAt` share one function, so they cannot disagree.
+
+**Throws:** `TypeError` for a non-integer `dayOrdinal`; `RangeError` for an unknown `zoneId`.
+
+### `format(dayOrdinal)` *(API 1)*
+
+```ts
+format(dayOrdinal: number): string
+```
+
+The active adapter's `format(dayOrdinal)`; `"Day N"` when the adapter has no `format` (or its
+`format` throws, which is logged). `TypeError` for a non-integer `dayOrdinal`.
+
+### `parse(text)` *(API 1)*
+
+```ts
+parse(text: string): number | null
+```
+
+The active adapter's `parse(text)` (a throw or a non-integer answer counts as `null`). When the
+adapter has no `parse`, a plain integer string (`"412"`, `" -3 "`) is accepted and anything else
+is `null`. Non-string input is `null`.
+
+### `canSetNow()`, `setNow(dayOrdinal)`, `advance(days)` *(API 1)*
+
+```ts
+canSetNow(): boolean
+setNow(dayOrdinal: number): Promise<boolean>
+advance(days: number): Promise<boolean>
+```
+
+Move the **active** calendar's current day. See "Time control" in §5 for the contract.
+
+- `canSetNow()` is `true` exactly when the active adapter has a `setNow` function.
+- `setNow(d)` sets the current day to `d`; `advance(n)` moves it by `n` days from `now()` (negative
+  goes back). Both resolve `true` when the day moved and `false` (never a rejection) when the
+  active adapter has no `setNow`, `now()` is `null` (advance only), the adapter's `setNow` threw or
+  rejected (logged with the adapter id), or the plugin unloaded while the call was in flight.
+- Both **reject with `TypeError`** for a non-integer or non-finite argument.
+- Calls are **serialised**: each starts after every earlier `setNow`/`advance` (and Wadjet's own
+  day edits) has settled, so `advance(1)` twice in a row moves two days.
+- On success `time-changed` fires once (§2).
+
+```ts
+if (wadjet.canSetNow()) await wadjet.advance(1);
+```
 
 ### `registerTimeAdapter(adapter)`
 
@@ -186,11 +298,15 @@ active.
 registerZoneResolver(resolver: ZoneResolver): () => void
 ```
 
-Adds a `ZoneResolver` (see §5) to the resolution chain. Resolvers are tried in registration order
-by `resolveZone`. Multiple resolvers may be registered, including several for the same locator
-`kind`.
+Adds a `ZoneResolver` (see §5) to the end of the resolution chain. Resolvers are tried in
+registration order. Multiple resolvers may be registered, including several for the same locator
+`kind`. Wadjet's own `wadjet.frontmatter` resolver is registered first, on load (§5).
 
-**Returns:** an unregister function that removes exactly this resolver instance.
+**Throws:** `TypeError` if the resolver has neither `resolve` nor `resolveAsync`, or no `kinds`
+array. Fires `resolvers-changed` (§2).
+
+**Returns:** an unregister function that removes exactly this resolver instance (and fires
+`resolvers-changed`); calling it again does nothing.
 
 ### `resolveZone(locator)`
 
@@ -199,10 +315,27 @@ resolveZone(locator: ZoneLocator): string | null
 ```
 
 Walks the registered resolvers **in registration order**; for each whose `kinds` includes
-`locator.kind`, calls `resolve(locator)`. Returns the first non-null id that also names a real,
-currently-configured zone. A resolver that throws is caught and skipped (a misbehaving
-third-party resolver can't break the others or the caller). Returns `null` if no resolver
+`locator.kind` and that has a synchronous `resolve`, calls `resolve(locator)`. Returns the first
+non-null id that also names a real, currently-configured zone. A resolver that throws is caught
+and skipped. Resolvers with only `resolveAsync` are skipped here. Returns `null` if no resolver
 produces a valid zone id.
+
+### `resolveZoneAsync(locator)` *(API 1)*
+
+```ts
+resolveZoneAsync(locator: ZoneLocator): Promise<string | null>
+```
+
+The same walk, for resolvers that need to await (read a file, ask a server):
+
+- The chain is **snapshotted** when the call starts; resolvers registered meanwhile are not asked.
+- Each resolver's `resolveAsync` is awaited when it has one, otherwise its `resolve` is called.
+- Each `resolveAsync` gets **2000 ms**. A slower one counts as `null` (with a `console.warn`
+  naming it) and the walk moves on; so does one that throws or rejects.
+- After each await the answer is re-checked against the zones that exist **now**, so a zone
+  deleted while a resolver was thinking is never returned.
+- Resolves `null` when no resolver answers. Rejects with `code: "wadjet-unloaded"` when called
+  after unload; resolves `null` if the plugin unloads during the walk.
 
 ### `calendar()`
 
@@ -236,7 +369,7 @@ describe(report: WeatherReport, style?: "short" | "prose"): string
 | Parameter | Type | Description |
 |---|---|---|
 | `report` | `WeatherReport` | Any report, generated or hand-built. |
-| `style` | `"short" \| "prose"` (optional) | Defaults to `"short"`. |
+| `style` | `"short" \| "prose"` (optional) | Defaults to `"short"`. Any other value (a typo, an object) also means `"short"`; it never throws. |
 
 **Returns:** a human sentence built from the report's descriptors and numbers (never from
 `conditions`/tags directly except to list them). `"short"` is one line, minus-sign-typeset
@@ -272,14 +405,63 @@ interface ConvertedReport {                    // everything not listed is as in
 }
 ```
 
+### `classify(report)` *(API 1)*
+
+```ts
+classify(report: WeatherReport): Classification
+```
+
+Standard meteorological classes for a report: Beaufort force, compass point, oktas, visibility
+class, precipitation class and apparent temperature. Pure and deterministic, works on any report
+including hand-built ones, and never reads the descriptor words. Tables and sources in §4b.
+
+### `glyphKey(report)`, `glyph(keyOrReport, opts?)` *(API 1)*
+
+```ts
+glyphKey(report: WeatherReport): GlyphKey
+glyph(keyOrReport: GlyphKey | WeatherReport, opts?: { size?: number; title?: string }): string
+```
+
+`glyphKey` picks one of twelve icon keys for a report (§4b). `glyph` returns the built-in SVG for
+a key (or for a report, via `glyphKey`) as a string: monochrome `currentColor` strokes, square
+`viewBox="0 0 24 24"`, no scripts and no external references, so it is safe to parse with
+`DOMParser` or `sanitizeHTMLToDom`. `size` sets the width and height (default 24); `title` adds an
+accessible `<title>`. An unknown key throws `RangeError`. Use your own art by mapping `glyphKey(report)` to it.
+
+### `registerInterpreter(interpreter)`, `listInterpreters(facet?)`, `getInterpreter(id)`, `interpret(id, report, options?)` *(API 1)*
+
+```ts
+registerInterpreter(interpreter: WeatherInterpreter): () => void
+listInterpreters(facet?: string): InterpreterInfo[]
+getInterpreter(id: string): WeatherInterpreter | null
+interpret<T = unknown>(id: string, report: WeatherReport, options?: Record<string, unknown>): T
+```
+
+The registry other plugins use to say what weather means for their game. See "Interpreters" in
+§5 for the contract and an example.
+
+- `registerInterpreter` **throws** `TypeError` for a malformed interpreter (empty `id`, `label`
+  or `facet`; no `interpret` function; a `format` that isn't a function) and an `Error` with
+  `code: "wadjet-duplicate-id"` when an interpreter with that id is already registered. It never
+  replaces silently. Returns an unregister function that removes the interpreter only if it is
+  still the one registered under that id; calling it again does nothing. Both directions fire
+  `interpreters-changed`.
+- `listInterpreters` returns `{ id, label, facet, description? }` for every registered
+  interpreter, in registration order, filtered to one `facet` when given.
+- `getInterpreter` returns the registered object itself, or `null`.
+- `interpret` builds the `InterpretContext` and calls the interpreter synchronously. **Throws**
+  `RangeError` for an unknown id; an interpreter that throws is rethrown as
+  `Error('Interpreter "<id>" failed: <message>')` with the original error as `cause`.
+
 ### `on(event, cb)`
 
 ```ts
-on(event: "ready" | "profiles-changed" | "time-changed" | "adapters-changed", cb: () => void): () => void
+on<E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => void): () => void
 ```
 
-Subscribes to a `WorldEvent` (see §2). **Returns** an unregister function. A listener that
-throws is caught and does not stop other listeners or the emitter.
+Subscribes to an event (see §2). The callback receives one frozen payload object; callbacks
+written for the old no-argument form keep working. **Returns** an unregister function. A listener
+that throws is logged with `console.error` and does not stop other listeners or the emitter.
 
 ---
 
@@ -287,18 +469,29 @@ throws is caught and does not stop other listeners or the emitter.
 
 ### API-level events (`wadjet.on(event, cb)`)
 
+Every callback receives one payload object, frozen (arrays inside it too), with `type` set to the
+event name. *(API 1: before, callbacks got no argument.)*
+
+| Event | Payload | Fires when |
+|---|---|---|
+| `"ready"` | `{ type }` | Once, from inside `onload()`, immediately after `api.ready` is set to `true` and just before the `wadjet:ready` workspace event. Only useful if you obtained the API object before the plugin finished loading; otherwise wait on the workspace event below. |
+| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt (zones, overrides, the seed, eras, descriptor bands; an edit in settings, a pin, a studio save). `zoneIds` lists the zones whose output may have changed — profile, name, `flipSeasons`, or that zone's pinned days — including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed; `zoneIds` is then every current zone. It can fire with `zoneIds: []` when a save touched nothing in the world state. |
+| `"time-changed"` | `{ type, current: number \| null, adapterId: string }` | Whenever the active calendar's "now" or its shape changes: `setNow`/`advance`, the *Advance/Rewind the calendar one day* commands, editing *Current day* in settings (while the internal calendar is active), switching *Calendar source*, editing the internal calendar's year length, moons or seasons while it is active, registering an adapter whose id is the active setting, unregistering the active adapter (fallback to the internal calendar), or the active adapter's own `subscribe` callback. `current` is `now()?.dayOrdinal` at that moment; `adapterId` is the active adapter. |
+| `"adapters-changed"` | `{ type }` | Whenever the set of registered time adapters changes — every `registerTimeAdapter` call and every call to the unregister function it returns, active or not — and when *Calendar source* switches to another adapter. Use this to refresh a UI that lists adapters (`listTimeAdapters()`); use `"time-changed"` for one that only cares about the active calendar. |
+| `"resolvers-changed"` | `{ type }` | A zone resolver was registered or unregistered. |
+| `"interpreters-changed"` | `{ type, facet: string }` | An interpreter was registered or unregistered; `facet` is that interpreter's facet. |
+| `"unload"` | `{ type }` | Once, at the start of unload, after `ready` became `false` and before the `wadjet:unload` workspace event. Listeners are dropped right after. |
+
+**Switching the active calendar** fires `time-changed` and `adapters-changed`, not
+`profiles-changed`: zone profiles did not change, and every report carries the calendar in
+`provenance.calendarHash`.
+
+### Workspace events
+
 | Event | Fires when |
 |---|---|
-| `"ready"` | Once, from inside `onload()`, immediately after `api.ready` is set to `true` and just before the `wadjet:ready` workspace event. Only useful if you obtained the API object before the plugin finished loading; otherwise wait on the workspace event below. |
-| `"profiles-changed"` | Whenever the World's state is rebuilt: zones, overrides, or the world seed changed and saved (`plugin.saveAndRebuild()` — e.g. after an edit in the zone/preset/override settings UI). Generators are invalidated and rebuilt lazily on next use. |
-| `"time-changed"` | Whenever the active calendar's notion of "now" changes: the *Advance/Rewind the calendar one day* commands, editing *Current day* or *Calendar source* in settings, editing the calendar's year length, a newly-registered `TimeAdapter` whose id matches the currently active adapter, or unregistering the currently-active adapter (the registry falls back to the internal calendar). |
-| `"adapters-changed"` | Whenever the set of registered time adapters changes — every `registerTimeAdapter` call and every call to the unregister function it returns, active or not. Fired in addition to (not instead of) `"time-changed"` when the change also affects the active adapter. Use this to refresh a UI that lists all adapters (e.g. `listTimeAdapters()`); use `"time-changed"` for one that only cares about the active calendar. |
-
-### Workspace event
-
-| Event | Fires when |
-|---|---|
-| `"wadjet:ready"` (`app.workspace.trigger`) | Once, at the very end of `onload()`, **after** `api.ready` has been set to `true`. This is the event to wait on. |
+| `"wadjet:ready"` (`app.workspace.trigger`) | At the very end of `onload()`, **after** `api.ready` has been set to `true`. This is the event to wait on. It fires again after a re-enable, with a new API object. |
+| `"wadjet:unload"` (`app.workspace.trigger`) | At the start of `onunload()`, right after the API-level `unload` event. Drop your reference to the API object; it is dead (see *Unload and re-enable* at the top). |
 
 ---
 
@@ -466,6 +659,95 @@ may have changed.
 
 ---
 
+## 4b. Classification and glyphs
+
+`classify(report)` maps a report onto published scales. Wadjet reports these physical classes
+and nothing more: what a gale means for a party on the road is an interpreter's business (§5).
+
+```ts
+interface Classification {
+  beaufort: number;               // 0..12
+  beaufortLabel: string;          // "Calm" ... "Hurricane force"
+  compass: string;                // 16-point, the direction the wind blows FROM ("WSW")
+  oktas: number;                  // 0..8
+  visibility: "very-poor" | "poor" | "moderate" | "good" | "very-good" | "excellent";
+  precipitation: "none" | "very-light" | "light" | "moderate" | "heavy" | "very-heavy" | "extremely-heavy";
+  frozenPrecipitation: boolean;   // sleet or snow
+  feelsLike: { mean: number; current?: number }; // °C, 0.1
+}
+```
+
+Lower bounds are inclusive throughout (half-open intervals), so every value lands in exactly one
+class.
+
+**Beaufort** — the WMO Beaufort scale (WMO Manual on Marine Meteorological Services, WMO-No. 558;
+Guide to Instruments and Methods of Observation, WMO-No. 8), on `wind.speedKph`:
+
+| Force | Label | km/h | Force | Label | km/h |
+|---|---|---|---|---|---|
+| 0 | Calm | < 1 | 7 | Near gale | 50–61 |
+| 1 | Light air | 1–5 | 8 | Gale | 62–74 |
+| 2 | Light breeze | 6–11 | 9 | Strong gale | 75–88 |
+| 3 | Gentle breeze | 12–19 | 10 | Storm | 89–102 |
+| 4 | Moderate breeze | 20–28 | 11 | Violent storm | 103–117 |
+| 5 | Fresh breeze | 29–38 | 12 | Hurricane force | ≥ 118 |
+| 6 | Strong breeze | 39–49 | | | |
+
+**Precipitation** — India Meteorological Department 24-hour rainfall categories (IMD
+"Terminologies and glossary", mm/day), applied to the water-equivalent `precipitation.amountMm`
+whatever the type. `"none"` is a day whose type is `none`; a wet day under 0.1 mm reads as
+`"very-light"`.
+
+| Class | mm/day |
+|---|---|
+| `very-light` | 0.1–2.4 |
+| `light` | 2.5–15.5 |
+| `moderate` | 15.6–64.4 |
+| `heavy` | 64.5–115.5 |
+| `very-heavy` | 115.6–204.4 |
+| `extremely-heavy` | ≥ 204.5 |
+
+**Visibility** — the Met Office general-public visibility scale, on `visibilityKm`. The stock
+generator caps visibility at 40 km, so `"excellent"` occurs only at exactly 40 km or through an
+override. Fog is a **condition** (`report.conditions` contains `"fog"`), not a visibility class.
+
+| Class | km |
+|---|---|
+| `very-poor` | < 1 |
+| `poor` | 1–4 |
+| `moderate` | 4–10 |
+| `good` | 10–20 |
+| `very-good` | 20–40 |
+| `excellent` | ≥ 40 |
+
+**Oktas** — WMO Manual on Codes (WMO-No. 306), code table 2700: `0` only when `cloudCover` is
+exactly 0, `8` only when it is exactly 1, otherwise `round(cloudCover × 8)` clamped to 1–7.
+
+**Feels like** — apparent temperature in °C, rounded to 0.1, for `temperature.mean` and (on an
+hourly report) `temperature.current`, using the report's daily `humidity` and `wind.speedKph`:
+
+- wind chill, the joint NWS / Environment Canada index (JAG/TI 2001), when T ≤ 10 °C and wind
+  > 4.8 km/h;
+- heat index, the full NWS algorithm (NWS Weather Prediction Center, "The Heat Index Equation";
+  Rothfusz 1990, SR 90-23): Steadman's simple form first, then the Rothfusz regression with its
+  low- and high-humidity adjustments when the simple result is 80 °F or more;
+- otherwise the air temperature.
+
+**Glyphs.** `GlyphKey` is a closed set: `clear`, `partly-cloudy`, `cloudy`, `overcast`, `fog`,
+`drizzle`, `rain`, `heavy-rain`, `sleet`, `snow`, `heavy-snow`, `windy`. `glyphKey(report)` picks
+one by this precedence. **The precedence is presentation, not a standard, and may be refined;**
+key on `classify()` when you need a rule.
+
+1. `conditions` contains `"fog"` → `fog`
+2. precipitation type → `drizzle`, `rain`, `sleet` or `snow`; rain and snow become `heavy-rain` /
+   `heavy-snow` when `precipitation.intensity` ≥ 0.6
+3. Beaufort ≥ 6 → `windy`
+4. `cloudCover` ≥ 0.8 → `overcast`; ≥ 0.6 → `cloudy`; ≥ 0.4 → `partly-cloudy`; else `clear`
+
+The code block's icon uses the same function.
+
+---
+
 ## 5. Third-party contracts
 
 ### `TimeAdapter`
@@ -481,8 +763,13 @@ interface TimeAdapter {
   parse?(text: string): number | null;
   format?(dayOrdinal: number): string;
   describe?(): CalendarDescription;
+  setNow?(dayOrdinal: number): void | Promise<void>;
+  subscribe?(cb: () => void): () => void;
 }
 ```
+
+(The declaration file writes these as properties, `now: () => TimeContext | null`; a class with
+methods satisfies either form.)
 
 | Member | Required | Contract |
 |---|---|---|
@@ -493,6 +780,24 @@ interface TimeAdapter {
 | `parse(text)` | optional | Parse a calendar-native date string (e.g. from a `wadjet` code block's `date:` field) to a `dayOrdinal`, or `null` if unparseable. |
 | `format(dayOrdinal)` | optional | Human-readable rendering of a day, used by the codeblock renderer and commands. |
 | `describe()` | optional | A static summary of the calendar's shape, for UIs — see `CalendarDescription` below. **Absent means "opaque calendar":** Wadjet's own editors (Seasons, CYCLE windows) can't show season/moon names or a badge for it, so they hide those affordances entirely rather than guess. `api.calendar()` returns `null` for an adapter with no `describe()`. |
+| `setNow(dayOrdinal)` | optional *(API 1)* | Move this calendar's current day. Its presence is what makes `api.canSetNow()` true while the adapter is active, and what `setNow`/`advance` and Wadjet's next/previous-day commands call. Only ever called with an integer. May be async; a throw or rejection makes the API call resolve `false`. |
+| `subscribe(cb)` | optional *(API 1)* | Call `cb` whenever the calendar's own current day changes (the user moved it in your plugin). Wadjet subscribes to the **active** adapter only, resubscribing when the active adapter changes, and fires `time-changed` for each call. Return an unsubscribe function. When an adapter has `subscribe`, Wadjet relies on it after a successful `setNow` too (so call `cb` from your `setNow`); without it, Wadjet fires `time-changed` itself after `setNow` resolves. |
+
+### Time control: `canSetNow` versus `readOnly`
+
+Two separate questions, two separate answers:
+
+- `CalendarDescription.readOnly` governs **Wadjet's own editing UIs** (the settings rows, the
+  studio's Seasons and CYCLE editors): whether Wadjet offers to edit the calendar's *shape*.
+- `api.canSetNow()` says whether the **current day** can be moved through the API: it is `true`
+  exactly when the active adapter has `setNow`, whatever `readOnly` says. A calendar plugin can be
+  `readOnly: true` (edit our months in our settings) and still let a session tracker advance the
+  day.
+
+The internal calendar implements `setNow` (it writes *Current day* and saves) and `subscribe`.
+Wadjet's settings-tab *Current day* edit and its next/previous-day commands go through the same
+serialised queue as `api.setNow`/`api.advance`; the commands move whichever calendar is active
+and say so in a notice when it can't be moved.
 
 **Which adapter is active is the user's choice in settings, not the registering plugin's** — see
 `registerTimeAdapter` above. A calendar plugin should implement `describe()` regardless of whether
@@ -649,7 +954,7 @@ Foo" from the *Calendar source* dropdown in Wadjet's settings if and when they w
 
 A plugin that owns a notion of "place" (a hex map, a note, ...) implements this and calls
 `wadjet.registerZoneResolver(resolver)` so other code can ask "what zone is this?" via
-`wadjet.resolveZone(locator)`.
+`wadjet.resolveZone(locator)` or `wadjet.resolveZoneAsync(locator)`.
 
 ```ts
 type ZoneLocator =
@@ -661,18 +966,135 @@ type ZoneLocator =
 interface ZoneResolver {
   id: string;
   kinds: ZoneLocator["kind"][];
-  resolve(locator: ZoneLocator): string | null;
+  resolve?(locator: ZoneLocator): string | null;
+  resolveAsync?(locator: ZoneLocator): Promise<string | null>;
 }
 ```
 
 | Member | Contract |
 |---|---|
-| `id` | Identity, not otherwise enforced unique by the engine. |
-| `kinds` | The locator `kind`s this resolver handles. `resolveZone` only calls `resolve` for locators whose `kind` is in this list — a resolver is never handed a shape it didn't declare. |
-| `resolve(locator)` | Return a zone id, or `null` if this resolver doesn't know. May throw; `resolveZone` catches and moves to the next resolver. The returned id must also be a zone that currently exists — `resolveZone` re-checks this before returning it. |
+| `id` | Identity, not otherwise enforced unique by the engine. Namespace it (`"my-maps.hex"`). |
+| `kinds` | The locator `kind`s this resolver handles. A resolver is only ever handed a locator whose `kind` is in this list. |
+| `resolve(locator)` | Optional *(API 1; required before)*. Return a zone id, or `null` if this resolver doesn't know. May throw; the walk catches it and moves on. The returned id must name a zone that currently exists; the walk re-checks. |
+| `resolveAsync(locator)` | Optional *(API 1)*. The same answer, awaited. Only `resolveZoneAsync` calls it, with a 2000 ms budget. A resolver needs `resolve`, `resolveAsync`, or both; registration throws a `TypeError` with neither. |
 
 `ZoneLocator` is a closed, tagged union; `"custom"` with a `namespace` is the escape hatch for a
 locator kind not otherwise anticipated.
+
+**Conventions.**
+
+- `hex`: `q` and `r` are **axial** coordinates in the map's own axial system. Wadjet doesn't care
+  whether the map is pointy- or flat-topped; only the map's own resolver interprets them.
+- **Map regions** (a named area on a map, a province, a biome painted over many hexes) use
+  `custom` with a namespace of `"<your plugin id>.region"`:
+
+  ```ts
+  wadjet.resolveZone({ kind: "custom", namespace: "my-maps.region", data: { mapId: "west-march", regionId: "fen" } });
+  ```
+
+  A resolver for that namespace declares `kinds: ["custom"]` and returns `null` for any other
+  namespace.
+
+### Built-in resolver: `wadjet.frontmatter`
+
+Wadjet registers one resolver of its own on load, **first** in the chain and through the same
+public `registerZoneResolver` any plugin uses. For `{ kind: "note", path }` it reads the note's
+`weather-zone` frontmatter key:
+
+```yaml
+---
+weather-zone: greywold-highlands   # a zone id, or a zone name
+---
+```
+
+An exact zone **id** match wins; otherwise the first zone whose **name** matches
+case-insensitively; otherwise `null` (the walk moves on to the next resolver). The code block
+uses this (§8).
+
+### Worked example: an async resolver
+
+A resolver that has to read a file before it can answer. It also answers synchronously from a
+cache, so the code block and `resolveZone` can use it once the cache is warm.
+
+```ts
+const cache = new Map<string, string | null>();
+const off = wadjet.registerZoneResolver({
+  id: "my-maps.hex",
+  kinds: ["hex"],
+  resolve: (l) => (l.kind === "hex" ? (cache.get(`${l.mapId}:${l.q},${l.r}`) ?? null) : null),
+  resolveAsync: async (l) => {
+    if (l.kind !== "hex") return null;
+    const key = `${l.mapId}:${l.q},${l.r}`;
+    if (!cache.has(key)) {
+      const map = JSON.parse(await this.app.vault.adapter.read(`maps/${l.mapId}.json`));
+      cache.set(key, map.cells?.[`${l.q},${l.r}`]?.zone ?? null);
+    }
+    return cache.get(key) ?? null;
+  },
+});
+this.register(off);
+
+const zoneId = await wadjet.resolveZoneAsync({ kind: "hex", mapId: "west-march", q: 3, r: -1 });
+```
+
+### Interpreters
+
+Wadjet reports weather; it never decides what weather does to a game — travel pace, saving
+throws, encounter odds, mood. Those rulings live in **interpreters** that other plugins (a game
+system, a hex crawler, your own script) register. Wadjet ships none.
+
+```ts
+interface WeatherInterpreter<T = unknown> {
+  id: string;            // namespaced: "my-system.mood"; unique among live registrations
+  label: string;         // shown in pickers and in the code block
+  facet: string;         // free-form grouping key
+  description?: string;
+  interpret(report: WeatherReport, ctx: InterpretContext): T; // synchronous
+  format?(result: T): string; // one line for the code block
+}
+
+interface InterpretContext {
+  zoneId: string;                     // report.zoneId
+  classification: Classification;     // classify(report)
+  time: TimeContext;                  // timeAt(report.dayOrdinal, report.zoneId), with report.hour when set
+  options?: Record<string, unknown>;  // whatever the caller passed to interpret()
+}
+
+interface InterpreterInfo { id: string; label: string; facet: string; description?: string }
+```
+
+- **`facet`** is a free-form string that groups interpreters answering the same kind of
+  question, so a consumer can offer "every interpreter with facet X" in a picker. Wadjet gives
+  facets no meaning and defines no result shapes: what an interpreter returns is between it and
+  its callers.
+- **`interpret` is synchronous by contract.** Return a value, not a promise.
+- If `report.zoneId` names a zone that no longer exists (a hand-built report), `ctx.time` is the
+  calendar's context without a hemisphere flip.
+
+Example — a made-up "mood" interpreter a game-system plugin might register:
+
+```ts
+const off = wadjet.registerInterpreter({
+  id: "my-system.mood",
+  label: "Mood",
+  facet: "mood",
+  description: "How the day feels at the table",
+  interpret: (report, ctx) => {
+    const c = ctx.classification;
+    if (c.precipitation === "heavy" || c.beaufort >= 8) return { mood: "grim", score: -2 };
+    if (c.oktas <= 2 && c.feelsLike.mean >= 15) return { mood: "bright", score: 1 };
+    return { mood: "plain", score: 0 };
+  },
+  format: (r) => `${r.mood} (${r.score >= 0 ? "+" : ""}${r.score})`,
+});
+this.register(off);
+
+const report = wadjet.getReport("greywold-highlands");
+const { mood } = wadjet.interpret<{ mood: string; score: number }>("my-system.mood", report);
+```
+
+A note can show the same ruling with no code: `interpret: my-system.mood` in a `wadjet` code
+block (§8).
 
 ---
 
@@ -1242,13 +1664,14 @@ at once — it does not stop at the first one).
 
 | Key | Values | Default | Notes |
 |---|---|---|---|
-| `zone` | a zone id | first configured zone | Errors at render time if the id doesn't match a configured zone. |
+| `zone` | a zone id | the note's zone, else the first configured zone | Errors at render time if the id doesn't match a configured zone. Without `zone:`, the block asks the resolver chain about its own note (`{ kind: "note", path }`; Wadjet's `weather-zone` frontmatter resolver answers first, §5) and falls back to the first zone. Such a block re-renders when the note's metadata changes which zone it resolves to. |
 | `date` | `today` \| `+N` \| `-N` \| an integer `dayOrdinal` \| an adapter-native date string | `today` | `+N`/`-N` are relative to the active adapter's current day (`now()`); `today`/`+N`/`-N` all error if there is no current day set. A bare integer (optionally negative) is taken as a literal `dayOrdinal`. Anything else is handed to the active adapter's optional `parse()`; errors if it returns `null` or the adapter has none. |
 | `hour` | a number in `[0, 24)` | none (whole-day report) | Adds `temperature.current` and `precipitation.active`; error if outside range. |
 | `style` | `card` \| `line` \| `prose` \| `table` \| `value` | `card` | See below. |
 | `range` | integer `1`–`366` | `7` | Only meaningful for `style: table` — the number of consecutive days starting at `date`. |
 | `field` | a `ConvertedReport` leaf: `temperature.high` `temperature.low` `temperature.mean` `temperature.current` `precipitation.type` `precipitation.amount` `precipitation.intensity` `precipitation.active` `humidity` `cloudCover` `wind.speed` `wind.directionDeg` `visibility` `regime` `conditions` `descriptors.temperature` `descriptors.precipitation` `descriptors.wind` `descriptors.sky` `overridden` `units` | none | Required for `style: value`; an error otherwise. |
 | `units` | `metric` \| `imperial` | the setting | Applies to every style. |
+| `interpret` | interpreter ids, comma-separated | none | *(API 1)* For `card`, `line` and `prose`: one line per id under the block, the interpreter's label and its `format(result)` (compact JSON when it has no `format`). An id nobody has registered shows as an error line; the block re-renders when interpreters are registered or unregistered. An error with `table` or `value`. |
 
 ### Styles
 

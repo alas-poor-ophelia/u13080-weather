@@ -241,16 +241,15 @@ export class WadjetSettingTab extends PluginSettingTab {
         this.update(); // pin summaries are shown in the chosen units
         return;
       case "activeTimeAdapter":
-        s.activeTimeAdapter = String(value);
-        this.plugin.time.setActive(s.activeTimeAdapter);
-        await this.plugin.saveAndRebuild();
+        await this.plugin.setActiveTimeAdapter(String(value));
         this.update(); // Moons/Seasons visibility and the read-only calendar row depend on the active adapter
         return;
-      case "currentDayOrdinal":
-        s.currentDayOrdinal = Number(value);
-        await this.plugin.saveSettings();
-        this.plugin.world.emit("time-changed");
-        return;
+      case "currentDayOrdinal": {
+        // The row validates whole days; anything else is left as it was.
+        const d = Number(value);
+        if (!Number.isInteger(d)) return;
+        return this.plugin.setInternalDay(d);
+      }
       case "calendar.yearLength":
         s.calendar.yearLength = Number(value);
         return this.plugin.saveAndRebuild();

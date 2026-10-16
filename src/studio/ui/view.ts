@@ -305,7 +305,13 @@ export class StudioView extends ItemView {
 
     this.unsubscribeStore = this.store.subscribe(() => this.render());
     // An edit outside the studio (settings, a pin, a command) rebuilds the world.
-    this.unsubscribeSettings = this.plugin.api.on("profiles-changed", () => this.refreshFromSettings());
+    // Switching the calendar source fires adapters-changed (not profiles-changed); the studio reads the active calendar on render.
+    const offProfiles = this.plugin.api.on("profiles-changed", () => this.refreshFromSettings());
+    const offAdapters = this.plugin.api.on("adapters-changed", () => this.render());
+    this.unsubscribeSettings = () => {
+      offProfiles();
+      offAdapters();
+    };
 
     this.insetStatusBar();
     this.render();

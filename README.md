@@ -381,27 +381,47 @@ else this.registerEvent(this.app.workspace.on("wadjet:ready", () => init(wadjet(
 
 ```ts
 interface WadjetAPI {
-  version: string; 
+  version: string;
+  apiVersion: 1;                                                // bumps when members are added
   ready: boolean;
-  schemaVersion: number; 
-  generatorVersion: string; rngVersion: string;
+  schemaVersion: 0;
+  generatorVersion: string;
+  rngVersion: string;
 
-  getReport(zoneId: string, time: TimeContext | { dayOrdinal: number; hour?: number }): WeatherReport;
-  
-  getRange(zoneId: string, fromDay: number, toDay: number): WeatherReport[];
-  
-  now(): TimeContext | null;
-  
-  listZones(): Array<{ id: string; name: string }>;
-  
-  describe(report: WeatherReport, style?: "short" | "prose"): string;
-  units(): "metric" | "imperial";                            // the display setting
-  convert(report: WeatherReport, units?): ConvertedReport;   // °F / in / mph / mi, or metric, keys without unit suffixes
+  getReport: (zoneId: string, time?: TimeContext | { dayOrdinal: number; hour?: number }) => WeatherReport; // time defaults to today
+  getRange: (zoneId: string, fromDay: number, toDay: number) => WeatherReport[];
+  now: () => TimeContext | null;
+  listZones: () => Array<{ id: string; name: string }>;
+  timeAt: (dayOrdinal: number, zoneId?: string) => TimeContext; // the day as the generator sees it
+  format: (dayOrdinal: number) => string;                       // the active calendar's date text
+  parse: (text: string) => number | null;
 
-  registerTimeAdapter(adapter: TimeAdapter): () => void;     // your calendar supplies "now"
-  registerZoneResolver(resolver: ZoneResolver): () => void;  // your map says which zone a hex is in
-  resolveZone(locator: ZoneLocator): string | null;
-  on(event: "ready" | "profiles-changed" | "time-changed", cb: () => void): () => void;
+  canSetNow: () => boolean;                                     // can the active calendar's day be moved?
+  setNow: (dayOrdinal: number) => Promise<boolean>;
+  advance: (days: number) => Promise<boolean>;
+
+  registerTimeAdapter: (adapter: TimeAdapter) => () => void;    // your calendar supplies "now"
+  registerZoneResolver: (resolver: ZoneResolver) => () => void; // your map says which zone a hex is in
+  resolveZone: (locator: ZoneLocator) => string | null;
+  resolveZoneAsync: (locator: ZoneLocator) => Promise<string | null>;
+
+  calendar: () => CalendarDescription | null;
+  listTimeAdapters: () => Array<{ id: string; label: string; active: boolean }>;
+
+  describe: (report: WeatherReport, style?: "short" | "prose") => string;
+  units: () => "metric" | "imperial";                           // the display setting
+  convert: (report: WeatherReport, units?: "metric" | "imperial") => ConvertedReport; // keys without unit suffixes
+
+  classify: (report: WeatherReport) => Classification;          // Beaufort, oktas, visibility, precipitation class, feels-like
+  glyphKey: (report: WeatherReport) => GlyphKey;
+  glyph: (keyOrReport: GlyphKey | WeatherReport, opts?: { size?: number; title?: string }) => string; // SVG
+
+  registerInterpreter: (interpreter: WeatherInterpreter) => () => void; // your rules for what weather means
+  listInterpreters: (facet?: string) => InterpreterInfo[];
+  getInterpreter: (id: string) => WeatherInterpreter | null;
+  interpret: <T = unknown>(id: string, report: WeatherReport, options?: Record<string, unknown>) => T;
+
+  on: <E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => void) => () => void;
 }
 ```
 
@@ -410,6 +430,14 @@ interface WadjetAPI {
 A **time adapter** gives the plugin a calendar (`now()`, `toContext(dayOrdinal)`, optionally
 `parse`/`format`); a **zone resolver** answers "which zone is this note / hex / point in" for
 locator kinds it declares. Both are unregistered by calling the function they return.
+
+Wadjet reports weather and standard classes (Beaufort force, oktas, visibility, rainfall class,
+feels-like temperature); it does not decide what weather does in a game. That is what
+**interpreters** are for: a game-system plugin registers one (say, a travel-pace ruling) and
+any note can show it with `interpret: <id>` in a `wadjet` code block. A note can also name its
+own zone with a `weather-zone` frontmatter key. Copy `types/wadjet.d.ts` for typings, and listen
+for `wadjet:unload`: a disabled or reloaded plugin hands out a new API object on the next
+`wadjet:ready`.
 
 The full field-by-field reference — every API member, the `WeatherReport` schema, the adapter and resolver contracts, the zone profile schema and the complete modifier grammar — is in [docs/API.md](docs/API.md).
 
