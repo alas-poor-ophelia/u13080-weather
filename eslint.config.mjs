@@ -25,7 +25,7 @@ export default tseslint.config(
     // `.claude/**` is agent scratch — the CLI checks throwaway git worktrees
     // out under it, each with its own built `main.js`, and a bundle that no
     // tsconfig covers stops typed linting dead.
-    ignores: ["node_modules/**", ".claude/**", "main.js", "**/*.json", "**/*.mjs", "**/*.cjs", "test/e2e/vault/**", "docs/**", "data/**", "NVIDIA Corporation/**"],
+    ignores: ["node_modules/**", ".claude/**", "main.js", "**/*.json", "**/*.mjs", "**/*.cjs", "test/e2e/vault/**", "docs/**", "data/**", "NVIDIA Corporation/**", ".wt/**"],
   },
   ...obsidianForSrc,
   ...tseslint.configs.recommendedTypeChecked,
