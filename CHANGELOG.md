@@ -2,7 +2,11 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
-## Unreleased
+## 0.4.0
+
+A plugin API round: types, classification, glyphs, interpreters, time control and zone resolvers
+for plugins that build on the weather. Nothing about a day's weather or a zone's JSON changes;
+the generator is untouched.
 
 ### Plugin API (API version 1)
 
@@ -60,6 +64,12 @@ Additions for plugins that build on the weather. Nothing about a day's weather c
 - `describe()` no longer repeats the precipitation type when the descriptor already names it:
   "drizzle drizzle" is now "drizzle", and a band label that already says the type (such as
   "heavy rain") is not followed by it again.
+
+**Housekeeping:**
+
+- Dev dependencies move to electron 41 and esbuild 0.28, and patched versions of moment,
+  fast-uri, js-yaml, postcss and brace-expansion are resolved, so `bun audit` reports nothing
+  for the store scan. The shipped plugin depends on none of them at runtime.
 
 ## 0.3.1
 
