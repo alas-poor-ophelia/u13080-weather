@@ -371,7 +371,8 @@ Changing the seed, the year length, a zone's climate, the calendar's moons or th
 
 ## Other Plugins (API)
 
-The API is `app.plugins.plugins.wadjet.api` (also `window.Wadjet`). Wait for it:
+The API is `app.plugins.plugins.wadjet.api` (also `window.Wadjet`). It exists once the plugin has
+loaded and is usable once `ready` is `true`:
 
 ```ts
 const wadjet = () => (this.app as any).plugins.plugins.wadjet?.api;
@@ -425,21 +426,31 @@ interface WadjetAPI {
 }
 ```
 
-`WeatherReport` is a plain object and always metric: temperature (low/high/mean, `current` when an hour is given), precipitation (type, mm, intensity, `active`), wind (km/h, degrees from), cloud cover, humidity, visibility, descriptor words, conditions, `overridden`, and provenance (seed, versions, zone hash). Everything is rounded (0.1 °C, 0.1 mm) so that results match across JavaScript engines. `convert(report)` gives the same thing in the user's units with plain key names (`precipitation.amount`, `wind.speed`, `visibility`) and a `labels` object for display.
+`WeatherReport` is a plain object, always metric. It holds temperature (low, high, mean, and
+`current` when an hour is given), precipitation (type, mm, intensity, and `active` when an hour is
+given), wind (km/h, and the direction it blows from in degrees), cloud cover, humidity, visibility,
+descriptor words, conditions, `overridden`, and provenance (seed, versions, zone and calendar
+hashes). Values are rounded to fixed steps (0.1 °C, 0.1 mm, whole km/h, 0.01 for fractions) so
+results match across JavaScript engines. `convert(report)` returns the same report in the user's
+units, with plain key names (`precipitation.amount`, `wind.speed`, `visibility`) and a `labels`
+object for display.
 
-A **time adapter** gives the plugin a calendar (`now()`, `toContext(dayOrdinal)`, optionally
-`parse`/`format`); a **zone resolver** answers "which zone is this note / hex / point in" for
-locator kinds it declares. Both are unregistered by calling the function they return.
+A time adapter gives the plugin a calendar: `now()`, `toContext(dayOrdinal)`, and optionally
+`parse` and `format`. A zone resolver answers "which zone is this note, hex or point in?" for the
+locator kinds it declares. Each `register…` call returns a function that unregisters it.
 
-Wadjet reports weather and standard classes (Beaufort force, oktas, visibility, rainfall class,
-feels-like temperature); it does not decide what weather does in a game. That is what
-**interpreters** are for: a game-system plugin registers one (say, a travel-pace ruling) and
-any note can show it with `interpret: <id>` in a `wadjet` code block. A note can also name its
-own zone with a `weather-zone` frontmatter key. Copy `types/wadjet.d.ts` for typings, and listen
-for `wadjet:unload`: a disabled or reloaded plugin hands out a new API object on the next
-`wadjet:ready`.
+Wadjet reports weather and standard classes: Beaufort force, oktas, visibility, rainfall class and
+feels-like temperature. It does not decide what weather does in a game. Interpreters do that: a
+game-system plugin registers one, such as a travel-pace ruling, and any note can show its result
+with `interpret: <id>` in a `wadjet` code block. A note can name its own zone with a
+`weather-zone` frontmatter key.
 
-The full field-by-field reference — every API member, the `WeatherReport` schema, the adapter and resolver contracts, the zone profile schema and the complete modifier grammar — is in [docs/API.md](docs/API.md).
+For typings, copy `types/wadjet.d.ts` into your plugin. When the plugin is disabled or reloaded it
+fires `wadjet:unload`, and the old API object stops working. Get the new one on the next
+`wadjet:ready` and register again.
+
+[docs/API.md](docs/API.md) is the full reference: every API member, the `WeatherReport` schema,
+the adapter and resolver contracts, the zone profile schema and the modifier grammar.
 
 > **Q**: Can I use this with Meta Bind/JS Engine/Templater/DataviewJS/etc, rather than writing or installing a whole other plugin?
 > **A**: Sure, so long as whatever solution you're using has the ability to import U+13080, it's all just JS.
