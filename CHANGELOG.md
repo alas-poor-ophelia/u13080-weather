@@ -46,8 +46,9 @@ Additions for plugins that build on the weather. Nothing about a day's weather c
 - Switching the calendar source fires `time-changed` and `adapters-changed` instead of
   `profiles-changed`. Editing the active calendar (year length, epoch year, moons, seasons) fires
   `profiles-changed` with `all: true`, since every report moved.
-- `profiles-changed` now fires on every settings save; `zoneIds` is empty when nothing that
-  changes weather was touched.
+- `profiles-changed` now fires on every save that rebuilds the world (zones, overrides, seed,
+  eras, bands, calendar config); `zoneIds` is empty when nothing that changes weather was touched.
+  The internal-calendar day write and the calendar-source switch do not fire it.
 - `format(dayOrdinal)` of a non-integer now throws a `TypeError`.
 - `setNow` and `advance` keep the current day within ±10,000,000 (a `RangeError` beyond), and
   every day argument must be a safe integer. If the internal calendar can't save a new day, the

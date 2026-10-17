@@ -1,8 +1,8 @@
 # Wadjet (U+13080 Weather) — API Reference
 
 This is a field-by-field reference to the plugin's public surface, generated from source, not
-from intent. Where the design doc (`DESIGN-v1.md`) and the shipped code disagree, this document
-describes the code — the thing a consumer plugin actually talks to.
+from intent. This document describes the shipped code — the thing a consumer plugin actually
+talks to.
 
 **Stability.** The whole plugin is alpha (see the README). Nothing in this surface — the API
 object's shape, the `WeatherReport` schema, the modifier grammar, the code block options — is
@@ -43,6 +43,7 @@ everything in this document. Copy it into your plugin and `import type { WadjetA
 
 **Feature detection.** `apiVersion` (below) bumps whenever members are added. Members this
 document marks *(API 1)* arrived with `apiVersion: 1`; on an older plugin `apiVersion` is absent.
+`on()` callbacks receive payloads from API 1 on.
 
 ---
 
@@ -119,7 +120,7 @@ alpha per its own doc comment ("0 until alpha ships").
 
 ### `generatorVersion`
 
-Type: `string`. Currently `"wadjet-gen/0.0.2"` (`GENERATOR_VERSION`). This is the version of the
+Type: `string`. Currently `"wadjet-gen/0.0.3"` (`GENERATOR_VERSION`). This is the version of the
 **code currently running**, not the version a given world was created with — see the note on
 `WeatherReport.provenance.generatorVersion` in §4.
 
@@ -385,7 +386,7 @@ describe(report: WeatherReport, style?: "short" | "prose"): string
 **Returns:** a human sentence built from the report's descriptors and numbers (never from
 `conditions`/tags directly except to list them). `"short"` is one line, minus-sign-typeset
 temperature range, e.g. `Cold, steady rain, breezy from the WSW, overcast. −1.1 to 7.8 °C.`;
-`"prose"` is a short paragraph. Both are marked "extremely rough for the alpha" in the README.
+`"prose"` is a short paragraph, marked "extremely rough for the alpha" in the README.
 
 ### `units()`
 
@@ -411,7 +412,7 @@ interface ConvertedReport {                    // everything not listed is as in
   labels: { temperature: string; amount: string; speed: string; distance: string }; // "°C"/"°F", "mm"/"in", ...
   temperature: { high: number; low: number; mean: number; current?: number };       // °C or °F, 0.1
   precipitation: { type: PrecipType; amount: number; intensity: number; active?: boolean }; // mm (0.1) or in (0.01)
-  wind: { speed: number; directionDeg: number };                                      // km/h or mph (0.1)
+  wind: { speed: number; directionDeg: number };                                      // km/h (whole) or mph (0.1)
   visibility: number;                                                                 // km or mi (0.1)
 }
 ```
@@ -492,12 +493,12 @@ event name. *(API 1: before, callbacks got no argument.)*
 | Event | Payload | Fires when |
 |---|---|---|
 | `"ready"` | `{ type }` | Once, from inside `onload()`, immediately after `api.ready` is set to `true` and just before the `wadjet:ready` workspace event. Only useful if you obtained the API object before the plugin finished loading; otherwise wait on the workspace event below. |
-| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt (zones, overrides, the seed, eras, descriptor bands; an edit in settings, a pin, a studio save). `zoneIds` lists the zones whose output may have changed — profile, name, `flipSeasons`, or that zone's pinned days — including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed, or when the active calendar's configuration changed in a way that changes reports (its `configHash()`, i.e. `provenance.calendarHash`, moved; for the internal calendar, any edit to year length, epoch year, moons or seasons); `zoneIds` is then every current zone. It fires on **every** save, with `all: false` and `zoneIds: []` when the save touched nothing that changes weather. |
-| `"time-changed"` | `{ type, current: number \| null, adapterId: string }` | Whenever the active calendar's "now" or its shape changes: `setNow`/`advance`, the *Advance/Rewind the calendar one day* commands, editing *Current day* in settings (while the internal calendar is active), switching *Calendar source*, editing the internal calendar's year length, moons or seasons while it is active, registering an adapter whose id is the active setting, unregistering the active adapter (fallback to the internal calendar), or the active adapter's own `subscribe` callback. `current` is `now()?.dayOrdinal` at that moment; `adapterId` is the active adapter. |
+| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt (zones, overrides, the seed, eras, descriptor bands, calendar configuration; an edit in settings, a pin, a studio save). The internal-calendar *Current day* write and the *Calendar source* switch do not rebuild the world and do not fire it. `zoneIds` lists the zones whose output may have changed — profile, name, `flipSeasons`, or that zone's pinned days — including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed, or when the active calendar's configuration changed in a way that changes reports (its `configHash()`, i.e. `provenance.calendarHash`, moved; for the internal calendar, an edit to year length, epoch year, seasons, or a moon's cycle length or epoch phase; renaming named moon phases does not, they are display metadata outside the config hash); `zoneIds` is then every current zone. It fires on **every** such save, with `all: false` and `zoneIds: []` when the save touched nothing that changes weather. |
+| `"time-changed"` | `{ type, current: number \| null, adapterId: string }` | Whenever the active calendar's "now" or its shape changes: `setNow`/`advance`, the *Advance/Rewind the calendar one day* commands, editing *Current day* in settings (while the internal calendar is active), switching *Calendar source*, editing the internal calendar's year length, epoch year, seasons, or a moon's cycle length or epoch phase while it is active, registering an adapter whose id is the active setting, unregistering the active adapter (fallback to the internal calendar), or the active adapter's own `subscribe` callback. `current` is `now()?.dayOrdinal` at that moment; `adapterId` is the active adapter. |
 | `"adapters-changed"` | `{ type }` | Whenever the set of registered time adapters changes — every `registerTimeAdapter` call and every call to the unregister function it returns, active or not — and when *Calendar source* switches to another adapter. Use this to refresh a UI that lists adapters (`listTimeAdapters()`); use `"time-changed"` for one that only cares about the active calendar. |
-| `"resolvers-changed"` | `{ type }` | A zone resolver was registered or unregistered. |
-| `"interpreters-changed"` | `{ type, facet: string }` | An interpreter was registered or unregistered; `facet` is that interpreter's facet. |
-| `"unload"` | `{ type }` | Once, at the start of unload, after `ready` became `false` and before the `wadjet:unload` workspace event. Listeners are dropped right after. |
+| `"resolvers-changed"` *(API 1)* | `{ type }` | A zone resolver was registered or unregistered. |
+| `"interpreters-changed"` *(API 1)* | `{ type, facet: string }` | An interpreter was registered or unregistered; `facet` is that interpreter's facet. |
+| `"unload"` *(API 1)* | `{ type }` | Once, at the start of unload, after `ready` became `false` and before the `wadjet:unload` workspace event. Listeners are dropped right after. |
 
 **Switching the active calendar** fires `time-changed` and `adapters-changed`, not
 `profiles-changed`: zone profiles did not change, and every report carries the calendar in
@@ -513,7 +514,7 @@ configuration changes on its own side is noticed at Wadjet's next save; key cach
 | Event | Fires when |
 |---|---|
 | `"wadjet:ready"` (`app.workspace.trigger`) | At the very end of `onload()`, **after** `api.ready` has been set to `true`. This is the event to wait on. It fires again after a re-enable, with a new API object. |
-| `"wadjet:unload"` (`app.workspace.trigger`) | At the start of `onunload()`, right after the API-level `unload` event. Drop your reference to the API object; it is dead (see *Unload and re-enable* at the top). |
+| `"wadjet:unload"` *(API 1)* (`app.workspace.trigger`) | At the start of `onunload()`, right after the API-level `unload` event. Drop your reference to the API object; it is dead (see *Unload and re-enable* at the top). |
 
 ---
 
@@ -542,7 +543,7 @@ interface TimeContext {
 | `dayOfYear` | `number`, optional | Integer day-of-year, used by the `dayOfYear` predicate (inclusive range test, §7). The internal calendar always supplies it (0-based); a third-party adapter may omit it, in which case `dayOfYear` predicates always evaluate false. |
 | `year` | `number`, optional | The calendar's year number, used by the era timeline. The internal calendar always supplies it (`epochYear` at `dayOrdinal 0`). If an adapter omits it, the era timeline counts years from 1 at day 0 using `yearLength`. |
 | `moons` | `Array<{ name: string; phase: number }>`, optional | `phase` is `[0, 1)`, `0` = new, `0.5` = full. Read by the `moon` predicate. |
-| `tags` | `string[]`, optional | Calendar-provided labels (seasons, festivals, eras — whatever the adapter wants). Read by the `tag` predicate. **Not** copied into `WeatherReport.conditions**; conditions come only from active modifier tags and the fog heuristic (§4). |
+| `tags` | `string[]`, optional | Calendar-provided labels (seasons, festivals, eras — whatever the adapter wants). Read by the `tag` predicate. **Not** copied into `WeatherReport.conditions`**; conditions come only from active modifier tags and the fog heuristic (§4). |
 | `source` | `string` | The adapter's `id`. |
 
 ---
@@ -599,7 +600,7 @@ All values °C, rounded to 0.1 (`Math.round(x*10)/10`).
 
 | Field | Type | Description |
 |---|---|---|
-| `type` | `"none" \| "drizzle" \| "rain" \| "sleet" \| "snow"` | See discrepancy note below — `"hail"` is *not* a value the current type or generator produces. |
+| `type` | `"none" \| "drizzle" \| "rain" \| "sleet" \| "snow"` | `"hail"` is *not* a value the current type or generator produces. |
 | `amountMm` | `number`, mm, rounded to 0.1 | Daily total. `0` if `type === "none"`. Otherwise floored at a **0.1 mm trace**: a wet day never reports `0` (`TRACE_MM = 0.1`). |
 | `intensity` | `number`, `[0, 1]`, rounded to 0.01 | `1 − exp(−amountMm / 20)`, monotone in `amountMm`. Reference points: 10 mm → 0.39, 25 mm → 0.71, 50 mm → 0.92. **Consumers should key on this field, not on `descriptors.precipitation`.** |
 | `active` | `boolean`, optional | Only present when `hour` was given. `false` if the day isn't wet; otherwise whether `hour` falls inside a deterministic daily precipitation window `[start, start+length)` (wrapping midnight): `start` is a per-(seed, zone, day) uniform draw over `[0, 24)`, and `length = min(24, 2 + 12·intensity)` hours (a heavier day rains longer). |
@@ -672,8 +673,8 @@ interface Provenance {
 | `worldSeed` | `string` | The world's seed at generation time (settings). |
 | `generatorVersion` | `string` | The `GENERATOR_VERSION` of the running plugin code. Settings also hold the version the world was created with (it drives the upgrade notice and the *Upgrade* button); `provenance` reports the running version. |
 | `rngVersion` | `string` | The frozen RNG/hash substrate's version. |
-| `profileHash` | `string` | `wh1:<8 hex><8 hex>` — two 32-bit hashes over the canonical JSON of `{ climate, regimes, modifiers }` for the zone (i.e. Tier C plus regimes/modifiers; the copied preset and geography are already baked into `climate` and don't appear separately). Changes whenever the zone's profile changes. |
-| `calendarHash` | `string` | The active time adapter's `configHash()` (for the internal calendar: `ical:<8 hex>` over year length, epoch year, moons, seasons), followed by `+eras:<8 hex>` over the era timeline when one is configured. |
+| `profileHash` | `string` | `wh1:<8 hex><8 hex>` — two 32-bit hashes over the canonical JSON of `{ climate, regimes, modifiers }` plus the automation lanes when the zone has any, for the zone (i.e. Tier C plus regimes/modifiers; the copied preset and geography are already baked into `climate` and don't appear separately). Changes whenever the zone's profile changes. |
+| `calendarHash` | `string` | The active time adapter's `configHash()` (for the internal calendar: `ical:<8 hex>` over year length, epoch year, moon cycle lengths and epoch phases, seasons; named moon phases are not hashed), followed by `+eras:<8 hex>` over the era timeline when one is configured. |
 
 Consumers wanting to cache a report should key on the full tuple `(zoneId, dayOrdinal, hour,
 provenance.*)`, not just `(zoneId, dayOrdinal)` — any provenance field changing means the weather
@@ -713,7 +714,7 @@ falls back as follows:
 | `cloudCover` | `NaN` | 0 oktas (`Infinity` is 8, `-Infinity` 0) |
 | `visibilityKm` | `NaN` | `"moderate"`, the middle of the scale (`Infinity` is `"excellent"`, `-Infinity` `"very-poor"`) |
 | `precipitation.amountMm` | `NaN` on a wet day | `"very-light"` (`Infinity` is `"extremely-heavy"`); a `none` day is `"none"` whatever the amount |
-| `humidity` | `NaN`, `±Infinity` | no heat index: feels like the air temperature |
+| `humidity` | `NaN`, `±Infinity` | no heat index; wind chill is unaffected |
 | `temperature.mean` / `.current` | `NaN`, `±Infinity` | `feelsLike` is that same value |
 
 **Beaufort** — the WMO Beaufort scale (WMO Manual on Marine Meteorological Services, WMO-No. 558;
@@ -756,8 +757,8 @@ override. Fog is a **condition** (`report.conditions` contains `"fog"`), not a v
 | `very-good` | 20–40 |
 | `excellent` | ≥ 40 |
 
-**Oktas** — WMO Manual on Codes (WMO-No. 306), code table 2700: `0` only when `cloudCover` is
-exactly 0, `8` only when it is exactly 1, otherwise `round(cloudCover × 8)` clamped to 1–7.
+**Oktas** — WMO Manual on Codes (WMO-No. 306), code table 2700: `0` when `cloudCover` is
+0 or less, `8` when it is 1 or more, otherwise `round(cloudCover × 8)` clamped to 1–7.
 
 **Feels like** — apparent temperature in °C, rounded to 0.1, for `temperature.mean` and (on an
 hourly report) `temperature.current`, using the report's daily `humidity` and `wind.speedKph`:
@@ -766,8 +767,8 @@ hourly report) `temperature.current`, using the report's daily `humidity` and `w
   > 4.8 km/h;
 - heat index, the full NWS algorithm (NWS Weather Prediction Center, "The Heat Index Equation";
   Rothfusz 1990, SR 90-23), when T ≥ 80 °F (≈ 26.7 °C): Steadman's simple form first, then the
-  Rothfusz regression with its low- and high-humidity adjustments when the simple result is
-  80 °F or more. The heat index switches on in **one step at 80 °F**, and in dry air it reads
+  Rothfusz regression with its low- and high-humidity adjustments when the average of the simple
+  result and T is 80 °F or more. The heat index switches on in **one step at 80 °F**, and in dry air it reads
   **below** the air temperature, as the NWS equation does (at 80 °F and 10 % humidity it gives
   about 79 °F), so feels-like can drop as the air warms across 80 °F;
 - otherwise the air temperature.
@@ -814,7 +815,7 @@ methods satisfies either form.)
 |---|---|---|
 | `id` | yes | Stable identity; used as the settings dropdown value and as the registration key (a second `register` under the same id replaces the first). |
 | `now()` | yes | The calendar's current date as a `TimeContext`, or `null` if it has none. |
-| `toContext(dayOrdinal)` | yes | **MUST be O(1) or O(log n)** — called for every warm-up day inside generation (up to 90 days per query, see §9), so anything heavier will be felt. **MUST extrapolate rather than throw** for a `dayOrdinal` outside the calendar's defined range (use the nearest defined year length or equivalent); the internal fallback adapter does this by construction. |
+| `toContext(dayOrdinal)` | yes | **MUST be O(1) or O(log n)** — called for every day of the 154-day block replay (90 warm-up + 64, see §9), and for more when the zone has spell modifiers (each adds a 365-day window estimate, and the spell lookback reaches up to 401 days back), so anything heavier will be felt. **MUST extrapolate rather than throw** for a `dayOrdinal` outside the calendar's defined range (use the nearest defined year length or equivalent); the internal fallback adapter does this by construction. |
 | `configHash()` | yes | A string identifying the adapter's *configuration* (not its current date) — folded into `provenance.calendarHash`. Should change whenever a setting that affects `toContext`'s output changes. |
 | `parse(text)` | optional | Parse a calendar-native date string (e.g. from a `wadjet` code block's `date:` field) to a `dayOrdinal`, or `null` if unparseable. |
 | `format(dayOrdinal)` | optional | Human-readable rendering of a day, used by the codeblock renderer and commands. |
@@ -840,8 +841,9 @@ and say so in a notice when it can't be moved.
 
 **Which adapter is active is the user's choice in settings, not the registering plugin's** — see
 `registerTimeAdapter` above. A calendar plugin should implement `describe()` regardless of whether
-it expects to be the active one; `listTimeAdapters()` reads it for every registered adapter to
-build the settings dropdown's labels.
+it expects to be the active one; `listTimeAdapters()` reads `describe().label` for every
+registered adapter (falling back to the id). The settings *Calendar source* dropdown currently
+labels each adapter by its bare `id`.
 
 ### `CalendarDescription`
 
@@ -877,7 +879,7 @@ drift, that test fails.
 
 ```ts
 // mirrors test/fixtures/api/third-party-calendar.ts
-import type { CalendarDescription, TimeAdapter, TimeContext } from "wadjet/time/adapter"; // illustrative import path
+import type { CalendarDescription, TimeAdapter, TimeContext } from "./wadjet";
 
 export function makeAdapter(): TimeAdapter {
   const YEAR_DAYS = 400;
@@ -1113,7 +1115,9 @@ interface InterpreterInfo { id: string; label: string; facet: string; descriptio
 Example — a made-up "mood" interpreter a game-system plugin might register:
 
 ```ts
-const off = wadjet.registerInterpreter({
+import type { WeatherInterpreter } from "./wadjet";
+
+const mood: WeatherInterpreter<{ mood: string; score: number }> = {
   id: "my-system.mood",
   label: "Mood",
   facet: "mood",
@@ -1125,7 +1129,8 @@ const off = wadjet.registerInterpreter({
     return { mood: "plain", score: 0 };
   },
   format: (r) => `${r.mood} (${r.score >= 0 ? "+" : ""}${r.score})`,
-});
+};
+const off = wadjet.registerInterpreter(mood as WeatherInterpreter);
 this.register(off);
 
 const report = wadjet.getReport("greywold-highlands");
@@ -1202,7 +1207,7 @@ Every numeric leaf is a `Curve` unless noted "scalar". All units per the doc com
 | `temperature.diurnalRange` | Curve | °C | `Tmax − Tmin`. |
 | `temperature.phase` | scalar | yearPhase `[0,1)` | yearPhase of the coldest day — hemisphere lives here. **Required**, no default. |
 | `temperature.wetDayOffset` | Curve | °C | Added to the mean on wet days (usually negative in summer — wet days run cooler). |
-| `temperature.persistence` | scalar | AR(1) coefficient | Error outside `[0, MAX_PERSISTENCE]`; warning above `0.9` (a faint seam may appear every 64 days) — see the validation table in §7. |
+| `temperature.persistence` | scalar | AR(1) coefficient | Error outside `[0, MAX_PERSISTENCE]` (`MAX_PERSISTENCE` is 0.95); warning above `0.9` (a faint seam may appear every 64 days) — see the validation table in §7. |
 | `temperature.sd` | Curve | °C | Residual SD of the daily mean; used for `sdHigh`/`sdLow` when they're absent. |
 | `temperature.sdHigh` | Curve, optional | °C | Residual SD of the daily high. Falls back to `sd`. |
 | `temperature.sdLow` | Curve, optional | °C | Residual SD of the daily low. Falls back to `sd`. |
@@ -1216,7 +1221,7 @@ Every numeric leaf is a `Curve` unless noted "scalar". All units per the doc com
 | `precipitation.pwd` | Curve | probability `[0,1]` | P(wet given yesterday dry). |
 | `precipitation.shape` | Curve | gamma shape (α) | Shape of the wet-day amount distribution. |
 | `precipitation.scale` | Curve | gamma scale (β), mm | Scale of the wet-day amount distribution. |
-| `precipitation.freezingPoint` | scalar | °C | Below this daily mean, precipitation becomes snow rather than rain/sleet/drizzle. |
+| `precipitation.freezingPoint` | scalar | °C | Precipitation is snow when the daily mean is at or below this, and sleet in the 2 °C band above it (`SLEET_BAND_C`); otherwise rain/drizzle. |
 
 #### `humidity`, `cloud` (`WetDrySplit`)
 
@@ -1437,9 +1442,9 @@ multiple keys, and rejects any key not in this list.
 | `not` | `Predicate` | Negation of the child. |
 | `moon` | `{ name: string; phase: [lo, hi] }` | True iff a moon named `name` exists in the day's `TimeContext.moons` and its `phase` (`[0,1)`, `0` = new, `0.5` = full) falls in `[lo, hi)` **on the unit circle** — the range **wraps** if `lo > hi` (e.g. `[0.9, 0.1]` covers new-moon-adjacent phases on both sides of `0`). If `lo === hi` the predicate is always false. If no moon of that name exists in the context, false. |
 | `yearPhase` | `[lo, hi]`, values in `[0, 1]` | Same wrap-around-circle semantics as `moon.phase`, tested against `TimeContext.yearPhase`. |
-| `dayOfYear` | `[lo, hi]`, integers in `[0, 100000]` | **Inclusive** on both ends (`dayOfYear >= lo && dayOfYear <= hi`), **does not wrap**. False if the time context has no `dayOfYear`. |
+| `dayOfYear` | `[lo, hi]`, numbers in `[0, 100000]` | **Inclusive** on both ends (`dayOfYear >= lo && dayOfYear <= hi`), **does not wrap**. False if the time context has no `dayOfYear`. |
 | `tag` | `string` | True iff the string is present in the day's tags: `TimeContext.tags` (calendar-provided — seasons, eras, festivals) plus tags set by modifiers **earlier in the list** the same day. Spells replay earlier days and see only calendar tags. Not `WeatherReport.conditions`. |
-| `regime` | `string` (a regime id) | True iff that regime is the one active on the day. Only known at generation time — see the `stripRegime` note below re: `spell` window estimation. |
+| `regime` | `string` (a regime id) | True iff that regime is the one active on the day. Only known at generation time — see the SpellSpec "Start probability" bullet re: `spell` window estimation. |
 | `chance` | `number`, `[0, 1]` | A per-day Bernoulli draw seeded by `hash(seed, zoneId, dayOrdinal, "mod:<modifierId>:chance")` — independent per day, no memory. Use this for a single freak day; use `spell` for a run of days. |
 
 ### `SpellSpec` — multi-day events
@@ -1571,7 +1576,7 @@ present.
 | `id` | error | Zone `id` missing. |
 | `climate` | error | `climate` object missing (all other climate checks are skipped). |
 | `climate.<param>` (every required Curve path) | error | Not a valid Curve: not finite (constant), empty keyframe array, keyframe missing numeric `at`/`value`, `at` outside `[0,1)`, or a harmonic missing numeric `mean`/`amplitude`/`phase`, or `phase` outside `[0,1)`. |
-| `climate.temperature.persistence` | error | Missing or outside `[0, MAX_PERSISTENCE]` (`MAX_PERSISTENCE` from `src/core/generator.ts`). |
+| `climate.temperature.persistence` | error | Missing or outside `[0, MAX_PERSISTENCE]` (`MAX_PERSISTENCE` = 0.95, from `src/core/generator.ts`). |
 | `climate.temperature.persistence` | warning | Above `0.9` — "a faint seam may appear every 64 days" (the block-warm-up seam, §9). |
 | `climate.temperature.phase` | error | Missing or outside `[0,1)`. |
 | `regimes` | error | Missing/empty array, or no regime with `weight > 0`. |
@@ -1586,7 +1591,7 @@ present.
 | `modifiers[i].when` | error | Predicate shape violations (wrong key count, unknown predicate key, out-of-range values — see the Predicates table's ranges: `moon.phase`/`yearPhase` must be within `[0,1]`, `dayOfYear` within `[0, 100000]`, `chance` within `[0,1]`, `tag`/`regime` non-empty strings). |
 | `modifiers[i].spell.meanStartsPerYear` | error | Not `> 0`. |
 | `modifiers[i].spell.meanDurationDays` | error | `< 1`. |
-| `modifiers[i].spell.meanDurationDays` | warning | `> 50` — "very long spells are looked back over at most 400 days". |
+| `modifiers[i].spell.meanDurationDays` | warning | `> 50` — "very long spells (> 50 days) are looked back over at most 400 days". |
 | `modifiers[i].apply` | error | Not an array; any op not an object; op's `param` not a valid path for the modifier's stage; op's `op` not one of `set`/`offset`/`scale`/`clamp`; `clamp` with neither `min` nor `max`; non-`clamp` op with a non-finite `value`. |
 | `modifiers[i].enabled`, `modifiers[i].apply[j].enabled` | error | Present but not `true`/`false`. |
 | `modifiers[i].mods` | error | Not an array, or present on a `climate`-stage modifier. |
@@ -1609,9 +1614,10 @@ present.
 | `automation[i].<field>` | warning | Unknown field on a lane — ignored (the same rule eras carry). |
 
 The complete list of paths this table can produce is checked in as
-`test/fixtures/studio/validator-paths.json`, generated from
-`test/fixtures/studio/trip-every-rule.json` by `test/validator-paths.test.ts` — a rule with no
-path there is a rule the UI has nowhere to show.
+`test/fixtures/studio/validator-paths.json` (`EXPECTED_PATHS`). `test/validator-paths.test.ts`
+fails unless the paths raised on the `test/fixtures/studio/trip-every-rule.json` fixtures plus a
+few mini-fixtures equal that file — a rule with no path there is a rule the UI has nowhere to
+show.
 
 ---
 
@@ -1716,13 +1722,13 @@ at once — it does not stop at the first one).
 
 | Style | Renders |
 |---|---|
-| `card` | Icon, one-line summary, and a temperature / precipitation / wind / sky / humidity / visibility grid, in the units configured in settings (metric/imperial). |
+| `card` | Icon, one-line summary, and a temperature / precipitation / wind / sky / humidity / visibility / conditions grid, in the units given by `units:` when set, else the settings (metric/imperial); a pinned note appears when the day is overridden. |
 | `line` | One line, e.g. `🌧 Year 3, day 14: Cold, steady rain, breezy from the WSW, overcast. 1.1 to 7.8 °C.` |
 | `prose` | A short paragraph from `describe(report, "prose")` — flagged in the README as "extremely rough for the alpha". |
 | `table` | One row per day for `range` days starting at `date`, pinned (overridden) days marked with 📌. |
 | `value` | The one `field`, bare, in a `<span class="wadjet-value">`: numbers as digits (no unit), lists comma-joined, booleans `yes`/`no`, a missing field (e.g. `temperature.current` without `hour`) as empty. |
 
-Day numbers count from the first day of year 1, which is `dayOrdinal 0`. `Y-D` date strings
+Day numbers count from the first day of the calendar's epoch year (year 1 by default), which is `dayOrdinal 0`. `Y-D` date strings
 (e.g. `3-14`) are the internal calendar's own year-day notation, parsed by
 `InternalCalendar.parse`, and are one such adapter-native format among possibly others.
 
@@ -1740,17 +1746,19 @@ Mechanism: every random draw on day `d` is `hash(worldSeed, zoneId, d, drawName)
 running RNG stream carried across days. Query cost is bounded because each day's computation
 replays from a **grid-anchored warm-up**: day `d` belongs to a 64-day block, and that block's
 computation always starts from a state hashed purely from `(worldSeed, zoneId, blockIndex)`,
-30 days (90 for the regime layer) before the block. A single-day query and a range query that
+90 days before the block (one warm-up for the whole chain). A single-day query and a range query that
 happens to touch the same day produce the identical result, because both replay the identical
 sequence from the identical anchor — agreement is structural, not the result of the chain having
-"mixed enough" (which is why `persistence` and regime `meanDurationDays` are capped: capping
-keeps the warm-up window long enough relative to persistence that the block seam stays invisible
-in practice, not because correctness depends on it).
+"mixed enough" (which is why `persistence` is capped, as an error above 0.95 (`MAX_PERSISTENCE`):
+capping keeps the warm-up window long enough relative to persistence that the block seam stays
+invisible in practice, not because correctness depends on it). A regime `meanDurationDays` above
+30 draws a warning, not a cap.
 
 **What changes past weather** (anything in the five-input domain): editing a zone's climate,
 regimes, or modifiers; changing the world seed; changing the calendar's year length, epoch, or
-moon configuration; upgrading the generator version. **What does not**: which zone/day you
-queried, in what order, or from a single-day vs. range call; overrides are layered on top of the
-generated report and are the only thing the plugin persists — they always win and survive any of
-the above changes. See the provenance discrepancy note (end of report) regarding
-`generatorVersion` specifically.
+moon configuration; upgrading the generator version. Also the era timeline (in `calendarHash`),
+automation lanes (in `profileHash`) and `flipSeasons` (in the generator cache key); descriptor
+bands and pinned overrides change the report too. **What does not**: which zone/day you queried,
+in what order, or from a single-day vs. range call. Overrides are layered on top of the generated
+report and always win; they are stored with the rest of the settings in `data.json` and survive
+any of the above changes. `provenance.generatorVersion` reports the running version.
