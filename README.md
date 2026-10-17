@@ -360,14 +360,14 @@ A day's weather is a pure function of five things: the world seed, the generator
 zone profile, the calendar and the day number, and nothing else. Nothing runs in the background and nothing is cached (except pinned events).
 
 - **Same seed === same weather.** Any two vaults with the same seed/same generator version are **guaranteed** to be the same. A "real" feeling weather system is pretty useless for a consistent world if it can change at random.
-- **The generator is pinned per world.** When a plugin update changes the numbers, your world will keep using the version it was created with until you press *Upgrade* in settings. 
+- **Generator changes are never silent.** Only the current generator ships, so a plugin update that changes the numbers changes past weather too. When that happens, Wadjet tells you on load and in settings until you press *Acknowledge*. 
 - **Pinned days survive everything.**
 
 Changing the seed, the year length, a zone's climate, the calendar's moons or the eras does change past weather; I have tried to make it clear where this is the case.
 
 > **Q**: So will the generator just constantly be getting breaking changes? Can I not take advantage of new features without risking my weather changing?
 > 
-> **A**: During the alpha, honestly.... yeah, probably. I'll do my best, but there may be some flex out of necessity. After the alpha, I expect it to be very rare. Think of this as a safety lever you hopefully don't need
+> **A**: During the alpha, honestly.... yeah, probably. I'll do my best, but there may be some flex out of necessity. After the alpha, I expect it to be very rare. Pinned days keep the values you pinned through any generator change.
 
 ## Other Plugins (API)
 

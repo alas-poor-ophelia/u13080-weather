@@ -1,8 +1,9 @@
 /**
  * Persisted plugin state (data.json). Pure: no Obsidian imports.
  *
- * History policy (DESIGN-v1.md §6): the world pins `generatorVersion`; the
- * plugin refuses to silently run a newer generator on an older world.
+ * History policy (DESIGN-v1.md §6): `generatorVersion` is the generator this
+ * world last accepted. Only the current generator ships; a mismatch is shown
+ * to the user (Notice + settings) until they acknowledge it.
  */
 import type { Override } from "../core/report";
 import type { DescriptorBands } from "../core/report";

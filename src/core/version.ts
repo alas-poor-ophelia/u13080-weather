@@ -2,8 +2,9 @@
  * Version strings that appear in WeatherReport.provenance (DESIGN-v1.md §6).
  *
  * - RNG_VERSION lives in rng.ts and is frozen with it.
- * - GENERATOR_VERSION changes whenever generator *math* changes. Worlds pin
- *   it; a change is a user-visible "upgrade generator" action, never silent.
+ * - GENERATOR_VERSION changes whenever generator *math* changes. Only the
+ *   current generator ships; each world records the version it last accepted,
+ *   and a change is shown to the user until acknowledged, never silent.
  * - SCHEMA_VERSION is the WeatherReport shape. 0 until alpha ships.
  */
 export { RNG_VERSION } from "./rng";

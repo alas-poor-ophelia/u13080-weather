@@ -97,7 +97,7 @@ export default class WadjetPlugin extends Plugin {
     this.registerCommands();
 
     if (generatorMismatch(this.settings)) {
-      new Notice(`The weather generator was updated (${this.settings.generatorVersion} → ${GENERATOR_VERSION}). Past weather stays as it was until you upgrade the world in settings.`, 10000);
+      new Notice(`The weather generator was updated (${this.settings.generatorVersion} → ${GENERATOR_VERSION}). Only the current generator ships, so past weather may differ from what you saw before. Pinned days are kept. You can acknowledge the change in settings.`, 10000);
     }
 
     await this.saveSettings(); // persist a freshly generated seed

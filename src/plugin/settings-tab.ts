@@ -68,17 +68,17 @@ export class WadjetSettingTab extends PluginSettingTab {
           },
           {
             name: "Generator",
-            desc: `This world uses ${s.generatorVersion}. The plugin now ships ${GENERATOR_VERSION}; upgrading changes past weather. Pinned days are kept.`,
+            desc: `This world last accepted ${s.generatorVersion}. The plugin now runs ${GENERATOR_VERSION}. Only the current generator ships, so past weather may already differ from before. Pinned days are kept.`,
             visible: () => generatorMismatch(this.plugin.settings),
             render: (setting) => {
               setting.addButton((b) =>
                 b
-                  .setButtonText("Upgrade")
-                  .setDestructive()
+                  .setButtonText("Acknowledge")
                   .onClick(() => {
+                    // Acknowledging records the version; it changes no weather (the running generator already made every report).
                     this.plugin.settings.generatorVersion = GENERATOR_VERSION;
-                    new Notice("Generator upgraded. Past weather has changed.");
-                    this.saveAndRefresh(true);
+                    new Notice("Generator change acknowledged.");
+                    this.saveAndRefresh(false);
                   }),
               );
             },

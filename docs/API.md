@@ -678,7 +678,7 @@ interface Provenance {
 | Field | Type | Description |
 |---|---|---|
 | `worldSeed` | `string` | The world's seed at generation time (settings). |
-| `generatorVersion` | `string` | The `GENERATOR_VERSION` of the running plugin code. Settings also hold the version the world was created with, which drives the upgrade notice and the *Upgrade* button. `provenance` reports the running version. |
+| `generatorVersion` | `string` | The `GENERATOR_VERSION` of the running plugin code. Settings also hold the version the world last accepted, which drives the generator-change notice and the *Acknowledge* button. Only the current generator ships, so every report comes from the running version, and `provenance` reports it. |
 | `rngVersion` | `string` | The frozen RNG/hash substrate's version. |
 | `profileHash` | `string` | `wh1:<8 hex><8 hex>`: two 32-bit hashes over the canonical JSON of the zone's `{ climate, regimes, modifiers }`, plus its automation lanes when it has any. This covers Tier C plus regimes and modifiers. The copied preset and geography are already baked into `climate` and do not appear separately. Changes whenever the zone's profile changes. |
 | `calendarHash` | `string` | The active time adapter's `configHash()`, followed by `+eras:<8 hex>` over the era timeline when one is configured. For the internal calendar the hash is `ical:<8 hex>` over year length, epoch year, moon cycle lengths and epoch phases, and seasons; named moon phases are not hashed. |
@@ -1766,7 +1766,7 @@ does not depend on it. A regime `meanDurationDays` above 30 draws a warning, not
 
 **What changes past weather** (anything in the five-input domain): editing a zone's climate,
 regimes, or modifiers; changing the world seed; changing the calendar's year length, epoch, or
-moon configuration; upgrading the generator version. The era timeline (in `calendarHash`),
+moon configuration; a plugin update that changes the generator version. The era timeline (in `calendarHash`),
 automation lanes (in `profileHash`) and `flipSeasons` (in the generator cache key) also change it.
 Descriptor bands and pinned overrides change the report too.
 

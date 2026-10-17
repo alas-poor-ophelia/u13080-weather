@@ -2,6 +2,15 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
+## Unreleased
+
+- **The generator-change notice no longer promises something the plugin does not do.** Older
+  versions said past weather "stays as it was until you upgrade the world". Only the current
+  generator ships, so a generator change already applies to every report. The notice and the
+  settings row now say that past weather may differ, and the *Upgrade* button is now
+  *Acknowledge*: it records that you've seen the change and changes no weather. Pinned days are
+  kept, as before.
+
 ## 0.4.0
 
 A plugin API round: types, classification, glyphs, interpreters, time control and zone resolvers
