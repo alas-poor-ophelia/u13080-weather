@@ -5,6 +5,7 @@
  */
 import { Modal, Notice, PluginSettingTab, Setting, type App, type DropdownComponent, type SettingDefinitionItem, type SettingGroupItem, type TextComponent } from "obsidian";
 import { validateEras } from "../core/eras";
+import { YEAR_LENGTH_MAX } from "../core/modifiers";
 import { koppenOfClimate } from "../core/koppen";
 import { validateProfile } from "../core/profile";
 import type { Override, OverridePatch } from "../core/report";
@@ -107,7 +108,7 @@ export class WadjetSettingTab extends PluginSettingTab {
           {
             name: "Days in a year",
             desc: "Changing it moves the seasons, so every day's weather changes.",
-            control: { type: "number", key: "calendar.yearLength", min: 1, step: 1, validate: (v) => (Number.isInteger(v) && v >= 1 ? undefined : "At least one day.") },
+            control: { type: "number", key: "calendar.yearLength", min: 1, max: YEAR_LENGTH_MAX, step: 1, validate: (v) => (Number.isInteger(v) && v >= 1 && v <= YEAR_LENGTH_MAX ? undefined : `Between 1 and ${YEAR_LENGTH_MAX.toLocaleString("en")} days.`) },
           },
           {
             name: "Moons",

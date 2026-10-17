@@ -16,7 +16,7 @@ import type { Preset } from "../src/core/types";
 import { GENERATOR_VERSION } from "../src/core/version";
 import { buildGolden, compareGolden, type Golden } from "../test/golden/golden";
 import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "../test/golden/golden-gen";
-import { buildGoldenCal, compareGoldenCal, type GoldenCal } from "../test/golden/golden-cal";
+import { buildGoldenCal, compareGoldenCal, summarizeGoldenCalDiffs, type GoldenCal } from "../test/golden/golden-cal";
 
 const rngPath = new URL("../test/golden/rng-1.json", import.meta.url);
 const genPath = new URL("../test/golden/gen-0.0.3.json", import.meta.url);
@@ -68,7 +68,9 @@ if (calDiffs.length === 0) {
   console.log(`calendar golden OK (${storedCal.worlds.map((w) => w.id).join(", ")})`);
 } else {
   failed = true;
-  console.error(`CALENDAR GOLDEN DRIFT — ${calDiffs.length} difference(s):`);
+  console.error(`CALENDAR GOLDEN DRIFT — ${calDiffs.length} difference(s), by category:`);
+  for (const line of summarizeGoldenCalDiffs(calDiffs)) console.error("  " + line);
+  console.error("first differences:");
   for (const d of calDiffs.slice(0, 40)) console.error("  " + d);
   if (calDiffs.length > 40) console.error(`  ... ${calDiffs.length - 40} more`);
 }

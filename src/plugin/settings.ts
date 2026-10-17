@@ -101,13 +101,45 @@ export function freshSeed(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Merge loaded data over defaults; fill a seed if missing. Returns a new object. */
-export function migrateSettings(raw: unknown): WadjetSettings {
+const DEFAULT_MOON = DEFAULT_SETTINGS.calendar.moons[0]!;
+
+/**
+ * The internal calendar's moons, repaired so the plugin always loads: a
+ * `moons` that is not a list becomes the default list; a moon whose cycle is
+ * not a positive finite number gets the default cycle, and a non-finite epoch
+ * phase becomes 0. Each repair is reported through `warn`. Valid moons are
+ * returned as they were (an epoch phase outside [0, 1) is valid: the calendar
+ * reduces it exactly), so their config hash does not move.
+ */
+function sanitizeMoons(moons: unknown, warn: (msg: string) => void): MoonConfig[] {
+  if (!Array.isArray(moons)) {
+    warn("The calendar's moons were not a list, so the default moon was used.");
+    return DEFAULT_SETTINGS.calendar.moons.map((m) => ({ ...m }));
+  }
+  return moons.map((raw: unknown, i) => {
+    const m = (raw && typeof raw === "object" ? raw : {}) as Partial<MoonConfig>;
+    const name = typeof m.name === "string" && m.name ? m.name : `Moon ${i + 1}`;
+    const fixed: MoonConfig = { ...m, name, cycleDays: m.cycleDays as number, phaseAtEpoch: m.phaseAtEpoch as number };
+    if (typeof m.cycleDays !== "number" || !Number.isFinite(m.cycleDays) || m.cycleDays <= 0) {
+      warn(`Moon "${name}" had no usable cycle length, so it was set to ${DEFAULT_MOON.cycleDays} days.`);
+      fixed.cycleDays = DEFAULT_MOON.cycleDays;
+    }
+    if (typeof m.phaseAtEpoch !== "number" || !Number.isFinite(m.phaseAtEpoch)) {
+      warn(`Moon "${name}" had no usable phase at day 0, so it was set to 0.`);
+      fixed.phaseAtEpoch = 0;
+    }
+    return fixed;
+  });
+}
+
+/** Merge loaded data over defaults; fill a seed if missing; repair broken moons (reported through `warn`). Returns a new object. */
+export function migrateSettings(raw: unknown, warn: (msg: string) => void = () => {}): WadjetSettings {
   const r = (raw ?? {}) as Partial<WadjetSettings>;
+  const calendar = { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) };
   const s: WadjetSettings = {
     ...DEFAULT_SETTINGS,
     ...r,
-    calendar: { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) },
+    calendar: { ...calendar, moons: sanitizeMoons(calendar.moons, warn) },
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],
@@ -119,7 +151,7 @@ export function migrateSettings(raw: unknown): WadjetSettings {
   return s;
 }
 
-/** The world was created under a different generator: only an explicit upgrade may change this. */
+/** The world last accepted a different generator: shown to the user until they acknowledge it. */
 export function generatorMismatch(s: WadjetSettings): boolean {
   return s.generatorVersion !== GENERATOR_VERSION;
 }

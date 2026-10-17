@@ -174,6 +174,28 @@ function walk(path: string, a: unknown, b: unknown, out: string[]): void {
   for (const k of keys) walk(path ? `${path}.${k}` : k, (a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], out);
 }
 
+/**
+ * Group diffs from compareGoldenCal by world and field, with day and array
+ * indices folded to `*`: `internal-365 time.moons.*.phase  ×412`. This is how
+ * a calendar change is reviewed: by category, then by sample line.
+ */
+export function summarizeGoldenCalDiffs(diffs: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const line of diffs) {
+    const path = line.slice(0, line.indexOf(": "));
+    const world = path.split(".")[0]!;
+    const field = path
+      .slice(world.length)
+      .replace(/\.zone \d+/, "")
+      .replace(/\.day#\d+/, "")
+      .replace(/\.\d+(?=\.|$)/g, ".*")
+      .replace(/^\./, "");
+    const key = `${world} ${field || "(world)"}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => a[0].localeCompare(b[0])).map(([k, n]) => `${k}  ×${n}`);
+}
+
 /** Turn `worlds.0.zones.1.days.7.report.x` into something a person can read. */
 function label(path: string): string {
   return path.replace(/^worlds\.(\d+)/, (_, i: string) => WORLDS[Number(i)]?.id ?? `world ${i}`).replace(/\.zones\.(\d+)/, ".zone $1").replace(/\.days\.(\d+)/, ".day#$1");

@@ -44,6 +44,13 @@ export default tseslint.config(
     },
   },
   {
+    // Seshat is a leaf library (docs/SESHAT-v0.md §7): it imports nothing outside src/seshat.
+    files: ["src/seshat/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["obsidian", "../*", "../**"], message: "src/seshat imports nothing outside src/seshat." }] }],
+    },
+  },
+  {
     // Tests and scripts drive a real Obsidian through page.evaluate and print reports:
     // `any`, non-null assertions and console are the job there.
     files: ["test/**/*.ts", "scripts/**/*.ts"],

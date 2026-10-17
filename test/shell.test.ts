@@ -25,6 +25,53 @@ describe("settings", () => {
     expect(migrateSettings(undefined).zones).toEqual([]);
   });
 
+  test("migrate: valid moons pass through unchanged and nothing is reported", () => {
+    const warnings: string[] = [];
+    const moons = [
+      { name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0, phases: [{ name: "Full", at: 0.5 }] },
+      { name: "Ash", cycleDays: 7.3, phaseAtEpoch: -0.25 },
+      { name: "Ember", cycleDays: 33, phaseAtEpoch: 1.2 },
+    ];
+    const s = migrateSettings({ calendar: { moons } }, (m) => warnings.push(m));
+    expect(s.calendar.moons).toEqual(moons);
+    expect(warnings).toEqual([]);
+    // the same config hash before and after: an out-of-range epoch phase is valid, not repaired
+    const before = new InternalCalendar({ ...DEFAULT_SETTINGS.calendar, moons }, () => 0).configHash();
+    expect(new InternalCalendar(s.calendar, () => 0).configHash()).toBe(before);
+  });
+
+  test("migrate: broken moons are repaired, reported, and the plugin still loads", () => {
+    const warn = (raw: unknown): { moons: unknown; warnings: string[] } => {
+      const warnings: string[] = [];
+      return { moons: migrateSettings({ calendar: { moons: raw } }, (m) => warnings.push(m)).calendar.moons, warnings };
+    };
+    const notList = warn("Moon, 29.53, 0");
+    expect(notList.moons).toEqual(DEFAULT_SETTINGS.calendar.moons);
+    expect(notList.warnings).toHaveLength(1);
+
+    for (const cycleDays of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "29.53", undefined]) {
+      const r = warn([{ name: "Sable", cycleDays, phaseAtEpoch: 0.1 }]);
+      expect(r.moons).toEqual([{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0.1 }]);
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings[0]).toContain("Sable");
+    }
+
+    const badPhase = warn([{ name: "Sable", cycleDays: 30, phaseAtEpoch: Number.NaN }]);
+    expect(badPhase.moons).toEqual([{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0 }]);
+    expect(badPhase.warnings).toHaveLength(1);
+
+    const nameless = warn([{ cycleDays: 30, phaseAtEpoch: 0 }, null]);
+    expect(nameless.moons).toEqual([
+      { name: "Moon 1", cycleDays: 30, phaseAtEpoch: 0 },
+      { name: "Moon 2", cycleDays: 29.53, phaseAtEpoch: 0 },
+    ]);
+    expect(nameless.warnings).toHaveLength(2); // the null moon's cycle and phase
+
+    // a repaired calendar is usable at once
+    const cal = new InternalCalendar({ ...DEFAULT_SETTINGS.calendar, moons: nameless.moons as typeof DEFAULT_SETTINGS.calendar.moons }, () => 0);
+    expect(cal.toContext(100).moons).toHaveLength(2);
+  });
+
   test("migrate: devicePresets defaults to [] when absent, and passes through an array", () => {
     expect(migrateSettings({}).devicePresets).toEqual([]);
     expect(migrateSettings(undefined).devicePresets).toEqual([]);

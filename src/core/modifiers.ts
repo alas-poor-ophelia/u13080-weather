@@ -156,6 +156,9 @@ export interface DailyModifierResult {
 /** Max days a spell can be looked back for. Spells longer than this are a misuse (use regimes). */
 export const SPELL_LOOKBACK_MAX = 400;
 
+/** Longest internal-calendar year (settings validation), and the most days a spell window scan reads. */
+export const YEAR_LENGTH_MAX = 10_000;
+
 export class ModifierEngine {
   private readonly daily: Modifier[];
   private readonly windowDays = new Map<string, number>();
