@@ -1,6 +1,6 @@
 /**
- * Golden-master generator / checker for the frozen RNG substrate AND the
- * daily generator.
+ * Golden-master generator / checker for the frozen RNG substrate, the daily
+ * generator, and the calendar path (InternalCalendar -> World, golden-cal.ts).
  *
  *   bun run scripts/golden.ts          # check (exit 1 on drift)
  *   bun run scripts/golden.ts --write  # (re)write the golden files — ONLY when
@@ -16,20 +16,25 @@ import type { Preset } from "../src/core/types";
 import { GENERATOR_VERSION } from "../src/core/version";
 import { buildGolden, compareGolden, type Golden } from "../test/golden/golden";
 import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "../test/golden/golden-gen";
+import { buildGoldenCal, compareGoldenCal, type GoldenCal } from "../test/golden/golden-cal";
 
 const rngPath = new URL("../test/golden/rng-1.json", import.meta.url);
 const genPath = new URL("../test/golden/gen-0.0.3.json", import.meta.url);
+const calPath = new URL("../test/golden/calendar.json", import.meta.url);
 const write = process.argv.includes("--write");
 
 const freshRng: Golden = buildGolden(rng);
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 const freshGen: GoldenGen = buildGoldenGen(fjord);
+const freshCal: GoldenCal = buildGoldenCal();
 
 if (write) {
   await Bun.write(rngPath, JSON.stringify(freshRng, null, 2) + "\n");
   console.log(`wrote ${rngPath.pathname} (${rng.RNG_VERSION})`);
   await Bun.write(genPath, JSON.stringify(freshGen, null, 2) + "\n");
   console.log(`wrote ${genPath.pathname} (${GENERATOR_VERSION})`);
+  await Bun.write(calPath, JSON.stringify(freshCal, null, 1) + "\n");
+  console.log(`wrote ${calPath.pathname} (${freshCal.worlds.length} worlds)`);
   process.exit(0);
 }
 
@@ -55,6 +60,17 @@ if (genDiffs.length === 0) {
   console.error(`GENERATOR GOLDEN DRIFT — ${genDiffs.length} difference(s):`);
   for (const d of genDiffs.slice(0, 40)) console.error("  " + d);
   if (genDiffs.length > 40) console.error(`  ... ${genDiffs.length - 40} more`);
+}
+
+const storedCal = (await Bun.file(calPath).json()) as GoldenCal;
+const calDiffs = compareGoldenCal(storedCal, freshCal);
+if (calDiffs.length === 0) {
+  console.log(`calendar golden OK (${storedCal.worlds.map((w) => w.id).join(", ")})`);
+} else {
+  failed = true;
+  console.error(`CALENDAR GOLDEN DRIFT — ${calDiffs.length} difference(s):`);
+  for (const d of calDiffs.slice(0, 40)) console.error("  " + d);
+  if (calDiffs.length > 40) console.error(`  ... ${calDiffs.length - 40} more`);
 }
 
 process.exit(failed ? 1 : 0);
