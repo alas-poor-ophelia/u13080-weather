@@ -266,7 +266,7 @@ export class ModifierEngine {
  * `any` and `not` follow Kleene logic, so an unknown never turns into a
  * definite answer by negation. Every other leaf is evaluated as usual.
  */
-function evaluateStatic(p: Predicate, ctx: PredicateContext): boolean | undefined {
+export function evaluateStatic(p: Predicate, ctx: PredicateContext): boolean | undefined {
   if ("all" in p) {
     const r = p.all.map((q) => evaluateStatic(q, ctx));
     return r.includes(false) ? false : r.includes(undefined) ? undefined : true;

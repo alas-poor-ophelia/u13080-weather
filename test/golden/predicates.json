@@ -1,0 +1,3397 @@
+{
+ "seed": "golden-pred-seed",
+ "regime": "wet",
+ "days": {
+  "from": -1000,
+  "to": 1000
+ },
+ "worlds": [
+  {
+   "id": "internal-365",
+   "zones": [
+    {
+     "zoneId": "north",
+     "rows": {
+      "moon half-open": {
+       "gen": "f26t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f25",
+       "static": "f26t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f25"
+      },
+      "moon wrap": {
+       "gen": "f25t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f25",
+       "static": "f25t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f25"
+      },
+      "moon lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon full circle": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "moon ulp window": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon unwrapped bounds": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "moon second": {
+       "gen": "f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4",
+       "static": "f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4"
+      },
+      "moon third": {
+       "gen": "f17t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t4",
+       "static": "f17t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t4"
+      },
+      "moon missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "not moon missing": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "yearPhase": {
+       "gen": "f70t98f267t98f267t98f267t98f267t98f267t98f8",
+       "static": "f70t98f267t98f267t98f267t98f267t98f267t98f8"
+      },
+      "yearPhase wrap": {
+       "gen": "f234t73f292t73f292t73f292t73f292t73f234",
+       "static": "f234t73f292t73f292t73f292t73f292t73f234"
+      },
+      "yearPhase lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "yearPhase edge 0": {
+       "gen": "f270t92f273t92f273t92f273t92f273t92f179",
+       "static": "f270t92f273t92f273t92f273t92f273t92f179"
+      },
+      "dayOfYear": {
+       "gen": "f280t11f354t11f354t11f354t11f354t11f250",
+       "static": "f280t11f354t11f354t11f354t11f354t11f250"
+      },
+      "dayOfYear single": {
+       "gen": "f280t1f364t1f364t1f364t1f364t1f260",
+       "static": "f280t1f364t1f364t1f364t1f364t1f260"
+      },
+      "dayOfYear reversed": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "dayOfYear negative lo": {
+       "gen": "f270t4f361t4f361t4f361t4f361t4f267",
+       "static": "f270t4f361t4f361t4f361t4f361t4f267"
+      },
+      "dayOfYear past end": {
+       "gen": "f269t1f364t1f364t1f364t1f364t1f271",
+       "static": "f269t1f364t1f364t1f364t1f364t1f271"
+      },
+      "dayOfYear fractional": {
+       "gen": "f280t1f364t1f364t1f364t1f364t1f260",
+       "static": "f280t1f364t1f364t1f364t1f364t1f260"
+      },
+      "not dayOfYear": {
+       "gen": "t280f11t354f11t354f11t354f11t354f11t250",
+       "static": "t280f11t354f11t354f11t354f11t354f11t250"
+      },
+      "tag season": {
+       "gen": "t88f274t91f274t91f274t91f274t91f274t91f88",
+       "static": "t88f274t91f274t91f274t91f274t91f274t91f88"
+      },
+      "tag era": {
+       "gen": "f1730t271",
+       "static": "u2001"
+      },
+      "tag era Ash": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not tag era": {
+       "gen": "t1730f271",
+       "static": "u2001"
+      },
+      "tag missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "regime match": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "regime other": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not regime": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "chance": {
+       "gen": "f1t4f7t1f1t2f5t1f4t1f3t4f3t1f2t1f1t1f2t1f6t3f1t2f8t2f3t1f2t1f6t1f9t2f13t3f6t1f8t2f1t1f3t1f4t3f1t2f3t1f6t4f1t3f1t2f7t1f1t1f2t2f1t1f4t3f1t1f1t1f3t1f2t1f3t1f1t1f2t1f3t1f2t1f2t1f2t2f1t1f1t1f9t1f1t1f1t1f10t5f8t1f3t1f7t2f2t1f7t1f2t1f5t1f9t1f1t1f2t1f1t3f1t1f1t1f8t2f4t1f8t3f1t2f1t1f1t1f1t1f1t2f1t1f1t3f1t1f9t1f3t1f1t1f2t1f6t1f2t1f17t1f2t1f1t1f2t1f5t1f4t1f3t2f4t1f1t2f1t1f2t1f7t1f8t1f1t1f3t1f4t1f2t1f4t1f3t3f1t1f1t1f4t1f1t1f5t1f2t1f1t1f6t2f2t4f1t1f4t1f4t1f3t2f2t3f3t1f1t1f3t1f4t1f8t1f2t1f5t2f5t1f1t1f16t1f1t1f1t1f2t1f4t2f6t1f1t1f3t1f3t2f2t1f1t1f4t2f4t1f1t3f1t1f2t1f5t1f3t1f5t1f3t1f5t1f5t1f2t1f9t2f1t1f2t1f1t2f1t2f4t1f5t1f5t2f2t1f9t1f2t1f5t1f2t1f1t4f1t1f4t2f6t1f4t1f2t2f3t1f1t1f4t2f2t1f3t1f4t3f4t1f12t1f8t1f4t1f2t1f2t2f6t1f3t1f7t1f3t2f5t1f10t2f6t2f1t1f3t1f3t1f4t2f3t1f3t1f2t2f2t1f1t1f1t1f2t1f4t2f1t1f8t1f2t2f7t1f6t2f9t1f4t1f9t1f1t1f2t2f1t1f2t1f1t1f2t1f3t1f2t1f4t2f5t1f3t1f3t1f3t1f4t1f1t1f1t3f4t1f3t2f1t1f1t2f1t1f5t1f5t1f7t2f2t1f1t1f11t1f2t1f3t1f7t2f3t1f1t1f1t1f9t1f4t2f1t2f10t1f10t1f8t2f1t1f8t2f3t2f1t2f1t1f2t1f3t1f4t1f8t2f4t2f6t4f1t1f1t1f4t1f3t1f9t2f1t1f4t1f1t1f1t1f1t4f1t1f1t2f4t1f7t2f7t1f5t2f3t2f1t2f2t2f1t1f7t1f1t2f4t3f1t1f2t2f3t1f1t1f1t1f6t1f1t1f2t1f1t1f2t1f1t1f2t2f2t1f4t2f1t1f2t1f1t1f1t2f3t4f3t1f2t1f14t1f4t1f7t2f3t1f1t3f2t1f9t2f1t1f11t2f1t1f20t1f1t1f3t2f4t1f1t2f3t1f7t3f3t1f2t2f1t1f3t1f1t1f1t1f8t1f1t1f3t1f1t1f1t1f1t1f7t1f5t1f3t2f3t2f3t3f1t1f11t1f1t1f4t1f2t1f6t1f1t1f1t2f1t1f2t1f6t2f6t1f6t4f3t2f3t1f3t2f2t1f4t5f1t1f1t1f1t1f1t2f1t1f1t1f7t1f5t3f3t5f1t2f3t2f1t2f1t1f3t1f3t3f3t1f3t1f1t1f1t3f2t1f1t4f1t1f4t1f5t1f4t1f3t2f3t1f4t1f6t2f7t1f3t1f4t1f1t1f4t1f1t1f4t1f1t1f2t2f4t2f2t2f2t1f6t1f3t1f3t1f4t1f2t1f1t1f1t1f3t1f1t1f3t1f1t1f10t1f1t1f6t3f2t1f1t2f5t3f1t1f1t1f2t3f7t2f1t1f3t1f2t1f4t1f3t1f2t1f3t1f1",
+       "static": "f1t4f7t1f1t2f5t1f4t1f3t4f3t1f2t1f1t1f2t1f6t3f1t2f8t2f3t1f2t1f6t1f9t2f13t3f6t1f8t2f1t1f3t1f4t3f1t2f3t1f6t4f1t3f1t2f7t1f1t1f2t2f1t1f4t3f1t1f1t1f3t1f2t1f3t1f1t1f2t1f3t1f2t1f2t1f2t2f1t1f1t1f9t1f1t1f1t1f10t5f8t1f3t1f7t2f2t1f7t1f2t1f5t1f9t1f1t1f2t1f1t3f1t1f1t1f8t2f4t1f8t3f1t2f1t1f1t1f1t1f1t2f1t1f1t3f1t1f9t1f3t1f1t1f2t1f6t1f2t1f17t1f2t1f1t1f2t1f5t1f4t1f3t2f4t1f1t2f1t1f2t1f7t1f8t1f1t1f3t1f4t1f2t1f4t1f3t3f1t1f1t1f4t1f1t1f5t1f2t1f1t1f6t2f2t4f1t1f4t1f4t1f3t2f2t3f3t1f1t1f3t1f4t1f8t1f2t1f5t2f5t1f1t1f16t1f1t1f1t1f2t1f4t2f6t1f1t1f3t1f3t2f2t1f1t1f4t2f4t1f1t3f1t1f2t1f5t1f3t1f5t1f3t1f5t1f5t1f2t1f9t2f1t1f2t1f1t2f1t2f4t1f5t1f5t2f2t1f9t1f2t1f5t1f2t1f1t4f1t1f4t2f6t1f4t1f2t2f3t1f1t1f4t2f2t1f3t1f4t3f4t1f12t1f8t1f4t1f2t1f2t2f6t1f3t1f7t1f3t2f5t1f10t2f6t2f1t1f3t1f3t1f4t2f3t1f3t1f2t2f2t1f1t1f1t1f2t1f4t2f1t1f8t1f2t2f7t1f6t2f9t1f4t1f9t1f1t1f2t2f1t1f2t1f1t1f2t1f3t1f2t1f4t2f5t1f3t1f3t1f3t1f4t1f1t1f1t3f4t1f3t2f1t1f1t2f1t1f5t1f5t1f7t2f2t1f1t1f11t1f2t1f3t1f7t2f3t1f1t1f1t1f9t1f4t2f1t2f10t1f10t1f8t2f1t1f8t2f3t2f1t2f1t1f2t1f3t1f4t1f8t2f4t2f6t4f1t1f1t1f4t1f3t1f9t2f1t1f4t1f1t1f1t1f1t4f1t1f1t2f4t1f7t2f7t1f5t2f3t2f1t2f2t2f1t1f7t1f1t2f4t3f1t1f2t2f3t1f1t1f1t1f6t1f1t1f2t1f1t1f2t1f1t1f2t2f2t1f4t2f1t1f2t1f1t1f1t2f3t4f3t1f2t1f14t1f4t1f7t2f3t1f1t3f2t1f9t2f1t1f11t2f1t1f20t1f1t1f3t2f4t1f1t2f3t1f7t3f3t1f2t2f1t1f3t1f1t1f1t1f8t1f1t1f3t1f1t1f1t1f1t1f7t1f5t1f3t2f3t2f3t3f1t1f11t1f1t1f4t1f2t1f6t1f1t1f1t2f1t1f2t1f6t2f6t1f6t4f3t2f3t1f3t2f2t1f4t5f1t1f1t1f1t1f1t2f1t1f1t1f7t1f5t3f3t5f1t2f3t2f1t2f1t1f3t1f3t3f3t1f3t1f1t1f1t3f2t1f1t4f1t1f4t1f5t1f4t1f3t2f3t1f4t1f6t2f7t1f3t1f4t1f1t1f4t1f1t1f4t1f1t1f2t2f4t2f2t2f2t1f6t1f3t1f3t1f4t1f2t1f1t1f1t1f3t1f1t1f3t1f1t1f10t1f1t1f6t3f2t1f1t2f5t3f1t1f1t1f2t3f7t2f1t1f3t1f2t1f4t1f3t1f2t1f3t1f1"
+      },
+      "chance 0": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "chance 1": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "all empty": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "any empty": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "all winter thaw": {
+       "gen": "f2001",
+       "static": "f179u91f274u91f274u91f274u91f274u91f271"
+      },
+      "all not-missing regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "any era or moon": {
+       "gen": "t11f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f6t271",
+       "static": "t11u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u11"
+      },
+      "not all era regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "nested chance": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "multi-key all+moon": {
+       "gen": "t88f274t91f274t91f274t91f274t91f274t91f88",
+       "static": "t88f274t91f274t91f274t91f274t91f274t91f88"
+      },
+      "multi-key moon+yearPhase": {
+       "gen": "t11f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f11",
+       "static": "t11f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f11"
+      },
+      "unknown kind": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed all": {
+       "gen": "x2001",
+       "static": "x2001"
+      },
+      "malformed phase": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed tag": {
+       "gen": "f2001",
+       "static": "x2001"
+      }
+     },
+     "windowDays": {
+      "moon-fog": 38,
+      "thaw-winter": 91,
+      "summer-spell": 91
+     }
+    },
+    {
+     "zoneId": "south",
+     "rows": {
+      "moon half-open": {
+       "gen": "f26t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f25",
+       "static": "f26t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f25"
+      },
+      "moon wrap": {
+       "gen": "f25t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f25",
+       "static": "f25t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f25"
+      },
+      "moon lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon full circle": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "moon ulp window": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon unwrapped bounds": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "moon second": {
+       "gen": "f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4",
+       "static": "f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t3f4t4f3t4f4t3f4t4f3t4f4t3f4t4"
+      },
+      "moon third": {
+       "gen": "f17t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t4",
+       "static": "f17t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t7f26t4"
+      },
+      "moon missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "not moon missing": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "yearPhase": {
+       "gen": "f70t98f267t98f267t98f267t98f267t98f267t98f8",
+       "static": "f70t98f267t98f267t98f267t98f267t98f267t98f8"
+      },
+      "yearPhase wrap": {
+       "gen": "f234t73f292t73f292t73f292t73f292t73f234",
+       "static": "f234t73f292t73f292t73f292t73f292t73f234"
+      },
+      "yearPhase lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "yearPhase edge 0": {
+       "gen": "f270t92f273t92f273t92f273t92f273t92f179",
+       "static": "f270t92f273t92f273t92f273t92f273t92f179"
+      },
+      "dayOfYear": {
+       "gen": "f280t11f354t11f354t11f354t11f354t11f250",
+       "static": "f280t11f354t11f354t11f354t11f354t11f250"
+      },
+      "dayOfYear single": {
+       "gen": "f280t1f364t1f364t1f364t1f364t1f260",
+       "static": "f280t1f364t1f364t1f364t1f364t1f260"
+      },
+      "dayOfYear reversed": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "dayOfYear negative lo": {
+       "gen": "f270t4f361t4f361t4f361t4f361t4f267",
+       "static": "f270t4f361t4f361t4f361t4f361t4f267"
+      },
+      "dayOfYear past end": {
+       "gen": "f269t1f364t1f364t1f364t1f364t1f271",
+       "static": "f269t1f364t1f364t1f364t1f364t1f271"
+      },
+      "dayOfYear fractional": {
+       "gen": "f280t1f364t1f364t1f364t1f364t1f260",
+       "static": "f280t1f364t1f364t1f364t1f364t1f260"
+      },
+      "not dayOfYear": {
+       "gen": "t280f11t354f11t354f11t354f11t354f11t250",
+       "static": "t280f11t354f11t354f11t354f11t354f11t250"
+      },
+      "tag season": {
+       "gen": "f179t91f274t91f274t91f274t91f274t91f271",
+       "static": "f179t91f274t91f274t91f274t91f274t91f271"
+      },
+      "tag era": {
+       "gen": "f1730t271",
+       "static": "u2001"
+      },
+      "tag era Ash": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not tag era": {
+       "gen": "t1730f271",
+       "static": "u2001"
+      },
+      "tag missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "regime match": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "regime other": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not regime": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "chance": {
+       "gen": "t1f12t1f2t1f1t2f4t2f2t1f1t1f1t1f1t1f4t1f2t3f2t1f2t2f13t2f1t2f1t1f6t4f3t1f4t1f2t2f3t1f2t3f7t1f1t2f3t2f3t3f1t1f6t2f5t2f3t1f3t2f8t1f3t1f4t1f7t1f1t1f2t1f1t1f1t1f1t1f5t1f3t1f2t1f8t1f4t1f2t1f1t2f2t1f10t2f4t1f1t1f2t1f8t2f2t1f4t2f1t1f4t1f1t1f1t2f1t2f1t1f1t2f2t1f1t2f5t1f14t1f4t1f6t1f1t1f6t1f4t1f2t1f5t1f2t1f2t4f4t4f4t1f4t2f3t2f1t1f1t1f3t2f2t1f1t1f5t1f1t1f2t1f2t1f7t2f13t2f5t1f1t1f3t1f7t2f3t2f1t1f1t1f3t2f1t1f4t1f2t1f1t1f1t2f1t2f1t2f13t1f2t1f3t1f1t2f1t1f5t1f2t1f7t1f3t2f1t1f4t1f8t1f8t1f2t1f2t3f1t2f6t1f9t1f3t2f4t5f1t1f2t2f2t1f4t2f1t3f4t2f11t1f1t2f7t5f3t2f3t1f1t1f13t1f8t1f1t2f2t1f4t1f3t1f2t1f2t1f1t1f1t1f1t1f1t1f1t1f4t1f4t2f3t1f2t1f2t1f5t1f6t2f7t3f10t1f2t1f2t1f1t1f2t1f1t1f9t1f1t1f4t1f2t1f1t2f1t1f7t1f4t1f4t1f3t1f1t3f1t1f2t1f3t2f1t1f3t2f1t1f1t2f3t1f5t1f1t1f3t1f1t1f3t1f3t1f5t2f12t1f3t1f1t1f1t4f4t1f2t1f7t1f3t1f2t2f1t1f8t1f4t1f2t2f4t1f1t1f1t1f2t1f1t1f5t1f10t1f1t4f1t1f2t1f6t1f1t1f3t1f4t1f5t3f5t1f3t2f9t2f1t2f1t1f1t1f3t2f3t1f4t1f7t1f2t2f2t1f2t1f2t3f2t1f3t1f3t1f7t1f1t1f2t1f2t1f3t1f8t1f1t1f7t1f3t2f1t2f1t2f4t1f1t1f2t4f4t2f3t1f3t1f3t1f1t1f1t1f1t1f4t1f1t1f2t3f4t1f1t1f7t2f2t1f1t1f6t1f1t1f2t1f7t1f8t1f2t1f8t2f2t1f5t1f8t2f7t1f2t1f2t2f4t2f2t1f2t4f3t1f3t1f1t1f2t1f2t3f2t3f9t1f1t1f10t2f2t1f1t3f2t1f1t2f4t1f1t1f2t1f6t1f1t1f1t1f11t1f6t2f1t1f4t1f3t1f17t1f13t1f1t2f1t1f2t2f1t1f1t2f8t1f5t1f1t2f1t2f1t1f3t1f2t4f3t1f1t1f2t2f6t1f1t1f1t1f1t1f5t1f5t1f2t1f3t1f2t1f2t1f1t2f8t2f2t1f1t2f1t2f8t1f1t2f2t1f2t2f4t2f2t1f1t1f6t1f9t2f3t1f1t3f5t1f2t1f1t2f6t2f7t2f1t2f6t2f3t1f10t1f10t1f9t2f4t1f2t1f1t1f1t1f2t1f2t1f2t1f3t1f1t1f1t2f9t1f13t1f1t1f4t3f3t1f7t1f1t1f8t1f2t1f1t1f3t2f5t1f2t1f3t1f2t1f4t1f6t1f6t1f1t1f9t2f5t2f1t1f3t1f1t1f3t1f2t1f1t1f5t1f3t1f11t1f1t1f6t2f9t1f3t1f3t2f3t1f5t1f4t1f1t1f2t1f2t3f1t2f1t1f1t1f2t1f2t1f8t1f8t1f1t1f2t1f6t1f1",
+       "static": "t1f12t1f2t1f1t2f4t2f2t1f1t1f1t1f1t1f4t1f2t3f2t1f2t2f13t2f1t2f1t1f6t4f3t1f4t1f2t2f3t1f2t3f7t1f1t2f3t2f3t3f1t1f6t2f5t2f3t1f3t2f8t1f3t1f4t1f7t1f1t1f2t1f1t1f1t1f1t1f5t1f3t1f2t1f8t1f4t1f2t1f1t2f2t1f10t2f4t1f1t1f2t1f8t2f2t1f4t2f1t1f4t1f1t1f1t2f1t2f1t1f1t2f2t1f1t2f5t1f14t1f4t1f6t1f1t1f6t1f4t1f2t1f5t1f2t1f2t4f4t4f4t1f4t2f3t2f1t1f1t1f3t2f2t1f1t1f5t1f1t1f2t1f2t1f7t2f13t2f5t1f1t1f3t1f7t2f3t2f1t1f1t1f3t2f1t1f4t1f2t1f1t1f1t2f1t2f1t2f13t1f2t1f3t1f1t2f1t1f5t1f2t1f7t1f3t2f1t1f4t1f8t1f8t1f2t1f2t3f1t2f6t1f9t1f3t2f4t5f1t1f2t2f2t1f4t2f1t3f4t2f11t1f1t2f7t5f3t2f3t1f1t1f13t1f8t1f1t2f2t1f4t1f3t1f2t1f2t1f1t1f1t1f1t1f1t1f1t1f4t1f4t2f3t1f2t1f2t1f5t1f6t2f7t3f10t1f2t1f2t1f1t1f2t1f1t1f9t1f1t1f4t1f2t1f1t2f1t1f7t1f4t1f4t1f3t1f1t3f1t1f2t1f3t2f1t1f3t2f1t1f1t2f3t1f5t1f1t1f3t1f1t1f3t1f3t1f5t2f12t1f3t1f1t1f1t4f4t1f2t1f7t1f3t1f2t2f1t1f8t1f4t1f2t2f4t1f1t1f1t1f2t1f1t1f5t1f10t1f1t4f1t1f2t1f6t1f1t1f3t1f4t1f5t3f5t1f3t2f9t2f1t2f1t1f1t1f3t2f3t1f4t1f7t1f2t2f2t1f2t1f2t3f2t1f3t1f3t1f7t1f1t1f2t1f2t1f3t1f8t1f1t1f7t1f3t2f1t2f1t2f4t1f1t1f2t4f4t2f3t1f3t1f3t1f1t1f1t1f1t1f4t1f1t1f2t3f4t1f1t1f7t2f2t1f1t1f6t1f1t1f2t1f7t1f8t1f2t1f8t2f2t1f5t1f8t2f7t1f2t1f2t2f4t2f2t1f2t4f3t1f3t1f1t1f2t1f2t3f2t3f9t1f1t1f10t2f2t1f1t3f2t1f1t2f4t1f1t1f2t1f6t1f1t1f1t1f11t1f6t2f1t1f4t1f3t1f17t1f13t1f1t2f1t1f2t2f1t1f1t2f8t1f5t1f1t2f1t2f1t1f3t1f2t4f3t1f1t1f2t2f6t1f1t1f1t1f1t1f5t1f5t1f2t1f3t1f2t1f2t1f1t2f8t2f2t1f1t2f1t2f8t1f1t2f2t1f2t2f4t2f2t1f1t1f6t1f9t2f3t1f1t3f5t1f2t1f1t2f6t2f7t2f1t2f6t2f3t1f10t1f10t1f9t2f4t1f2t1f1t1f1t1f2t1f2t1f2t1f3t1f1t1f1t2f9t1f13t1f1t1f4t3f3t1f7t1f1t1f8t1f2t1f1t1f3t2f5t1f2t1f3t1f2t1f4t1f6t1f6t1f1t1f9t2f5t2f1t1f3t1f1t1f3t1f2t1f1t1f5t1f3t1f11t1f1t1f6t2f9t1f3t1f3t2f3t1f5t1f4t1f1t1f2t1f2t3f1t2f1t1f1t1f2t1f2t1f8t1f8t1f1t1f2t1f6t1f1"
+      },
+      "chance 0": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "chance 1": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "all empty": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "any empty": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "all winter thaw": {
+       "gen": "f1822t91f88",
+       "static": "u88f274u91f274u91f274u91f274u91f274u91f88"
+      },
+      "all not-missing regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "any era or moon": {
+       "gen": "t11f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f6t271",
+       "static": "t11u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u11"
+      },
+      "not all era regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "nested chance": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "multi-key all+moon": {
+       "gen": "f179t91f274t91f274t91f274t91f274t91f271",
+       "static": "f179t91f274t91f274t91f274t91f274t91f271"
+      },
+      "multi-key moon+yearPhase": {
+       "gen": "t11f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f11",
+       "static": "t11f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f11"
+      },
+      "unknown kind": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed all": {
+       "gen": "x2001",
+       "static": "x2001"
+      },
+      "malformed phase": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed tag": {
+       "gen": "f2001",
+       "static": "x2001"
+      }
+     },
+     "windowDays": {
+      "moon-fog": 38,
+      "thaw-winter": 91,
+      "summer-spell": 91
+     }
+    }
+   ]
+  },
+  {
+   "id": "internal-400",
+   "zones": [
+    {
+     "zoneId": "north",
+     "rows": {
+      "moon half-open": {
+       "gen": "f11t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f40",
+       "static": "f11t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f58t1f58t1f58t1f29t1f28t1f29t1f58t1f58t1f58t1f58t1f40"
+      },
+      "moon wrap": {
+       "gen": "f10t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f10",
+       "static": "f10t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f27t2f27t3f27t3f26t3f27t3f26t3f27t3f26t3f27t3f26t3f10"
+      },
+      "moon lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon full circle": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "moon ulp window": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon unwrapped bounds": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "moon second": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon third": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "not moon missing": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "yearPhase": {
+       "gen": "t88f292t108f292t108f292t108f292t108f292t21",
+       "static": "t88f292t108f292t108f292t108f292t108f292t21"
+      },
+      "yearPhase wrap": {
+       "gen": "f160t80f320t80f320t80f320t80f320t80f161",
+       "static": "f160t80f320t80f320t80f320t80f320t80f161"
+      },
+      "yearPhase lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "yearPhase edge 0": {
+       "gen": "f200t100f300t100f300t100f300t100f300t100f101",
+       "static": "f200t100f300t100f300t100f300t100f300t100f101"
+      },
+      "dayOfYear": {
+       "gen": "f210t11f389t11f389t11f389t11f389t11f180",
+       "static": "f210t11f389t11f389t11f389t11f389t11f180"
+      },
+      "dayOfYear single": {
+       "gen": "f210t1f399t1f399t1f399t1f399t1f190",
+       "static": "f210t1f399t1f399t1f399t1f399t1f190"
+      },
+      "dayOfYear reversed": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "dayOfYear negative lo": {
+       "gen": "f200t4f396t4f396t4f396t4f396t4f197",
+       "static": "f200t4f396t4f396t4f396t4f396t4f197"
+      },
+      "dayOfYear past end": {
+       "gen": "f164t36f364t36f364t36f364t36f364t36f201",
+       "static": "f164t36f364t36f364t36f364t36f364t36f201"
+      },
+      "dayOfYear fractional": {
+       "gen": "f210t1f399t1f399t1f399t1f399t1f190",
+       "static": "f210t1f399t1f399t1f399t1f399t1f190"
+      },
+      "not dayOfYear": {
+       "gen": "t210f11t389f11t389f11t389f11t389f11t180",
+       "static": "t210f11t389f11t389f11t389f11t389f11t180"
+      },
+      "tag season": {
+       "gen": "f300t100f300t100f300t100f300t100f300t100f1",
+       "static": "f300t100f300t100f300t100f300t100f300t100f1"
+      },
+      "tag era": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "tag era Ash": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not tag era": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "tag missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "regime match": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "regime other": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not regime": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "chance": {
+       "gen": "f1t4f7t1f1t2f5t1f4t1f3t4f3t1f2t1f1t1f2t1f6t3f1t2f8t2f3t1f2t1f6t1f9t2f13t3f6t1f8t2f1t1f3t1f4t3f1t2f3t1f6t4f1t3f1t2f7t1f1t1f2t2f1t1f4t3f1t1f1t1f3t1f2t1f3t1f1t1f2t1f3t1f2t1f2t1f2t2f1t1f1t1f9t1f1t1f1t1f10t5f8t1f3t1f7t2f2t1f7t1f2t1f5t1f9t1f1t1f2t1f1t3f1t1f1t1f8t2f4t1f8t3f1t2f1t1f1t1f1t1f1t2f1t1f1t3f1t1f9t1f3t1f1t1f2t1f6t1f2t1f17t1f2t1f1t1f2t1f5t1f4t1f3t2f4t1f1t2f1t1f2t1f7t1f8t1f1t1f3t1f4t1f2t1f4t1f3t3f1t1f1t1f4t1f1t1f5t1f2t1f1t1f6t2f2t4f1t1f4t1f4t1f3t2f2t3f3t1f1t1f3t1f4t1f8t1f2t1f5t2f5t1f1t1f16t1f1t1f1t1f2t1f4t2f6t1f1t1f3t1f3t2f2t1f1t1f4t2f4t1f1t3f1t1f2t1f5t1f3t1f5t1f3t1f5t1f5t1f2t1f9t2f1t1f2t1f1t2f1t2f4t1f5t1f5t2f2t1f9t1f2t1f5t1f2t1f1t4f1t1f4t2f6t1f4t1f2t2f3t1f1t1f4t2f2t1f3t1f4t3f4t1f12t1f8t1f4t1f2t1f2t2f6t1f3t1f7t1f3t2f5t1f10t2f6t2f1t1f3t1f3t1f4t2f3t1f3t1f2t2f2t1f1t1f1t1f2t1f4t2f1t1f8t1f2t2f7t1f6t2f9t1f4t1f9t1f1t1f2t2f1t1f2t1f1t1f2t1f3t1f2t1f4t2f5t1f3t1f3t1f3t1f4t1f1t1f1t3f4t1f3t2f1t1f1t2f1t1f5t1f5t1f7t2f2t1f1t1f11t1f2t1f3t1f7t2f3t1f1t1f1t1f9t1f4t2f1t2f10t1f10t1f8t2f1t1f8t2f3t2f1t2f1t1f2t1f3t1f4t1f8t2f4t2f6t4f1t1f1t1f4t1f3t1f9t2f1t1f4t1f1t1f1t1f1t4f1t1f1t2f4t1f7t2f7t1f5t2f3t2f1t2f2t2f1t1f7t1f1t2f4t3f1t1f2t2f3t1f1t1f1t1f6t1f1t1f2t1f1t1f2t1f1t1f2t2f2t1f4t2f1t1f2t1f1t1f1t2f3t4f3t1f2t1f14t1f4t1f7t2f3t1f1t3f2t1f9t2f1t1f11t2f1t1f20t1f1t1f3t2f4t1f1t2f3t1f7t3f3t1f2t2f1t1f3t1f1t1f1t1f8t1f1t1f3t1f1t1f1t1f1t1f7t1f5t1f3t2f3t2f3t3f1t1f11t1f1t1f4t1f2t1f6t1f1t1f1t2f1t1f2t1f6t2f6t1f6t4f3t2f3t1f3t2f2t1f4t5f1t1f1t1f1t1f1t2f1t1f1t1f7t1f5t3f3t5f1t2f3t2f1t2f1t1f3t1f3t3f3t1f3t1f1t1f1t3f2t1f1t4f1t1f4t1f5t1f4t1f3t2f3t1f4t1f6t2f7t1f3t1f4t1f1t1f4t1f1t1f4t1f1t1f2t2f4t2f2t2f2t1f6t1f3t1f3t1f4t1f2t1f1t1f1t1f3t1f1t1f3t1f1t1f10t1f1t1f6t3f2t1f1t2f5t3f1t1f1t1f2t3f7t2f1t1f3t1f2t1f4t1f3t1f2t1f3t1f1",
+       "static": "f1t4f7t1f1t2f5t1f4t1f3t4f3t1f2t1f1t1f2t1f6t3f1t2f8t2f3t1f2t1f6t1f9t2f13t3f6t1f8t2f1t1f3t1f4t3f1t2f3t1f6t4f1t3f1t2f7t1f1t1f2t2f1t1f4t3f1t1f1t1f3t1f2t1f3t1f1t1f2t1f3t1f2t1f2t1f2t2f1t1f1t1f9t1f1t1f1t1f10t5f8t1f3t1f7t2f2t1f7t1f2t1f5t1f9t1f1t1f2t1f1t3f1t1f1t1f8t2f4t1f8t3f1t2f1t1f1t1f1t1f1t2f1t1f1t3f1t1f9t1f3t1f1t1f2t1f6t1f2t1f17t1f2t1f1t1f2t1f5t1f4t1f3t2f4t1f1t2f1t1f2t1f7t1f8t1f1t1f3t1f4t1f2t1f4t1f3t3f1t1f1t1f4t1f1t1f5t1f2t1f1t1f6t2f2t4f1t1f4t1f4t1f3t2f2t3f3t1f1t1f3t1f4t1f8t1f2t1f5t2f5t1f1t1f16t1f1t1f1t1f2t1f4t2f6t1f1t1f3t1f3t2f2t1f1t1f4t2f4t1f1t3f1t1f2t1f5t1f3t1f5t1f3t1f5t1f5t1f2t1f9t2f1t1f2t1f1t2f1t2f4t1f5t1f5t2f2t1f9t1f2t1f5t1f2t1f1t4f1t1f4t2f6t1f4t1f2t2f3t1f1t1f4t2f2t1f3t1f4t3f4t1f12t1f8t1f4t1f2t1f2t2f6t1f3t1f7t1f3t2f5t1f10t2f6t2f1t1f3t1f3t1f4t2f3t1f3t1f2t2f2t1f1t1f1t1f2t1f4t2f1t1f8t1f2t2f7t1f6t2f9t1f4t1f9t1f1t1f2t2f1t1f2t1f1t1f2t1f3t1f2t1f4t2f5t1f3t1f3t1f3t1f4t1f1t1f1t3f4t1f3t2f1t1f1t2f1t1f5t1f5t1f7t2f2t1f1t1f11t1f2t1f3t1f7t2f3t1f1t1f1t1f9t1f4t2f1t2f10t1f10t1f8t2f1t1f8t2f3t2f1t2f1t1f2t1f3t1f4t1f8t2f4t2f6t4f1t1f1t1f4t1f3t1f9t2f1t1f4t1f1t1f1t1f1t4f1t1f1t2f4t1f7t2f7t1f5t2f3t2f1t2f2t2f1t1f7t1f1t2f4t3f1t1f2t2f3t1f1t1f1t1f6t1f1t1f2t1f1t1f2t1f1t1f2t2f2t1f4t2f1t1f2t1f1t1f1t2f3t4f3t1f2t1f14t1f4t1f7t2f3t1f1t3f2t1f9t2f1t1f11t2f1t1f20t1f1t1f3t2f4t1f1t2f3t1f7t3f3t1f2t2f1t1f3t1f1t1f1t1f8t1f1t1f3t1f1t1f1t1f1t1f7t1f5t1f3t2f3t2f3t3f1t1f11t1f1t1f4t1f2t1f6t1f1t1f1t2f1t1f2t1f6t2f6t1f6t4f3t2f3t1f3t2f2t1f4t5f1t1f1t1f1t1f1t2f1t1f1t1f7t1f5t3f3t5f1t2f3t2f1t2f1t1f3t1f3t3f3t1f3t1f1t1f1t3f2t1f1t4f1t1f4t1f5t1f4t1f3t2f3t1f4t1f6t2f7t1f3t1f4t1f1t1f4t1f1t1f4t1f1t1f2t2f4t2f2t2f2t1f6t1f3t1f3t1f4t1f2t1f1t1f1t1f3t1f1t1f3t1f1t1f10t1f1t1f6t3f2t1f1t2f5t3f1t1f1t1f2t3f7t2f1t1f3t1f2t1f4t1f3t1f2t1f3t1f1"
+      },
+      "chance 0": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "chance 1": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "all empty": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "any empty": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "all winter thaw": {
+       "gen": "f2001",
+       "static": "f100u100f300u100f300u100f300u100f300u100f201"
+      },
+      "all not-missing regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "any era or moon": {
+       "gen": "f11t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t11",
+       "static": "u11t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u14t15u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t14u15t15u15t11"
+      },
+      "not all era regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "nested chance": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "multi-key all+moon": {
+       "gen": "f300t100f300t100f300t100f300t100f300t100f1",
+       "static": "f300t100f300t100f300t100f300t100f300t100f1"
+      },
+      "multi-key moon+yearPhase": {
+       "gen": "f11t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t11",
+       "static": "f11t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f14t15f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t14f15t15f15t11"
+      },
+      "unknown kind": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed all": {
+       "gen": "x2001",
+       "static": "x2001"
+      },
+      "malformed phase": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed tag": {
+       "gen": "f2001",
+       "static": "x2001"
+      }
+     },
+     "windowDays": {
+      "moon-fog": 41,
+      "thaw-winter": 100,
+      "summer-spell": 100
+     }
+    }
+   ]
+  },
+  {
+   "id": "almanac",
+   "zones": [
+    {
+     "zoneId": "north",
+     "rows": {
+      "moon half-open": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon wrap": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon full circle": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon ulp window": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon unwrapped bounds": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon second": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "moon third": {
+       "gen": "f24t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f24",
+       "static": "f24t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f27t6f24"
+      },
+      "moon missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "not moon missing": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "yearPhase": {
+       "gen": "t87f292t108f293t108f292t108f292t108f292t21",
+       "static": "t87f292t108f293t108f292t108f292t108f292t21"
+      },
+      "yearPhase wrap": {
+       "gen": "f159t80f320t81f320t80f320t80f320t80f161",
+       "static": "f159t80f320t81f320t80f320t80f320t80f161"
+      },
+      "yearPhase lo===hi": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "yearPhase edge 0": {
+       "gen": "f199t100f300t101f300t100f300t100f300t100f101",
+       "static": "f199t100f300t101f300t100f300t100f300t100f101"
+      },
+      "dayOfYear": {
+       "gen": "f209t11f389t11f390t11f389t11f389t11f180",
+       "static": "f209t11f389t11f390t11f389t11f389t11f180"
+      },
+      "dayOfYear single": {
+       "gen": "f209t1f399t1f400t1f399t1f399t1f190",
+       "static": "f209t1f399t1f400t1f399t1f399t1f190"
+      },
+      "dayOfYear reversed": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "dayOfYear negative lo": {
+       "gen": "f199t4f396t4f397t4f396t4f396t4f197",
+       "static": "f199t4f396t4f397t4f396t4f396t4f197"
+      },
+      "dayOfYear past end": {
+       "gen": "f163t36f364t36f364t37f364t36f364t36f201",
+       "static": "f163t36f364t36f364t37f364t36f364t36f201"
+      },
+      "dayOfYear fractional": {
+       "gen": "f209t1f399t1f400t1f399t1f399t1f190",
+       "static": "f209t1f399t1f400t1f399t1f399t1f190"
+      },
+      "not dayOfYear": {
+       "gen": "t209f11t389f11t390f11t389f11t389f11t180",
+       "static": "t209f11t389f11t390f11t389f11t389f11t180"
+      },
+      "tag season": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "tag era": {
+       "gen": "f1800t201",
+       "static": "u2001"
+      },
+      "tag era Ash": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not tag era": {
+       "gen": "t1800f201",
+       "static": "u2001"
+      },
+      "tag missing": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "regime match": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "regime other": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "not regime": {
+       "gen": "f2001",
+       "static": "u2001"
+      },
+      "chance": {
+       "gen": "f1t4f7t1f1t2f5t1f4t1f3t4f3t1f2t1f1t1f2t1f6t3f1t2f8t2f3t1f2t1f6t1f9t2f13t3f6t1f8t2f1t1f3t1f4t3f1t2f3t1f6t4f1t3f1t2f7t1f1t1f2t2f1t1f4t3f1t1f1t1f3t1f2t1f3t1f1t1f2t1f3t1f2t1f2t1f2t2f1t1f1t1f9t1f1t1f1t1f10t5f8t1f3t1f7t2f2t1f7t1f2t1f5t1f9t1f1t1f2t1f1t3f1t1f1t1f8t2f4t1f8t3f1t2f1t1f1t1f1t1f1t2f1t1f1t3f1t1f9t1f3t1f1t1f2t1f6t1f2t1f17t1f2t1f1t1f2t1f5t1f4t1f3t2f4t1f1t2f1t1f2t1f7t1f8t1f1t1f3t1f4t1f2t1f4t1f3t3f1t1f1t1f4t1f1t1f5t1f2t1f1t1f6t2f2t4f1t1f4t1f4t1f3t2f2t3f3t1f1t1f3t1f4t1f8t1f2t1f5t2f5t1f1t1f16t1f1t1f1t1f2t1f4t2f6t1f1t1f3t1f3t2f2t1f1t1f4t2f4t1f1t3f1t1f2t1f5t1f3t1f5t1f3t1f5t1f5t1f2t1f9t2f1t1f2t1f1t2f1t2f4t1f5t1f5t2f2t1f9t1f2t1f5t1f2t1f1t4f1t1f4t2f6t1f4t1f2t2f3t1f1t1f4t2f2t1f3t1f4t3f4t1f12t1f8t1f4t1f2t1f2t2f6t1f3t1f7t1f3t2f5t1f10t2f6t2f1t1f3t1f3t1f4t2f3t1f3t1f2t2f2t1f1t1f1t1f2t1f4t2f1t1f8t1f2t2f7t1f6t2f9t1f4t1f9t1f1t1f2t2f1t1f2t1f1t1f2t1f3t1f2t1f4t2f5t1f3t1f3t1f3t1f4t1f1t1f1t3f4t1f3t2f1t1f1t2f1t1f5t1f5t1f7t2f2t1f1t1f11t1f2t1f3t1f7t2f3t1f1t1f1t1f9t1f4t2f1t2f10t1f10t1f8t2f1t1f8t2f3t2f1t2f1t1f2t1f3t1f4t1f8t2f4t2f6t4f1t1f1t1f4t1f3t1f9t2f1t1f4t1f1t1f1t1f1t4f1t1f1t2f4t1f7t2f7t1f5t2f3t2f1t2f2t2f1t1f7t1f1t2f4t3f1t1f2t2f3t1f1t1f1t1f6t1f1t1f2t1f1t1f2t1f1t1f2t2f2t1f4t2f1t1f2t1f1t1f1t2f3t4f3t1f2t1f14t1f4t1f7t2f3t1f1t3f2t1f9t2f1t1f11t2f1t1f20t1f1t1f3t2f4t1f1t2f3t1f7t3f3t1f2t2f1t1f3t1f1t1f1t1f8t1f1t1f3t1f1t1f1t1f1t1f7t1f5t1f3t2f3t2f3t3f1t1f11t1f1t1f4t1f2t1f6t1f1t1f1t2f1t1f2t1f6t2f6t1f6t4f3t2f3t1f3t2f2t1f4t5f1t1f1t1f1t1f1t2f1t1f1t1f7t1f5t3f3t5f1t2f3t2f1t2f1t1f3t1f3t3f3t1f3t1f1t1f1t3f2t1f1t4f1t1f4t1f5t1f4t1f3t2f3t1f4t1f6t2f7t1f3t1f4t1f1t1f4t1f1t1f4t1f1t1f2t2f4t2f2t2f2t1f6t1f3t1f3t1f4t1f2t1f1t1f1t1f3t1f1t1f3t1f1t1f10t1f1t1f6t3f2t1f1t2f5t3f1t1f1t1f2t3f7t2f1t1f3t1f2t1f4t1f3t1f2t1f3t1f1",
+       "static": "f1t4f7t1f1t2f5t1f4t1f3t4f3t1f2t1f1t1f2t1f6t3f1t2f8t2f3t1f2t1f6t1f9t2f13t3f6t1f8t2f1t1f3t1f4t3f1t2f3t1f6t4f1t3f1t2f7t1f1t1f2t2f1t1f4t3f1t1f1t1f3t1f2t1f3t1f1t1f2t1f3t1f2t1f2t1f2t2f1t1f1t1f9t1f1t1f1t1f10t5f8t1f3t1f7t2f2t1f7t1f2t1f5t1f9t1f1t1f2t1f1t3f1t1f1t1f8t2f4t1f8t3f1t2f1t1f1t1f1t1f1t2f1t1f1t3f1t1f9t1f3t1f1t1f2t1f6t1f2t1f17t1f2t1f1t1f2t1f5t1f4t1f3t2f4t1f1t2f1t1f2t1f7t1f8t1f1t1f3t1f4t1f2t1f4t1f3t3f1t1f1t1f4t1f1t1f5t1f2t1f1t1f6t2f2t4f1t1f4t1f4t1f3t2f2t3f3t1f1t1f3t1f4t1f8t1f2t1f5t2f5t1f1t1f16t1f1t1f1t1f2t1f4t2f6t1f1t1f3t1f3t2f2t1f1t1f4t2f4t1f1t3f1t1f2t1f5t1f3t1f5t1f3t1f5t1f5t1f2t1f9t2f1t1f2t1f1t2f1t2f4t1f5t1f5t2f2t1f9t1f2t1f5t1f2t1f1t4f1t1f4t2f6t1f4t1f2t2f3t1f1t1f4t2f2t1f3t1f4t3f4t1f12t1f8t1f4t1f2t1f2t2f6t1f3t1f7t1f3t2f5t1f10t2f6t2f1t1f3t1f3t1f4t2f3t1f3t1f2t2f2t1f1t1f1t1f2t1f4t2f1t1f8t1f2t2f7t1f6t2f9t1f4t1f9t1f1t1f2t2f1t1f2t1f1t1f2t1f3t1f2t1f4t2f5t1f3t1f3t1f3t1f4t1f1t1f1t3f4t1f3t2f1t1f1t2f1t1f5t1f5t1f7t2f2t1f1t1f11t1f2t1f3t1f7t2f3t1f1t1f1t1f9t1f4t2f1t2f10t1f10t1f8t2f1t1f8t2f3t2f1t2f1t1f2t1f3t1f4t1f8t2f4t2f6t4f1t1f1t1f4t1f3t1f9t2f1t1f4t1f1t1f1t1f1t4f1t1f1t2f4t1f7t2f7t1f5t2f3t2f1t2f2t2f1t1f7t1f1t2f4t3f1t1f2t2f3t1f1t1f1t1f6t1f1t1f2t1f1t1f2t1f1t1f2t2f2t1f4t2f1t1f2t1f1t1f1t2f3t4f3t1f2t1f14t1f4t1f7t2f3t1f1t3f2t1f9t2f1t1f11t2f1t1f20t1f1t1f3t2f4t1f1t2f3t1f7t3f3t1f2t2f1t1f3t1f1t1f1t1f8t1f1t1f3t1f1t1f1t1f1t1f7t1f5t1f3t2f3t2f3t3f1t1f11t1f1t1f4t1f2t1f6t1f1t1f1t2f1t1f2t1f6t2f6t1f6t4f3t2f3t1f3t2f2t1f4t5f1t1f1t1f1t1f1t2f1t1f1t1f7t1f5t3f3t5f1t2f3t2f1t2f1t1f3t1f3t3f3t1f3t1f1t1f1t3f2t1f1t4f1t1f4t1f5t1f4t1f3t2f3t1f4t1f6t2f7t1f3t1f4t1f1t1f4t1f1t1f4t1f1t1f2t2f4t2f2t2f2t1f6t1f3t1f3t1f4t1f2t1f1t1f1t1f3t1f1t1f3t1f1t1f10t1f1t1f6t3f2t1f1t2f5t3f1t1f1t1f2t3f7t2f1t1f3t1f2t1f4t1f3t1f2t1f3t1f1"
+      },
+      "chance 0": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "chance 1": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "all empty": {
+       "gen": "t2001",
+       "static": "t2001"
+      },
+      "any empty": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "all winter thaw": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "all not-missing regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "any era or moon": {
+       "gen": "f1800t201",
+       "static": "u2001"
+      },
+      "not all era regime": {
+       "gen": "t2001",
+       "static": "u2001"
+      },
+      "nested chance": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "multi-key all+moon": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "multi-key moon+yearPhase": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "unknown kind": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed all": {
+       "gen": "x2001",
+       "static": "x2001"
+      },
+      "malformed phase": {
+       "gen": "f2001",
+       "static": "f2001"
+      },
+      "malformed tag": {
+       "gen": "f2001",
+       "static": "x2001"
+      }
+     },
+     "windowDays": {
+      "moon-fog": 38,
+      "thaw-winter": 400,
+      "summer-spell": 400
+     }
+    }
+   ]
+  }
+ ],
+ "edges": {
+  "moon half-open": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon wrap": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon lo===hi": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon full circle": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon ulp window": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon unwrapped bounds": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon second": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon third": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "moon missing": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "not moon missing": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "t"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "t"
+   }
+  },
+  "yearPhase": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "t"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "yearPhase wrap": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "yearPhase lo===hi": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "yearPhase edge 0": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "dayOfYear": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "t"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "dayOfYear single": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "dayOfYear reversed": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "dayOfYear negative lo": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "dayOfYear past end": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "dayOfYear fractional": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "not dayOfYear": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "t"
+   }
+  },
+  "tag season": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "tag era": {
+   "no moons field": {
+    "gen": "f",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "u"
+   }
+  },
+  "tag era Ash": {
+   "no moons field": {
+    "gen": "f",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "u"
+   }
+  },
+  "not tag era": {
+   "no moons field": {
+    "gen": "t",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "u"
+   }
+  },
+  "tag missing": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "regime match": {
+   "no moons field": {
+    "gen": "t",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "u"
+   }
+  },
+  "regime other": {
+   "no moons field": {
+    "gen": "f",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "u"
+   }
+  },
+  "not regime": {
+   "no moons field": {
+    "gen": "f",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "u"
+   }
+  },
+  "chance": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "chance 0": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "chance 1": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "t"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "t"
+   }
+  },
+  "all empty": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "t"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "t"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "t"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "t"
+   }
+  },
+  "any empty": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "all winter thaw": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "u"
+   }
+  },
+  "all not-missing regime": {
+   "no moons field": {
+    "gen": "t",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "u"
+   }
+  },
+  "any era or moon": {
+   "no moons field": {
+    "gen": "f",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "u"
+   }
+  },
+  "not all era regime": {
+   "no moons field": {
+    "gen": "t",
+    "static": "u"
+   },
+   "moons empty": {
+    "gen": "t",
+    "static": "u"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase NaN": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0.1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase just under 1": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "u"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear fractional": {
+    "gen": "t",
+    "static": "u"
+   },
+   "dayOfYear just over": {
+    "gen": "t",
+    "static": "u"
+   },
+   "tags missing": {
+    "gen": "t",
+    "static": "u"
+   },
+   "era tag only": {
+    "gen": "t",
+    "static": "u"
+   }
+  },
+  "nested chance": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "multi-key all+moon": {
+   "no moons field": {
+    "gen": "t",
+    "static": "t"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "multi-key moon+yearPhase": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "t",
+    "static": "t"
+   },
+   "phase -0": {
+    "gen": "t",
+    "static": "t"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "unknown kind": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "malformed all": {
+   "no moons field": {
+    "gen": "x",
+    "static": "x"
+   },
+   "moons empty": {
+    "gen": "x",
+    "static": "x"
+   },
+   "duplicate moon": {
+    "gen": "x",
+    "static": "x"
+   },
+   "phase NaN": {
+    "gen": "x",
+    "static": "x"
+   },
+   "phase 1": {
+    "gen": "x",
+    "static": "x"
+   },
+   "phase -0.1": {
+    "gen": "x",
+    "static": "x"
+   },
+   "phase just under 1": {
+    "gen": "x",
+    "static": "x"
+   },
+   "phase exact edges": {
+    "gen": "x",
+    "static": "x"
+   },
+   "phase -0": {
+    "gen": "x",
+    "static": "x"
+   },
+   "dayOfYear missing": {
+    "gen": "x",
+    "static": "x"
+   },
+   "dayOfYear fractional": {
+    "gen": "x",
+    "static": "x"
+   },
+   "dayOfYear just over": {
+    "gen": "x",
+    "static": "x"
+   },
+   "tags missing": {
+    "gen": "x",
+    "static": "x"
+   },
+   "era tag only": {
+    "gen": "x",
+    "static": "x"
+   }
+  },
+  "malformed phase": {
+   "no moons field": {
+    "gen": "f",
+    "static": "f"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "f"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "f"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "f"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "f"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "f"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "f"
+   }
+  },
+  "malformed tag": {
+   "no moons field": {
+    "gen": "f",
+    "static": "x"
+   },
+   "moons empty": {
+    "gen": "f",
+    "static": "x"
+   },
+   "duplicate moon": {
+    "gen": "f",
+    "static": "x"
+   },
+   "phase NaN": {
+    "gen": "f",
+    "static": "x"
+   },
+   "phase 1": {
+    "gen": "f",
+    "static": "x"
+   },
+   "phase -0.1": {
+    "gen": "f",
+    "static": "x"
+   },
+   "phase just under 1": {
+    "gen": "f",
+    "static": "x"
+   },
+   "phase exact edges": {
+    "gen": "f",
+    "static": "x"
+   },
+   "phase -0": {
+    "gen": "f",
+    "static": "x"
+   },
+   "dayOfYear missing": {
+    "gen": "f",
+    "static": "x"
+   },
+   "dayOfYear fractional": {
+    "gen": "f",
+    "static": "x"
+   },
+   "dayOfYear just over": {
+    "gen": "f",
+    "static": "x"
+   },
+   "tags missing": {
+    "gen": "f",
+    "static": "x"
+   },
+   "era tag only": {
+    "gen": "f",
+    "static": "x"
+   }
+  }
+ }
+}

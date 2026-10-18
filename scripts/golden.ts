@@ -1,6 +1,7 @@
 /**
  * Golden-master generator / checker for the frozen RNG substrate, the daily
- * generator, and the calendar path (InternalCalendar -> World, golden-cal.ts).
+ * generator, the calendar path (InternalCalendar -> World, golden-cal.ts), and
+ * the frozen predicate oracle (golden-pred.ts, Seshat P2).
  *
  *   bun run scripts/golden.ts          # check (exit 1 on drift)
  *   bun run scripts/golden.ts --write  # (re)write the golden files — ONLY when
@@ -17,17 +18,20 @@ import { GENERATOR_VERSION } from "../src/core/version";
 import { buildGolden, compareGolden, type Golden } from "../test/golden/golden";
 import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "../test/golden/golden-gen";
 import { buildGoldenCal, compareGoldenCal, summarizeGoldenCalDiffs, type GoldenCal } from "../test/golden/golden-cal";
+import { buildGoldenPred, type GoldenPred } from "../test/golden/golden-pred";
 
 const rngPath = new URL("../test/golden/rng-1.json", import.meta.url);
 // the generator golden is named after the version that wrote it: wadjet-gen/0.0.4 -> gen-0.0.4.json
 const genPath = new URL(`../test/golden/gen-${GENERATOR_VERSION.split("/")[1]}.json`, import.meta.url);
 const calPath = new URL("../test/golden/calendar.json", import.meta.url);
+const predPath = new URL("../test/golden/predicates.json", import.meta.url);
 const write = process.argv.includes("--write");
 
 const freshRng: Golden = buildGolden(rng);
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 const freshGen: GoldenGen = buildGoldenGen(fjord);
 const freshCal: GoldenCal = buildGoldenCal();
+const freshPred: GoldenPred = buildGoldenPred();
 
 if (write) {
   await Bun.write(rngPath, JSON.stringify(freshRng, null, 2) + "\n");
@@ -36,6 +40,8 @@ if (write) {
   console.log(`wrote ${genPath.pathname} (${GENERATOR_VERSION})`);
   await Bun.write(calPath, JSON.stringify(freshCal, null, 1) + "\n");
   console.log(`wrote ${calPath.pathname} (${freshCal.worlds.length} worlds)`);
+  await Bun.write(predPath, JSON.stringify(freshPred, null, 1) + "\n");
+  console.log(`wrote ${predPath.pathname} (${Object.keys(freshPred.edges).length} predicates)`);
   process.exit(0);
 }
 
@@ -74,6 +80,18 @@ if (calDiffs.length === 0) {
   console.error("first differences:");
   for (const d of calDiffs.slice(0, 40)) console.error("  " + d);
   if (calDiffs.length > 40) console.error(`  ... ${calDiffs.length - 40} more`);
+}
+
+const storedPred = (await Bun.file(predPath).json()) as GoldenPred;
+// same exact structural diff as the calendar golden (world indices label the same WORLDS)
+const predDiffs = compareGoldenCal(storedPred as unknown as GoldenCal, freshPred as unknown as GoldenCal);
+if (predDiffs.length === 0) {
+  console.log(`predicate golden OK (${Object.keys(storedPred.edges).length} predicates, days ${storedPred.days.from}..${storedPred.days.to})`);
+} else {
+  failed = true;
+  console.error(`PREDICATE GOLDEN DRIFT — ${predDiffs.length} difference(s):`);
+  for (const d of predDiffs.slice(0, 40)) console.error("  " + d);
+  if (predDiffs.length > 40) console.error(`  ... ${predDiffs.length - 40} more`);
 }
 
 process.exit(failed ? 1 : 0);

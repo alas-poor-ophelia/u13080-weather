@@ -37,10 +37,12 @@ export const MOONS_365: InternalCalendarConfig["moons"] = [
 ];
 export const MOONS_400: InternalCalendarConfig["moons"] = [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0.5 }];
 
-const ERAS: Era[] = [
-  { name: "Thaw", from: 3, to: 5 },
-  { name: "Ash", from: -10, to: -8, apply: [{ param: "temperature.mean", op: "offset", value: -2 }] },
-];
+function makeEras(): Era[] {
+  return [
+    { name: "Thaw", from: 3, to: 5 },
+    { name: "Ash", from: -10, to: -8, apply: [{ param: "temperature.mean", op: "offset", value: -2 }] },
+  ];
+}
 
 /** Every predicate boundary below that reads a moon phase; the flip scan checks these. */
 export const MOON_BOUNDARIES = [0, 0.02, 0.05, 0.4, 0.5, 0.6, 0.95];
@@ -87,29 +89,35 @@ const range = (a: number, b: number): number[] => Array.from({ length: b - a + 1
 /** Far samples, including multiples of 2953 (29.53-day moon with phase 0 is exactly new there). */
 const FAR = [2953, -2953, 29530, 295300, -295300, 2953000, 1_000_003, -1_234_567, 5_000_000, -5_000_000, 9_999_999, -9_999_999];
 
-export const WORLDS: WorldSpec[] = [
-  {
-    id: "internal-365",
-    adapter: () => new InternalCalendar({ yearLength: 365, epochYear: 1, moons: MOONS_365, seasons: FOUR }, () => 0),
-    eras: ERAS,
-    zones: [zone("north", "Sable", false), zone("south", "Sable", true)],
-    days: [...range(-40, 40), ...range(360, 370), ...range(1003, 1100), ...range(-3290, -3280), ...FAR], // 1003..1094 = Winter of year 3, inside era Thaw
-  },
-  {
-    id: "internal-400",
-    adapter: () => new InternalCalendar({ yearLength: 400, epochYear: 1, moons: MOONS_400, seasons: FOUR }, () => 0),
-    eras: [],
-    zones: [zone("north", "Sable", false)],
-    days: [...range(-10, 10), ...range(100, 200), ...range(395, 405), ...FAR], // 100..199 = Summer of a 400-day year
-  },
-  {
-    id: "almanac",
-    adapter: makeAdapter,
-    eras: ERAS,
-    zones: [zone("north", "Ember", false)],
-    days: [...range(-10, 10), ...range(200, 300), ...range(1195, 1205), ...range(1595, 1605), ...FAR], // 1600 = leap day of the 401-day year
-  },
-];
+/** Fresh world specs (new zone, era and modifier objects on every call): a test that must see objects no other code has touched builds its own. */
+export function makeWorlds(): WorldSpec[] {
+  const ERAS: Era[] = makeEras();
+  return [
+    {
+      id: "internal-365",
+      adapter: () => new InternalCalendar({ yearLength: 365, epochYear: 1, moons: MOONS_365, seasons: FOUR }, () => 0),
+      eras: ERAS,
+      zones: [zone("north", "Sable", false), zone("south", "Sable", true)],
+      days: [...range(-40, 40), ...range(360, 370), ...range(1003, 1100), ...range(-3290, -3280), ...FAR], // 1003..1094 = Winter of year 3, inside era Thaw
+    },
+    {
+      id: "internal-400",
+      adapter: () => new InternalCalendar({ yearLength: 400, epochYear: 1, moons: MOONS_400, seasons: FOUR }, () => 0),
+      eras: [],
+      zones: [zone("north", "Sable", false)],
+      days: [...range(-10, 10), ...range(100, 200), ...range(395, 405), ...FAR], // 100..199 = Summer of a 400-day year
+    },
+    {
+      id: "almanac",
+      adapter: makeAdapter,
+      eras: ERAS,
+      zones: [zone("north", "Ember", false)],
+      days: [...range(-10, 10), ...range(200, 300), ...range(1195, 1205), ...range(1595, 1605), ...FAR], // 1600 = leap day of the 401-day year
+    },
+  ];
+}
+
+export const WORLDS: WorldSpec[] = makeWorlds();
 
 export interface GoldenCalDay {
   day: number;
