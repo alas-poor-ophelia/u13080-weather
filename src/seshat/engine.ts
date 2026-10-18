@@ -1,9 +1,11 @@
 /**
  * A compiled calendar (docs/SESHAT-v0.md §5): day from unit index in closed
- * form, unit index from day by an estimate from the mean length corrected by
- * whole steps. Everything is integer arithmetic on safe integers.
+ * form; unit index from day exactly for a bare base, else by an estimate from
+ * the mean length corrected by whole steps. Everything is integer arithmetic
+ * on safe integers.
  */
 import type { CalendarAst, CycleUnitAst, SlotsUnitAst } from "./ast";
+import { baseIndexAt, baseLengths, baseStart, linearBase, type LinearBase } from "./base";
 import { DAY_LIMIT } from "./day";
 import { gearBelow, gearDensity, gearDeviation, gearMatches, type GearAst } from "./gear";
 import { validate } from "./validate";
@@ -17,8 +19,9 @@ export interface Position {
 export class Engine {
   private readonly units = new Map<string, CycleUnitAst | SlotsUnitAst>();
   private readonly gears = new Map<string, GearAst>();
+  private readonly bases = new Map<string, LinearBase>();
   private readonly means = new Map<string, number>();
-  /** V4: the most whole steps indexAt may need to correct its estimate, per cycle unit */
+  /** V4: the most whole steps indexAt may need to correct its estimate, per cycle unit; 0 for a base with no gear terms, which inverts exactly */
   private readonly steps = new Map<string, number>();
 
   constructor(readonly ast: CalendarAst) {
@@ -28,11 +31,18 @@ export class Engine {
     for (const u of ast.units) {
       this.units.set(u.id, u);
       if (u.kind !== "cycle") continue;
+      const base = linearBase(u);
+      this.bases.set(u.id, base);
       const terms = (u.gears ?? []).map((t) => ({ add: t.add, g: this.gears.get(t.gear)! }));
-      this.means.set(u.id, u.length + terms.reduce((a, t) => a + t.add * gearDensity(t.g), 0));
-      // start(i) − anchor − mean·i is Σ add·(gearBelow(i) − density·i), and each gear's term stays within gearDeviation of 0
-      const deviation = terms.reduce((a, t) => a + Math.abs(t.add) * gearDeviation(t.g), 0);
-      const shortest = u.length + terms.reduce((a, t) => a + Math.min(0, t.add), 0);
+      this.means.set(u.id, base.a / base.L + terms.reduce((a, t) => a + t.add * gearDensity(t.g), 0));
+      if (!terms.length) {
+        this.steps.set(u.id, 0);
+        continue;
+      }
+      // start(i) − c/L − mean·i is the base's floor (under 1 day, 0 for a whole-day base) plus
+      // Σ add·(gearBelow(i) − density·i), and each gear's term stays within gearDeviation of 0
+      const deviation = (base.L === 1 ? 0 : 1) + terms.reduce((a, t) => a + Math.abs(t.add) * gearDeviation(t.g), 0);
+      const shortest = baseLengths(base)[0]! + terms.reduce((a, t) => a + Math.min(0, t.add), 0);
       this.steps.set(u.id, Math.ceil(deviation / shortest) + 2);
     }
   }
@@ -40,7 +50,7 @@ export class Engine {
   /** The day on which occurrence `index` of cycle unit `id` starts. */
   start(id: string, index: number): number {
     const u = this.cycle(id);
-    let s = u.anchor + u.length * index;
+    let s = baseStart(this.bases.get(id)!, index);
     for (const t of u.gears ?? []) s += t.add * gearBelow(this.gears.get(t.gear)!, index);
     return s;
   }
@@ -54,8 +64,10 @@ export class Engine {
   indexAt(id: string, day: number): number {
     const u = this.cycle(id);
     if (!Number.isSafeInteger(day) || Math.abs(day) > DAY_LIMIT) throw new RangeError(`day ${day} is not a whole day within ±${DAY_LIMIT}`);
-    // estimate from the mean, then correct by whole steps; V4 bounds how many
-    let i = Math.floor((day - u.anchor) / this.means.get(id)!);
+    const base = this.bases.get(id)!;
+    // a base alone inverts exactly; with gear terms, estimate from the mean and correct by whole steps, V4 bounds how many
+    if (!u.gears?.length) return baseIndexAt(base, day);
+    let i = Math.floor((day - base.c / base.L) / this.means.get(id)!);
     let left = this.steps.get(id)!;
     while (this.start(id, i) > day) i = this.step(id, i, -1, left--);
     while (this.start(id, i + 1) <= day) i = this.step(id, i, 1, left--);

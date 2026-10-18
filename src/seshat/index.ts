@@ -5,7 +5,8 @@
 export { Body, bodyFor, bodyFromNumbers, moonPhase } from "./body";
 export { dayIn, dayOf, type FixedYearCalendar, type MoonDef } from "./calendar";
 export { positionIn, startOf, type FixedUnit } from "./unit";
-export type { CalendarAst, CycleUnitAst, GearTerm, SlotAst, SlotsUnitAst, UnitAst } from "./ast";
+export type { CalendarAst, ConstantCycleAst, CrossingAst, CrossingCycleAst, CycleUnitAst, GearTerm, SlotAst, SlotsUnitAst, UnitAst } from "./ast";
+export { baseIndexAt, baseLengths, baseStart, linearBase, type LinearBase } from "./base";
 export { DAY_LIMIT } from "./day";
 export { gearBelow, gearDensity, gearDeviation, gearMatches, gearPeriod, type GearAst } from "./gear";
 export { Engine, type Position } from "./engine";
@@ -13,7 +14,7 @@ export { validate } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
 export { COPTIC, ETHIOPIAN } from "./calendars/ethiopian";
-export { FRENCH_REPUBLICAN } from "./calendars/french";
+export { FRENCH_REPUBLICAN, FRENCH_REPUBLICAN_EQUINOX } from "./calendars/french";
 export { HARPTOS } from "./calendars/harptos";
 export { wrap } from "./phase";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";

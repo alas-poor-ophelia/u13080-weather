@@ -4,12 +4,16 @@
  * list means the calendar can be compiled.
  *
  * Covered here: ids and references (V1), monotone lengths (V3: every
- * occurrence at least one day), magnitudes (V5), gear sanity, and slot sums. Stage windows (V2), the inverse bound (V4), cycle lcm (V6) and ledger
- * order (V7) arrive with stages, cycle labels and the ledger.
+ * occurrence at least one day), magnitudes (V5), one base per unit (V8),
+ * gear sanity, and slot sums. Stage windows (V2), the inverse bound (V4),
+ * cycle lcm (V6) and ledger order (V7) arrive with stages, cycle labels and
+ * the ledger.
  */
 import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
+import { baseLengths, linearBase } from "./base";
 import { gearPeriod, mod, type GearAst } from "./gear";
+import { gcd } from "./rational";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
 const GEAR_PERIOD_MAX = 100_000;
@@ -21,6 +25,8 @@ const SLOT_GEARS_MAX = 8;
  * product in Engine.start stays below 2^52, where the floor divisions are exact.
  */
 const MAGNITUDE_MAX = 2 * DAY_LIMIT;
+/** V5 for a linear base: every k·a + c and (d + 1)·L − c stays below this, where the floor divisions are exact. */
+const LINEAR_MAX = 2 ** 52;
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
 const inBounds = (x: number): boolean => isInt(x) && Math.abs(x) <= MAGNITUDE_MAX;
@@ -64,10 +70,9 @@ export function validate(ast: CalendarAst): string[] {
   for (const u of ast.units) {
     const at = `unit "${u.id}"`;
     if (u.kind === "cycle") {
-      if (!isInt(u.anchor) || Math.abs(u.anchor) > DAY_LIMIT) fail(u.id, `${at}: anchor ${u.anchor} is not a whole day within ±${DAY_LIMIT}`);
-      if (!inBounds(u.length)) fail(u.id, `${at}: length ${u.length} is not a whole number of days within ±${MAGNITUDE_MAX}`);
       const loss = checkTerms(u.id, at, u.gears, u.id);
-      if (inBounds(u.length) && u.length + loss < 1) fail(u.id, `${at}: an occurrence can be ${u.length + loss} days long; every occurrence needs at least one day (V3)`);
+      const shortest = checkBase(u, loss, (msg) => fail(u.id, `${at}: ${msg}`));
+      if (shortest !== null && shortest + loss < 1) fail(u.id, `${at}: an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
       continue;
     }
     const chain = chainOf(u, units);
@@ -105,6 +110,42 @@ export function validate(ast: CalendarAst): string[] {
     if (u.kind === "slots" && Array.isArray(chain)) sums(u, chain);
   }
   return errors;
+}
+
+/**
+ * One base per unit that never resets (V8): a constant anchor and length, or a
+ * crossing. A crossing's rationals must be in lowest terms (so equal calendars
+ * hash equal), its period at least one day, and its integer form must stay
+ * below 2^52 for every day within ±DAY_LIMIT (V5, §2.3.2). `loss` is the most
+ * the unit's gear terms can take off an occurrence. Returns the shortest base
+ * occurrence, or null when the base is unusable.
+ */
+function checkBase(u: CycleUnitAst, loss: number, fail: (msg: string) => void): number | null {
+  const n0 = u as { anchor?: unknown; length?: unknown; crossing?: unknown };
+  if (u.crossing == null) {
+    if (n0.anchor === undefined || n0.length === undefined) return fail("needs a base: an anchor and a length, or a crossing (V8)"), null;
+    let ok = true;
+    if (!isInt(u.anchor) || Math.abs(u.anchor) > DAY_LIMIT) ok = (fail(`anchor ${u.anchor} is not a whole day within ±${DAY_LIMIT}`), false);
+    if (!inBounds(u.length)) ok = (fail(`length ${u.length} is not a whole number of days within ±${MAGNITUDE_MAX}`), false);
+    return ok ? u.length : null;
+  }
+  if (n0.anchor !== undefined || n0.length !== undefined) return fail("has both a crossing and an anchor or length; a unit has one base (V8)"), null;
+  const x = n0.crossing as { period?: unknown; at?: unknown } | null;
+  const isRational = (r: unknown): r is { n: number; d: number } => typeof r === "object" && r !== null && isInt((r as { n: unknown }).n) && isInt((r as { d: unknown }).d);
+  if (typeof x !== "object" || x === null || !isRational(x.period) || !isRational(x.at)) return fail("crossing needs a period and an instant, each a rational { n, d } of safe integers"), null;
+  const { period, at } = u.crossing;
+  if (period.d <= 0 || at.d <= 0 || gcd(period.n, period.d) !== 1 || gcd(at.n, at.d) !== 1) return fail("crossing period and instant must be rationals n/d in lowest terms with d > 0"), null;
+  if (period.n < period.d) return fail(`crossing period ${period.n}/${period.d} is shorter than one day (V8)`), null;
+  if (Math.abs(at.n / at.d) > DAY_LIMIT) return fail(`crossing instant ${at.n}/${at.d} is outside ±${DAY_LIMIT}`), null;
+  const { a, c, L } = linearBase(u);
+  const shortest = baseLengths({ a, c, L })[0]!;
+  // the engine evaluates k·a + c and (d + 1)·L − c, k within the indices a day in range can reach, plus correction
+  // steps; gear terms can shorten an occurrence to shortest + loss (≥ 1 by V3), so they reach that many more indices
+  const kMax = Math.ceil((3 * DAY_LIMIT) / Math.max(1, shortest + loss)) + 2;
+  if (!(Math.abs(c) + (DAY_LIMIT + 1) * L < LINEAR_MAX && Math.abs(c) + kMax * a < LINEAR_MAX && isInt(c))) {
+    return fail(`crossing ${period.n}/${period.d} at ${at.n}/${at.d} is too fine for exact integer days within ±${DAY_LIMIT} (V5): use a coarser period or instant`), null;
+  }
+  return shortest;
 }
 
 function checkGear(g: GearAst, errors: string[]): void {
@@ -157,7 +198,7 @@ function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], er
     const state = involved.map((id, i) => `${id}=${(mask >> i) & 1}`).join(", ") || "always";
     // lengths a non-filler occurrence of each level can have, top down; this unit's own slots are checked at the last step
     const root = chain[0] as CycleUnitAst;
-    let parentLengths = [root.length + add(root.gears)];
+    let parentLengths = baseLengths(linearBase(root)).map((l) => l + add(root.gears));
     for (const c of chain.slice(1) as SlotsUnitAst[]) {
       const fixedLens = c.slots.map((s) => (s.length === "slack" ? 0 : s.length + add(s.gears)));
       const fixed = fixedLens.reduce((a, b) => a + b, 0);

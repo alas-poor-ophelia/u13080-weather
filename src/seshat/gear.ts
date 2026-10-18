@@ -34,11 +34,13 @@ export function mod(a: number, m: number): number {
   return r < 0 ? r + m : r + 0; // + 0 folds −0
 }
 
-function floorDiv(a: number, b: number): number {
+/** floor(a / b) for integers, exact while |a| < 2^53 (see the header). */
+export function floorDiv(a: number, b: number): number {
   return Math.floor(a / b);
 }
 
-function ceilDiv(a: number, b: number): number {
+/** ceil(a / b) for integers, exact under the same bound. */
+export function ceilDiv(a: number, b: number): number {
   return -Math.floor(-a / b);
 }
 
