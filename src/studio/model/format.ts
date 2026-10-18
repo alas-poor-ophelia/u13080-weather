@@ -25,6 +25,7 @@
  */
 import { compassPoint, withMinus } from "../../core/report";
 import { cToF, fToC, inToMm, kphToMph, mmToIn, mphToKph, type Units } from "../../core/units";
+import { mod } from "../../seshat/gear";
 
 export type Quantity = "temperature" | "temperatureDelta" | "amount" | "speed" | "direction" | "fraction" | "percent" | "factor" | "days" | "years" | "phase" | "probability" | "count";
 
@@ -225,12 +226,7 @@ function displayStep(step: number, q: Quantity, units: Units): number {
  * untouched by this.
  */
 export function dayLabel(dayOfYear: number, yearLength: number): string {
-  return `d${wrapDay(dayOfYear, yearLength)}`;
-}
-
-function wrapDay(day: number, yearLength: number): number {
-  const n = Math.max(1, Math.round(yearLength));
-  return ((Math.round(day) % n) + n) % n;
+  return `d${mod(Math.round(dayOfYear), Math.max(1, Math.round(yearLength)))}`;
 }
 
 /**
