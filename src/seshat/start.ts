@@ -8,7 +8,7 @@
  * Shared by the engine and the validator (which scans real occurrences when
  * stages make lengths depend on neighbouring years).
  */
-import type { CycleUnitAst, StageAst } from "./ast";
+import type { CycleRule, StageAst } from "./ast";
 import { baseIndexAt, baseLengths, baseStart, linearBase, type LinearBase } from "./base";
 import { floorDiv, gearBelow, gearDensity, gearDeviation, mod, type GearAst } from "./gear";
 
@@ -34,8 +34,8 @@ export function stageReach(stage: StageAst): { up: number; down: number } {
   return { up, down };
 }
 
-/** Assumes a validated unit and gears. */
-export function compileStart(u: CycleUnitAst, gears: ReadonlyMap<string, GearAst>): StartRule {
+/** Assumes a validated rule and gears; `id` names the unit in messages. A ledger is layered on by piecewise.ts. */
+export function compileStart(u: CycleRule, gears: ReadonlyMap<string, GearAst>, id: string): StartRule {
   const base = linearBase(u);
   const index: LinearBase | null = u.crossing?.index ?? null;
   const terms = (u.gears ?? []).map((t) => ({ add: t.add, g: gears.get(t.gear)! }));
@@ -94,7 +94,7 @@ export function compileStart(u: CycleUnitAst, gears: ReadonlyMap<string, GearAst
   };
 
   function step(i: number, by: number, left: number): number {
-    if (left <= 0) throw new Error(`unreachable: "${u.id}" needed more correction steps than its V4 bound`);
+    if (left <= 0) throw new Error(`unreachable: "${id}" needed more correction steps than its V4 bound`);
     return i + by;
   }
 }

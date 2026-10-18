@@ -7,15 +7,16 @@
  * occurrence at least one day, stages included), stage windows (V2),
  * magnitudes (V5), one base per unit (V8), gear sanity, and slot sums. The
  * inverse bound (V4) is computed by the start rule, and cycle lcm (V6) by
- * Engine.round; ledger order (V7) arrives with the ledger. Labels (C5) are
- * checked for shape.
+ * Engine.round. The ledger (C6) is checked for shape and order (V7), then for
+ * continuity on the compiled starts. Labels (C5) are checked for shape.
  */
-import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
+import type { CalendarAst, CycleRule, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
 import { baseLengths, linearBase } from "./base";
-import { gearMatches, gearPeriod, mod, type GearAst } from "./gear";
+import { gearMatches, gearPeriod, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
-import { compileStart, stageReach } from "./start";
+import { compileUnit } from "./piecewise";
+import { stageReach } from "./start";
 import { gcd } from "./rational";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
@@ -34,6 +35,10 @@ const LINEAR_MAX = 2 ** 52;
 const STAGE_WINDOW_MAX = 8;
 /** Most occurrences of a staged cycle the slot-sum scan reads (Hebrew needs about 55,000). */
 const SCAN_MAX = 1_000_000;
+/** The occurrence indices a ledger entry may name: a day within ±DAY_LIMIT reaches no further (V5). */
+const INDEX_MAX = 3 * DAY_LIMIT;
+/** Most pinned starts in one unit's ledger. */
+const PIN_MAX = 100_000;
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
@@ -81,14 +86,20 @@ export function validate(ast: CalendarAst): string[] {
     const at = `unit "${u.id}"`;
     if (u.kind === "cycle") {
       const unitFail = (msg: string) => fail(u.id, `${at}: ${msg}`);
-      // the most gear terms and stages can take off an occurrence
-      const loss = checkTerms(u.id, at, u.gears, u.id) - checkStages(u.stages, unitFail);
-      const shortest = checkBase(u, loss, unitFail);
+      /** a start rule: the unit's own, or a ledger switch's (V3, V5, V8 per rule) */
+      const checkRule = (rule: CycleRule, where: string) => {
+        const rf = (msg: string) => fail(u.id, `${where}: ${msg}`);
+        // the most gear terms and stages can take off an occurrence
+        const loss = checkTerms(u.id, where, rule.gears, u.id) - checkStages(rule.stages, rf);
+        const shortest = checkBase(rule, loss, rf);
+        if (shortest !== null && shortest + loss < 1) rf(`an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
+      };
+      checkRule(u, at);
       if (u.labels !== undefined) {
         if (!Array.isArray(u.labels) || !u.labels.length) unitFail("labels must be a non-empty list");
         else (u.labels as unknown[]).forEach((l, i) => checkLabel(l, `label ${i + 1}`, unitFail));
       }
-      if (shortest !== null && shortest + loss < 1) unitFail(`an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
+      if (u.ledger !== undefined) checkLedger(u, units, unitFail, (rule, where) => checkRule(rule, `${at} ${where}`));
       continue;
     }
     const chain = chainOf(u, units);
@@ -108,8 +119,31 @@ export function validate(ast: CalendarAst): string[] {
         continue;
       }
       if (s.min !== undefined || s.max !== undefined || s.fill !== undefined) fail(u.id, `${where}: min, max and fill belong to slack slots only`);
+      if (typeof s.length === "object") {
+        if (s.gears?.length) fail(u.id, `${where}: a keyed slot takes its length from its table and cannot carry gear terms`);
+        if (isObj(s.length)) checkKeyed(s.length, (msg) => fail(u.id, `${where}: ${msg}`));
+        else fail(u.id, `${where}: length ${show(s.length)} is not a number, "slack" or a keyed table`);
+        continue;
+      }
       if (!inBounds(s.length) || s.length < 0) fail(u.id, `${where}: length ${s.length} is not a whole number of days in 0..${MAGNITUDE_MAX}`);
       if (root) checkTerms(u.id, where, s.gears, root.id);
+    }
+  }
+
+  // V7 on the compiled starts: strictly increasing across every pin and switch (one comparison per boundary)
+  for (const u of ast.units) {
+    if (u.kind !== "cycle" || !u.ledger?.length || bad.has(u.id)) continue;
+    const read = [u, ...u.ledger.flatMap((e) => (e.kind === "switch" ? [e.rule] : []))].flatMap((r) => r.gears ?? []).map((t) => t.gear);
+    if (read.some((g) => bad.has(g) || !gears.has(g))) continue;
+    const rule = compileUnit(u, gears);
+    const boundaries = new Set<number>();
+    for (const e of u.ledger) {
+      if (e.kind === "switch") boundaries.add(e.from);
+      if (e.kind === "starts") for (let k = e.from; k <= e.from + (e.lengths?.length ?? 0) + 1; k++) boundaries.add(k);
+    }
+    for (const k of [...boundaries].sort((a, b) => a - b)) {
+      const [before, here] = [rule.start(k - 1), rule.start(k)];
+      if (here <= before) fail(u.id, `unit "${u.id}": occurrence ${k - 1} would be ${here - before} days long (it starts on day ${before}, the next on day ${here}); every occurrence needs at least one day (V7)`);
     }
   }
 
@@ -123,7 +157,9 @@ export function validate(ast: CalendarAst): string[] {
     const parent = chain[chain.length - 2]!;
     if (parent.kind === "slots") sums(parent, chain.slice(0, -1));
     if (chain.some((c) => bad.has(c.id))) return;
-    const read = chain.flatMap((c) => (c.kind === "cycle" ? (c.gears ?? []) : c.slots.flatMap((s) => s.gears ?? []))).map((t) => t.gear);
+    const read = chain
+      .flatMap((c) => (c.kind === "cycle" ? [...(c.gears ?? []), ...(c.ledger ?? []).flatMap((e) => (e.kind === "switch" ? (e.rule.gears ?? []) : []))] : c.slots.flatMap((s) => s.gears ?? [])))
+      .map((t) => t.gear);
     if (read.some((g) => bad.has(g) || !gears.has(g))) return;
     if (!checkSlotSums(u, chain, [...new Set(read)], gears, scans, errors)) bad.add(u.id);
   };
@@ -142,7 +178,7 @@ export function validate(ast: CalendarAst): string[] {
  * the unit's gear terms can take off an occurrence. Returns the shortest base
  * occurrence, or null when the base is unusable.
  */
-function checkBase(u: CycleUnitAst, loss: number, fail: (msg: string) => void): number | null {
+function checkBase(u: CycleRule, loss: number, fail: (msg: string) => void): number | null {
   const n0 = u as { anchor?: unknown; length?: unknown; crossing?: unknown };
   if (u.crossing == null) {
     if (n0.anchor === undefined || n0.length === undefined) return fail("needs a base: an anchor and a length, or a crossing (V8)"), null;
@@ -214,6 +250,81 @@ function chainOf(u: UnitAst, units: Map<string, UnitAst>): UnitAst[] | "missing"
   return chain;
 }
 
+/** A keyed slot length (C2): ordered [parent length, length] pairs, each parent length once. */
+function checkKeyed(k: Record<string, unknown>, fail: (msg: string) => void): void {
+  if (k.by !== "parent" || !Array.isArray(k.table) || !k.table.length) return fail('a keyed length is { by: "parent", table: [[parentLength, length], …] } with at least one row');
+  const parents = new Set<number>();
+  for (const row of k.table as unknown[]) {
+    if (!Array.isArray(row) || row.length !== 2 || !isInt(row[0]) || (row[0] as number) < 1 || !inBounds(row[1] as number) || (row[1] as number) < 0) return fail(`table row ${show(row)} is not [parent length ≥ 1, length ≥ 0]`);
+    if (parents.has(row[0] as number)) return fail(`table lists parent length ${show(row[0])} twice`);
+    parents.add(row[0] as number);
+  }
+}
+
+/**
+ * C6 ledger shape (§2.7.1, V7): switches in strictly increasing order with a
+ * valid rule each; pinned runs that do not overlap one another or sit on a
+ * switch's first occurrence; slot overrides that name a slot unit under this
+ * cycle, the right path and one length per slot. Continuity is checked on the
+ * compiled starts afterwards.
+ */
+function checkLedger(u: CycleUnitAst, units: ReadonlyMap<string, UnitAst>, fail: (msg: string) => void, checkRule: (rule: CycleRule, where: string) => void): void {
+  if (!Array.isArray(u.ledger)) return fail("ledger must be a list");
+  let lastSwitch = -Infinity;
+  const switches = new Set<number>();
+  const pinned = new Set<number>();
+  const overridden = new Set<string>();
+  for (const [i, e] of (u.ledger as unknown[]).entries()) {
+    const where = `ledger entry ${i + 1}`;
+    if (!isObj(e)) {
+      fail(`${where} is not an object`);
+      continue;
+    }
+    if (!isInt(e.from) || Math.abs(e.from as number) > INDEX_MAX) {
+      fail(`${where}: from ${show(e.from)} is not a whole occurrence index within ±${INDEX_MAX}`);
+      continue;
+    }
+    const from = e.from as number;
+    if (e.kind === "switch") {
+      if (from <= lastSwitch) fail(`${where}: switches must come in increasing order of from`);
+      lastSwitch = from;
+      switches.add(from);
+      if (!isObj(e.rule)) fail(`${where}: a switch needs a rule`);
+      else checkRule(e.rule as unknown as CycleRule, `${where} (switch at ${from})`);
+    } else if (e.kind === "starts") {
+      if (!isInt(e.startsOn) || Math.abs(e.startsOn as number) > MAGNITUDE_MAX) fail(`${where}: startsOn ${show(e.startsOn)} is not a whole day within ±${MAGNITUDE_MAX}`);
+      const lengths = e.lengths ?? [];
+      if (!Array.isArray(lengths) || (lengths as unknown[]).some((l) => !isInt(l) || (l as number) < 1 || (l as number) > MAGNITUDE_MAX)) {
+        fail(`${where}: lengths must be whole numbers of days ≥ 1`);
+        continue;
+      }
+      const lastStart = (e.startsOn as number) + (lengths as number[]).reduce((a, b) => a + b, 0);
+      if (Math.abs(lastStart) > MAGNITUDE_MAX) fail(`${where}: its last pinned start, day ${lastStart}, is outside ±${MAGNITUDE_MAX}`);
+      for (let k = from; k <= from + lengths.length; k++) {
+        if (pinned.has(k)) fail(`${where}: occurrence ${k} is pinned twice`);
+        pinned.add(k);
+      }
+      if (pinned.size > PIN_MAX) fail(`${where}: more than ${PIN_MAX} pinned starts`);
+    } else if (e.kind === "slots") {
+      const target = typeof e.unit === "string" ? units.get(e.unit) : undefined;
+      const chain = target ? chainOf(target, new Map(units)) : null;
+      if (!target || target.kind !== "slots" || !Array.isArray(chain) || chain[0] !== u) {
+        fail(`${where}: unit ${show(e.unit)} is not a slot unit under "${u.id}"`);
+        continue;
+      }
+      const path = e.path ?? [];
+      const between = chain.slice(1, -1) as SlotsUnitAst[];
+      const pathOk = Array.isArray(path) && path.length === between.length && (path as unknown[]).every((x, j) => isInt(x) && (x as number) >= 0 && (x as number) < between[j]!.slots.length && !between[j]!.slots[x as number]!.filler);
+      if (!pathOk) fail(`${where}: path must name one non-filler slot of each of the ${between.length} slot unit(s) between "${u.id}" and "${target.id}"`);
+      if (!Array.isArray(e.lengths) || e.lengths.length !== target.slots.length || (e.lengths as unknown[]).some((l) => !isInt(l) || (l as number) < 0 || (l as number) > MAGNITUDE_MAX)) fail(`${where}: lengths must be ${target.slots.length} whole numbers of days ≥ 0, one per slot of "${target.id}"`);
+      const key = `${target.id}|${from}|${show(path)}`;
+      if (overridden.has(key)) fail(`${where}: occurrence ${from} of "${target.id}" is overridden twice`);
+      overridden.add(key);
+    } else fail(`${where}: kind ${show(e.kind)} is not switch, starts or slots`);
+  }
+  for (const k of pinned) if (switches.has(k)) fail(`occurrence ${k} is both pinned and a switch's first occurrence; pin the next one instead`);
+}
+
 /** C5: a label's name is a string; its tags are distinct non-empty strings (they are hashed and reach predicates). */
 function checkLabel(l: unknown, where: string, fail: (msg: string) => void): void {
   if (!isObj(l)) return fail(`${where} must be an object with a name and/or tags`);
@@ -274,6 +385,8 @@ interface CycleState {
   readonly total: number;
   readonly on: (g: string) => boolean;
   readonly label: string;
+  /** set when a ledger slot override names this occurrence, so its slots are read with the override */
+  readonly k?: number;
 }
 
 /**
@@ -284,28 +397,35 @@ interface CycleState {
  * check). Otherwise they are every gear combination with every base length
  * (stricter than reality, never looser).
  */
-function cycleStates(root: CycleUnitAst, involved: string[], gears: ReadonlyMap<string, GearAst>, scans: Map<string, CycleState[] | string>): CycleState[] | string {
-  if (root.stages?.length || root.crossing?.index) {
+function cycleStates(chain: UnitAst[], involved: string[], gears: ReadonlyMap<string, GearAst>, scans: Map<string, CycleState[] | string>): CycleState[] | string {
+  const root = chain[0] as CycleUnitAst;
+  const keyed = chain.some((c) => c.kind === "slots" && c.slots.some((sl) => isObj(sl.length)));
+  const switchRules = (root.ledger ?? []).flatMap((e) => (e.kind === "switch" ? [e.rule] : []));
+  const staged = [root, ...switchRules].some((r) => r.stages?.length || r.crossing?.index);
+  if (!staged && (root.ledger?.length || keyed)) return ruleStates(root, switchRules, involved, gears);
+  if (staged) {
     // one scan per cycle and gear set, shared by every slot unit under it
     const cacheKey = `${root.id}|${involved.join()}`;
     const cached = scans.get(cacheKey);
     if (cached) return cached;
-    const rule = compileStart(root, gears);
+    const rule = compileUnit(root, gears);
     const [lo, hi] = [rule.indexAt(-DAY_LIMIT), rule.indexAt(DAY_LIMIT)];
     if (hi - lo > SCAN_MAX) {
-      const msg = `"${root.id}" has ${hi - lo + 1} occurrences within ±${DAY_LIMIT}; slot units under a staged cycle are checked occurrence by occurrence, at most ${SCAN_MAX}`;
+      const msg = `"${root.id}" has ${hi - lo + 1} occurrences within ±${DAY_LIMIT}; slot units under a staged, ledgered or keyed cycle are checked occurrence by occurrence, at most ${SCAN_MAX}`;
       scans.set(cacheKey, msg);
       return msg;
     }
-    const seen = new Map<number, CycleState>();
+    // occurrences a slot override names are checked one by one; the rest by distinct state
+    const overridden = new Set((root.ledger ?? []).flatMap((e) => (e.kind === "slots" ? [e.from] : [])));
+    const seen = new Map<string, CycleState>();
     for (let k = lo, s = rule.start(lo); k <= hi; k++) {
       const next = rule.start(k + 1);
       let mask = 0;
       for (let i = 0; i < involved.length; i++) if (gearMatches(gears.get(involved[i]!)!, k)) mask |= 1 << i;
-      const key = (next - s) * (1 << SLOT_GEARS_MAX) + mask;
+      const key = overridden.has(k) ? `k${k}` : `${next - s}|${mask}`;
       if (!seen.has(key)) {
         const m = mask;
-        seen.set(key, { total: next - s, on: (g) => ((m >> involved.indexOf(g)) & 1) === 1, label: `"${root.id}" ${k}: ${next - s} days` });
+        seen.set(key, { total: next - s, on: (g) => ((m >> involved.indexOf(g)) & 1) === 1, label: `"${root.id}" ${k}: ${next - s} days`, ...(overridden.has(k) && { k }) });
       }
       s = next;
     }
@@ -324,29 +444,94 @@ function cycleStates(root: CycleUnitAst, involved: string[], gears: ReadonlyMap<
 }
 
 /**
+ * States of a cycle whose rules have no stages: one gear period of each rule
+ * (exact, as gear-only lengths repeat with the lcm of the gear periods; a
+ * crossing base adds its two base lengths to every gear state, stricter than
+ * reality), plus every occurrence a ledger entry touches, read off the
+ * compiled starts, each with its own index so a slot override applies.
+ */
+function ruleStates(root: CycleUnitAst, switchRules: CycleRule[], involved: string[], gears: ReadonlyMap<string, GearAst>): CycleState[] {
+  const states: CycleState[] = [];
+  const bitsAt = (k: number) => {
+    const bits = involved.map((g) => gearMatches(gears.get(g)!, k));
+    return (g: string) => bits[involved.indexOf(g)] ?? false;
+  };
+  for (const [j, rule] of [root, ...switchRules].entries()) {
+    const name = j === 0 ? `"${root.id}"` : `"${root.id}" switch ${j}`;
+    const terms = (rule.gears ?? []).map((t) => ({ add: t.add, g: gears.get(t.gear)! }));
+    const base = baseLengths(linearBase(rule));
+    // lengths and every gear bit the slots read repeat together with the lcm of all their periods
+    let period = 1;
+    for (const g of new Set([...terms.map((t) => t.g), ...involved.map((id) => gears.get(id)!)])) {
+      period = lcm(period, gearPeriod(g));
+      if (period > SCAN_MAX) break;
+    }
+    if (period > SCAN_MAX) {
+      // too long to walk: every combination of gear bits with every base length, stricter than reality, never looser
+      for (let mask = 0; mask < 1 << involved.length; mask++) {
+        const on = (g: string) => ((mask >> involved.indexOf(g)) & 1) === 1;
+        const add = terms.reduce((a, t) => a + (on(t.g.id) ? t.add : 0), 0);
+        const label = `${name}, ${involved.map((id, i) => `${id}=${(mask >> i) & 1}`).join(", ") || "always"}`;
+        for (const len of base) states.push({ total: len + add, on, label });
+      }
+      continue;
+    }
+    const seen = new Set<string>();
+    for (let k = 0; k < period; k++) {
+      const on = bitsAt(k);
+      const add = terms.reduce((a, t) => a + (gearMatches(t.g, k) ? t.add : 0), 0);
+      for (const len of base) {
+        const key = `${len + add}|${involved.map((g) => (on(g) ? 1 : 0)).join("")}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        states.push({ total: len + add, on, label: `${name}, occurrence ${k} of a ${period}-occurrence gear period` });
+      }
+    }
+  }
+  const rule = compileUnit(root, gears);
+  const touched = new Set<number>();
+  for (const e of root.ledger ?? []) {
+    const last = e.kind === "starts" ? e.from + (e.lengths?.length ?? 0) : e.from;
+    for (let k = e.from - 1; k <= last; k++) touched.add(k);
+  }
+  const overridden = new Set((root.ledger ?? []).flatMap((e) => (e.kind === "slots" ? [e.from] : [])));
+  for (const k of touched) {
+    const total = rule.start(k + 1) - rule.start(k);
+    states.push({ total, on: bitsAt(k), label: `"${root.id}" ${k}: ${total} days`, ...(overridden.has(k) && { k }) });
+  }
+  return states;
+}
+
+/**
  * In every state of the chain's cycle, each slot unit's slots must fit every
  * length a non-filler occurrence of its parent can have (slotLengthsIn: fixed
  * slots and their gear terms, slack within its min and max).
  */
 function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], gears: ReadonlyMap<string, GearAst>, scans: Map<string, CycleState[] | string>, errors: string[]): boolean {
   if (involved.length > SLOT_GEARS_MAX) return (errors.push(`unit "${u.id}": reads ${involved.length} gears; at most ${SLOT_GEARS_MAX}`), false);
-  const states = cycleStates(chain[0] as CycleUnitAst, involved, gears, scans);
+  const states = cycleStates(chain, involved, gears, scans);
   if (typeof states === "string") return (errors.push(`unit "${u.id}": ${states}`), false);
+  const overrides = new Map(((chain[0] as CycleUnitAst).ledger ?? []).flatMap((e) => (e.kind === "slots" ? [[`${e.unit}|${[e.from, ...(e.path ?? [])].join(",")}`, e.lengths] as const] : [])));
   for (const state of states) {
-    let parentLengths = [state.total];
+    // parent occurrences at each level, with their slot path when an override could name one
+    let parents = [{ len: state.total, path: [] as number[] }];
     for (const c of chain.slice(1) as SlotsUnitAst[]) {
-      const next = new Set<number>();
-      for (const total of parentLengths) {
-        const lens = slotLengthsIn(c, total, state.on);
-        if (typeof lens === "string") {
-          if (c === u) return (errors.push(`unit "${u.id}": ${lens} (${state.label})`), false);
+      const next: Array<{ len: number; path: number[] }> = [];
+      const lens = new Set<number>();
+      for (const p of parents) {
+        const override = state.k === undefined ? undefined : overrides.get(`${c.id}|${[state.k, ...p.path].join(",")}`);
+        const got = slotLengthsIn(c, p.len, state.on, override);
+        if (typeof got === "string") {
+          if (c === u) return (errors.push(`unit "${u.id}": ${got} (${state.label})`), false);
           continue; // a parent's own failure is reported by the parent
         }
-        c.slots.forEach((s, i) => {
-          if (!s.filler) next.add(lens[i]!);
+        c.slots.forEach((sl, i) => {
+          if (sl.filler || (state.k === undefined && lens.has(got[i]!))) return;
+          lens.add(got[i]!);
+          next.push({ len: got[i]!, path: [...p.path, i] });
         });
       }
-      parentLengths = [...next];
+      parents = next;
     }
   }
   return true;

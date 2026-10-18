@@ -8,7 +8,8 @@ import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
 import { gearMatches, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
-import { compileStart, type StartRule } from "./start";
+import { compileUnit } from "./piecewise";
+import type { StartRule } from "./start";
 import { validate } from "./validate";
 
 /** Where a day falls in one unit: the occurrence (a cycle's index, or a slot's index in its parent) and the days into it. */
@@ -21,6 +22,8 @@ export class Engine {
   private readonly units = new Map<string, CycleUnitAst | SlotsUnitAst>();
   private readonly gears = new Map<string, GearAst>();
   private readonly rules = new Map<string, StartRule>();
+  /** ledger slot overrides (C6), by slot unit and parent path [cycle index, slot indices…] */
+  private readonly overrides = new Map<string, readonly number[]>();
 
   constructor(readonly ast: CalendarAst) {
     const errors = validate(ast);
@@ -28,7 +31,9 @@ export class Engine {
     for (const g of ast.gears) this.gears.set(g.id, g);
     for (const u of ast.units) {
       this.units.set(u.id, u);
-      if (u.kind === "cycle") this.rules.set(u.id, compileStart(u, this.gears));
+      if (u.kind !== "cycle") continue;
+      this.rules.set(u.id, compileUnit(u, this.gears));
+      for (const e of u.ledger ?? []) if (e.kind === "slots") this.overrides.set(overrideKey(e.unit, [e.from, ...(e.path ?? [])]), e.lengths);
     }
   }
 
@@ -56,7 +61,7 @@ export class Engine {
    */
   slotLengths(id: string, path: readonly number[]): number[] {
     const u = this.slots(id);
-    const lens = slotLengthsIn(u, this.occurrenceLength(u.in, path), (g) => gearMatches(this.gears.get(g)!, path[0]!));
+    const lens = slotLengthsIn(u, this.occurrenceLength(u.in, path), (g) => gearMatches(this.gears.get(g)!, path[0]!), this.overrides.get(overrideKey(id, path)));
     if (typeof lens === "string") throw new Error(`unreachable: "${id}" at [${path.join(", ")}]: ${lens}`); // the validator checks every reachable occurrence
     return lens;
   }
@@ -159,6 +164,7 @@ export class Engine {
   tagsAt(day: number): string[] {
     const tags: string[] = [];
     for (const u of this.ast.units) tags.push(...(this.labelAt(u.id, day)?.tags ?? []));
+    for (const d of this.ast.days ?? []) if (d.day === day) tags.push(...(d.tags ?? []));
     return tags;
   }
 
@@ -172,7 +178,7 @@ export class Engine {
     let p = 1;
     for (const id of ids) {
       const u = this.units.get(id);
-      if (u?.kind !== "cycle" || u.crossing || u.gears?.length || u.stages?.length) throw new RangeError(`"${id}" is not a constant cycle; its labels have no fixed period`);
+      if (u?.kind !== "cycle" || u.crossing || u.gears?.length || u.stages?.length || u.ledger?.length) throw new RangeError(`"${id}" is not a constant cycle; its labels have no fixed period`);
       p = lcm(p, u.length * (u.labels?.length || 1));
       if (!Number.isSafeInteger(p)) throw new RangeError(`the round of ${ids.join(", ")} is past the safe integers`);
     }
@@ -184,4 +190,8 @@ export class Engine {
     if (!r) throw new RangeError(`"${id}" is not a cycle unit`);
     return r;
   }
+}
+
+function overrideKey(unit: string, path: readonly number[]): string {
+  return `${unit}|${path.join(",")}`;
 }

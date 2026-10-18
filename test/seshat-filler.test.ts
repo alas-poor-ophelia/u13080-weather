@@ -50,7 +50,7 @@ function layoutOf(ast: CalendarAst): (leap: boolean) => Array<{ len: number; fil
   if (months.kind !== "slots") throw new Error("fixture");
   return (leap) =>
     months.slots.map((s: SlotAst) => ({
-      len: s.length === "slack" ? (leap ? 6 : 5) : s.length + (leap ? (s.gears ?? []).reduce((a, t) => a + t.add, 0) : 0),
+      len: s.length === "slack" ? (leap ? 6 : 5) : (s.length as number) + (leap ? (s.gears ?? []).reduce((a, t) => a + t.add, 0) : 0),
       filler: !!s.filler,
     }));
 }

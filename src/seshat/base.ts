@@ -8,7 +8,7 @@
  * Shared by the validator (V5, slot sums) and the engine, so the two can never
  * read a base differently.
  */
-import type { CycleUnitAst } from "./ast";
+import type { CycleRule } from "./ast";
 import { ceilDiv, floorDiv, lcm } from "./gear";
 
 export interface LinearBase {
@@ -18,7 +18,7 @@ export interface LinearBase {
 }
 
 /** The base in integers. Assumes a validated unit (safe-integer rationals, positive period). */
-export function linearBase(u: CycleUnitAst): LinearBase {
+export function linearBase(u: CycleRule): LinearBase {
   if (!u.crossing) return { a: u.length, c: u.anchor, L: 1 };
   const { period: p, at } = u.crossing;
   const L = lcm(p.d, at.d);

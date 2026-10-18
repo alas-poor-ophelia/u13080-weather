@@ -6,8 +6,8 @@
  * This is the subset the first calendars need: cycle units (never reset; a
  * constant or crossing base plus gear terms) and slot units (tile a parent
  * cycle or slot unit; constant, gear-adjusted or slack slots, any of them
- * filler), stages, and labels with tags. Tables keyed on a parent quantity
- * and the ledger arrive with the calendars that need them.
+ * filler, or keyed on the parent's length), stages, labels with tags, and
+ * the ledger (C6).
  */
 import type { GearAst } from "./gear";
 import type { Rational } from "./rational";
@@ -51,34 +51,61 @@ export type StageRule =
   /** shift by `add` when occurrence k + `at` below is `is` days long; window [at, at + 1] */
   | { readonly add: number; readonly length: { readonly at: number; readonly is: number } };
 
-interface CycleCommon {
-  readonly id: string;
-  readonly kind: "cycle";
+interface RuleCommon {
   readonly gears?: readonly GearTerm[];
   /** layers over the base and its gear terms, applied in order (§2.3.1) */
   readonly stages?: readonly StageAst[];
-  /** occurrence k carries labels[k mod labels.length] (C5, §2.6): modular weekday names, or one table over a cycle */
-  readonly labels?: readonly LabelAst[];
 }
 
-/** A unit that never resets, with a constant base: occurrence i starts on anchor + length·i, plus its gear terms. */
-export interface ConstantCycleAst extends CycleCommon {
+/** A constant base: occurrence i starts on anchor + length·i, plus the gear terms. */
+export interface ConstantRule extends RuleCommon {
   /** the day on which occurrence 0 starts (V1) */
   readonly anchor: number;
-  /** base length in days; each gear term (on this unit) adds to it */
+  /** base length in days; each gear term (on the unit) adds to it */
   readonly length: number;
   readonly crossing?: never;
 }
 
-/** A unit that never resets, with a crossing base: occurrence k starts on the civil day holding crossing k, plus its gear terms. */
-export interface CrossingCycleAst extends CycleCommon {
+/** A crossing base: occurrence k starts on the civil day holding crossing k, plus the gear terms. */
+export interface CrossingRule extends RuleCommon {
   readonly crossing: CrossingAst;
   readonly anchor?: never;
   readonly length?: never;
 }
 
-/** A unit that never resets: one base and any gear terms on top (§2.3.1). */
+/** A start rule (§2.3.1): one base, its gear terms and stages. A ledger `switch` carries one. */
+export type CycleRule = ConstantRule | CrossingRule;
+
+interface CycleCommon {
+  readonly id: string;
+  readonly kind: "cycle";
+  /** occurrence k carries labels[k mod labels.length] (C5, §2.6): modular weekday names, or one table over a cycle */
+  readonly labels?: readonly LabelAst[];
+  /** C6 (§2.7.1): rule switches, pinned starts and slot overrides, ordered by `from` (V7) */
+  readonly ledger?: readonly LedgerEntry[];
+}
+
+export type ConstantCycleAst = ConstantRule & CycleCommon;
+export type CrossingCycleAst = CrossingRule & CycleCommon;
+
+/** A unit that never resets: its own start rule, and a ledger over it (§2.3.1, §2.7.1). */
 export type CycleUnitAst = ConstantCycleAst | CrossingCycleAst;
+
+/**
+ * A ledger entry (C6, §2.7.1). Every entry is absolute: a switch's rule is
+ * the same rule it would be alone, and pins name days, not offsets, so one
+ * edit never moves the dates around it. Stages never read ledger data.
+ */
+export type LedgerEntry =
+  /** from occurrence `from` on (until the next switch), this rule governs */
+  | { readonly kind: "switch"; readonly from: number; readonly rule: CycleRule }
+  /** occurrence `from` starts on `startsOn`; each length pins one more start after it (n lengths pin n + 1 starts) */
+  | { readonly kind: "starts"; readonly from: number; readonly startsOn: number; readonly lengths?: readonly number[] }
+  /**
+   * in occurrence `from`, slot unit `unit` has exactly these lengths; `path` names the slot of each slot
+   * unit between the cycle and `unit` (empty for a unit directly under the cycle). They must fill the parent.
+   */
+  | { readonly kind: "slots"; readonly from: number; readonly unit: string; readonly path?: readonly number[]; readonly lengths: readonly number[] };
 
 /**
  * C5 Label (§2.6): a display name, not hashed (as moon phase names are not),
@@ -99,7 +126,7 @@ export interface SlotAst {
    * 0 means the slot is absent this time. Several slack slots each get their
    * `min`, then the rest is handed out in `fill` order, each up to its `max`.
    */
-  readonly length: number | "slack";
+  readonly length: number | "slack" | KeyedLength;
   /** slack only: the fewest days this slot takes (default 0) */
   readonly min?: number;
   /** slack only: the most days this slot takes (default unbounded) */
@@ -110,6 +137,16 @@ export interface SlotAst {
   readonly gears?: readonly GearTerm[];
   /** belongs to the parent but to no child sequence: a festival day has no décade (§2.3, Q1: it may still be named) */
   readonly filler?: boolean;
+}
+
+/**
+ * A slot length keyed on the length of the parent occurrence (C2): the Roman
+ * February is 23 days in a 377-day year, 24 in a 378-day one. Ordered pairs,
+ * so the hashed form is canonical; a parent length with no row is invalid.
+ */
+export interface KeyedLength {
+  readonly by: "parent";
+  readonly table: ReadonlyArray<readonly [parentLength: number, length: number]>;
 }
 
 /** A unit that resets with its parent and tiles each occurrence of the parent, except filler slots, with an ordered list of slots. */
@@ -123,8 +160,14 @@ export interface SlotsUnitAst {
 
 export type UnitAst = CycleUnitAst | SlotsUnitAst;
 
+/** A named or tagged day (C6 RDATE, §2.7.1): a one-off, such as a coronation. Its tags reach tagsAt. */
+export interface DayLabelAst extends LabelAst {
+  readonly day: number;
+}
+
 export interface CalendarAst {
   readonly name: string;
   readonly gears: readonly GearAst[];
   readonly units: readonly UnitAst[];
+  readonly days?: readonly DayLabelAst[];
 }

@@ -11,9 +11,15 @@ import type { SlotsUnitAst } from "./ast";
 /**
  * The lengths of `u`'s slots in a parent occurrence of `total` days, where
  * `matches(gear)` says whether a gear matches this occurrence's cycle index.
- * A string is the reason they cannot fit.
+ * `override` is a ledger slot override (C6) for this occurrence: it replaces
+ * the rule but must still fill the parent. A string is the reason they
+ * cannot fit.
  */
-export function slotLengthsIn(u: SlotsUnitAst, total: number, matches: (gear: string) => boolean): number[] | string {
+export function slotLengthsIn(u: SlotsUnitAst, total: number, matches: (gear: string) => boolean, override?: readonly number[]): number[] | string {
+  if (override) {
+    const sum = override.reduce((a, b) => a + b, 0);
+    return sum === total ? [...override] : `the ledger's slot lengths total ${sum} days but its parent occurrence is ${total}`;
+  }
   const lens: number[] = [];
   const slack: number[] = [];
   let used = 0;
@@ -21,6 +27,10 @@ export function slotLengthsIn(u: SlotsUnitAst, total: number, matches: (gear: st
     if (s.length === "slack") {
       lens.push(s.min ?? 0);
       slack.push(i);
+    } else if (typeof s.length === "object") {
+      const row = s.length.table.find(([parent]) => parent === total);
+      if (!row) return `slot ${i + 1} has no length for a parent occurrence of ${total} days`;
+      lens.push(row[1]);
     } else {
       let len = s.length;
       for (const t of s.gears ?? []) if (matches(t.gear)) len += t.add;
