@@ -32,10 +32,15 @@ Release notes are taken from the matching `## <version>` section by the release 
     regime had the same problem. Era and regime terms now count as *unknown* for that estimate,
     so the window is the season's days in both cases, negated or not.
   - Moons with a missing, zero, negative or non-numeric cycle are repaired on load (29.53 days)
-    and reported once, instead of producing broken phases. The values that were replaced are kept
-    in `data.json` under `calendar.repairedFrom`. A cycle stored as a numeric string (`"30"`) is
+    and reported once, instead of producing broken phases. The report (a notice on load, and the
+    developer console) names each value it replaced. A cycle stored as a numeric string (`"30"`) is
     read as that number and does not change. The moons box in settings now refuses a cycle that
     is not more than 0 days.
+  - The same load-time repair covers the calendar's days-in-a-year (0, negative or not a number
+    becomes 365) and first year (not a number becomes 1; a numeric string such as `"1"`, which made
+    every year a string, becomes its number), reported the same way. Values
+    the calendar could already use, such as a fractional year length or one longer than the
+    settings row allows, are left as they are.
   - Pinned days keep the values you pinned. The settings row asks you to *Acknowledge* the new
     generator version.
 

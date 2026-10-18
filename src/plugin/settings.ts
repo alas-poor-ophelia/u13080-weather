@@ -51,8 +51,6 @@ export interface InternalCalendarConfig {
   moons: MoonConfig[];
   /** optional season labels: yearPhase start → name (becomes a tag) */
   seasons: Array<{ name: string; from: number }>;
-  /** what a load-time repair replaced, oldest first (never read; kept so a hand edit is recoverable). Not in configHash. */
-  repairedFrom?: Array<{ at: string; field: "moons"; original: unknown }>;
 }
 
 export interface WadjetSettings {
@@ -105,6 +103,14 @@ export function freshSeed(): string {
 
 const DEFAULT_MOON = DEFAULT_SETTINGS.calendar.moons[0]!;
 
+/** A stored value as a person would read it in a repair message: strings quoted, NaN as NaN, long values cut short. */
+function shown(v: unknown): string {
+  if (v === undefined) return "nothing";
+  if (typeof v === "number") return String(v);
+  const text = typeof v === "string" ? JSON.stringify(v) : (JSON.stringify(v) ?? `a ${typeof v}`);
+  return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+}
+
 /**
  * The internal calendar's moons, repaired so the plugin always loads: a
  * `moons` that is not a list becomes the default list; a moon whose cycle is
@@ -117,7 +123,7 @@ const DEFAULT_MOON = DEFAULT_SETTINGS.calendar.moons[0]!;
  */
 function sanitizeMoons(moons: unknown, warn: (msg: string) => void): MoonConfig[] {
   if (!Array.isArray(moons)) {
-    warn("The calendar's moons were not a list, so the default moon was used.");
+    warn(`The calendar's moons were ${shown(moons)}, not a list, so the default moon was used.`);
     return DEFAULT_SETTINGS.calendar.moons.map((m) => ({ ...m }));
   }
   return moons.map((raw: unknown, i) => {
@@ -127,36 +133,62 @@ function sanitizeMoons(moons: unknown, warn: (msg: string) => void): MoonConfig[
     const cycle: unknown = typeof stored === "string" && stored.trim() !== "" ? Number(stored) : stored;
     const fixed: MoonConfig = { ...m, name, cycleDays: cycle as number, phaseAtEpoch: m.phaseAtEpoch as number };
     if (typeof cycle !== "number" || !Number.isFinite(cycle) || cycle <= 0) {
-      warn(`Moon "${name}" had no usable cycle length, so it was set to ${DEFAULT_MOON.cycleDays} days.`);
+      warn(`Moon "${name}" had a cycle of ${shown(stored)} days, which is not usable, so it was set to ${DEFAULT_MOON.cycleDays}.`);
       fixed.cycleDays = DEFAULT_MOON.cycleDays;
     }
     if (typeof m.phaseAtEpoch !== "number" || !Number.isFinite(m.phaseAtEpoch)) {
-      warn(`Moon "${name}" had no usable phase at day 0, so it was set to 0.`);
+      warn(`Moon "${name}" had a phase at day 0 of ${shown(m.phaseAtEpoch)}, which is not usable, so it was set to 0.`);
       fixed.phaseAtEpoch = 0;
     }
     if (m.phases !== undefined && !Array.isArray(m.phases)) {
-      warn(`Moon "${name}" had unreadable named phases, so they were removed.`);
+      warn(`Moon "${name}" had named phases of ${shown(m.phases)}, which are not readable, so they were removed.`);
       delete fixed.phases;
     }
     return fixed;
   });
 }
 
-/** Merge loaded data over defaults; fill a seed if missing; repair broken moons (reported through `warn`). Returns a new object. */
+/**
+ * The year length, repaired only where the calendar could not use it: 0, a
+ * negative number, NaN, or something that is not a number gives NaN phases,
+ * so it becomes 365 (reported). A numeric string ("400") is read as its
+ * number. Anything else the calendar already handled (a fractional year, a
+ * year longer than the settings row allows) is left alone: those worlds work.
+ */
+function sanitizeYearLength(v: unknown, warn: (msg: string) => void): number {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  if (typeof n === "number" && Number.isFinite(n) && n > 0) return n;
+  warn(`The calendar's days-in-a-year was ${shown(v)}, which is not usable, so it was set to ${DEFAULT_SETTINGS.calendar.yearLength}.`);
+  return DEFAULT_SETTINGS.calendar.yearLength;
+}
+
+/**
+ * The epoch year. A string (even "1") made every year a string ("1" gave year
+ * "21"), and NaN gave no year at all: both are repaired and reported, a numeric
+ * string to its number, anything else to 1. `null` already behaved as 0, so
+ * it becomes 0 without a report.
+ */
+function sanitizeEpochYear(v: unknown, warn: (msg: string) => void): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v === null) return 0;
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  const fixed = Number.isFinite(n) ? n : DEFAULT_SETTINGS.calendar.epochYear;
+  warn(`The calendar's first year was ${shown(v)}, not a number, so it was set to ${fixed}.`);
+  return fixed;
+}
+
+/** Merge loaded data over defaults; fill a seed if missing; repair a broken calendar (reported through `warn`). Returns a new object. */
 export function migrateSettings(raw: unknown, warn: (msg: string) => void = () => {}): WadjetSettings {
   const r = (raw ?? {}) as Partial<WadjetSettings>;
   const calendar: InternalCalendarConfig = { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) };
-  let repaired = false;
-  const moons = sanitizeMoons(calendar.moons, (msg) => {
-    repaired = true;
-    warn(msg);
-  });
-  // the plugin saves on load, so keep what the repair replaced: a hand edit stays recoverable
-  const repairedFrom = repaired ? [...(Array.isArray(calendar.repairedFrom) ? calendar.repairedFrom : []), { at: new Date().toISOString(), field: "moons" as const, original: calendar.moons as unknown }] : calendar.repairedFrom;
+  // each message names the value it replaced: the plugin saves on load, so the message is where the old value survives
+  const moons = sanitizeMoons(calendar.moons, warn);
+  const yearLength = sanitizeYearLength(calendar.yearLength, warn);
+  const epochYear = sanitizeEpochYear(calendar.epochYear, warn);
   const s: WadjetSettings = {
     ...DEFAULT_SETTINGS,
     ...r,
-    calendar: { ...calendar, moons, ...(repairedFrom ? { repairedFrom } : {}) },
+    calendar: { ...calendar, yearLength, epochYear, moons },
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],

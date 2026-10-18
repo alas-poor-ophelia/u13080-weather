@@ -57,7 +57,11 @@ export default class WadjetPlugin extends Plugin {
     if (this.dead) return;
     const repairs: string[] = [];
     this.settings = migrateSettings(loaded, (msg) => repairs.push(msg));
-    if (repairs.length) new Notice(`Wadjet repaired its calendar settings: ${repairs.join(" ")} The original values are kept in data.json under calendar.repairedFrom.`, 15000);
+    if (repairs.length) {
+      // the repaired settings are saved below, so these messages are where the old values survive: show them and log them
+      for (const msg of repairs) console.warn(`U+13080 Weather: ${msg}`);
+      new Notice(`Wadjet repaired its calendar settings: ${repairs.join(" ")}`, 15000);
+    }
     this.time = new TimeRegistry(this.settings.activeTimeAdapter);
     this.internalCalendar = new InternalCalendar(
       this.settings.calendar,

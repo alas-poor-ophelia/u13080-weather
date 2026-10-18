@@ -81,25 +81,77 @@ describe("settings", () => {
     expect(cal.toContext(100).moons).toHaveLength(2);
   });
 
-  test("migrate: a repair keeps the original values in calendar.repairedFrom, once", () => {
-    const original = [{ name: "Sable", cycleDays: -5, phaseAtEpoch: 0 }, "not a moon"];
-    const first = migrateSettings({ calendar: { moons: original } });
-    expect(first.calendar.repairedFrom).toHaveLength(1);
-    const rec = first.calendar.repairedFrom![0]!;
-    expect(rec.field).toBe("moons");
-    expect(rec.original).toEqual(original);
-    expect(new Date(rec.at).toISOString()).toBe(rec.at);
+  test("migrate: each repair message names the value it replaced, and nothing is stored about it", () => {
+    const warnings: string[] = [];
+    const s = migrateSettings({ calendar: { moons: [{ name: "Sable", cycleDays: "29,53", phaseAtEpoch: Number.NaN }] } }, (m) => warnings.push(m));
+    expect(warnings).toEqual([
+      'Moon "Sable" had a cycle of "29,53" days, which is not usable, so it was set to 29.53.',
+      'Moon "Sable" had a phase at day 0 of NaN, which is not usable, so it was set to 0.',
+    ]);
+    // the repaired calendar holds only calendar fields: no record of the repair is kept in data.json
+    expect(Object.keys(s.calendar).sort()).toEqual(["epochYear", "moons", "seasons", "yearLength"]);
+    // reloading the repaired settings repairs nothing
+    const again: string[] = [];
+    migrateSettings(JSON.parse(JSON.stringify(s)), (m) => again.push(m));
+    expect(again).toEqual([]);
+    // a long value is cut short in the message
+    const long: string[] = [];
+    migrateSettings({ calendar: { moons: "x".repeat(200) } }, (m) => long.push(m));
+    expect(long[0]!.length).toBeLessThan(160);
+  });
 
-    // reloading the repaired settings repairs nothing and keeps the record
-    const again = migrateSettings(JSON.parse(JSON.stringify(first)));
-    expect(again.calendar.repairedFrom).toEqual(first.calendar.repairedFrom);
+  test("migrate: an unusable year length is repaired; one the calendar could use is left alone", () => {
+    const load = (yearLength: unknown) => {
+      const warnings: string[] = [];
+      const cal = migrateSettings({ calendar: { yearLength } }, (m) => warnings.push(m)).calendar;
+      return { cal, warnings };
+    };
+    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, null, "abc", ""]) {
+      const { cal, warnings } = load(bad);
+      expect(cal.yearLength).toBe(365);
+      expect(warnings).toHaveLength(1);
+      const ctx = new InternalCalendar(cal, () => 0).toContext(1000);
+      for (const v of [ctx.yearPhase, ctx.dayOfYear, ctx.year]) expect(Number.isFinite(v)).toBe(true);
+    }
+    // these worked before the repair existed, so they must come back exactly as stored
+    for (const fine of [365, 400, 365.25, 20_000, 0.5]) {
+      const { cal, warnings } = load(fine);
+      expect(cal.yearLength).toBe(fine);
+      expect(warnings).toEqual([]);
+    }
+    const numeric = load("400");
+    expect(numeric.cal.yearLength).toBe(400);
+    expect(numeric.warnings).toEqual([]);
+  });
 
-    // a valid load records nothing
-    expect(migrateSettings({ calendar: { moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] } }).calendar.repairedFrom).toBeUndefined();
+  test("migrate: an epoch year that is not a number is repaired", () => {
+    const load = (epochYear: unknown) => {
+      const warnings: string[] = [];
+      const cal = migrateSettings({ calendar: { epochYear } }, (m) => warnings.push(m)).calendar;
+      return { cal, warnings };
+    };
+    expect(load("1").cal.epochYear).toBe(1); // used to make every year a string ("21")
+    expect(load("1").warnings).toHaveLength(1);
+    expect(load("x").cal.epochYear).toBe(1);
+    expect(load(Number.NaN).cal.epochYear).toBe(1);
+    expect(load("x").warnings).toEqual([`The calendar's first year was "x", not a number, so it was set to 1.`]);
+    // null already behaved as 0, so it becomes 0 without a report
+    expect(load(null).cal.epochYear).toBe(0);
+    expect(load(null).warnings).toEqual([]);
+    for (const fine of [1, -40, 1.5, 1492]) {
+      expect(load(fine).cal.epochYear).toBe(fine);
+      expect(load(fine).warnings).toEqual([]);
+    }
+  });
 
-    // the record never changes weather: it is not part of the calendar hash
-    const { repairedFrom: _r, ...bare } = first.calendar;
-    expect(new InternalCalendar(first.calendar, () => 0).configHash()).toBe(new InternalCalendar(bare, () => 0).configHash());
+  test("migrate: several repairs in one load each report once, in calendar order", () => {
+    const warnings: string[] = [];
+    migrateSettings({ calendar: { yearLength: 0, epochYear: "x", moons: [{ name: "A", cycleDays: 0, phaseAtEpoch: 0 }] } }, (m) => warnings.push(m));
+    expect(warnings).toEqual([
+      'Moon "A" had a cycle of 0 days, which is not usable, so it was set to 29.53.',
+      "The calendar's days-in-a-year was 0, which is not usable, so it was set to 365.",
+      `The calendar's first year was "x", not a number, so it was set to 1.`,
+    ]);
   });
 
   test("migrate: devicePresets defaults to [] when absent, and passes through an array", () => {
