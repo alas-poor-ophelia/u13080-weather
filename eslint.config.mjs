@@ -51,6 +51,13 @@ export default tseslint.config(
     },
   },
   {
+    // src/seshat/calendars/ may reach one level up, into src/seshat, and no further.
+    files: ["src/seshat/calendars/**/*.ts"],
+    rules: {
+      "no-restricted-imports": ["error", { patterns: [{ group: ["obsidian", "../../*", "../../**"], message: "src/seshat imports nothing outside src/seshat." }] }],
+    },
+  },
+  {
     // Tests and scripts drive a real Obsidian through page.evaluate and print reports:
     // `any`, non-null assertions and console are the job there.
     files: ["test/**/*.ts", "scripts/**/*.ts"],
