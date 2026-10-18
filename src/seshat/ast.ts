@@ -6,8 +6,8 @@
  * This is the subset the first calendars need: cycle units (never reset; a
  * constant or crossing base plus gear terms) and slot units (tile a parent
  * cycle or slot unit; constant, gear-adjusted or slack slots, any of them
- * filler). Tables, stages, labels with tags and the ledger arrive with the
- * calendars that need them.
+ * filler), stages, and labels with tags. Tables keyed on a parent quantity
+ * and the ledger arrive with the calendars that need them.
  */
 import type { GearAst } from "./gear";
 import type { Rational } from "./rational";
@@ -57,8 +57,8 @@ interface CycleCommon {
   readonly gears?: readonly GearTerm[];
   /** layers over the base and its gear terms, applied in order (§2.3.1) */
   readonly stages?: readonly StageAst[];
-  /** display names by position (index mod labels.length); not hashed */
-  readonly labels?: readonly string[];
+  /** occurrence k carries labels[k mod labels.length] (C5, §2.6): modular weekday names, or one table over a cycle */
+  readonly labels?: readonly LabelAst[];
 }
 
 /** A unit that never resets, with a constant base: occurrence i starts on anchor + length·i, plus its gear terms. */
@@ -80,9 +80,20 @@ export interface CrossingCycleAst extends CycleCommon {
 /** A unit that never resets: one base and any gear terms on top (§2.3.1). */
 export type CycleUnitAst = ConstantCycleAst | CrossingCycleAst;
 
+/**
+ * C5 Label (§2.6): a display name, not hashed (as moon phase names are not),
+ * and tags, which are hashed because they reach predicates and weather.
+ */
+export interface LabelAst {
+  readonly name?: string;
+  readonly tags?: readonly string[];
+}
+
 export interface SlotAst {
   /** display name; not hashed */
   readonly name?: string;
+  /** hashed, like a label's tags (Q1: filler slots may carry them too) */
+  readonly tags?: readonly string[];
   /**
    * days, or "slack": a share of whatever the parent occurrence leaves over.
    * 0 means the slot is absent this time. Several slack slots each get their

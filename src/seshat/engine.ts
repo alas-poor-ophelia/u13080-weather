@@ -4,9 +4,9 @@
  * the mean length corrected by whole steps. Everything is integer arithmetic
  * on safe integers.
  */
-import type { CalendarAst, CycleUnitAst, SlotsUnitAst } from "./ast";
+import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
-import { gearMatches, type GearAst } from "./gear";
+import { gearMatches, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileStart, type StartRule } from "./start";
 import { validate } from "./validate";
@@ -138,6 +138,45 @@ export class Engine {
     const u = this.units.get(id);
     if (u?.kind !== "slots") throw new RangeError(`"${id}" is not a slot unit`);
     return u;
+  }
+
+  /**
+   * The label `day` carries in unit `id` (C5): a cycle's label by occurrence
+   * (index mod the table's length), or a slot's own name and tags. Null when
+   * the unit has no label there, or the day has no place in it.
+   */
+  labelAt(id: string, day: number): LabelAst | null {
+    const u = this.units.get(id);
+    if (!u) throw new RangeError(`no unit "${id}"`);
+    const at = this.positionOf(id, day);
+    if (!at) return null;
+    if (u.kind === "cycle") return u.labels?.length ? u.labels[mod(at.index, u.labels.length)]! : null;
+    const s = u.slots[at.index]!;
+    return s.name === undefined && s.tags === undefined ? null : { ...(s.name !== undefined && { name: s.name }), ...(s.tags && { tags: s.tags }) };
+  }
+
+  /** Every tag `day` carries, unit by unit in declaration order (tags are hashed; names are not). */
+  tagsAt(day: number): string[] {
+    const tags: string[] = [];
+    for (const u of this.ast.units) tags.push(...(this.labelAt(u.id, day)?.tags ?? []));
+    return tags;
+  }
+
+  /**
+   * V6: the days after which the labels of cycle units `ids` all repeat
+   * together (the Calendar Round of Tzolk'in and Haab' is 18,980). Each unit
+   * needs a constant length and no gear terms or stages; its period is its
+   * length times its label count.
+   */
+  round(ids: readonly string[]): number {
+    let p = 1;
+    for (const id of ids) {
+      const u = this.units.get(id);
+      if (u?.kind !== "cycle" || u.crossing || u.gears?.length || u.stages?.length) throw new RangeError(`"${id}" is not a constant cycle; its labels have no fixed period`);
+      p = lcm(p, u.length * (u.labels?.length || 1));
+      if (!Number.isSafeInteger(p)) throw new RangeError(`the round of ${ids.join(", ")} is past the safe integers`);
+    }
+    return p;
   }
 
   private rule(id: string): StartRule {

@@ -6,8 +6,9 @@
  * Covered here: ids and references (V1), monotone lengths (V3: every
  * occurrence at least one day, stages included), stage windows (V2),
  * magnitudes (V5), one base per unit (V8), gear sanity, and slot sums. The
- * inverse bound (V4) is computed by the start rule; cycle lcm (V6) and ledger
- * order (V7) arrive with cycle labels and the ledger.
+ * inverse bound (V4) is computed by the start rule, and cycle lcm (V6) by
+ * Engine.round; ledger order (V7) arrives with the ledger. Labels (C5) are
+ * checked for shape.
  */
 import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
@@ -83,6 +84,10 @@ export function validate(ast: CalendarAst): string[] {
       // the most gear terms and stages can take off an occurrence
       const loss = checkTerms(u.id, at, u.gears, u.id) - checkStages(u.stages, unitFail);
       const shortest = checkBase(u, loss, unitFail);
+      if (u.labels !== undefined) {
+        if (!Array.isArray(u.labels) || !u.labels.length) unitFail("labels must be a non-empty list");
+        else (u.labels as unknown[]).forEach((l, i) => checkLabel(l, `label ${i + 1}`, unitFail));
+      }
       if (shortest !== null && shortest + loss < 1) unitFail(`an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
       continue;
     }
@@ -93,6 +98,7 @@ export function validate(ast: CalendarAst): string[] {
     else if (chain === "missing") bad.add(u.id); // the unit missing higher up reports itself
     for (const [i, s] of u.slots.entries()) {
       const where = `${at} slot ${i + 1}`;
+      if (s.name !== undefined || s.tags !== undefined) checkLabel({ name: s.name, tags: s.tags }, "its name and tags", (msg) => fail(u.id, `${where}: ${msg}`));
       if (s.length === "slack") {
         if (s.gears?.length) fail(u.id, `${where}: a slack slot takes what is left and cannot carry gear terms`);
         const min = s.min ?? 0;
@@ -206,6 +212,15 @@ function chainOf(u: UnitAst, units: Map<string, UnitAst>): UnitAst[] | "missing"
     c = p;
   }
   return chain;
+}
+
+/** C5: a label's name is a string; its tags are distinct non-empty strings (they are hashed and reach predicates). */
+function checkLabel(l: unknown, where: string, fail: (msg: string) => void): void {
+  if (!isObj(l)) return fail(`${where} must be an object with a name and/or tags`);
+  if (l.name !== undefined && typeof l.name !== "string") fail(`${where}: name ${show(l.name)} is not a string`);
+  if (l.tags === undefined) return;
+  if (!Array.isArray(l.tags) || (l.tags as unknown[]).some((t) => typeof t !== "string" || !t)) return fail(`${where}: tags must be a list of non-empty strings`);
+  if (new Set(l.tags).size !== l.tags.length) fail(`${where}: a tag is listed twice`);
 }
 
 /**

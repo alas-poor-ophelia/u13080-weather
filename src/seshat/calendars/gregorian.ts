@@ -47,6 +47,6 @@ export const GREGORIAN: CalendarAst = {
       ],
     },
     // 1970-01-04 was a Sunday
-    { id: "week", kind: "cycle", anchor: 3, length: 7, labels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] },
+    { id: "week", kind: "cycle", anchor: 3, length: 7, labels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((name) => ({ name })) },
   ],
 };
