@@ -27,12 +27,36 @@ export interface GearTerm {
 export interface CrossingAst {
   readonly period: Rational;
   readonly at: Rational;
+  /**
+   * Read the crossing at a derived index instead of k (§2.3.1): crossing
+   * number floor((k·a + c) / L). Hebrew reads the molad at the months elapsed
+   * before year k, floor((235k + 1) / 19).
+   */
+  readonly index?: { readonly a: number; readonly c: number; readonly L: number };
 }
+
+/**
+ * One stage (C4, §2.5): a shift of each start, chosen by the first rule that
+ * matches, read off the stage below only (the base plus gear terms, or the
+ * previous stage). No rule matching shifts by 0. A stage never reads its own
+ * output, so it is never a fixpoint.
+ */
+export interface StageAst {
+  readonly rules: readonly StageRule[];
+}
+
+export type StageRule =
+  /** shift by `add` when the start below, minus `offset`, is in `in` mod `mod` (a weekday test); window [0, 0] */
+  | { readonly add: number; readonly residue: { readonly mod: number; readonly offset?: number; readonly in: readonly number[] } }
+  /** shift by `add` when occurrence k + `at` below is `is` days long; window [at, at + 1] */
+  | { readonly add: number; readonly length: { readonly at: number; readonly is: number } };
 
 interface CycleCommon {
   readonly id: string;
   readonly kind: "cycle";
   readonly gears?: readonly GearTerm[];
+  /** layers over the base and its gear terms, applied in order (§2.3.1) */
+  readonly stages?: readonly StageAst[];
   /** display names by position (index mod labels.length); not hashed */
   readonly labels?: readonly string[];
 }
@@ -59,8 +83,18 @@ export type CycleUnitAst = ConstantCycleAst | CrossingCycleAst;
 export interface SlotAst {
   /** display name; not hashed */
   readonly name?: string;
-  /** days, or "slack": whatever the parent occurrence leaves over. 0 means the slot is absent this time */
+  /**
+   * days, or "slack": a share of whatever the parent occurrence leaves over.
+   * 0 means the slot is absent this time. Several slack slots each get their
+   * `min`, then the rest is handed out in `fill` order, each up to its `max`.
+   */
   readonly length: number | "slack";
+  /** slack only: the fewest days this slot takes (default 0) */
+  readonly min?: number;
+  /** slack only: the most days this slot takes (default unbounded) */
+  readonly max?: number;
+  /** slack only: the order extra days are handed out in, lowest first; slots without one come after, ties in slot order */
+  readonly fill?: number;
   /** gear terms read the index of the cycle the slot unit sits under */
   readonly gears?: readonly GearTerm[];
   /** belongs to the parent but to no child sequence: a festival day has no décade (§2.3, Q1: it may still be named) */

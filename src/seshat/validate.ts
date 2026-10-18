@@ -4,15 +4,17 @@
  * list means the calendar can be compiled.
  *
  * Covered here: ids and references (V1), monotone lengths (V3: every
- * occurrence at least one day), magnitudes (V5), one base per unit (V8),
- * gear sanity, and slot sums. Stage windows (V2), the inverse bound (V4),
- * cycle lcm (V6) and ledger order (V7) arrive with stages, cycle labels and
- * the ledger.
+ * occurrence at least one day, stages included), stage windows (V2),
+ * magnitudes (V5), one base per unit (V8), gear sanity, and slot sums. The
+ * inverse bound (V4) is computed by the start rule; cycle lcm (V6) and ledger
+ * order (V7) arrive with cycle labels and the ledger.
  */
-import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst, UnitAst } from "./ast";
+import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
 import { baseLengths, linearBase } from "./base";
-import { gearPeriod, mod, type GearAst } from "./gear";
+import { gearMatches, gearPeriod, mod, type GearAst } from "./gear";
+import { slotLengthsIn } from "./slots";
+import { compileStart, stageReach } from "./start";
 import { gcd } from "./rational";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
@@ -27,8 +29,15 @@ const SLOT_GEARS_MAX = 8;
 const MAGNITUDE_MAX = 2 * DAY_LIMIT;
 /** V5 for a linear base: every k·a + c and (d + 1)·L − c stays below this, where the floor divisions are exact. */
 const LINEAR_MAX = 2 ** 52;
+/** V2: the farthest occurrence a stage rule may read, either way. */
+const STAGE_WINDOW_MAX = 8;
+/** Most occurrences of a staged cycle the slot-sum scan reads (Hebrew needs about 55,000). */
+const SCAN_MAX = 1_000_000;
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
+const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
+/** An unchecked value as it appears in the AST, for messages. */
+const show = (x: unknown): string => String(JSON.stringify(x));
 const inBounds = (x: number): boolean => isInt(x) && Math.abs(x) <= MAGNITUDE_MAX;
 
 export function validate(ast: CalendarAst): string[] {
@@ -70,9 +79,11 @@ export function validate(ast: CalendarAst): string[] {
   for (const u of ast.units) {
     const at = `unit "${u.id}"`;
     if (u.kind === "cycle") {
-      const loss = checkTerms(u.id, at, u.gears, u.id);
-      const shortest = checkBase(u, loss, (msg) => fail(u.id, `${at}: ${msg}`));
-      if (shortest !== null && shortest + loss < 1) fail(u.id, `${at}: an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
+      const unitFail = (msg: string) => fail(u.id, `${at}: ${msg}`);
+      // the most gear terms and stages can take off an occurrence
+      const loss = checkTerms(u.id, at, u.gears, u.id) - checkStages(u.stages, unitFail);
+      const shortest = checkBase(u, loss, unitFail);
+      if (shortest !== null && shortest + loss < 1) unitFail(`an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
       continue;
     }
     const chain = chainOf(u, units);
@@ -84,17 +95,22 @@ export function validate(ast: CalendarAst): string[] {
       const where = `${at} slot ${i + 1}`;
       if (s.length === "slack") {
         if (s.gears?.length) fail(u.id, `${where}: a slack slot takes what is left and cannot carry gear terms`);
+        const min = s.min ?? 0;
+        if (s.min !== undefined && (!inBounds(s.min) || s.min < 0)) fail(u.id, `${where}: min ${s.min} is not a whole number of days in 0..${MAGNITUDE_MAX}`);
+        if (s.max !== undefined && (!inBounds(s.max) || s.max < min)) fail(u.id, `${where}: max ${s.max} is not a whole number of days from min (${min}) to ${MAGNITUDE_MAX}`);
+        if (s.fill !== undefined && !inBounds(s.fill)) fail(u.id, `${where}: fill ${s.fill} is not a whole number`);
         continue;
       }
+      if (s.min !== undefined || s.max !== undefined || s.fill !== undefined) fail(u.id, `${where}: min, max and fill belong to slack slots only`);
       if (!inBounds(s.length) || s.length < 0) fail(u.id, `${where}: length ${s.length} is not a whole number of days in 0..${MAGNITUDE_MAX}`);
       if (root) checkTerms(u.id, where, s.gears, root.id);
     }
-    if (u.slots.filter((s) => s.length === "slack").length > 1) fail(u.id, `${at}: more than one slack slot`);
   }
 
   // slot sums need the whole chain clean: the unit, every slot unit above it, the cycle, and every gear they read.
   // Parents come first, so a unit whose parent's sums failed is skipped rather than reporting the same fault again.
   const done = new Set<string>();
+  const scans = new Map<string, CycleState[] | string>();
   const sums = (u: SlotsUnitAst, chain: UnitAst[]): void => {
     if (done.has(u.id)) return;
     done.add(u.id);
@@ -103,7 +119,7 @@ export function validate(ast: CalendarAst): string[] {
     if (chain.some((c) => bad.has(c.id))) return;
     const read = chain.flatMap((c) => (c.kind === "cycle" ? (c.gears ?? []) : c.slots.flatMap((s) => s.gears ?? []))).map((t) => t.gear);
     if (read.some((g) => bad.has(g) || !gears.has(g))) return;
-    if (!checkSlotSums(u, chain, [...new Set(read)], errors)) bad.add(u.id);
+    if (!checkSlotSums(u, chain, [...new Set(read)], gears, scans, errors)) bad.add(u.id);
   };
   for (const u of ast.units) {
     const chain = u.kind === "slots" ? chainOf(u, units) : null;
@@ -137,14 +153,22 @@ function checkBase(u: CycleUnitAst, loss: number, fail: (msg: string) => void): 
   if (period.d <= 0 || at.d <= 0 || gcd(period.n, period.d) !== 1 || gcd(at.n, at.d) !== 1) return fail("crossing period and instant must be rationals n/d in lowest terms with d > 0"), null;
   if (period.n < period.d) return fail(`crossing period ${period.n}/${period.d} is shorter than one day (V8)`), null;
   if (Math.abs(at.n / at.d) > DAY_LIMIT) return fail(`crossing instant ${at.n}/${at.d} is outside ±${DAY_LIMIT}`), null;
-  const { a, c, L } = linearBase(u);
-  const shortest = baseLengths({ a, c, L })[0]!;
-  // the engine evaluates k·a + c and (d + 1)·L − c, k within the indices a day in range can reach, plus correction
-  // steps; gear terms can shorten an occurrence to shortest + loss (≥ 1 by V3), so they reach that many more indices
-  const kMax = Math.ceil((3 * DAY_LIMIT) / Math.max(1, shortest + loss)) + 2;
-  if (!(Math.abs(c) + (DAY_LIMIT + 1) * L < LINEAR_MAX && Math.abs(c) + kMax * a < LINEAR_MAX && isInt(c))) {
-    return fail(`crossing ${period.n}/${period.d} at ${at.n}/${at.d} is too fine for exact integer days within ±${DAY_LIMIT} (V5): use a coarser period or instant`), null;
+  const index = (n0.crossing as { index?: unknown }).index as { a?: unknown; c?: unknown; L?: unknown } | undefined;
+  if (index !== undefined && (typeof index !== "object" || index === null || !isInt(index.a) || !isInt(index.c) || !isInt(index.L) || (index.a as number) < 1 || (index.L as number) < 1)) {
+    return fail("crossing index must be { a, c, L } of safe integers with a ≥ 1 and L ≥ 1 (the crossing number floor((k·a + c)/L))"), null;
   }
+  const { a, c, L } = linearBase(u);
+  const idx = u.crossing.index;
+  // occurrence k spans floor or ceil of index.a / index.L crossings; each crossing step is floor or ceil of a / L days
+  const shortest = (idx ? baseLengths(idx)[0]! : 1) * baseLengths({ a, c, L })[0]!;
+  if (shortest < 1) return fail("crossing index steps by 0 crossings; every occurrence needs at least one day (V3)"), null;
+  // the engine evaluates k·a + c and (d + 1)·L − c (through the index map, k·index.a + index.c first), k within the
+  // indices a day in range can reach, plus correction steps; gear terms and stages can shorten an occurrence to
+  // shortest + loss (≥ 1 by V3), so they reach that many more indices
+  const kMax = Math.ceil((3 * DAY_LIMIT) / Math.max(1, shortest + loss)) + 2;
+  const mMax = idx ? Math.ceil((kMax * idx.a + Math.abs(idx.c)) / idx.L) + 1 : kMax;
+  const fits = Math.abs(c) + (DAY_LIMIT + 1) * L < LINEAR_MAX && Math.abs(c) + mMax * a < LINEAR_MAX && isInt(c) && (!idx || kMax * idx.a + Math.abs(idx.c) < LINEAR_MAX);
+  if (!fits) return fail(`crossing ${period.n}/${period.d} at ${at.n}/${at.d} is too fine for exact integer days within ±${DAY_LIMIT} (V5): use a coarser period or instant`), null;
   return shortest;
 }
 
@@ -185,37 +209,128 @@ function chainOf(u: UnitAst, units: Map<string, UnitAst>): UnitAst[] | "missing"
 }
 
 /**
- * Under every combination of the gears the chain reads, each slot unit's
- * slots must fit every length a non-filler occurrence of its parent can have:
- * fixed slots no longer than it with a slack slot, exactly as long without
- * one, and no slot shorter than 0 days.
+ * Stages (C4, V2): each rule shifts by a whole number of days and reads a
+ * finite window of the stage below (a residue of its start, or the length of
+ * occurrence k + at, |at| ≤ STAGE_WINDOW_MAX). Stages read only the stage
+ * below by construction, so they are acyclic. Returns the most the stages
+ * together can take off an occurrence (Σ up + down), for V3.
  */
-function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], errors: string[]): boolean {
-  const fail = (msg: string) => (errors.push(msg), false);
-  if (involved.length > SLOT_GEARS_MAX) return fail(`unit "${u.id}": reads ${involved.length} gears; at most ${SLOT_GEARS_MAX}`);
+function checkStages(stages: CycleUnitAst["stages"], fail: (msg: string) => void): number {
+  if (stages === undefined) return 0;
+  if (!Array.isArray(stages)) return fail("stages must be a list"), 0;
+  let reach = 0;
+  for (const [j, stage] of (stages as unknown[]).entries()) {
+    const where = `stage ${j + 1}`;
+    const rules = isObj(stage) ? stage.rules : undefined;
+    if (!Array.isArray(rules) || !rules.length) {
+      fail(`${where} has no rules`);
+      continue;
+    }
+    let ok = true;
+    for (const [i, r] of (rules as unknown[]).entries()) {
+      const at = `${where} rule ${i + 1}`;
+      const bad = (msg: string) => ((ok = false), fail(`${at}: ${msg}`));
+      if (!isObj(r)) {
+        bad("a rule is an object with an add and a residue or length test");
+        continue;
+      }
+      if (!inBounds(r.add as number)) bad(`add ${show(r.add)} is not a whole number of days within ±${MAGNITUDE_MAX}`);
+      if (isObj(r.residue)) {
+        const { mod: m, offset, in: set } = r.residue;
+        if (!isInt(m) || (m as number) < 1 || (m as number) > GEAR_PERIOD_MAX) bad(`mod ${show(m)} is not a whole number in 1..${GEAR_PERIOD_MAX}`);
+        else if (!Array.isArray(set) || !set.length) bad("a residue test needs at least one residue");
+        else if (new Set(set).size !== set.length || (set as unknown[]).some((x) => !isInt(x) || (x as number) < 0 || (x as number) >= (m as number))) bad(`residues must be distinct whole numbers in 0..${(m as number) - 1}`);
+        if (offset !== undefined && !inBounds(offset as number)) bad(`offset ${show(offset)} is not a whole number within ±${MAGNITUDE_MAX}`);
+      } else if (isObj(r.length)) {
+        const { at: w, is } = r.length;
+        if (!isInt(w) || Math.abs(w as number) > STAGE_WINDOW_MAX) bad(`window offset ${show(w)} is not a whole number within ±${STAGE_WINDOW_MAX} (V2)`);
+        if (!isInt(is) || (is as number) < 1) bad(`length ${show(is)} is not a whole number of days ≥ 1`);
+      } else bad("a rule tests a residue or a length");
+    }
+    if (ok) {
+      const { up, down } = stageReach(stage as StageAst);
+      reach += up + down;
+    }
+  }
+  return reach;
+}
+
+interface CycleState {
+  readonly total: number;
+  readonly on: (g: string) => boolean;
+  readonly label: string;
+}
+
+/**
+ * Every state an occurrence of the chain's cycle can be in: its length and
+ * which gears match. With stages or a derived index, lengths depend on
+ * neighbouring occurrences, so the states are read off every occurrence a day
+ * within ±DAY_LIMIT can reach (exact; no unreachable combination can fail the
+ * check). Otherwise they are every gear combination with every base length
+ * (stricter than reality, never looser).
+ */
+function cycleStates(root: CycleUnitAst, involved: string[], gears: ReadonlyMap<string, GearAst>, scans: Map<string, CycleState[] | string>): CycleState[] | string {
+  if (root.stages?.length || root.crossing?.index) {
+    // one scan per cycle and gear set, shared by every slot unit under it
+    const cacheKey = `${root.id}|${involved.join()}`;
+    const cached = scans.get(cacheKey);
+    if (cached) return cached;
+    const rule = compileStart(root, gears);
+    const [lo, hi] = [rule.indexAt(-DAY_LIMIT), rule.indexAt(DAY_LIMIT)];
+    if (hi - lo > SCAN_MAX) {
+      const msg = `"${root.id}" has ${hi - lo + 1} occurrences within ±${DAY_LIMIT}; slot units under a staged cycle are checked occurrence by occurrence, at most ${SCAN_MAX}`;
+      scans.set(cacheKey, msg);
+      return msg;
+    }
+    const seen = new Map<number, CycleState>();
+    for (let k = lo, s = rule.start(lo); k <= hi; k++) {
+      const next = rule.start(k + 1);
+      let mask = 0;
+      for (let i = 0; i < involved.length; i++) if (gearMatches(gears.get(involved[i]!)!, k)) mask |= 1 << i;
+      const key = (next - s) * (1 << SLOT_GEARS_MAX) + mask;
+      if (!seen.has(key)) {
+        const m = mask;
+        seen.set(key, { total: next - s, on: (g) => ((m >> involved.indexOf(g)) & 1) === 1, label: `"${root.id}" ${k}: ${next - s} days` });
+      }
+      s = next;
+    }
+    const states = [...seen.values()];
+    scans.set(cacheKey, states);
+    return states;
+  }
+  const states: CycleState[] = [];
   for (let mask = 0; mask < 1 << involved.length; mask++) {
-    const add = (terms: readonly GearTerm[] | undefined) => (terms ?? []).reduce((a, t) => a + t.add * ((mask >> involved.indexOf(t.gear)) & 1), 0);
-    const state = involved.map((id, i) => `${id}=${(mask >> i) & 1}`).join(", ") || "always";
-    // lengths a non-filler occurrence of each level can have, top down; this unit's own slots are checked at the last step
-    const root = chain[0] as CycleUnitAst;
-    let parentLengths = baseLengths(linearBase(root)).map((l) => l + add(root.gears));
+    const on = (g: string) => ((mask >> involved.indexOf(g)) & 1) === 1;
+    const label = involved.map((id, i) => `${id}=${(mask >> i) & 1}`).join(", ") || "always";
+    const add = (root.gears ?? []).reduce((a, t) => a + (on(t.gear) ? t.add : 0), 0);
+    for (const len of baseLengths(linearBase(root))) states.push({ total: len + add, on, label });
+  }
+  return states;
+}
+
+/**
+ * In every state of the chain's cycle, each slot unit's slots must fit every
+ * length a non-filler occurrence of its parent can have (slotLengthsIn: fixed
+ * slots and their gear terms, slack within its min and max).
+ */
+function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], gears: ReadonlyMap<string, GearAst>, scans: Map<string, CycleState[] | string>, errors: string[]): boolean {
+  if (involved.length > SLOT_GEARS_MAX) return (errors.push(`unit "${u.id}": reads ${involved.length} gears; at most ${SLOT_GEARS_MAX}`), false);
+  const states = cycleStates(chain[0] as CycleUnitAst, involved, gears, scans);
+  if (typeof states === "string") return (errors.push(`unit "${u.id}": ${states}`), false);
+  for (const state of states) {
+    let parentLengths = [state.total];
     for (const c of chain.slice(1) as SlotsUnitAst[]) {
-      const fixedLens = c.slots.map((s) => (s.length === "slack" ? 0 : s.length + add(s.gears)));
-      const fixed = fixedLens.reduce((a, b) => a + b, 0);
-      const hasSlack = c.slots.some((s) => s.length === "slack");
       const next = new Set<number>();
       for (const total of parentLengths) {
-        if (c === u) {
-          const neg = fixedLens.findIndex((l) => l < 0);
-          if (neg >= 0) return fail(`unit "${u.id}" slot ${neg + 1}: ${fixedLens[neg]} days (${state})`);
-          // every combination is checked, reachable or not: that only makes the check stricter
-          if (hasSlack ? fixed > total : fixed !== total) return fail(`unit "${u.id}": slots total ${fixed} days but its parent occurrence is ${total} (${state})`);
+        const lens = slotLengthsIn(c, total, state.on);
+        if (typeof lens === "string") {
+          if (c === u) return (errors.push(`unit "${u.id}": ${lens} (${state.label})`), false);
+          continue; // a parent's own failure is reported by the parent
         }
         c.slots.forEach((s, i) => {
-          if (!s.filler) next.add(s.length === "slack" ? total - fixed : fixedLens[i]!);
+          if (!s.filler) next.add(lens[i]!);
         });
       }
-      if (c === u) break; // on to the next gear state
       parentLengths = [...next];
     }
   }

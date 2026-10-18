@@ -44,7 +44,7 @@ describe("seshat: Gregorian against Date", () => {
       }
     }
     expect(bad).toBe(0);
-  });
+  }, 60_000); // six million lookups
 
   test("dayOf inverts positionOf, and Date still agrees, out to ±10,000,000 days", () => {
     for (let d = -10_000_000; d <= 10_000_000; d += 9_973) {
@@ -97,7 +97,7 @@ describe("seshat: validator", () => {
     const noSlack = { ...months, slots: months.slots.map((s) => (s.length === "slack" ? { ...s, length: 28 } : s)) };
     expect(validate(withUnits([base.units[0]!, noSlack])).join()).toContain("leap=1");
     const tooLong = { ...months, slots: [...months.slots, { name: "Extra", length: 30 }] };
-    expect(validate(withUnits([base.units[0]!, tooLong])).join()).toContain("slots total");
+    expect(validate(withUnits([base.units[0]!, tooLong])).join()).toContain("slots take at least 367 days");
   });
 
   test("references, anchors and gear nesting are checked", () => {

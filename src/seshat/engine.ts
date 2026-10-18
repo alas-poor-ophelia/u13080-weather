@@ -5,9 +5,10 @@
  * on safe integers.
  */
 import type { CalendarAst, CycleUnitAst, SlotsUnitAst } from "./ast";
-import { baseIndexAt, baseLengths, baseStart, linearBase, type LinearBase } from "./base";
 import { DAY_LIMIT } from "./day";
-import { gearBelow, gearDensity, gearDeviation, gearMatches, type GearAst } from "./gear";
+import { gearMatches, type GearAst } from "./gear";
+import { slotLengthsIn } from "./slots";
+import { compileStart, type StartRule } from "./start";
 import { validate } from "./validate";
 
 /** Where a day falls in one unit: the occurrence (a cycle's index, or a slot's index in its parent) and the days into it. */
@@ -19,10 +20,7 @@ export interface Position {
 export class Engine {
   private readonly units = new Map<string, CycleUnitAst | SlotsUnitAst>();
   private readonly gears = new Map<string, GearAst>();
-  private readonly bases = new Map<string, LinearBase>();
-  private readonly means = new Map<string, number>();
-  /** V4: the most whole steps indexAt may need to correct its estimate, per cycle unit; 0 for a base with no gear terms, which inverts exactly */
-  private readonly steps = new Map<string, number>();
+  private readonly rules = new Map<string, StartRule>();
 
   constructor(readonly ast: CalendarAst) {
     const errors = validate(ast);
@@ -30,29 +28,13 @@ export class Engine {
     for (const g of ast.gears) this.gears.set(g.id, g);
     for (const u of ast.units) {
       this.units.set(u.id, u);
-      if (u.kind !== "cycle") continue;
-      const base = linearBase(u);
-      this.bases.set(u.id, base);
-      const terms = (u.gears ?? []).map((t) => ({ add: t.add, g: this.gears.get(t.gear)! }));
-      this.means.set(u.id, base.a / base.L + terms.reduce((a, t) => a + t.add * gearDensity(t.g), 0));
-      if (!terms.length) {
-        this.steps.set(u.id, 0);
-        continue;
-      }
-      // start(i) − c/L − mean·i is the base's floor (under 1 day, 0 for a whole-day base) plus
-      // Σ add·(gearBelow(i) − density·i), and each gear's term stays within gearDeviation of 0
-      const deviation = (base.L === 1 ? 0 : 1) + terms.reduce((a, t) => a + Math.abs(t.add) * gearDeviation(t.g), 0);
-      const shortest = baseLengths(base)[0]! + terms.reduce((a, t) => a + Math.min(0, t.add), 0);
-      this.steps.set(u.id, Math.ceil(deviation / shortest) + 2);
+      if (u.kind === "cycle") this.rules.set(u.id, compileStart(u, this.gears));
     }
   }
 
   /** The day on which occurrence `index` of cycle unit `id` starts. */
   start(id: string, index: number): number {
-    const u = this.cycle(id);
-    let s = baseStart(this.bases.get(id)!, index);
-    for (const t of u.gears ?? []) s += t.add * gearBelow(this.gears.get(t.gear)!, index);
-    return s;
+    return this.rule(id).start(index);
   }
 
   /** Days in occurrence `index` of cycle unit `id`: by definition the gap between two starts, so the two can never disagree. */
@@ -62,21 +44,9 @@ export class Engine {
 
   /** The occurrence of cycle unit `id` that holds `day` (a whole day within ±DAY_LIMIT). */
   indexAt(id: string, day: number): number {
-    const u = this.cycle(id);
+    const rule = this.rule(id);
     if (!Number.isSafeInteger(day) || Math.abs(day) > DAY_LIMIT) throw new RangeError(`day ${day} is not a whole day within ±${DAY_LIMIT}`);
-    const base = this.bases.get(id)!;
-    // a base alone inverts exactly; with gear terms, estimate from the mean and correct by whole steps, V4 bounds how many
-    if (!u.gears?.length) return baseIndexAt(base, day);
-    let i = Math.floor((day - base.c / base.L) / this.means.get(id)!);
-    let left = this.steps.get(id)!;
-    while (this.start(id, i) > day) i = this.step(id, i, -1, left--);
-    while (this.start(id, i + 1) <= day) i = this.step(id, i, 1, left--);
-    return i;
-  }
-
-  private step(id: string, i: number, by: number, left: number): number {
-    if (left <= 0) throw new Error(`unreachable: "${id}" needed more correction steps than its V4 bound`);
-    return i + by;
+    return rule.indexAt(day);
   }
 
   /**
@@ -86,17 +56,8 @@ export class Engine {
    */
   slotLengths(id: string, path: readonly number[]): number[] {
     const u = this.slots(id);
-    const total = this.occurrenceLength(u.in, path);
-    let fixed = 0;
-    const lens = u.slots.map((s) => {
-      if (s.length === "slack") return 0;
-      let len = s.length;
-      for (const t of s.gears ?? []) if (gearMatches(this.gears.get(t.gear)!, path[0]!)) len += t.add;
-      fixed += len;
-      return len;
-    });
-    const slack = u.slots.findIndex((s) => s.length === "slack");
-    if (slack >= 0) lens[slack] = total - fixed;
+    const lens = slotLengthsIn(u, this.occurrenceLength(u.in, path), (g) => gearMatches(this.gears.get(g)!, path[0]!));
+    if (typeof lens === "string") throw new Error(`unreachable: "${id}" at [${path.join(", ")}]: ${lens}`); // the validator checks every reachable occurrence
     return lens;
   }
 
@@ -179,9 +140,9 @@ export class Engine {
     return u;
   }
 
-  private cycle(id: string): CycleUnitAst {
-    const u = this.units.get(id);
-    if (u?.kind !== "cycle") throw new RangeError(`"${id}" is not a cycle unit`);
-    return u;
+  private rule(id: string): StartRule {
+    const r = this.rules.get(id);
+    if (!r) throw new RangeError(`"${id}" is not a cycle unit`);
+    return r;
   }
 }
