@@ -7,7 +7,7 @@
  * occurrence at least one day), magnitudes (V5), gear sanity, and slot sums. Stage windows (V2), the inverse bound (V4), cycle lcm (V6) and ledger
  * order (V7) arrive with stages, cycle labels and the ledger.
  */
-import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst } from "./ast";
+import type { CalendarAst, CycleUnitAst, GearTerm, SlotsUnitAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
 import { gearPeriod, mod, type GearAst } from "./gear";
 
@@ -70,9 +70,11 @@ export function validate(ast: CalendarAst): string[] {
       if (inBounds(u.length) && u.length + loss < 1) fail(u.id, `${at}: an occurrence can be ${u.length + loss} days long; every occurrence needs at least one day (V3)`);
       continue;
     }
-    const parent = units.get(u.in);
-    if (!parent) fail(u.id, `${at}: no parent unit "${u.in}"`);
-    else if (parent.kind !== "cycle") fail(u.id, `${at}: parent "${u.in}" must be a cycle unit (nested slot units are not supported yet)`);
+    const chain = chainOf(u, units);
+    const root = Array.isArray(chain) ? (chain[0] as CycleUnitAst) : null;
+    if (!units.has(u.in)) fail(u.id, `${at}: no parent unit "${u.in}"`);
+    else if (chain === "loop") fail(u.id, `${at}: its parents loop back on themselves; a slot unit must sit under a cycle unit`);
+    else if (chain === "missing") bad.add(u.id); // the unit missing higher up reports itself
     for (const [i, s] of u.slots.entries()) {
       const where = `${at} slot ${i + 1}`;
       if (s.length === "slack") {
@@ -80,13 +82,27 @@ export function validate(ast: CalendarAst): string[] {
         continue;
       }
       if (!inBounds(s.length) || s.length < 0) fail(u.id, `${where}: length ${s.length} is not a whole number of days in 0..${MAGNITUDE_MAX}`);
-      checkTerms(u.id, where, s.gears, u.in);
+      if (root) checkTerms(u.id, where, s.gears, root.id);
     }
     if (u.slots.filter((s) => s.length === "slack").length > 1) fail(u.id, `${at}: more than one slack slot`);
-    if (parent?.kind !== "cycle" || bad.has(u.id) || bad.has(parent.id)) continue;
-    const read = [...(parent.gears ?? []), ...u.slots.flatMap((s) => s.gears ?? [])].map((t) => t.gear);
-    if (read.some((g) => bad.has(g) || !gears.has(g))) continue;
-    checkSlotSums(u, parent, errors);
+  }
+
+  // slot sums need the whole chain clean: the unit, every slot unit above it, the cycle, and every gear they read.
+  // Parents come first, so a unit whose parent's sums failed is skipped rather than reporting the same fault again.
+  const done = new Set<string>();
+  const sums = (u: SlotsUnitAst, chain: UnitAst[]): void => {
+    if (done.has(u.id)) return;
+    done.add(u.id);
+    const parent = chain[chain.length - 2]!;
+    if (parent.kind === "slots") sums(parent, chain.slice(0, -1));
+    if (chain.some((c) => bad.has(c.id))) return;
+    const read = chain.flatMap((c) => (c.kind === "cycle" ? (c.gears ?? []) : c.slots.flatMap((s) => s.gears ?? []))).map((t) => t.gear);
+    if (read.some((g) => bad.has(g) || !gears.has(g))) return;
+    if (!checkSlotSums(u, chain, [...new Set(read)], errors)) bad.add(u.id);
+  };
+  for (const u of ast.units) {
+    const chain = u.kind === "slots" ? chainOf(u, units) : null;
+    if (u.kind === "slots" && Array.isArray(chain)) sums(u, chain);
   }
   return errors;
 }
@@ -114,27 +130,53 @@ function checkGear(g: GearAst, errors: string[]): void {
   }
 }
 
+/** The units from the cycle down to `u`, or why there is no such chain: a parent is missing, or the parents loop. */
+function chainOf(u: UnitAst, units: Map<string, UnitAst>): UnitAst[] | "missing" | "loop" {
+  const chain: UnitAst[] = [u];
+  for (let c = u; c.kind === "slots"; ) {
+    const p = units.get(c.in);
+    if (!p) return "missing";
+    if (chain.includes(p)) return "loop";
+    chain.unshift(p);
+    c = p;
+  }
+  return chain;
+}
+
 /**
- * Under every combination of the gears involved, fixed slots must fit the
- * parent occurrence, a slack slot must not go negative, and without a slack
- * slot the slots must fill it exactly.
+ * Under every combination of the gears the chain reads, each slot unit's
+ * slots must fit every length a non-filler occurrence of its parent can have:
+ * fixed slots no longer than it with a slack slot, exactly as long without
+ * one, and no slot shorter than 0 days.
  */
-function checkSlotSums(u: SlotsUnitAst, parent: CycleUnitAst, errors: string[]): void {
-  const involved = [...new Set([...(parent.gears ?? []), ...u.slots.flatMap((s) => s.gears ?? [])].map((t) => t.gear))];
-  if (involved.length > SLOT_GEARS_MAX) return void errors.push(`unit "${u.id}": reads ${involved.length} gears; at most ${SLOT_GEARS_MAX}`);
-  const hasSlack = u.slots.some((s) => s.length === "slack");
+function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], errors: string[]): boolean {
+  const fail = (msg: string) => (errors.push(msg), false);
+  if (involved.length > SLOT_GEARS_MAX) return fail(`unit "${u.id}": reads ${involved.length} gears; at most ${SLOT_GEARS_MAX}`);
   for (let mask = 0; mask < 1 << involved.length; mask++) {
     const add = (terms: readonly GearTerm[] | undefined) => (terms ?? []).reduce((a, t) => a + t.add * ((mask >> involved.indexOf(t.gear)) & 1), 0);
     const state = involved.map((id, i) => `${id}=${(mask >> i) & 1}`).join(", ") || "always";
-    const total = parent.length + add(parent.gears);
-    let fixed = 0;
-    for (const [i, s] of u.slots.entries()) {
-      if (s.length === "slack") continue;
-      const len = s.length + add(s.gears);
-      if (len < 0) return void errors.push(`unit "${u.id}" slot ${i + 1}: ${len} days (${state})`);
-      fixed += len;
+    // lengths a non-filler occurrence of each level can have, top down; this unit's own slots are checked at the last step
+    const root = chain[0] as CycleUnitAst;
+    let parentLengths = [root.length + add(root.gears)];
+    for (const c of chain.slice(1) as SlotsUnitAst[]) {
+      const fixedLens = c.slots.map((s) => (s.length === "slack" ? 0 : s.length + add(s.gears)));
+      const fixed = fixedLens.reduce((a, b) => a + b, 0);
+      const hasSlack = c.slots.some((s) => s.length === "slack");
+      const next = new Set<number>();
+      for (const total of parentLengths) {
+        if (c === u) {
+          const neg = fixedLens.findIndex((l) => l < 0);
+          if (neg >= 0) return fail(`unit "${u.id}" slot ${neg + 1}: ${fixedLens[neg]} days (${state})`);
+          // every combination is checked, reachable or not: that only makes the check stricter
+          if (hasSlack ? fixed > total : fixed !== total) return fail(`unit "${u.id}": slots total ${fixed} days but its parent occurrence is ${total} (${state})`);
+        }
+        c.slots.forEach((s, i) => {
+          if (!s.filler) next.add(s.length === "slack" ? total - fixed : fixedLens[i]!);
+        });
+      }
+      if (c === u) break; // on to the next gear state
+      parentLengths = [...next];
     }
-    // every combination is checked, reachable or not: that only makes the check stricter
-    if (hasSlack ? fixed > total : fixed !== total) return void errors.push(`unit "${u.id}": slots total ${fixed} days but "${parent.id}" is ${total} (${state})`);
   }
+  return true;
 }

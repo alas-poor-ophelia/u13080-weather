@@ -67,51 +67,104 @@ export class Engine {
     return i + by;
   }
 
-  /** Slot lengths of slot unit `id` inside occurrence `parentIndex` of its parent. */
-  slotLengths(id: string, parentIndex: number): number[] {
-    const u = this.units.get(id);
-    if (u?.kind !== "slots") throw new RangeError(`"${id}" is not a slot unit`);
+  /**
+   * Slot lengths of slot unit `id` inside one occurrence of its parent. `path`
+   * addresses that occurrence from the cycle down: [year] for a month,
+   * [year, month] for a décade. Gear terms read the cycle index, path[0].
+   */
+  slotLengths(id: string, path: readonly number[]): number[] {
+    const u = this.slots(id);
+    const total = this.occurrenceLength(u.in, path);
     let fixed = 0;
     const lens = u.slots.map((s) => {
       if (s.length === "slack") return 0;
       let len = s.length;
-      for (const t of s.gears ?? []) if (gearMatches(this.gears.get(t.gear)!, parentIndex)) len += t.add;
+      for (const t of s.gears ?? []) if (gearMatches(this.gears.get(t.gear)!, path[0]!)) len += t.add;
       fixed += len;
       return len;
     });
     const slack = u.slots.findIndex((s) => s.length === "slack");
-    if (slack >= 0) lens[slack] = this.length(u.in, parentIndex) - fixed;
+    if (slack >= 0) lens[slack] = total - fixed;
     return lens;
   }
 
-  /** Where `day` falls in unit `id`. */
-  positionOf(id: string, day: number): Position {
+  /**
+   * Where `day` falls in unit `id`, or null when the day has no place in it:
+   * it lies in a filler slot of an enclosing unit (a festival day has no
+   * décade).
+   */
+  positionOf(id: string, day: number): Position | null {
+    const at = this.locate(id, day);
+    return at && { index: at.path[at.path.length - 1]!, offset: at.offset };
+  }
+
+  /** The day `offset` days into slot `slot` of unit `id`, inside the parent occurrence at `path` (see slotLengths). */
+  dayOf(id: string, path: readonly number[], slot: number, offset: number): number {
+    const lens = this.slotLengths(id, path);
+    if (!Number.isSafeInteger(slot) || slot < 0 || slot >= lens.length) throw new RangeError(`"${id}" has no slot ${slot}`);
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= lens[slot]!) throw new RangeError(`slot ${slot} of "${id}" at [${path.join(", ")}] has ${lens[slot]} days; no day ${offset}`);
+    let d = this.occurrenceStart(this.slots(id).in, path);
+    for (let i = 0; i < slot; i++) d += lens[i]!;
+    return d + offset;
+  }
+
+  /** The path of every occurrence holding `day` from the cycle down to `id`, and the days into the last one. */
+  private locate(id: string, day: number): { path: number[]; offset: number } | null {
     const u = this.units.get(id);
     if (!u) throw new RangeError(`no unit "${id}"`);
     if (u.kind === "cycle") {
       const index = this.indexAt(id, day);
-      return { index, offset: day - this.start(id, index) };
+      return { path: [index], offset: day - this.start(id, index) };
     }
-    const parent = this.positionOf(u.in, day);
+    const parent = this.locate(u.in, day);
+    if (!parent || this.isFiller(u.in, parent.path)) return null;
     let offset = parent.offset;
-    const lens = this.slotLengths(id, parent.index);
+    const lens = this.slotLengths(id, parent.path);
     for (let i = 0; i < lens.length; i++) {
-      if (offset < lens[i]!) return { index: i, offset };
+      if (offset < lens[i]!) return { path: [...parent.path, i], offset };
       offset -= lens[i]!;
     }
     throw new Error(`unreachable: day ${day} falls past the slots of "${id}"`); // the validator makes the slots fill the parent
   }
 
-  /** The day `offset` days into slot `slot` of unit `id`, inside occurrence `parentIndex` of its parent. */
-  dayOf(id: string, parentIndex: number, slot: number, offset: number): number {
+  /** Whether the occurrence of `id` at `path` is a filler slot (it has no children). A cycle occurrence never is. */
+  private isFiller(id: string, path: readonly number[]): boolean {
+    const u = this.units.get(id)!;
+    return u.kind === "slots" && !!u.slots[path[path.length - 1]!]!.filler;
+  }
+
+  /** Days in the occurrence of unit `id` at `path`; a filler occurrence has no children to hold. */
+  private occurrenceLength(id: string, path: readonly number[]): number {
+    this.checkPath(id, path);
+    const u = this.units.get(id)!;
+    if (u.kind === "cycle") return this.length(id, path[0]!);
+    if (this.isFiller(id, path)) throw new RangeError(`slot ${path[path.length - 1]} of "${id}" is a filler slot; nothing nests in it`);
+    return this.slotLengths(id, path.slice(0, -1))[path[path.length - 1]!]!;
+  }
+
+  private occurrenceStart(id: string, path: readonly number[]): number {
+    const u = this.units.get(id)!;
+    if (u.kind === "cycle") return this.start(id, path[0]!);
+    const lens = this.slotLengths(id, path.slice(0, -1));
+    let d = this.occurrenceStart(u.in, path.slice(0, -1));
+    for (let i = 0; i < path[path.length - 1]!; i++) d += lens[i]!;
+    return d;
+  }
+
+  /** A path names one index per level from the cycle down to `id`, each slot index in range. */
+  private checkPath(id: string, path: readonly number[]): void {
+    let depth = 1;
+    for (let u = this.units.get(id)!; u.kind === "slots"; u = this.units.get(u.in)!) depth++;
+    if (path.length !== depth || !path.every((i) => Number.isSafeInteger(i))) throw new RangeError(`"${id}" needs a path of ${depth} whole indices, got [${path.join(", ")}]`);
+    const u = this.units.get(id)!;
+    const i = path[path.length - 1]!;
+    if (u.kind === "slots" && (i < 0 || i >= u.slots.length)) throw new RangeError(`"${id}" has no slot ${i}`);
+  }
+
+  private slots(id: string): SlotsUnitAst {
     const u = this.units.get(id);
     if (u?.kind !== "slots") throw new RangeError(`"${id}" is not a slot unit`);
-    const lens = this.slotLengths(id, parentIndex);
-    if (!Number.isSafeInteger(slot) || slot < 0 || slot >= lens.length) throw new RangeError(`"${id}" has no slot ${slot}`);
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= lens[slot]!) throw new RangeError(`slot ${slot} of "${id}" in ${u.in} ${parentIndex} has ${lens[slot]} days; no day ${offset}`);
-    let d = this.start(u.in, parentIndex);
-    for (let i = 0; i < slot; i++) d += lens[i]!;
-    return d + offset;
+    return u;
   }
 
   private cycle(id: string): CycleUnitAst {

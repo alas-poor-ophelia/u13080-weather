@@ -16,8 +16,8 @@ function icu(calendar: string): (d: number) => [number, number, number] {
 
 function seshat(e: Engine): (d: number) => [number, number, number] {
   return (d) => {
-    const m = e.positionOf("month", d);
-    return [e.positionOf("year", d).index + 1, m.index, m.offset + 1];
+    const m = e.positionOf("month", d)!;
+    return [e.positionOf("year", d)!.index + 1, m.index, m.offset + 1];
   };
 }
 
@@ -60,7 +60,7 @@ describe("seshat: tabular Islamic against ICU", () => {
     // AH 2 is the first leap year, i.e. year index 1
     expect(civil.length("year", 0)).toBe(354);
     expect(civil.length("year", 1)).toBe(355);
-    expect(civil.slotLengths("month", 1)[11]).toBe(30);
+    expect(civil.slotLengths("month", [1])[11]).toBe(30);
     expect(civil.start("year", 30) - civil.start("year", 0)).toBe(10_631);
   });
 });

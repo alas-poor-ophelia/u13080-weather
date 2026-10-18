@@ -36,9 +36,9 @@ describe("seshat: Gregorian against Date", () => {
     let bad = 0;
     for (let d = -1_000_000; d <= 1_000_000; d++) {
       const t = new Date(d * DAY_MS);
-      const y = greg.positionOf("year", d);
-      const m = greg.positionOf("month", d);
-      const w = greg.positionOf("week", d);
+      const y = greg.positionOf("year", d)!;
+      const m = greg.positionOf("month", d)!;
+      const w = greg.positionOf("week", d)!;
       if (y.index !== t.getUTCFullYear() || m.index !== t.getUTCMonth() || m.offset + 1 !== t.getUTCDate() || ((w.offset % 7) + 7) % 7 !== t.getUTCDay()) {
         if (bad++ < 5) expect({ d, year: y.index, month: m.index, dom: m.offset + 1, wd: w.offset }).toEqual({ d, year: t.getUTCFullYear(), month: t.getUTCMonth(), dom: t.getUTCDate(), wd: t.getUTCDay() });
       }
@@ -48,18 +48,18 @@ describe("seshat: Gregorian against Date", () => {
 
   test("dayOf inverts positionOf, and Date still agrees, out to ±10,000,000 days", () => {
     for (let d = -10_000_000; d <= 10_000_000; d += 9_973) {
-      const y = greg.positionOf("year", d);
-      const m = greg.positionOf("month", d);
+      const y = greg.positionOf("year", d)!;
+      const m = greg.positionOf("month", d)!;
       const t = new Date(d * DAY_MS);
       expect([y.index, m.index, m.offset + 1]).toEqual([t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()]);
-      expect(greg.dayOf("month", y.index, m.index, m.offset)).toBe(d);
+      expect(greg.dayOf("month", [y.index], m.index, m.offset)).toBe(d);
       expect(greg.start("year", y.index + 1) - greg.start("year", y.index)).toBe(greg.length("year", y.index));
     }
   });
 
   test("February is the slack: 29 days in a leap year, 28 otherwise", () => {
-    expect(greg.slotLengths("month", 2024)[1]).toBe(29);
-    expect(greg.slotLengths("month", 1900)[1]).toBe(28);
+    expect(greg.slotLengths("month", [2024])[1]).toBe(29);
+    expect(greg.slotLengths("month", [1900])[1]).toBe(28);
     expect(greg.length("year", 2000)).toBe(366);
   });
 
@@ -67,9 +67,9 @@ describe("seshat: Gregorian against Date", () => {
     expect(() => greg.positionOf("year", 0.5)).toThrow(RangeError);
     expect(() => greg.positionOf("year", Number.NaN)).toThrow(RangeError);
     expect(() => greg.positionOf("year", DAY_LIMIT + 1)).toThrow(RangeError);
-    expect(() => greg.dayOf("month", 2023, 1, 28)).toThrow(RangeError); // 29 February 2023
-    expect(() => greg.dayOf("month", 2023, 12, 0)).toThrow(RangeError);
-    expect(greg.dayOf("month", 2024, 1, 28)).toBe(Date.UTC(2024, 1, 29) / DAY_MS);
+    expect(() => greg.dayOf("month", [2023], 1, 28)).toThrow(RangeError); // 29 February 2023
+    expect(() => greg.dayOf("month", [2023], 12, 0)).toThrow(RangeError);
+    expect(greg.dayOf("month", [2024], 1, 28)).toBe(Date.UTC(2024, 1, 29) / DAY_MS);
   });
 
   test("DAY_LIMIT is Wadjet's MAX_DAY_ORDINAL", () => {

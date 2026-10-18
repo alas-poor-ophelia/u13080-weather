@@ -5,9 +5,9 @@
  *
  * This is the subset the first calendars need: cycle units (never reset,
  * anchored; constant length plus gear terms) and slot units (tile a parent
- * cycle; constant, gear-adjusted or slack slots). Filler flags, tables,
- * stages, labels with tags and the ledger arrive with the calendars that
- * need them.
+ * cycle or slot unit; constant, gear-adjusted or slack slots, any of them
+ * filler). Tables, stages, labels with tags and the ledger arrive with the
+ * calendars that need them.
  */
 import type { GearAst } from "./gear";
 
@@ -35,15 +35,17 @@ export interface SlotAst {
   readonly name?: string;
   /** days, or "slack": whatever the parent occurrence leaves over. 0 means the slot is absent this time */
   readonly length: number | "slack";
-  /** gear terms read the parent's occurrence index */
+  /** gear terms read the index of the cycle the slot unit sits under */
   readonly gears?: readonly GearTerm[];
+  /** belongs to the parent but to no child sequence: a festival day has no décade (§2.3, Q1: it may still be named) */
+  readonly filler?: boolean;
 }
 
-/** A unit that resets with its parent and tiles it with an ordered list of slots. */
+/** A unit that resets with its parent and tiles each occurrence of the parent, except filler slots, with an ordered list of slots. */
 export interface SlotsUnitAst {
   readonly id: string;
   readonly kind: "slots";
-  /** the parent cycle unit */
+  /** the parent: a cycle unit, or a slot unit (a décade in a month) */
   readonly in: string;
   readonly slots: readonly SlotAst[];
 }

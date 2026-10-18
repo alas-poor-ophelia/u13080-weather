@@ -24,8 +24,8 @@ function icu(calendar: string, year: (era: string, y: number) => number): (d: nu
 function compare(e: Engine, want: (d: number) => [number, number, number], from: number, to: number, stride: number): void {
   let bad = 0;
   for (let d = from; d <= to; d += stride) {
-    const m = e.positionOf("month", d);
-    const got = [e.positionOf("year", d).index + 1, m.index, m.offset + 1];
+    const m = e.positionOf("month", d)!;
+    const got = [e.positionOf("year", d)!.index + 1, m.index, m.offset + 1];
     const w = want(d);
     if (got[0] !== w[0] || got[1] !== w[1] || got[2] !== w[2]) if (bad++ < 5) expect({ d, got }).toEqual({ d, got: w });
   }
@@ -61,8 +61,8 @@ describe("seshat: Ethiopian and Coptic against ICU", () => {
 
   test("Pagume has 6 days in a year before a Gregorian leap year, 5 otherwise", () => {
     // Ethiopian 2015 (index 2014) ran 11 Sep 2022 to 11 Sep 2023, with Pagume 6 on 11 Sep 2023
-    expect(eth.slotLengths("month", 2014)[12]).toBe(6);
-    expect(eth.slotLengths("month", 2015)[12]).toBe(5);
-    expect(eth.dayOf("month", 2014, 12, 5)).toBe(gregorianDay(2023, 9, 11));
+    expect(eth.slotLengths("month", [2014])[12]).toBe(6);
+    expect(eth.slotLengths("month", [2015])[12]).toBe(5);
+    expect(eth.dayOf("month", [2014], 12, 5)).toBe(gregorianDay(2023, 9, 11));
   });
 });

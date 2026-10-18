@@ -13,6 +13,8 @@ export { validate } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
 export { COPTIC, ETHIOPIAN } from "./calendars/ethiopian";
+export { FRENCH_REPUBLICAN } from "./calendars/french";
+export { HARPTOS } from "./calendars/harptos";
 export { wrap } from "./phase";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
