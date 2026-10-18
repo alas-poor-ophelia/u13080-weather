@@ -9,7 +9,8 @@
  * profile hash for provenance / cache keys. The hash uses the frozen RNG
  * hash (no crypto dependency; Obsidian mobile has no Bun.CryptoHasher).
  */
-import { automationOps, FALLBACK_YEAR_LENGTH, validateAutomation } from "./automation";
+import { DEFAULT_YEAR_LENGTH } from "../seshat/year";
+import { automationOps, validateAutomation } from "./automation";
 import { isCurvePath, isScalarPath, applyClimateOps } from "./curve-ops";
 import { Generator, MAX_PERSISTENCE, type GeneratorConfig } from "./generator";
 import { type DailyModifierResult, ModifierEngine } from "./modifiers";
@@ -361,9 +362,9 @@ export function createGenerator(z: ZoneProfile, seed: string, timeOf: (dayOrdina
       if (!resolved.automation.length) return m;
       // `timeOf` is typed DayTime; the plugin's adapters return a TimeContext that carries
       // dayOrdinal/yearLength, but bare callers (e.g. gregorianTime) supply neither — fall
-      // back to the requested ordinal and a FALLBACK_YEAR_LENGTH-day year.
+      // back to the requested ordinal and a DEFAULT_YEAR_LENGTH-day year.
       const t = timeOf(d) as DayTime & { dayOrdinal?: number; yearLength?: number };
-      const time = { ...t, dayOrdinal: t.dayOrdinal ?? d, yearLength: t.yearLength ?? FALLBACK_YEAR_LENGTH };
+      const time = { ...t, dayOrdinal: t.dayOrdinal ?? d, yearLength: t.yearLength ?? DEFAULT_YEAR_LENGTH };
       const out: DailyModifierResult = { ops: [...automationOps(resolved.automation, time), ...m.ops], tags: m.tags, active: m.active };
       return out;
     },

@@ -3,6 +3,7 @@
  * spans, season bands, the moon face, the gate ring, and the tag hues. Every
  * function here is a function of its arguments alone.
  */
+import { wrap } from "../../../../seshat/phase";
 import type { Era, ModifierOp } from "../../../../core/types";
 import { SEASON_CYCLE, cycleColour } from "../../../model/palette";
 import { CHANNEL_COLOUR, DISC_C, DISC_R } from "./constants";
@@ -32,7 +33,7 @@ export function tagColour(tag: string, seasons: ReadonlyArray<{ name: string }>)
 
 /** `[a, b)` in year phase, split at the wrap so a window across new year draws as two clips. */
 export function windowSpans(start: number, length: number): Array<[number, number]> {
-  const a = ((start % 1) + 1) % 1;
+  const a = wrap(start);
   const span = Math.min(1, Math.max(0, length));
   if (span === 0) return [];
   if (a + span <= 1) return [[a, a + span]];
@@ -69,7 +70,7 @@ export function ringPoint(phase: number): { x: number; y: number } {
 
 /** How much of the cycle `[a, b)` covers — a full circle when the ends meet. */
 export function ringSpan(a: number, b: number): number {
-  const d = (((b - a) % 1) + 1) % 1;
+  const d = wrap(b - a);
   return d === 0 ? 1 : d;
 }
 

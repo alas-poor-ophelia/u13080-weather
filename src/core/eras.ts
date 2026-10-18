@@ -4,16 +4,16 @@
  * on the absolute timeline — a pure function of the day — so they sit inside
  * the determinism contract; they are not cycles (NON-GOALS.md).
  */
+import { yearOf } from "../seshat/year";
 import { hash32 } from "./rng";
 import { canonicalJson, type ValidationIssue, validateDailyOps } from "./profile";
 import type { DayTime, Era, Modifier, ModifierOp } from "./types";
 
 export const ERA_TAG_PREFIX = "era:";
 
-/** The calendar year of a day: what the adapter says, else counted from year 1 at day 0. */
-export function yearOf(t: DayTime & { dayOrdinal: number; yearLength: number }): number {
-  return t.year ?? Math.floor(t.dayOrdinal / t.yearLength) + 1;
-}
+/** The calendar year of a day (one definition, in Seshat; re-exported for era callers). */
+export { yearOf };
+
 
 export function eraActive(e: Era, year: number): boolean {
   if (e.enabled === false) return false;
@@ -88,4 +88,9 @@ export function validateEras(eras: unknown): ValidationIssue[] {
 /** Part of the calendar hash: eras change past weather, so they must show in provenance. */
 export function erasHash(eras: readonly Era[]): string {
   return `eras:${hash32(canonicalJson(eras), 0x45524153).toString(16).padStart(8, "0")}`;
+}
+
+/** A world's calendar hash: the active adapter's configHash plus the era timeline. The one formula for World and the Studio audition. */
+export function calendarHashOf(adapterHash: string, eras: readonly Era[]): string {
+  return eras.length ? `${adapterHash}+${erasHash(eras)}` : adapterHash;
 }

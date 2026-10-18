@@ -34,6 +34,7 @@
  * `segments()` output index always agree (`boundaries.ts`'s own contract for
  * callers — see its file doc).
  */
+import { DEFAULT_YEAR_LENGTH } from "../../../seshat/year";
 import { dayLabel, tabular } from "../../model/format";
 import { seasonsHint } from "../../model/hints-seasons";
 import { cycleColour, SEASON_CYCLE } from "../../model/palette";
@@ -51,8 +52,6 @@ import { confirmWorldEdit } from "../world-confirm-modal";
 /** The id this window is registered and opened under (SPEC §3.4). */
 export const SEASONS_WINDOW = "seasons";
 
-/** Year length to assume when the active adapter does not describe itself. */
-const DEFAULT_YEAR_LENGTH = 365;
 
 /** The season's own hue, full strength — the ⚑, the stem and the duration label. */
 function seasonColour(index: number): string {

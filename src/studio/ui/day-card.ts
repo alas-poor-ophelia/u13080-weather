@@ -22,6 +22,7 @@
  * the override wrote one, its note — the same marker the strip uses.
  */
 import { compassPoint } from "../../core/report";
+import { yearOf } from "../../seshat/year";
 import { rollCached, type AuditionDay, type AuditionYear } from "../model/audition";
 import { conditionCode, conditionColour, conditionOf } from "../model/copy";
 import { format, yearLabel } from "../model/format";
@@ -67,7 +68,7 @@ function tagValue(day: AuditionDay, prefix: string): string {
 
 /** `DAY 36 · YEAR 1600 · THAW` — the prototype's eyebrow, season included. */
 export function dayEyebrow(day: AuditionDay): string {
-  const year = day.time.year ?? Math.floor(day.dayOrdinal / day.time.yearLength) + 1;
+  const year = yearOf({ year: day.time.year, dayOrdinal: day.dayOrdinal, yearLength: day.time.yearLength });
   const season = tagValue(day, "season:");
   return [`DAY ${day.dayOfYear}`, `YEAR ${yearLabel(year).replace(/^Y /, "")}`, season].filter((p) => p !== "").join(" · ").toUpperCase();
 }

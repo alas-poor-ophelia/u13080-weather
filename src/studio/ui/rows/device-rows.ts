@@ -33,6 +33,7 @@
  *    the MOD gates; `dragToWhen` returns `null` for all three, so a drag on one
  *    writes nothing even if the Lane were ever to offer it.
  */
+import { DEFAULT_YEAR_LENGTH } from "../../../seshat/year";
 import { rollCached, type AuditionInput } from "../../model/audition";
 import { channelOrNull, devices } from "../../model/compile";
 import { displayName } from "../../model/copy";
@@ -176,7 +177,7 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
   let lane: LaneComponent | null = null;
   let captionEl: HTMLElement | null = null;
   /** the calendar's year length, for the caption's day numbers */
-  let yearLength = 365;
+  let yearLength = DEFAULT_YEAR_LENGTH;
   /** the last gathered runs, and the roll key they were gathered under */
   let runsMemo: { key: string; days: Array<{ dayOrdinal: number; active: boolean }> } | null = null;
 

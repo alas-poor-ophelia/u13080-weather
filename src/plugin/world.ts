@@ -9,7 +9,7 @@
 import type { Generator } from "../core/generator";
 import { createGenerator, profileHash, validateProfile, type ValidationIssue } from "../core/profile";
 import { buildReport, describe, overrideKey, type DescriptorBands, type Override, type OverridePatch, type WeatherReport } from "../core/report";
-import { eraModifiers, erasHash, withEraTags } from "../core/eras";
+import { calendarHashOf, eraModifiers, erasHash, withEraTags } from "../core/eras";
 import type { DayTime, Era, ZoneProfile } from "../core/types";
 import { makePayload, type PayloadArgs, type WadjetEvent, type WadjetEventPayloads } from "./events";
 import type { TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
@@ -161,9 +161,7 @@ export class World {
 
   /** The adapter's config hash plus the era timeline: everything calendar-side that changes past weather. */
   calendarHash(): string {
-    const h = this.adapterFor().configHash();
-    const eras = this.state.eras ?? [];
-    return eras.length ? `${h}+${erasHash(eras)}` : h;
+    return calendarHashOf(this.adapterFor().configHash(), this.state.eras ?? []);
   }
 
   private generator(zoneId: string): { generator: Generator; hash: string } {

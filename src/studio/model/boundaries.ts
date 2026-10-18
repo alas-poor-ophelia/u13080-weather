@@ -16,6 +16,7 @@
  *
  * Pure: no Obsidian imports (PLAN D3).
  */
+import { wrap } from "../../seshat/phase";
 
 /** A named boundary on the unit circle. `at` ∈ [0,1). */
 export interface Mark {
@@ -30,7 +31,7 @@ export interface MarkLimits {
   minGap: number;
 }
 
-/** Seasons · CALENDAR: 1–6 seasons, at least a week apart. */
+/** Seasons · CALENDAR: 1–6 seasons, at least a week apart (a week of a 365-day year; follows the real year in Seshat P3). */
 export const SEASON_LIMITS: MarkLimits = { min: 1, max: 6, minGap: 7 / 365 };
 /** Sable · CYCLE: unlimited named phases, at least 2% of the cycle apart. */
 export const PHASE_LIMITS: MarkLimits = { min: 1, max: Infinity, minGap: 0.02 };
@@ -43,11 +44,6 @@ export interface Segment {
   length: number;
 }
 
-/** Wraps `x` into [0,1); mirrors `InternalCalendar`'s own `wrap` helper. */
-function wrapPhase(x: number): number {
-  const r = x - Math.floor(x);
-  return r === 1 ? 0 : r;
-}
 
 function clampNumber(value: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, value));
@@ -55,7 +51,7 @@ function clampNumber(value: number, lo: number, hi: number): number {
 
 /** Sorted by `at`, ats wrapped into [0,1); always returns copies. */
 export function normalise(marks: readonly Mark[]): Mark[] {
-  return marks.map((m) => ({ name: m.name, at: wrapPhase(m.at) })).sort((a, b) => a.at - b.at);
+  return marks.map((m) => ({ name: m.name, at: wrap(m.at) })).sort((a, b) => a.at - b.at);
 }
 
 /**
@@ -100,18 +96,18 @@ export function dragMark(marks: readonly Mark[], index: number, toPhase: number,
   const n = out.length;
   if (n === 0 || index < 0 || index >= n) return out;
   if (n === 1) {
-    out[0]!.at = wrapPhase(toPhase);
+    out[0]!.at = wrap(toPhase);
     return out;
   }
 
   const prevIdx = (index - 1 + n) % n;
   const nextIdx = (index + 1) % n;
-  const prevAt = wrapPhase(out[prevIdx]!.at);
-  const nextAt = wrapPhase(out[nextIdx]!.at);
+  const prevAt = wrap(out[prevIdx]!.at);
+  const nextAt = wrap(out[nextIdx]!.at);
   // Forward distance from prev to next, going the same direction marks are
   // ordered in; when prev and next are the same other mark (n === 2) that
   // distance is the whole circle, split by it on both sides.
-  let total = wrapPhase(nextAt - prevAt);
+  let total = wrap(nextAt - prevAt);
   if (total === 0) total = 1;
 
   let lo = limits.minGap;
@@ -121,9 +117,9 @@ export function dragMark(marks: readonly Mark[], index: number, toPhase: number,
     // hold the midpoint rather than producing an inverted clamp range.
     lo = hi = total / 2;
   }
-  const rawD = wrapPhase(toPhase - prevAt);
+  const rawD = wrap(toPhase - prevAt);
   const d = clampNumber(rawD, lo, hi);
-  out[index]!.at = wrapPhase(prevAt + d);
+  out[index]!.at = wrap(prevAt + d);
   return out;
 }
 
@@ -155,12 +151,12 @@ export function split(marks: readonly Mark[], phase: number, limits: MarkLimits,
   if (s.length === 0 || s.length >= limits.max) return null;
 
   const segs = segments(s);
-  const p = wrapPhase(phase);
+  const p = wrap(phase);
   const segIndex = segs.findIndex((seg) => inSegment(p, seg));
   if (segIndex < 0) return null;
   const seg = segs[segIndex]!;
 
-  const lenA = wrapPhase(p - seg.from);
+  const lenA = wrap(p - seg.from);
   const lenB = seg.length - lenA;
   if (lenA < limits.minGap || lenB < limits.minGap) return null;
 
@@ -175,7 +171,7 @@ export function splitLongest(marks: readonly Mark[], limits: MarkLimits, newName
   if (segs.length === 0) return null;
   let best = segs[0]!;
   for (const seg of segs) if (seg.length > best.length) best = seg;
-  const phase = wrapPhase(best.from + best.length / 2);
+  const phase = wrap(best.from + best.length / 2);
   return split(marks, phase, limits, newName);
 }
 
@@ -269,7 +265,7 @@ export function angleOf(at: number): number {
 
 /** Inverse of `angleOf`, wrapped into [0,1). */
 export function phaseOfAngle(deg: number): number {
-  return wrapPhase(deg / 360);
+  return wrap(deg / 360);
 }
 
 /** Evenly spaced marks starting at 0, e.g. the 4-season default: Spring 0, Summer .25, Autumn .5, Winter .75. */

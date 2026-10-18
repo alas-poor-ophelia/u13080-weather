@@ -2,6 +2,7 @@
  * WHEN · year window — the season-banded lane, the start/length knobs, and the
  * list of clips under it (SPEC §5).
  */
+import { wrap } from "../../../../seshat/phase";
 import type { CalendarDescription } from "../../../../plugin/time/adapter";
 import { seasonAtPhase } from "../../../../plugin/time/seasons";
 import { addYearWindow, removeYearWindow, setYearWindow } from "../../../model/device-edit";
@@ -58,7 +59,7 @@ export function buildYearWindow(c: DeviceWindowContext, parent: HTMLElement, d: 
     max: 1,
     step: 1 / yearLength,
     value: chosen.start,
-    fmt: (v) => `d${Math.round(v * yearLength)} · ${seasonAtPhase(seasons, ((v % 1) + 1) % 1) ?? "—"}`,
+    fmt: (v) => `d${Math.round(v * yearLength)} · ${seasonAtPhase(seasons, wrap(v)) ?? "—"}`,
     color: "var(--wadjet-studio-gold)",
     hint: deviceHint("device.when.start"),
     onChange: (v, phase) => c.gesture(phase, (x) => setYearWindow(x, at, { start: v, length: yearWindowsOf(x.when)[at]?.length ?? chosen.length })),
@@ -78,7 +79,7 @@ export function buildYearWindow(c: DeviceWindowContext, parent: HTMLElement, d: 
 
   const rows = parent.createDiv({ cls: "wadjet-studio-device-clips" });
   clips.forEach((clip, i) => {
-    const season = seasonAtPhase(seasons, (((clip.start + clip.length / 2) % 1) + 1) % 1);
+    const season = seasonAtPhase(seasons, wrap(clip.start + clip.length / 2));
     const row = rows.createDiv({ cls: "wadjet-studio-device-clip-row", attr: { "data-clip": String(i), "data-selected": i === at ? "true" : "false", "data-hint": deviceHint("device.when.lane") } });
     row.createDiv({ cls: "wadjet-studio-device-clip-swatch" });
     row.createSpan({ cls: "wadjet-studio-device-clip-label", text: dayRangeLabel(clip.start, clip.length, yearLength) });

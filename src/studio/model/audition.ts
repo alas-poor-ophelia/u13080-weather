@@ -13,7 +13,7 @@
  * (`overrides`) are keyed on the real `(zoneId, dayOrdinal)` and applied
  * regardless of salt — a re-roll keeps them.
  */
-import { eraModifiers, erasHash, withEraTags, yearOf } from "../../core/eras";
+import { calendarHashOf, eraModifiers, erasHash, withEraTags, yearOf } from "../../core/eras";
 import type { DailyRecord } from "../../core/generator";
 import { canonicalJson, createGenerator, profileHash, validateProfile, type ValidationIssue } from "../../core/profile";
 import { buildReport, overrideKey, type Override, type WeatherReport } from "../../core/report";
@@ -115,12 +115,6 @@ export function isRolled(input: AuditionInput): boolean {
   return ROLL_CACHE.has(auditionKey(input));
 }
 
-/** The calendar-side identity a report's provenance carries — same formula as `World.calendarHash()`. */
-function calendarHashFor(adapter: TimeAdapter, eras: readonly Era[]): string {
-  const h = adapter.configHash();
-  return eras.length ? `${h}+${erasHash(eras)}` : h;
-}
-
 /**
  * The dayOrdinal of `${year}-1`: the adapter's own parser when it has one,
  * else a bounded scan. Starts from an estimate at `(year - 1) * yearLength`
@@ -204,7 +198,7 @@ export function rollYear(i: AuditionInput, cache?: Map<string, AuditionYear>): A
   const { generator, engine } = createGenerator(i.zone, genSeed, timeOf, eraModifiers(i.eras));
 
   const profHash = profileHash(i.zone);
-  const calendarHash = calendarHashFor(i.adapter, i.eras);
+  const calendarHash = calendarHashOf(i.adapter.configHash(), i.eras);
   const overrideMap = new Map((i.overrides ?? []).map((o) => [overrideKey(o.zoneId, o.dayOrdinal), o.patch]));
 
   const firstDay = firstDayOfYear(i.adapter, i.year);

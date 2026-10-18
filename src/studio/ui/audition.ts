@@ -37,6 +37,7 @@
  * the cells, the bands behind the charts and the Seasons window are never
  * three different greens.
  */
+import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { PrecipType } from "../../core/generator";
 import type { Override } from "../../core/report";
 import type { Modifier } from "../../core/types";
@@ -403,7 +404,7 @@ export function createAuditionSurface(): Surface {
     const units = ctx?.units() ?? "metric";
     // Before the first roll there is no year to measure; fall back to the
     // adapter's own year length so a chip never reads `d0` for every pin.
-    const yearLength = days.length > 0 ? days.length : Math.max(1, Math.round(time?.toContext(0).yearLength ?? 365));
+    const yearLength = days.length > 0 ? days.length : Math.max(1, Math.round(time?.toContext(0).yearLength ?? DEFAULT_YEAR_LENGTH));
     for (const override of myPins(state)) {
       const at = days.findIndex((d) => d.dayOrdinal === override.dayOrdinal);
       const doy = at >= 0 ? days[at]!.dayOfYear : (time?.toContext(override.dayOrdinal).dayOfYear ?? 0);

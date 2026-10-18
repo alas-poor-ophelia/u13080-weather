@@ -27,6 +27,7 @@
  *   disabled era) is timed-and-empty instead: it does mute a composite,
  *   because that tag can never be on a day.
  */
+import { wrap } from "../../seshat/phase";
 import type { ModGate, Predicate, SpellSpec } from "../../core/types";
 import { moonPhase } from "../../plugin/time/internal";
 import { seasonAtPhase } from "../../plugin/time/seasons";
@@ -101,10 +102,6 @@ export function moonPhaseAt(moon: SpanCalendar["moons"][number], dayOrdinal: num
   return moonPhase(moon.cycleDays, moon.phaseAtEpoch ?? 0, dayOrdinal);
 }
 
-function wrap1(x: number): number {
-  const r = x - Math.floor(x);
-  return r === 1 ? 0 : r;
-}
 
 // ---------------------------------------------------------------------------
 // Intervals (the composite rows work on these, not on spans)
@@ -222,8 +219,8 @@ function perYear(startPhase: number, lengthYears: number, w: Window, max: number
  */
 function yearPhaseSpans(range: readonly [number, number], w: Window, max: number): Derived {
   if (range[0] === range[1]) return timed([]);
-  const a = wrap1(range[0]);
-  const b = wrap1(range[1]);
+  const a = wrap(range[0]);
+  const b = wrap(range[1]);
   const length = b > a ? b - a : 1 - a + b;
   return perYear(a, length, w, max, (year, from, to) => ({ id: `yp:${year}`, from, to, kind: "clip", editable: true }));
 }
@@ -254,8 +251,8 @@ function moonSpans(m: { name: string; phase: readonly [number, number] }, cal: S
   const moon = cal.moons.find((x) => x.name === m.name);
   if (!moon || !(moon.cycleDays > 0)) return timed([]);
   if (m.phase[0] === m.phase[1]) return timed([]);
-  const a = wrap1(m.phase[0]);
-  const b = wrap1(m.phase[1]);
+  const a = wrap(m.phase[0]);
+  const b = wrap(m.phase[1]);
   const arc = b > a ? b - a : 1 - a + b;
   const lengthDays = arc * moon.cycleDays;
 
@@ -293,7 +290,7 @@ function seasonSpans(name: string, cal: SpanCalendar, w: Window, max: number): D
   const from = sorted[i]!.from;
   const next = i + 1 < sorted.length ? sorted[i + 1]!.from : sorted[0]!.from + 1;
   const length = next - from;
-  const start = cal.flipSeasons === true ? wrap1(from - 0.5) : from;
+  const start = cal.flipSeasons === true ? wrap(from - 0.5) : from;
   return perYear(start, length, w, max, (year, a, b) => ({ id: `season:${name}:${year}`, from: a, to: b, kind: "band", editable: false, label: name }));
 }
 
@@ -347,7 +344,7 @@ function gateSourceOnDay(source: string, t: number, cal: SpanCalendar): boolean 
 /** The season tagged on the day at fractional year `t`, honouring `flipSeasons`. */
 function seasonNameAt(t: number, cal: SpanCalendar): string | null {
   if (cal.seasons.length === 0) return null;
-  const phase = wrap1(cal.flipSeasons === true ? t + 0.5 : t);
+  const phase = wrap(cal.flipSeasons === true ? t + 0.5 : t);
   return seasonAtPhase(cal.seasons, phase);
 }
 

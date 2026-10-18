@@ -33,6 +33,7 @@
  * Pure: no DOM, no Obsidian (PLAN D3). Memo keys are `seriesKey`'s job — the
  * row never rebuilds an SVG for a window it has already drawn (PLAN §7).
  */
+import { wrap } from "../../seshat/phase";
 import { sampleCurve } from "../../core/curve";
 import { eraOpsAt } from "../../core/eras";
 import { evaluateDayParams } from "../../core/generator";
@@ -353,11 +354,6 @@ function paramsAt(climate: ClimateParams, phase: number, year: number, eras: rea
   return ops.length === 0 ? base : applyDayOps(base, ops);
 }
 
-/** `t`'s position within its calendar year, in [0,1). */
-function yearPhase(t: number): number {
-  const p = t - Math.floor(t);
-  return p < 0 ? p + 1 : p;
-}
 
 /**
  * The composed climate sampled evenly across `[a, b]`, x already rescaled to
@@ -377,7 +373,7 @@ export function composedAcross(zone: ZoneProfile, channel: Channel, a: number, b
   const at: DayParams[] = [];
   for (let i = 0; i <= n; i++) {
     const t = a + (b - a) * (i / n);
-    at.push(paramsAt(climate, yearPhase(t), Math.floor(t), eras));
+    at.push(paramsAt(climate, wrap(t), Math.floor(t), eras));
   }
   return readers.map((r) => ({ role: r.role, points: at.map((p, i) => [i / n, r.at(p)] as [number, number]) }));
 }

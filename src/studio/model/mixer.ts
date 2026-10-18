@@ -21,6 +21,7 @@
  *
  * Pure: no Obsidian imports (PLAN D3).
  */
+import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import type { Era, Modifier, ModifierOp, ZoneProfile } from "../../core/types";
 import type { Units } from "../../core/units";
@@ -314,7 +315,7 @@ export function showsRailWhenChip(d: Device): boolean {
   return d.when.kind !== "moon";
 }
 
-export function railWhenLabel(d: Device, yearLength = 365): string {
+export function railWhenLabel(d: Device, yearLength = DEFAULT_YEAR_LENGTH): string {
   const w = d.when;
   switch (w.kind) {
     case "always":
@@ -358,7 +359,7 @@ export function unitsFor(
   eraColours: readonly number[] = [],
 ): UnitCard[] {
   const out: UnitCard[] = [];
-  const yearLength = calendar?.yearLength ?? 365;
+  const yearLength = calendar?.yearLength ?? DEFAULT_YEAR_LENGTH;
   let slot = 0;
 
   for (const m of devices(z)) {

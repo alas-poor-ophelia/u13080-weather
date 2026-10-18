@@ -26,6 +26,7 @@
  * The ruler is not a component-bin part (SPEC law 3) — it is chrome, the same
  * status as the header's transport buttons and a floating window's ×.
  */
+import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import { dayLabel, tabular } from "../model/format";
 import { playlistHint } from "../model/hints-playlist";
@@ -46,8 +47,6 @@ import type { SurfaceContext } from "./surfaces";
  */
 export const SEASONS_WINDOW = "seasons";
 
-/** Year length to label with when the active adapter does not describe itself. */
-const DEFAULT_YEAR_LENGTH = 365;
 
 /** The ruler's own band, under the season name and behind the tick labels. */
 const RULER_BAND_ALPHA = "18%";

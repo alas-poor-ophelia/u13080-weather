@@ -16,6 +16,8 @@
  *
  * Pure: no Obsidian imports (PLAN D3).
  */
+import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
+import { wrap } from "../../seshat/phase";
 import type { ModGate, Modifier, ModifierOp, Predicate, SpellSpec } from "../../core/types";
 import { withMinus } from "../../core/report";
 import type { CalendarDescription } from "../../plugin/time/adapter";
@@ -95,7 +97,6 @@ const CUSTOM_FALLBACK_KIND: DeviceKind = "trim";
 /** Boundary matching tolerance — phase boundaries are authored, not computed. */
 const PHASE_EPSILON = 1e-9;
 
-const mod1 = (x: number): number => ((x % 1) + 1) % 1;
 
 /**
  * A year window is stored as `[a, b)` but edited as start + length, and
@@ -149,7 +150,7 @@ export function moonRange(phases: readonly { name: string; at: number }[], selec
     for (let k = 0; k < n; k++) if (chosen.has((start + k) % n)) lastOffset = k;
     const a = sorted[start]!.at;
     const b = sorted[(start + lastOffset + 1) % n]!.at;
-    const arc = mod1(b - a) || 1;
+    const arc = wrap(b - a) || 1;
     if (arc < bestArc) {
       bestArc = arc;
       best = [a, b];
@@ -168,8 +169,8 @@ export function phasesFor(phases: readonly { name: string; at: number }[], range
   const n = sorted.length;
   if (n === 0) return [];
   if (range[0] === 0 && range[1] === 1) return sorted.map((p) => p.name);
-  const a = mod1(range[0]);
-  const b = mod1(range[1]);
+  const a = wrap(range[0]);
+  const b = wrap(range[1]);
   if (a === b) return []; // an empty window, not a selection
   const i = indexAt(sorted, a);
   const j = indexAt(sorted, b);
@@ -489,7 +490,7 @@ function num(v: number, maxDecimals = 2): string {
  * 14 d` appended when the device carries a spell. `yearLength` is the active
  * calendar's; it only affects the year-window wording.
  */
-export function whenSummary(d: Device, yearLength = 365): string {
+export function whenSummary(d: Device, yearLength = DEFAULT_YEAR_LENGTH): string {
   const w = d.when;
   let head: string;
   switch (w.kind) {

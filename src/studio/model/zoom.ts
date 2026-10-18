@@ -80,6 +80,7 @@ export function worldBounds(epoch: number, eras: readonly EraReach[] = []): Zoom
   return { min, max };
 }
 
+// a nominal 365-day year for zoom widths and tick spacing; the real year length arrives with Seshat P3
 const MIN_WIDTH_YEARS = MIN_WINDOW_DAYS / 365;
 const DAYS_PER_YEAR = 365;
 

@@ -10,25 +10,11 @@
  *
  * Absent `automation` = today's behaviour, exactly (history protection).
  */
+import { yearOf } from "../seshat/year";
 import { isCurvePath } from "./curve-ops";
 import type { ValidationIssue } from "./profile";
 import type { AutomationLane, DayTime, ModifierOp } from "./types";
 
-/**
- * Year length assumed when the caller's `timeOf` supplies neither `year` nor
- * `yearLength` (e.g. `gregorianTime`, which returns only yearPhase/dayOfYear).
- * The plugin's real adapters return a `TimeContext` that carries both.
- */
-export const FALLBACK_YEAR_LENGTH = 365;
-
-/**
- * The calendar year of a day. Mirrors eras.ts yearOf — duplicated (two lines)
- * rather than imported so this module does not close the import cycle
- * profile → automation → eras → profile.
- */
-function yearOf(t: DayTime & { dayOrdinal: number; yearLength: number }): number {
-  return t.year ?? Math.floor(t.dayOrdinal / t.yearLength) + 1;
-}
 
 /** Linear between points, clamped to the first/last value outside; a single point is a constant. */
 export function laneValue(lane: AutomationLane, fractionalYear: number): number {

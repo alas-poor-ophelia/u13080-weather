@@ -8,6 +8,7 @@
  * earlier days with the same hashed draws, so it is a pure function of d.
  */
 import { wrap } from "../seshat/phase";
+import { DEFAULT_YEAR_LENGTH } from "../seshat/year";
 import { DrawStream, bernoulli, drawKey, geometricDuration } from "./rng";
 import type { DayTime, Modifier, ModifierOp, Predicate } from "./types";
 
@@ -216,7 +217,7 @@ export class ModifierEngine {
    */
   private estimateWindowDays(m: Modifier): number {
     const reported = (this.cfg.timeOf(0) as DayTime & { yearLength?: number }).yearLength;
-    const year = typeof reported === "number" && Number.isFinite(reported) && reported >= 1 ? Math.floor(reported) : 365;
+    const year = typeof reported === "number" && Number.isFinite(reported) && reported >= 1 ? Math.floor(reported) : DEFAULT_YEAR_LENGTH;
     if (!m.when) return year;
     const scanned = Math.min(year, YEAR_LENGTH_MAX);
     let n = 0;

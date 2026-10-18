@@ -185,7 +185,7 @@ export function addYearWindow(d: Device): boolean {
   const clips = yearWindowsOf(d.when);
   const last = clips[clips.length - 1] ?? { start: 0.2, length: 0.04 };
   const start = Math.min(0.9, last.start + last.length + 0.06);
-  clips.push({ start, length: Math.min(0.6, 1 - start, 15 / 365) });
+  clips.push({ start, length: Math.min(0.6, 1 - start, 15 / 365) }); // ~15 days of a 365-day year (the real year in Seshat P3)
   writeYearWindows(d, clips);
   return true;
 }

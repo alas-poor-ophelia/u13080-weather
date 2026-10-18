@@ -5,8 +5,8 @@
  */
 import type { Channel } from "../../../model/compile";
 
-/** Year length to draw with when the active adapter does not describe itself (SPEC §8). */
-export const DEFAULT_YEAR_LENGTH = 365;
+/** Year length to draw with when the active adapter does not describe itself (SPEC §8): the one shared default. */
+export { DEFAULT_YEAR_LENGTH } from "../../../../seshat/year";
 
 /**
  * Prototype width (`proto-markup/1095-vst-device.html` l.2): a design constant,

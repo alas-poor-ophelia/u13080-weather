@@ -29,7 +29,7 @@ export interface LaneProps {
 
 const DEFAULT_HEIGHT = 28;
 const OPEN_BOUNDS = { min: -Infinity, max: Infinity };
-/** One day, in fractional years. */
+/** One day, in fractional years (of a 365-day year; the real year length arrives with Seshat P3). */
 const DAY_YEARS = 1 / 365;
 /** Below this, a year is too few pixels to drag by day — ←/→ moves a year instead (SPEC §3.8). */
 const YEAR_STEP_BELOW_PX_PER_YEAR = 50;

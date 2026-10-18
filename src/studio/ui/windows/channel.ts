@@ -60,6 +60,7 @@
  * stands for is `model/channel-edit.ts`'s, so the panel and the pure round-trip
  * tests read one table, not two (SPEC §8 "Channel parity").
  */
+import { DEFAULT_YEAR_LENGTH } from "../../../seshat/year";
 import { Notice } from "obsidian";
 import type { ZoneProfile } from "../../../core/types";
 import type { Units } from "../../../core/units";
@@ -122,8 +123,6 @@ function chartPad(height: number): { left: number; right: number; top: number; b
 }
 /** The keyframe the panel opens on — the prototype's `selKf: 6`, mid-year. */
 const DEFAULT_POINT = 6;
-/** Only when the adapter describes no calendar (`ui/header.ts`, `ui/ruler.ts` keep the same fallback). */
-const DEFAULT_YEAR_LENGTH = 365;
 
 // ---------------------------------------------------------------------------
 // The per-channel spec table (bead wadjet-9f9.32 fills the other three in)

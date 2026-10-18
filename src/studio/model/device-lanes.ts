@@ -30,6 +30,7 @@
  *
  * Pure: no DOM, no Obsidian, no roll (PLAN D3).
  */
+import { wrap } from "../../seshat/phase";
 import { ERA_TAG_PREFIX } from "../../core/eras";
 import { canonicalJson } from "../../core/profile";
 import type { Era, Modifier, Predicate } from "../../core/types";
@@ -65,10 +66,6 @@ const EPS = 1e-9;
  */
 const round10 = (x: number): number => Number(x.toFixed(10));
 
-const wrap1 = (x: number): number => {
-  const r = x - Math.floor(x);
-  return r === 1 ? 0 : r;
-};
 
 /**
  * Does `p` place the device in time? Mirrors `spans.ts`'s `Derived.timed`
@@ -265,8 +262,8 @@ export function dragToWhen(m: Modifier, span: Span, newFrom: number, newTo: numb
   if ("yearPhase" in w) {
     const length = newTo - newFrom;
     if (length >= 1 - EPS) return { ...m, when: { yearPhase: [0, 1] } };
-    const a = wrap1(newFrom - year);
-    const b = wrap1(a + length);
+    const a = wrap(newFrom - year);
+    const b = wrap(a + length);
     if (Math.abs(a - b) < EPS) return null;
     return { ...m, when: { yearPhase: [round10(a), round10(b)] } };
   }

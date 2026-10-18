@@ -6,6 +6,7 @@
  * now (`mod-moon.ts`, gap2 B6), so `togglePhase` is exported to them. The disc
  * is built from `apply.ts`, which owns the row it shares with the op knobs.
  */
+import { wrap } from "../../../../seshat/phase";
 import type { CalendarDescription } from "../../../../plugin/time/adapter";
 import { setWhen } from "../../../model/device-edit";
 import { moonRange, moonRangeEnd, phasesFor } from "../../../model/devices";
@@ -73,7 +74,7 @@ export function buildGateDisc(c: DeviceWindowContext, parent: HTMLElement, range
   });
   svg.createSvg("circle", { cls: "wadjet-studio-device-disc-face", attr: { cx: DISC_C, cy: DISC_C, r: DISC_R } });
   const mid = range[0] + ringSpan(range[0], range[1]) / 2;
-  svg.createSvg("path", { cls: "wadjet-studio-device-disc-moon", attr: { d: moonPath(((mid % 1) + 1) % 1, DISC_C, DISC_C, DISC_FACE_R) } });
+  svg.createSvg("path", { cls: "wadjet-studio-device-disc-moon", attr: { d: moonPath(wrap(mid), DISC_C, DISC_C, DISC_FACE_R) } });
   svg.createSvg("path", { cls: "wadjet-studio-device-disc-arc", attr: { d: ringArc(range[0], range[1]) } });
 
   ([0, 1] as const).forEach((end) => {

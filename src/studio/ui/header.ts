@@ -29,6 +29,7 @@
  * the window's × and the ruler's label. The four things that stand for an
  * *entity* (zone, Köppen class, station, hemisphere flag) are Chips.
  */
+import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import { Menu, Notice } from "obsidian";
 import { koppenOfClimate, type KoppenResult } from "../../core/koppen";
 import { canonicalJson, resolveProfile, validateProfile } from "../../core/profile";
@@ -56,8 +57,6 @@ const ZOOM_OUT = 1.25;
 /** Transport pan step, as a fraction of the visible window. */
 const PAN_FRACTION = 0.25;
 
-/** Year length to label with when the active adapter does not describe itself. */
-const DEFAULT_YEAR_LENGTH = 365;
 
 const PRESET_OPTIONS: ReadonlyArray<{ value: ZoomPreset; label: string; hint: string }> = [
   { value: "day", label: "Day", hint: hintAttr("zoom.day") },

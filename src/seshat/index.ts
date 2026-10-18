@@ -4,6 +4,7 @@
  */
 export { Body, bodyFor, bodyFromNumbers } from "./body";
 export { wrap } from "./phase";
+export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
 
 /** Folded into the internal calendar's configHash: bump when Seshat changes any computed value. */
