@@ -12,6 +12,7 @@ export { Engine, type Position } from "./engine";
 export { validate } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
+export { COPTIC, ETHIOPIAN } from "./calendars/ethiopian";
 export { wrap } from "./phase";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
