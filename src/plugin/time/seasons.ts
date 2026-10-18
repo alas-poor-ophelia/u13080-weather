@@ -4,6 +4,7 @@
  * calendar or a World.
  */
 import type { DayTime } from "../../core/types";
+import { wrap } from "../../seshat/phase";
 
 /** A season boundary: `from` is a yearPhase in [0,1). */
 export interface SeasonMark {
@@ -36,7 +37,7 @@ export function seasonAtPhase(seasons: readonly SeasonMark[], phase: number): st
  */
 export function flipSeasonTags(ctx: DayTime, seasons: readonly SeasonMark[]): DayTime {
   if (seasons.length === 0) return ctx;
-  const name = seasonAtPhase(seasons, wrapPhase(ctx.yearPhase + 0.5));
+  const name = seasonAtPhase(seasons, wrap(ctx.yearPhase + 0.5));
   if (name === null) return ctx;
   const tag = `season:${name}`;
   const tags = ctx.tags ?? [];
@@ -47,7 +48,3 @@ export function flipSeasonTags(ctx: DayTime, seasons: readonly SeasonMark[]): Da
   return { ...ctx, tags: next };
 }
 
-function wrapPhase(x: number): number {
-  const r = x - Math.floor(x);
-  return r === 1 ? 0 : r;
-}

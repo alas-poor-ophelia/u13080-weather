@@ -10,6 +10,34 @@ Release notes are taken from the matching `## <version>` section by the release 
   settings row now say that past weather may differ, and the *Upgrade* button is now
   *Acknowledge*: it records that you've seen the change and changes no weather. Pinned days are
   kept, as before.
+- **Past weather changes (generator `wadjet-gen/0.0.4`).** This is the one planned change of the
+  internal calendar's rework (Seshat). Who is affected, and how:
+  - **Windows that start or end exactly on a day.** A `yearPhase` or moon window is `[start,
+    end)`, but the old arithmetic nudged some phases that sit exactly on a boundary just below
+    it. Those days now fall on the side the rule says. With boundaries written to two decimals,
+    a 365-day year has two such days (day 73 against 0.2 and day 146 against 0.4), a 360-day
+    year six, and a 400-day year 31. Onset envelopes are sampled the same way.
+  - **Moons on the internal calendar** are now computed exactly instead of in floating point.
+    Phases move by at most about 1e-10 of a cycle, so a day can only change sides of a moon window
+    if its phase sits that close to the window's edge. For the moons and window edges we tested
+    (periods 7.3, 29.53 and 33 days; edges such as 0, 0.05, 0.4, 0.5, 0.95), no day in ten
+    million either side of day 0 changed sides. Numbers that scale with a moon's phase (an onset
+    envelope) can move in their last digit.
+  - **Spells on calendars whose year is not 365 days**, including third-party calendars. A spell's
+    start rate was worked out over a fixed 365 days. It now uses the calendar's own year length,
+    so `meanStartsPerYear` means per year of that calendar.
+  - **Spells whose `when` names an era tag or negates a regime.** The start rate was worked out
+    on year 0, where an era usually does not apply, so a spell gated on an era and a season fell
+    back to the whole year and came out about four times too rare. A spell with `not` around a
+    regime had the same problem. Era and regime terms now count as *unknown* for that estimate,
+    so the window is the season's days in both cases, negated or not.
+  - Moons with a missing, zero, negative or non-numeric cycle are repaired on load (29.53 days)
+    and reported once, instead of producing broken phases. The values that were replaced are kept
+    in `data.json` under `calendar.repairedFrom`. A cycle stored as a numeric string (`"30"`) is
+    read as that number and does not change. The moons box in settings now refuses a cycle that
+    is not more than 0 days.
+  - Pinned days keep the values you pinned. The settings row asks you to *Acknowledge* the new
+    generator version.
 
 ## 0.4.0
 

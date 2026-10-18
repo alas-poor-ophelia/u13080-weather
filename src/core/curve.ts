@@ -1,12 +1,10 @@
+import { wrap } from "../seshat/phase";
 import type { Curve, Harmonic, Keyframe } from "./types";
 
 const TAU = 2 * Math.PI;
 
-/** Wrap a yearPhase into [0, 1). */
-export function wrapPhase(t: number): number {
-  const r = t - Math.floor(t);
-  return r === 1 ? 0 : r;
-}
+/** Wrap a yearPhase into [0, 1) (Seshat's wrap; kept under this name for curve callers). */
+export const wrapPhase = wrap;
 
 export function isHarmonic(c: Curve): c is Harmonic {
   return typeof c === "object" && !Array.isArray(c);

@@ -7,6 +7,7 @@
  * A spell's activity on day d is recomputed by scanning a bounded window of
  * earlier days with the same hashed draws, so it is a pure function of d.
  */
+import { wrap } from "../seshat/phase";
 import { DrawStream, bernoulli, drawKey, geometricDuration } from "./rng";
 import type { DayTime, Modifier, ModifierOp, Predicate } from "./types";
 
@@ -22,7 +23,7 @@ export function sampleEnvelope(env: readonly (readonly [number, number])[], t: n
   const first = pts[0]!;
   const last = pts[pts.length - 1]!;
   if (pts.length === 1) return first[1];
-  const x = ((t % 1) + 1) % 1;
+  const x = wrap(t);
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i]!;
     const b = pts[i + 1]!;
@@ -101,7 +102,7 @@ export interface PredicateContext extends DayTime {
 
 /** Is x inside [lo, hi) on the unit circle (wraps if lo > hi)? */
 export function inPhaseRange(x: number, lo: number, hi: number): boolean {
-  const t = ((x % 1) + 1) % 1;
+  const t = wrap(x);
   if (lo === hi) return false;
   if (lo < hi) return t >= lo && t < hi;
   return t >= lo || t < hi;
@@ -204,21 +205,28 @@ export class ModifierEngine {
 
   /**
    * Window size for converting meanStartsPerYear into a per-day start
-   * probability: the number of days in a reference year (days 0..364) on
-   * which the static part of `when` holds. Regime predicates are treated as
-   * true for this estimate (the regime is unknown outside generation), and
-   * tags from other modifiers are not visible to it.
+   * probability: the number of days in a reference year (days 0..L-1, L the
+   * year length the calendar reports at day 0, or 365 when the time source
+   * reports none) on which `when` can hold. Regime and era terms are UNKNOWN
+   * for this estimate (the regime is decided during generation, and an era
+   * rarely covers the reference year): a day counts unless `when` is false
+   * whatever they turn out to be, so `not era:X` and `not regime` are counted
+   * correctly too. Tags from other modifiers are not visible to it. A year longer than YEAR_LENGTH_MAX is sampled on its first
+   * YEAR_LENGTH_MAX days and the count scaled to the full year.
    */
   private estimateWindowDays(m: Modifier): number {
-    if (!m.when) return 365;
-    const staticWhen = stripRegime(m.when);
+    const reported = (this.cfg.timeOf(0) as DayTime & { yearLength?: number }).yearLength;
+    const year = typeof reported === "number" && Number.isFinite(reported) && reported >= 1 ? Math.floor(reported) : 365;
+    if (!m.when) return year;
+    const scanned = Math.min(year, YEAR_LENGTH_MAX);
     let n = 0;
-    for (let d = 0; d < 365; d++) {
-      if (evaluatePredicate(staticWhen, this.ctx(m, d, this.cfg.timeOf(d), ""))) n++;
+    for (let d = 0; d < scanned; d++) {
+      if (evaluateStatic(m.when, this.ctx(m, d, this.cfg.timeOf(d), "")) !== false) n++;
     }
-    // no day of the reference year qualifies (e.g. gated on an era that starts later): fall back to
-    // a whole year rather than collapsing to a per-day start probability of meanStartsPerYear
-    return n === 0 ? 365 : n;
+    // no day of the reference year qualifies: fall back to a whole year rather than collapsing to a
+    // per-day start probability of meanStartsPerYear
+    if (n === 0) return year;
+    return scanned === year ? n : Math.max(1, Math.round((n * year) / scanned));
   }
 
   private startsAt(m: Modifier, d: number, regime: string): boolean {
@@ -251,10 +259,26 @@ export class ModifierEngine {
   }
 }
 
-function stripRegime(p: Predicate): Predicate {
-  if ("all" in p) return { all: p.all.map(stripRegime) };
-  if ("any" in p) return { any: p.any.map(stripRegime) };
-  if ("not" in p) return { not: stripRegime(p.not) };
-  if ("regime" in p) return { all: [] }; // vacuously true
-  return p;
+/**
+ * A predicate evaluated before generation, three-valued: `undefined` means
+ * unknown. Regime and era terms are unknown (see estimateWindowDays); `all`,
+ * `any` and `not` follow Kleene logic, so an unknown never turns into a
+ * definite answer by negation. Every other leaf is evaluated as usual.
+ */
+function evaluateStatic(p: Predicate, ctx: PredicateContext): boolean | undefined {
+  if ("all" in p) {
+    const r = p.all.map((q) => evaluateStatic(q, ctx));
+    return r.includes(false) ? false : r.includes(undefined) ? undefined : true;
+  }
+  if ("any" in p) {
+    const r = p.any.map((q) => evaluateStatic(q, ctx));
+    return r.includes(true) ? true : r.includes(undefined) ? undefined : false;
+  }
+  if ("not" in p) {
+    const r = evaluateStatic(p.not, ctx);
+    return r === undefined ? undefined : !r;
+  }
+  if ("regime" in p) return undefined;
+  if ("tag" in p && p.tag.startsWith("era:")) return undefined;
+  return evaluatePredicate(p, ctx);
 }

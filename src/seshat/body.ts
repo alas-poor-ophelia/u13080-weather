@@ -38,6 +38,23 @@ export class Body {
   }
 }
 
+const bodies = new Map<string, Body | null>();
+
+/** The body for a stored (period, epoch) pair, memoized by value; null when no body can represent it (e.g. a non-positive period). */
+export function bodyFor(periodDays: number, epochPhase: number): Body | null {
+  const key = `${periodDays}|${epochPhase}`;
+  let b = bodies.get(key);
+  if (b === undefined) {
+    try {
+      b = bodyFromNumbers(periodDays, epochPhase);
+    } catch {
+      b = null;
+    }
+    bodies.set(key, b);
+  }
+  return b;
+}
+
 /**
  * A body from the numbers a calendar stores (a period in days and an epoch
  * phase). Each is taken at its shortest decimal; if the pair would overflow

@@ -49,12 +49,21 @@ describe("settings", () => {
     expect(notList.moons).toEqual(DEFAULT_SETTINGS.calendar.moons);
     expect(notList.warnings).toHaveLength(1);
 
-    for (const cycleDays of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "29.53", undefined]) {
+    for (const cycleDays of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "", "thirty", undefined]) {
       const r = warn([{ name: "Sable", cycleDays, phaseAtEpoch: 0.1 }]);
       expect(r.moons).toEqual([{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0.1 }]);
       expect(r.warnings).toHaveLength(1);
       expect(r.warnings[0]).toContain("Sable");
     }
+
+    // a numeric string worked before (division coerced it), so it is read as its number, silently
+    const numeric = warn([{ name: "Sable", cycleDays: "30", phaseAtEpoch: 0.1 }]);
+    expect(numeric.moons).toEqual([{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0.1 }]);
+    expect(numeric.warnings).toEqual([]);
+
+    const badPhases = warn([{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0, phases: "Full@0.5" }]);
+    expect(badPhases.moons).toEqual([{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0 }]);
+    expect(badPhases.warnings).toHaveLength(1);
 
     const badPhase = warn([{ name: "Sable", cycleDays: 30, phaseAtEpoch: Number.NaN }]);
     expect(badPhase.moons).toEqual([{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0 }]);
@@ -70,6 +79,27 @@ describe("settings", () => {
     // a repaired calendar is usable at once
     const cal = new InternalCalendar({ ...DEFAULT_SETTINGS.calendar, moons: nameless.moons as typeof DEFAULT_SETTINGS.calendar.moons }, () => 0);
     expect(cal.toContext(100).moons).toHaveLength(2);
+  });
+
+  test("migrate: a repair keeps the original values in calendar.repairedFrom, once", () => {
+    const original = [{ name: "Sable", cycleDays: -5, phaseAtEpoch: 0 }, "not a moon"];
+    const first = migrateSettings({ calendar: { moons: original } });
+    expect(first.calendar.repairedFrom).toHaveLength(1);
+    const rec = first.calendar.repairedFrom![0]!;
+    expect(rec.field).toBe("moons");
+    expect(rec.original).toEqual(original);
+    expect(new Date(rec.at).toISOString()).toBe(rec.at);
+
+    // reloading the repaired settings repairs nothing and keeps the record
+    const again = migrateSettings(JSON.parse(JSON.stringify(first)));
+    expect(again.calendar.repairedFrom).toEqual(first.calendar.repairedFrom);
+
+    // a valid load records nothing
+    expect(migrateSettings({ calendar: { moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] } }).calendar.repairedFrom).toBeUndefined();
+
+    // the record never changes weather: it is not part of the calendar hash
+    const { repairedFrom: _r, ...bare } = first.calendar;
+    expect(new InternalCalendar(first.calendar, () => 0).configHash()).toBe(new InternalCalendar(bare, () => 0).configHash());
   });
 
   test("migrate: devicePresets defaults to [] when absent, and passes through an array", () => {

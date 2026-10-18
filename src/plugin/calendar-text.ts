@@ -54,6 +54,7 @@ export function badMoonsLine(text: string): string | undefined {
     if (!p[0] || p.length < 3 || [p[1], p[2]].some((x) => !Number.isFinite(Number(x)) || x === "")) {
       return `Can't read "${raw.trim()}" — expected a name, cycle in days, and phase at day 0, separated by commas.`;
     }
+    if (Number(p[1]) <= 0) return `The cycle in "${raw.trim()}" must be more than 0 days.`;
     let prevAt = -Infinity;
     const seen = new Set<string>();
     for (const tok of p.slice(3)) {

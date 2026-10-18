@@ -28,6 +28,7 @@
  *   because that tag can never be on a day.
  */
 import type { ModGate, Predicate, SpellSpec } from "../../core/types";
+import { moonPhase } from "../../plugin/time/internal";
 import { seasonAtPhase } from "../../plugin/time/seasons";
 import type { Span } from "./lanes";
 import { zoomLabel, type Window } from "./zoom";
@@ -93,12 +94,11 @@ export function dayOrdinalAt(year: number, cal: SpanCalendar): number {
 }
 
 /**
- * A moon's phase on `dayOrdinal`, `((d / cycleDays) + phaseAtEpoch) mod 1` —
- * the same formula `InternalCalendar.toContext` hands the predicate, so a
- * pulse's edge lands exactly where `inPhaseRange` flips.
+ * A moon's phase on `dayOrdinal`: the same function `InternalCalendar.toContext`
+ * hands the predicate, so a pulse's edge lands exactly where `inPhaseRange` flips.
  */
 export function moonPhaseAt(moon: SpanCalendar["moons"][number], dayOrdinal: number): number {
-  return wrap1((dayOrdinal / moon.cycleDays + (moon.phaseAtEpoch ?? 0)) % 1);
+  return moonPhase(moon.cycleDays, moon.phaseAtEpoch ?? 0, dayOrdinal);
 }
 
 function wrap1(x: number): number {

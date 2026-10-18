@@ -3,6 +3,7 @@
  * tags. Enough to run Wadjet with no calendar plugin installed.
  */
 import { hash32 } from "../../core/rng";
+import { bodyFor, SESHAT_VERSION } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import type { CalendarDescription, TimeAdapter, TimeContext } from "./adapter";
 import { seasonAtPhase } from "./seasons";
@@ -60,7 +61,7 @@ export class InternalCalendar implements TimeAdapter {
     const yearIndex = Math.floor(dayOrdinal / y);
     const dayOfYear = dayOrdinal - yearIndex * y;
     const yearPhase = dayOfYear / y;
-    const moons = this.cfg.moons.map((m) => ({ name: m.name, phase: wrap((dayOrdinal / m.cycleDays + m.phaseAtEpoch) % 1) }));
+    const moons = this.cfg.moons.map((m) => ({ name: m.name, phase: moonPhase(m.cycleDays, m.phaseAtEpoch, dayOrdinal) }));
     const tags: string[] = [];
     const season = this.seasonAt(yearPhase);
     if (season) tags.push(`season:${season}`);
@@ -74,7 +75,8 @@ export class InternalCalendar implements TimeAdapter {
   configHash(): string {
     // phases are display metadata (PLAN §2.2), not part of the roll — excluded so adding/editing them never invalidates cached weather.
     const moons = this.cfg.moons.map((m) => ({ name: m.name, cycleDays: m.cycleDays, phaseAtEpoch: m.phaseAtEpoch }));
-    const json = JSON.stringify({ y: this.cfg.yearLength, e: this.cfg.epochYear, m: moons, s: this.cfg.seasons });
+    // SESHAT_VERSION: the algorithm is part of the hash, not only the inputs (docs/SESHAT-v0.md §8.2 item 6)
+    const json = JSON.stringify({ v: SESHAT_VERSION, y: this.cfg.yearLength, e: this.cfg.epochYear, m: moons, s: this.cfg.seasons });
     return `ical:${hash32(json, 0x43414c45).toString(16).padStart(8, "0")}`;
   }
 
@@ -113,6 +115,22 @@ export class InternalCalendar implements TimeAdapter {
     const season = this.seasonAt(c.yearPhase);
     return `Year ${year}, day ${(c.dayOfYear ?? 0) + 1}${season ? ` (${season})` : ""}`;
   }
+}
+
+/**
+ * A moon's phase on `dayOrdinal`: exact, from a Seshat body
+ * (docs/SESHAT-v0.md §2.2). The one formula for the generator and the Studio.
+ * A moon no body can represent (a non-positive, vanishingly small or huge
+ * cycle that slipped past validation) keeps the old float formula rather than
+ * throwing, with a non-finite result read as 0: toContext must never throw
+ * or return NaN (API.md §5). Bodies are memoized by value, so a moon the
+ * settings UI edits in place is picked up at once.
+ */
+export function moonPhase(cycleDays: number, phaseAtEpoch: number, dayOrdinal: number): number {
+  const body = bodyFor(cycleDays, phaseAtEpoch);
+  if (body) return body.phaseAt(dayOrdinal);
+  const p = wrap((dayOrdinal / cycleDays + phaseAtEpoch) % 1);
+  return Number.isFinite(p) ? p : 0; // e.g. a cycle of 5e-324 overflows to Infinity: never hand a NaN phase to a predicate
 }
 
 function wrap(x: number): number {

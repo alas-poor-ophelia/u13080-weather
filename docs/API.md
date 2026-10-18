@@ -120,7 +120,7 @@ Type: `0` (literal, `SCHEMA_VERSION` in source). The version of the `WeatherRepo
 
 ### `generatorVersion`
 
-Type: `string`. Currently `"wadjet-gen/0.0.3"` (`GENERATOR_VERSION`). This is the version of the
+Type: `string`. Currently `"wadjet-gen/0.0.4"` (`GENERATOR_VERSION`). This is the version of the
 code currently running, not the version a given world was created with. See the note on
 `WeatherReport.provenance.generatorVersion` in §4.
 
@@ -822,7 +822,7 @@ methods satisfies either form.)
 |---|---|---|
 | `id` | yes | Stable identity. It is the settings dropdown value and the registration key. A second `register` under the same id replaces the first. |
 | `now()` | yes | The calendar's current date as a `TimeContext`, or `null` if it has none. |
-| `toContext(dayOrdinal)` | yes | MUST be O(1) or O(log n). It is called for every day of the 154-day block replay (90 warm-up + 64, see §9). Zones with spell modifiers need more calls: each modifier adds a 365-day window estimate, and the spell lookback reaches up to 401 days back. Anything heavier causes noticeable delays. MUST extrapolate rather than throw for a `dayOrdinal` outside the calendar's defined range. Use the nearest defined year length or equivalent. The internal fallback adapter extrapolates this way. |
+| `toContext(dayOrdinal)` | yes | MUST be O(1) or O(log n). It is called for every day of the 154-day block replay (90 warm-up + 64, see §9). Zones with spell modifiers need more calls: each modifier adds a one-year window estimate (at most 10,000 days), and the spell lookback reaches up to 401 days back. Anything heavier causes noticeable delays. MUST extrapolate rather than throw for a `dayOrdinal` outside the calendar's defined range. Use the nearest defined year length or equivalent. The internal fallback adapter extrapolates this way. |
 | `configHash()` | yes | A string identifying the adapter's configuration, not its current date. It is folded into `provenance.calendarHash`. It should change whenever a setting that affects `toContext`'s output changes. |
 | `parse(text)` | optional | Parse a calendar-native date string (e.g. from a `wadjet` code block's `date:` field) to a `dayOrdinal`. Return `null` if the string cannot be parsed. |
 | `format(dayOrdinal)` | optional | A human-readable rendering of a day, used by the codeblock renderer and commands. |
@@ -1468,10 +1468,16 @@ interface SpellSpec {
 A spell turns a `when` condition into a run of consecutive active days rather than a per-day test:
 
 - **Start probability.** For each candidate day inside the `when` window, the per-day probability
-  of a spell starting is `meanStartsPerYear / windowDays`. `windowDays` is the count of days
-  (0–364, a reference year) on which the regime-stripped `when` predicate holds: any `regime`
-  sub-predicate is treated as vacuously true for this estimate, because the regime for an
-  arbitrary future day is not known in advance. The result is clamped to `≤ 1`. Draws are seeded
+  of a spell starting is `meanStartsPerYear / windowDays`. `windowDays` is the count of days in a
+  reference year, days `0` to `L − 1`, on which the `when` predicate can hold. `L` is the
+  `yearLength` the calendar reports for day `0`, or 365 when the time source reports none. Two
+  kinds of sub-predicate are treated as *unknown* for this estimate: `regime`, because the regime
+  for an arbitrary future day is not known in advance, and a `tag` starting `era:`, because an era
+  rarely covers the reference year. A day counts unless `when` is false whatever those turn out
+  to be, so `not` of an unknown is still unknown (`{ "not": { "tag": "era:Dark" } }` inside an
+  `all` with a season gives the season's days, not the whole year). If no day qualifies,
+  `windowDays` is `L`. A year longer than 10,000 days is sampled on its first 10,000 days and the count scaled to
+  `L`. The result is clamped to `≤ 1`. Draws are seeded
   by `hash(seed, zoneId, day, "mod:<id>:spell")`.
 - **Duration.** Geometric with mean `meanDurationDays`, seeded by `hash(seed, zoneId, startDay,
   "mod:<id>:spell-duration")`.

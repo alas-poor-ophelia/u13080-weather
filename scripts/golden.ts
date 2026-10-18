@@ -19,7 +19,8 @@ import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "../test/golden
 import { buildGoldenCal, compareGoldenCal, summarizeGoldenCalDiffs, type GoldenCal } from "../test/golden/golden-cal";
 
 const rngPath = new URL("../test/golden/rng-1.json", import.meta.url);
-const genPath = new URL("../test/golden/gen-0.0.3.json", import.meta.url);
+// the generator golden is named after the version that wrote it: wadjet-gen/0.0.4 -> gen-0.0.4.json
+const genPath = new URL(`../test/golden/gen-${GENERATOR_VERSION.split("/")[1]}.json`, import.meta.url);
 const calPath = new URL("../test/golden/calendar.json", import.meta.url);
 const write = process.argv.includes("--write");
 

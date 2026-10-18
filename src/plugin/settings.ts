@@ -51,6 +51,8 @@ export interface InternalCalendarConfig {
   moons: MoonConfig[];
   /** optional season labels: yearPhase start → name (becomes a tag) */
   seasons: Array<{ name: string; from: number }>;
+  /** what a load-time repair replaced, oldest first (never read; kept so a hand edit is recoverable). Not in configHash. */
+  repairedFrom?: Array<{ at: string; field: "moons"; original: unknown }>;
 }
 
 export interface WadjetSettings {
@@ -106,10 +108,12 @@ const DEFAULT_MOON = DEFAULT_SETTINGS.calendar.moons[0]!;
 /**
  * The internal calendar's moons, repaired so the plugin always loads: a
  * `moons` that is not a list becomes the default list; a moon whose cycle is
- * not a positive finite number gets the default cycle, and a non-finite epoch
- * phase becomes 0. Each repair is reported through `warn`. Valid moons are
- * returned as they were (an epoch phase outside [0, 1) is valid: the calendar
- * reduces it exactly), so their config hash does not move.
+ * not a positive finite number gets the default cycle, a non-finite epoch
+ * phase becomes 0, and a `phases` that is not a list is dropped. Each repair
+ * is reported through `warn`. A cycle stored as a numeric string ("30") is
+ * read as that number without a warning: the old arithmetic coerced it, so
+ * that moon always worked. Valid moons are returned as they were (an epoch
+ * phase outside [0, 1) is valid: the calendar reduces it exactly).
  */
 function sanitizeMoons(moons: unknown, warn: (msg: string) => void): MoonConfig[] {
   if (!Array.isArray(moons)) {
@@ -119,14 +123,20 @@ function sanitizeMoons(moons: unknown, warn: (msg: string) => void): MoonConfig[
   return moons.map((raw: unknown, i) => {
     const m = (raw && typeof raw === "object" ? raw : {}) as Partial<MoonConfig>;
     const name = typeof m.name === "string" && m.name ? m.name : `Moon ${i + 1}`;
-    const fixed: MoonConfig = { ...m, name, cycleDays: m.cycleDays as number, phaseAtEpoch: m.phaseAtEpoch as number };
-    if (typeof m.cycleDays !== "number" || !Number.isFinite(m.cycleDays) || m.cycleDays <= 0) {
+    const stored: unknown = m.cycleDays;
+    const cycle: unknown = typeof stored === "string" && stored.trim() !== "" ? Number(stored) : stored;
+    const fixed: MoonConfig = { ...m, name, cycleDays: cycle as number, phaseAtEpoch: m.phaseAtEpoch as number };
+    if (typeof cycle !== "number" || !Number.isFinite(cycle) || cycle <= 0) {
       warn(`Moon "${name}" had no usable cycle length, so it was set to ${DEFAULT_MOON.cycleDays} days.`);
       fixed.cycleDays = DEFAULT_MOON.cycleDays;
     }
     if (typeof m.phaseAtEpoch !== "number" || !Number.isFinite(m.phaseAtEpoch)) {
       warn(`Moon "${name}" had no usable phase at day 0, so it was set to 0.`);
       fixed.phaseAtEpoch = 0;
+    }
+    if (m.phases !== undefined && !Array.isArray(m.phases)) {
+      warn(`Moon "${name}" had unreadable named phases, so they were removed.`);
+      delete fixed.phases;
     }
     return fixed;
   });
@@ -135,11 +145,18 @@ function sanitizeMoons(moons: unknown, warn: (msg: string) => void): MoonConfig[
 /** Merge loaded data over defaults; fill a seed if missing; repair broken moons (reported through `warn`). Returns a new object. */
 export function migrateSettings(raw: unknown, warn: (msg: string) => void = () => {}): WadjetSettings {
   const r = (raw ?? {}) as Partial<WadjetSettings>;
-  const calendar = { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) };
+  const calendar: InternalCalendarConfig = { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) };
+  let repaired = false;
+  const moons = sanitizeMoons(calendar.moons, (msg) => {
+    repaired = true;
+    warn(msg);
+  });
+  // the plugin saves on load, so keep what the repair replaced: a hand edit stays recoverable
+  const repairedFrom = repaired ? [...(Array.isArray(calendar.repairedFrom) ? calendar.repairedFrom : []), { at: new Date().toISOString(), field: "moons" as const, original: calendar.moons as unknown }] : calendar.repairedFrom;
   const s: WadjetSettings = {
     ...DEFAULT_SETTINGS,
     ...r,
-    calendar: { ...calendar, moons: sanitizeMoons(calendar.moons, warn) },
+    calendar: { ...calendar, moons, ...(repairedFrom ? { repairedFrom } : {}) },
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],

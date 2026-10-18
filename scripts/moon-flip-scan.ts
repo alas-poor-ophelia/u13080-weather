@@ -1,16 +1,17 @@
 /**
  * Moon flip scan (Seshat P0 step 0, docs/SESHAT-v0.md §8.1).
  *
- * Today the internal calendar computes a moon's phase in floats:
- * wrap((d / cycleDays + phaseAtEpoch) % 1) (src/plugin/time/internal.ts).
- * Seshat P0 computes it exactly: cycleDays and phaseAtEpoch become rationals
- * (from their shortest round-trip decimal) and the phase is one integer
- * remainder divided once. This lists every day in ±MAX_DAY_ORDINAL where the
- * two land on different sides of a predicate boundary the calendar golden
- * uses, so P0's diff can be checked against a known list.
+ * Before Seshat P0 the internal calendar computed a moon's phase in floats:
+ * wrap((d / cycleDays + phaseAtEpoch) % 1). Since P0 it is exact: cycleDays
+ * and phaseAtEpoch are rationals (from their shortest round-trip decimal) and
+ * the phase is one integer remainder divided once. This records every day in
+ * ±MAX_DAY_ORDINAL where the old float phase and the exact phase land on
+ * different sides of a predicate boundary the calendar golden uses (the
+ * pre-P0 capture found none), and checks that the shipped InternalCalendar
+ * really is the exact formula.
  *
  *   bun run scripts/moon-flip-scan.ts          # check against test/golden/moon-flips.json
- *   bun run scripts/moon-flip-scan.ts --write  # rewrite it (pre-P0 capture only)
+ *   bun run scripts/moon-flip-scan.ts --write  # rewrite it
  */
 import { InternalCalendar } from "../src/plugin/time/internal";
 import { MAX_DAY_ORDINAL } from "../src/plugin/world";
@@ -77,14 +78,14 @@ function scan(m: Moon): MoonScan {
   return { ...m, differingDays, maxAbsDiff, flips };
 }
 
-// Guard: the inline float expression must equal the real InternalCalendar on a sample.
+// Guard: since P0, the real InternalCalendar must equal the exact formula (and so differ from the old float one).
 const moons: Moon[] = [...MOONS_365, ...MOONS_400.map((m) => ({ ...m, name: `${m.name}@400` }))];
 const cal = new InternalCalendar({ yearLength: 365, epochYear: 1, moons: [...MOONS_365, ...MOONS_400], seasons: [] }, () => 0);
 for (let i = 0; i < 20_000; i++) {
   const d = Math.round((i / 20_000 - 0.5) * 2 * MAX_DAY_ORDINAL);
   const ctx = cal.toContext(d).moons!;
   moons.forEach((m, j) => {
-    if (ctx[j]!.phase !== floatPhase(d, m)) throw new Error(`floatPhase disagrees with InternalCalendar at day ${d} for ${m.name}`);
+    if (ctx[j]!.phase !== exactPhase(d, decimal(m.cycleDays), decimal(m.phaseAtEpoch))) throw new Error(`exactPhase disagrees with InternalCalendar at day ${d} for ${m.name}`);
   });
 }
 
