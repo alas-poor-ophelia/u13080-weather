@@ -127,10 +127,19 @@ function ctxOf(t: DayTime, dayOrdinal: number, zoneId: string, regime: string): 
   return { ...t, dayOrdinal, regime, seed: SEED, zoneId, modifierId: "golden-pred" };
 }
 
-function symbols(p: Predicate, t: DayTime, d: number, zoneId: string): { gen: Sym; static: Sym } {
+/** The two evaluation modes under test, each answering one predicate on one day. */
+export interface Evaluators {
+  gen(p: Predicate, ctx: PredicateContext): boolean | undefined;
+  static(p: Predicate, ctx: PredicateContext): boolean | undefined;
+}
+
+/** The evaluator the fixture was frozen from. */
+export const OLD_EVALUATORS: Evaluators = { gen: evaluatePredicate, static: evaluateStatic };
+
+function symbols(ev: Evaluators, p: Predicate, t: DayTime, d: number, zoneId: string): { gen: Sym; static: Sym } {
   return {
-    gen: run(() => evaluatePredicate(p, ctxOf(t, d, zoneId, REGIME))),
-    static: run(() => evaluateStatic(p, ctxOf(t, d, zoneId, ""))),
+    gen: run(() => ev.gen(p, ctxOf(t, d, zoneId, REGIME))),
+    static: run(() => ev.static(p, ctxOf(t, d, zoneId, ""))),
   };
 }
 
@@ -146,7 +155,7 @@ export function rle(s: string): string {
   return out;
 }
 
-export function buildGoldenPred(): GoldenPred {
+export function buildGoldenPred(ev: Evaluators = OLD_EVALUATORS): GoldenPred {
   const worlds = WORLDS.map((w) => {
     const adapter = w.adapter();
     return {
@@ -158,7 +167,7 @@ export function buildGoldenPred(): GoldenPred {
           let gen = "";
           let stat = "";
           for (let d = DAYS.from; d <= DAYS.to; d++) {
-            const s = symbols(p as Predicate, timeOf(d), d, z.id);
+            const s = symbols(ev, p as Predicate, timeOf(d), d, z.id);
             gen += s.gen;
             stat += s.static;
           }
@@ -175,7 +184,7 @@ export function buildGoldenPred(): GoldenPred {
   const edges: GoldenPred["edges"] = {};
   for (const [name, p] of PREDICATES) {
     const row: GoldenPred["edges"][string] = {};
-    for (const [edge, t] of EDGES) row[edge] = symbols(p as Predicate, t, t.dayOrdinal, "edge");
+    for (const [edge, t] of EDGES) row[edge] = symbols(ev, p as Predicate, t, t.dayOrdinal, "edge");
     edges[name] = row;
   }
   return { seed: SEED, regime: REGIME, days: DAYS, worlds, edges };

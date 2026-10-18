@@ -1,7 +1,7 @@
 /**
  * The proleptic Gregorian calendar as a Seshat AST (docs/SESHAT-v0.md §4):
  * a leap gear (+4, −100, +400) on the year, months as slots with February
- * the slack, and a seven-day week.
+ * the slack, a seven-day week, and the day names on a one-day weekday cycle.
  *
  * Day 0 is 1970-01-01, so a day is a Unix day and the tests compare against
  * Date. Year indices are astronomical years (year 0 is 1 BC).
@@ -46,7 +46,9 @@ export const GREGORIAN: CalendarAst = {
         { name: "December", length: 31 },
       ],
     },
-    // 1970-01-04 was a Sunday
-    { id: "week", kind: "cycle", anchor: 3, length: 7, labels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((name) => ({ name })) },
+    // 1970-01-04 was a Sunday. Labels name occurrences, so the day names sit on a one-day cycle:
+    // seven labels on the seven-day week would name weeks.
+    { id: "week", kind: "cycle", anchor: 3, length: 7 },
+    { id: "weekday", kind: "cycle", anchor: 3, length: 1, labels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((name) => ({ name })) },
   ],
 };

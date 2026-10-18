@@ -7,9 +7,9 @@
 import { yearOf } from "../seshat/year";
 import { hash32 } from "./rng";
 import { canonicalJson, type ValidationIssue, validateDailyOps } from "./profile";
-import type { DayTime, Era, Modifier, ModifierOp } from "./types";
+import { ERA_TAG_PREFIX, type DayTime, type Era, type Modifier, type ModifierOp } from "./types";
 
-export const ERA_TAG_PREFIX = "era:";
+export { ERA_TAG_PREFIX };
 
 /** The calendar year of a day (one definition, in Seshat; re-exported for era callers). */
 export { yearOf };

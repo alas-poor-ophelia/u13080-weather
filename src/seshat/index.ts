@@ -22,6 +22,7 @@ export { BALINESE } from "./calendars/balinese";
 export { ROMAN } from "./calendars/roman";
 export { BAHAI } from "./calendars/bahai";
 export { wrap } from "./phase";
+export { evaluate, inPhase, TimeView, type DayView, type EvalOptions, type HostKey, type RuleAst, type TimeLike } from "./rule";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
 

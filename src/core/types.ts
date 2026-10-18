@@ -279,3 +279,6 @@ export interface Preset {
   /** sha256 over the canonical JSON of { climate, regimes } */
   contentHash: string;
 }
+
+/** Tag prefix every era day carries (`era:<name>`). Lives here, a leaf, so rule and era modules can both read it without importing each other. */
+export const ERA_TAG_PREFIX = "era:";
