@@ -23,8 +23,10 @@ export type GearAst =
       readonly on: string;
       readonly kind: "positions";
       readonly period: number;
-      /** index n matches when n mod period is listed */
+      /** index n matches when (n − offset) mod period is listed */
       readonly positions: readonly number[];
+      /** shifts the table, as an interval's offset does: a calendar whose years count from 1 has index n = year − 1, so offset −1 */
+      readonly offset?: number;
     };
 
 export function mod(a: number, m: number): number {
@@ -42,7 +44,7 @@ function ceilDiv(a: number, b: number): number {
 
 /** Whether occurrence index n matches the gear. */
 export function gearMatches(g: GearAst, n: number): boolean {
-  if (g.kind === "positions") return g.positions.includes(mod(n, g.period));
+  if (g.kind === "positions") return g.positions.includes(mod(n - (g.offset ?? 0), g.period));
   let s = 0;
   for (const t of g.terms) if (mod(n - (t.offset ?? 0), t.every) === 0) s += t.sign;
   return s === 1;
@@ -54,10 +56,8 @@ export function gearMatches(g: GearAst, n: number): boolean {
  */
 export function gearBelow(g: GearAst, n: number): number {
   if (g.kind === "positions") {
-    const r = mod(n, g.period);
-    let partial = 0;
-    for (const q of g.positions) if (q < r) partial++;
-    return floorDiv(n, g.period) * g.positions.length + partial;
+    const o = g.offset ?? 0;
+    return residuesBelow(g, n - o) - residuesBelow(g, -o);
   }
   let c = 0;
   for (const t of g.terms) {
@@ -65,6 +65,14 @@ export function gearBelow(g: GearAst, n: number): number {
     c += t.sign * (ceilDiv(n - o, t.every) - ceilDiv(-o, t.every));
   }
   return c;
+}
+
+/** Integers k in [0, m) (minus those in [m, 0) for m < 0) whose residue mod the period is listed. */
+function residuesBelow(g: GearAst & { kind: "positions" }, m: number): number {
+  const r = mod(m, g.period);
+  let partial = 0;
+  for (const q of g.positions) if (q < r) partial++;
+  return floorDiv(m, g.period) * g.positions.length + partial;
 }
 
 /** The long-run fraction of indices that match. */
@@ -76,12 +84,12 @@ export function gearDensity(g: GearAst): number {
 }
 
 /**
- * A bound on |gearBelow(n) − density·n| over every n: under the table size for
- * positions (the partial count against its mean share of one period), and two
- * per interval term (each ceiling sits within one of its mean, plus the offset term).
+ * A bound on |gearBelow(n) − density·n| over every n. A table count strays
+ * under its size from its mean share, twice over with the offset's term; each
+ * interval term strays under one per ceiling, two ceilings a term.
  */
 export function gearDeviation(g: GearAst): number {
-  return g.kind === "positions" ? g.positions.length : 2 * g.terms.length;
+  return g.kind === "positions" ? 2 * g.positions.length : 2 * g.terms.length;
 }
 
 /** The gear's period: the lcm of its intervals, or its table period. */
