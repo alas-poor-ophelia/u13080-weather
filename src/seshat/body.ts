@@ -5,6 +5,7 @@
  * an integer remainder and ONE division, so it is exact up to that single
  * correctly rounded step and identical in every JS engine.
  */
+import { wrap } from "./phase";
 import { approximate, frac, fromNumber, rational, SAFE, type Rational } from "./rational";
 
 export class Body {
@@ -70,4 +71,19 @@ export function bodyFromNumbers(periodDays: number, epochPhase: number): Body {
   }
   if (2 * period.n * epoch.d > SAFE) epoch = frac(approximate(epochPhase - Math.floor(epochPhase), Math.max(1, Math.floor(SAFE / (2 * period.n)))));
   return new Body(period, rational(epoch.n, epoch.d));
+}
+
+/**
+ * A moon's phase on `day`: exact, from a body (§2.2). The one formula for the
+ * generator and the Studio. A moon no body can represent (a non-positive,
+ * vanishingly small or huge cycle that slipped past validation) keeps the old
+ * float formula rather than throwing, with a non-finite result read as 0:
+ * toContext must never throw or return NaN (API.md §5). Bodies are memoized by
+ * value, so a moon the settings UI edits in place is picked up at once.
+ */
+export function moonPhase(cycleDays: number, phaseAtEpoch: number, day: number): number {
+  const body = bodyFor(cycleDays, phaseAtEpoch);
+  if (body) return body.phaseAt(day);
+  const p = wrap((day / cycleDays + phaseAtEpoch) % 1);
+  return Number.isFinite(p) ? p : 0; // e.g. a cycle of 5e-324 overflows to Infinity: never hand a NaN phase to a predicate
 }

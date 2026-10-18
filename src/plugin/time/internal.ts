@@ -1,9 +1,11 @@
 /**
  * Internal fallback calendar: fixed year length, optional moons and season
- * tags. Enough to run Wadjet with no calendar plugin installed.
+ * tags. Enough to run Wadjet with no calendar plugin installed. A thin adapter
+ * over a Seshat definition (docs/SESHAT-v0.md §7): the date arithmetic is
+ * Seshat's, the season tags and the text format are this adapter's.
  */
 import { hash32 } from "../../core/rng";
-import { bodyFor, SESHAT_VERSION } from "../../seshat";
+import { dayIn, dayOf, SESHAT_VERSION, type FixedYearCalendar } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import type { CalendarDescription, TimeAdapter, TimeContext } from "./adapter";
 import { seasonAtPhase } from "./seasons";
@@ -57,15 +59,20 @@ export class InternalCalendar implements TimeAdapter {
   }
 
   toContext(dayOrdinal: number): TimeContext {
-    const y = this.cfg.yearLength;
-    const yearIndex = Math.floor(dayOrdinal / y);
-    const dayOfYear = dayOrdinal - yearIndex * y;
-    const yearPhase = dayOfYear / y;
-    const moons = this.cfg.moons.map((m) => ({ name: m.name, phase: moonPhase(m.cycleDays, m.phaseAtEpoch, dayOrdinal) }));
+    const { year, dayOfYear, yearPhase, moons } = dayIn(this.definition(), dayOrdinal);
     const tags: string[] = [];
     const season = this.seasonAt(yearPhase);
     if (season) tags.push(`season:${season}`);
-    return { dayOrdinal, yearPhase, yearLength: y, dayOfYear, year: yearIndex + this.cfg.epochYear, moons, tags, source: this.id };
+    return { dayOrdinal, yearPhase, yearLength: this.cfg.yearLength, dayOfYear, year, moons, tags, source: this.id };
+  }
+
+  /**
+   * The Seshat definition of the stored config, read fresh on every call: the
+   * settings tab writes the shared config in place before `update` runs, and
+   * the adapter has always seen such an edit at once.
+   */
+  private definition(): FixedYearCalendar {
+    return { year: { anchor: 0, length: this.cfg.yearLength }, epochYear: this.cfg.epochYear, moons: this.cfg.moons };
   }
 
   seasonAt(yearPhase: number): string | null {
@@ -106,7 +113,7 @@ export class InternalCalendar implements TimeAdapter {
     const year = Number(m[1]);
     const doy = Number(m[2]);
     if (doy < 1 || doy > this.cfg.yearLength) return null;
-    return (year - this.cfg.epochYear) * this.cfg.yearLength + (doy - 1);
+    return dayOf(this.definition(), year, doy - 1);
   }
 
   format(dayOrdinal: number): string {
@@ -115,25 +122,4 @@ export class InternalCalendar implements TimeAdapter {
     const season = this.seasonAt(c.yearPhase);
     return `Year ${year}, day ${(c.dayOfYear ?? 0) + 1}${season ? ` (${season})` : ""}`;
   }
-}
-
-/**
- * A moon's phase on `dayOrdinal`: exact, from a Seshat body
- * (docs/SESHAT-v0.md §2.2). The one formula for the generator and the Studio.
- * A moon no body can represent (a non-positive, vanishingly small or huge
- * cycle that slipped past validation) keeps the old float formula rather than
- * throwing, with a non-finite result read as 0: toContext must never throw
- * or return NaN (API.md §5). Bodies are memoized by value, so a moon the
- * settings UI edits in place is picked up at once.
- */
-export function moonPhase(cycleDays: number, phaseAtEpoch: number, dayOrdinal: number): number {
-  const body = bodyFor(cycleDays, phaseAtEpoch);
-  if (body) return body.phaseAt(dayOrdinal);
-  const p = wrap((dayOrdinal / cycleDays + phaseAtEpoch) % 1);
-  return Number.isFinite(p) ? p : 0; // e.g. a cycle of 5e-324 overflows to Infinity: never hand a NaN phase to a predicate
-}
-
-function wrap(x: number): number {
-  const r = x - Math.floor(x);
-  return r === 1 ? 0 : r;
 }

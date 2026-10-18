@@ -29,7 +29,7 @@
  */
 import { wrap } from "../../seshat/phase";
 import type { ModGate, Predicate, SpellSpec } from "../../core/types";
-import { moonPhase } from "../../plugin/time/internal";
+import { moonPhase } from "../../seshat/body";
 import { seasonAtPhase } from "../../plugin/time/seasons";
 import type { Span } from "./lanes";
 import { zoomLabel, type Window } from "./zoom";

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { approximate, Body, bodyFromNumbers, frac, fromNumber, rational, SESHAT_VERSION, wrap } from "../src/seshat";
+import { approximate, Body, bodyFor, bodyFromNumbers, dayIn, dayOf, frac, fromNumber, positionIn, rational, SESHAT_VERSION, startOf, wrap } from "../src/seshat";
+import { InternalCalendar } from "../src/plugin/time/internal";
 import { SAFE } from "../src/seshat/rational";
 import { MOONS_365, MOONS_400 } from "./golden/golden-cal";
 
@@ -105,5 +106,60 @@ describe("seshat: wrap and version", () => {
 
   test("SESHAT_VERSION is a stable string", () => {
     expect(SESHAT_VERSION).toBe("seshat/1");
+  });
+});
+
+describe("seshat: fixed-length year unit (C2 first step)", () => {
+  test("positionIn and startOf invert each other on a whole-day year, negatives included", () => {
+    const year = { anchor: 0, length: 365 };
+    expect(positionIn(year, 0)).toEqual({ index: 0, offset: 0 });
+    expect(positionIn(year, 364)).toEqual({ index: 0, offset: 364 });
+    expect(positionIn(year, 365)).toEqual({ index: 1, offset: 0 });
+    expect(positionIn(year, -1)).toEqual({ index: -1, offset: 364 });
+    for (const i of [-3, 0, 7]) expect(positionIn(year, startOf(year, i))).toEqual({ index: i, offset: 0 });
+    expect(positionIn({ anchor: 10, length: 7 }, 9)).toEqual({ index: -1, offset: 6 });
+  });
+
+  // The swap must not move a float: replay the inline formulas InternalCalendar used before it (main 97eda19).
+  test("InternalCalendar on Seshat matches the pre-swap formulas exactly, fractional years included", () => {
+    const moons = [
+      { name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 },
+      { name: "Ash", cycleDays: 7.3, phaseAtEpoch: -0.25 },
+      { name: "Husk", cycleDays: 0, phaseAtEpoch: 0.5 }, // no body can hold it: the float fallback
+    ];
+    // the moon phase InternalCalendar computed before the swap (Seshat P0's body, else the float fallback)
+    const oldPhase = (c: number, e: number, d: number) => {
+      const b = bodyFor(c, e);
+      if (b) return b.phaseAt(d);
+      const p = wrap((d / c + e) % 1);
+      return Number.isFinite(p) ? p : 0;
+    };
+    for (const yearLength of [365, 400, 365.25, 365.2425, 7.5, 1, 20_000]) {
+      for (const epochYear of [1, 0, -40, 1.5]) {
+        const cal = new InternalCalendar({ yearLength, epochYear, moons, seasons: [] }, () => 0);
+        for (const d of [0, -0, 1, -1, 364, 365, 366, -365, 1461, 123_456, -9_999_999, 9_999_999]) {
+          const yearIndex = Math.floor(d / yearLength);
+          const dayOfYear = d - yearIndex * yearLength;
+          const c = cal.toContext(d);
+          expect(c.dayOfYear).toBe(dayOfYear);
+          expect(c.yearPhase).toBe(dayOfYear / yearLength);
+          expect(c.year).toBe(yearIndex + epochYear);
+          expect(c.yearLength).toBe(yearLength);
+          expect(c.moons).toEqual(moons.map((m) => ({ name: m.name, phase: oldPhase(m.cycleDays, m.phaseAtEpoch, d) })));
+        }
+        for (const [y, doy] of [[1, 1], [epochYear, 1], [-5, 3], [2026, 365]] as const) {
+          if (doy > yearLength || !Number.isInteger(y)) continue; // parse reads whole year numbers only
+          expect(cal.parse(`${y}-${doy}`)).toBe((y - epochYear) * yearLength + (doy - 1));
+        }
+      }
+    }
+  });
+
+  test("dayIn and dayOf round-trip a whole-day calendar", () => {
+    const cal = { year: { anchor: 0, length: 354 }, epochYear: 1, moons: [] };
+    for (const d of [-708, -1, 0, 353, 354, 10_000]) {
+      const p = dayIn(cal, d);
+      expect(dayOf(cal, p.year, p.dayOfYear)).toBe(d);
+    }
   });
 });

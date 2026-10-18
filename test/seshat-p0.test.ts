@@ -7,7 +7,8 @@ import { gregorianTime } from "../src/core/generator";
 import { ModifierEngine, YEAR_LENGTH_MAX, inPhaseRange, sampleEnvelope } from "../src/core/modifiers";
 import type { DayTime, Modifier, Predicate } from "../src/core/types";
 import { badMoonsLine } from "../src/plugin/calendar-text";
-import { InternalCalendar, moonPhase } from "../src/plugin/time/internal";
+import { InternalCalendar } from "../src/plugin/time/internal";
+import { moonPhase } from "../src/seshat";
 
 describe("B1: window edges honour [lo, hi) exactly", () => {
   test("a phase exactly on a window's start is inside, exactly on its end is outside", () => {
