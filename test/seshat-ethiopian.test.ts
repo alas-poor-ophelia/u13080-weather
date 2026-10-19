@@ -35,9 +35,11 @@ function compare(e: Engine, want: (d: number) => [number, number, number], from:
 describe("seshat: Ethiopian and Coptic against ICU", () => {
   const eth = new Engine(ETHIOPIAN);
   const cop = new Engine(COPTIC);
-  // ethioaa is one unbroken era, Amete Alem = Amete Mihret + 5500; coptic's era before year 1 counts back (year 0 is era 0, year 1)
+  // ethioaa is one unbroken era, Amete Alem = Amete Mihret + 5500; coptic's era before year 1 counts back (year 0 is
+  // its year 1). ICU 73 names that era ERA0, ICU 78 something else: a day whose era is not day 0's is before the epoch.
   const amete = icu("ethioaa", (_era, y) => y - 5500);
-  const coptic = icu("coptic", (era, y) => (era === "ERA0" ? 1 - y : y));
+  const anno = new Intl.DateTimeFormat("en-u-ca-coptic", { timeZone: "UTC", year: "numeric", era: "short" }).formatToParts(new Date(0)).find((p) => p.type === "era")!.value;
+  const coptic = icu("coptic", (era, y) => (era === anno ? y : 1 - y));
 
   test("both ASTs are valid, and year 1 starts on the documented days", () => {
     expect(validate(ETHIOPIAN)).toEqual([]);

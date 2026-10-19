@@ -3,14 +3,25 @@ import { Engine, gearBelow, gearDensity, gearDeviation, gearMatches, ISLAMIC_CIV
 
 const DAY_MS = 86_400_000;
 
-/** ICU's reading of a day: [AH year, month 0-based, day of month]. */
+/**
+ * ICU's era convention changed between versions: ICU 73 writes a year before
+ * the Hijra as a negative AH year, ICU 78 as a positive year in the era
+ * "Before Hijra" (Coptic likewise). One reading holds for both: a day whose era
+ * differs from day 0's is before the epoch, so its year on one line is 1 - y.
+ */
+/** ICU's reading of a day: [AH year on one line (year 0 is 1 BH), month 0-based, day of month]. */
 function icu(calendar: string): (d: number) => [number, number, number] {
-  const f = new Intl.DateTimeFormat(`en-u-ca-${calendar}`, { timeZone: "UTC", year: "numeric", month: "numeric", day: "numeric" });
+  const f = new Intl.DateTimeFormat(`en-u-ca-${calendar}`, { timeZone: "UTC", year: "numeric", month: "numeric", day: "numeric", era: "short" });
   expect(f.resolvedOptions().calendar).toBe(calendar); // never compare against a silent fallback to gregory
-  return (d) => {
+  const read = (d: number) => {
     const parts = f.formatToParts(new Date(d * DAY_MS));
-    const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
-    return [get("year"), get("month") - 1, get("day")];
+    const get = (type: string) => parts.find((p) => p.type === type)!.value;
+    return { era: get("era"), year: Number(get("year")), month: Number(get("month")), day: Number(get("day")) };
+  };
+  const ah = read(0).era;
+  return (d) => {
+    const r = read(d);
+    return [r.era === ah ? r.year : 1 - r.year, r.month - 1, r.day];
   };
 }
 

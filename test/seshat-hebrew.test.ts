@@ -88,14 +88,20 @@ describe("seshat: Hebrew", () => {
     expect([...seen].sort((a, b) => a - b)).toEqual([353, 354, 355, 383, 384, 385]);
   });
 
-  // ICU (Bun's and Node's 76.1 alike) puts some new years a day late: in AM 5343–5999 exactly 5462, 5560 and 5807,
-  // where .NET's HebrewCalendar, the classic rules and Hebcal (Rosh Hashana 5807 begins the evening of
-  // Sunday 30 September 2046) all give Monday. Its disagreements are listed here, not hidden.
-  test("ICU's new years disagree in exactly the years we know; .NET and Hebcal side with Seshat", () => {
+  // ICU up to 76 (Bun 1.3's 73.2, Node's 76.1) puts some new years a day late: in AM 5343–5999 exactly 5462, 5560 and
+  // 5807, where .NET's HebrewCalendar, the classic rules and Hebcal (Rosh Hashana 5807 begins the evening of Sunday
+  // 30 September 2046) all give Monday. ICU 78.3 (Bun 1.4.3) agrees with them: it was fixed between the two. ICU 77
+  // was not measured, so either answer passes there. Its disagreements are listed here, not hidden.
+  const icuMajor = Number(process.versions.icu!.split(".")[0]);
+  const icuFixed = icuMajor >= 78 ? true : icuMajor <= 76 ? false : undefined;
+  test("ICU's new years disagree only in the years we know (none since ICU 78); .NET and Hebcal side with Seshat", () => {
     const f = new Intl.DateTimeFormat("en-u-ca-hebrew", { timeZone: "UTC", year: "numeric", month: "long", day: "numeric" });
     const disputed: number[] = [];
     for (let y = 5343; y <= 5999; y++) if (!f.format(new Date(heb.start("year", y - 1) * DAY_MS)).startsWith(`1 Tishri ${y}`)) disputed.push(y);
-    expect(disputed).toEqual([5462, 5560, 5807]);
+    const known = [5462, 5560, 5807];
+    if (icuFixed === true) expect(disputed).toEqual([]);
+    else if (icuFixed === false) expect(disputed).toEqual(known);
+    else expect([[], known]).toContainEqual(disputed);
     expect(heb.start("year", 5461)).toBe(gregorianDay(1701, 10, 3));
     expect(heb.start("year", 5559)).toBe(gregorianDay(1799, 9, 30));
     expect(heb.start("year", 5806)).toBe(gregorianDay(2046, 10, 1));
@@ -120,8 +126,12 @@ describe("seshat: Hebrew", () => {
       if (a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]) if (bad++ < 5) expect({ d, seshat: a }).toEqual({ d, seshat: b });
     }
     expect(bad).toBe(0);
-    // pinned, not capped: 31 new years ICU puts a day late in AM 2992–8468, each touching the year on either side
-    expect([...icuYearOk.values()].filter((ok) => !ok).length).toBe(62);
+    // pinned, not capped: before ICU 78, 31 new years put a day late in AM 2992–8468, each touching the year on either
+    // side; since ICU 78 none, so this is agreement on every day of the ±1M span with nothing set aside
+    const excluded = [...icuYearOk.values()].filter((ok) => !ok).length;
+    if (icuFixed === true) expect(excluded).toBe(0);
+    else if (icuFixed === false) expect(excluded).toBe(62);
+    else expect([0, 62]).toContain(excluded);
   }, 120_000);
 });
 
