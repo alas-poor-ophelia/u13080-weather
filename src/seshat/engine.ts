@@ -7,6 +7,7 @@
 import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { Body } from "./body";
 import { DAY_LIMIT } from "./day";
+import { seasonAtPhase } from "./seasons";
 import { EngineDays } from "./engine-view";
 import { gearMatcher, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
@@ -118,6 +119,21 @@ export class Engine {
     const at = this.locate(id, day);
     if (!at) return null;
     return { index: at.path[at.path.length - 1]!, start: day - at.offset, length: at.length };
+  }
+
+  /** The season `day` falls in (the legacy rule over the seasons unit's phase), or null with no seasons. */
+  seasonAt(day: number): string | null {
+    const s = this.ast.seasons;
+    if (!s) return null;
+    const o = this.occurrenceAt(s.unit, day)!;
+    return seasonAtPhase(s.marks, (day - o.start) / o.length);
+  }
+
+  /** The moons on `day`, in declaration order: the bodies with a moon facet, each with its exact phase. */
+  moonsAt(day: number): Array<{ name: string; phase: number }> {
+    const out: Array<{ name: string; phase: number }> = [];
+    for (const b of this.ast.bodies ?? []) if (b.moon) out.push({ name: b.moon.name, phase: this.bodies.get(b.id)!.phaseAt(day) });
+    return out;
   }
 
   /** Phase of body `id` on `day` in [0, 1), exact to one division; undefined for an unknown body. */

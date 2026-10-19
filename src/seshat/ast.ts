@@ -12,6 +12,7 @@
 import type { GearAst } from "./gear";
 import type { Rational } from "./rational";
 import type { RuleAst } from "./rule";
+import type { SeasonMark } from "./seasons";
 
 /** Add `add` days to a length when `gear` matches. */
 export interface GearTerm {
@@ -193,6 +194,20 @@ export interface BodyAst {
   readonly id: string;
   readonly period: Rational;
   readonly epoch: Rational;
+  /** a body with a moon facet is one of the calendar's moons: its name is what predicates match (hashed); phases are display */
+  readonly moon?: MoonAst;
+}
+
+/** A moon (§13.5): `name` reaches predicates; `phases` are named phase marks for display only. */
+export interface MoonAst {
+  readonly name: string;
+  readonly phases?: readonly SeasonMark[];
+}
+
+/** Seasons (§13.4): marks over the phase of one cycle unit, with the legacy calendar's rule (seasonAtPhase). */
+export interface SeasonsAst {
+  readonly unit: string;
+  readonly marks: readonly SeasonMark[];
 }
 
 /** A named format pattern (§4.2): "default" formats a day, "filler" a day in a filler slot. Display data. */
@@ -204,6 +219,7 @@ export interface FormatAst {
 export interface CalendarAst {
   readonly name: string;
   readonly formats?: readonly FormatAst[];
+  readonly seasons?: SeasonsAst;
   readonly bodies?: readonly BodyAst[];
   readonly gears: readonly GearAst[];
   readonly units: readonly UnitAst[];

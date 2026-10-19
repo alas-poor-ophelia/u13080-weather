@@ -6,24 +6,10 @@
 import type { DayTime } from "../../core/types";
 import { wrap } from "../../seshat/phase";
 
-/** A season boundary: `from` is a yearPhase in [0,1). */
-export interface SeasonMark {
-  name: string;
-  from: number;
-}
+// one season rule for the legacy calendar and a Seshat definition (docs/SESHAT-v0.md §13.4)
+import { seasonAtPhase, type SeasonMark } from "../../seshat/seasons";
 
-/**
- * The season covering `phase`: the last mark whose `from <= phase`, wrapping to
- * the final mark when `phase` falls before the first one. Returns null when the
- * calendar defines no seasons.
- */
-export function seasonAtPhase(seasons: readonly SeasonMark[], phase: number): string | null {
-  const s = [...seasons].sort((a, b) => a.from - b.from);
-  if (s.length === 0) return null;
-  let cur = s[s.length - 1]!;
-  for (const x of s) if (phase >= x.from) cur = x;
-  return cur.name;
-}
+export { seasonAtPhase, type SeasonMark };
 
 /**
  * Southern-hemisphere view of a day: every `season:*` tag is replaced by the

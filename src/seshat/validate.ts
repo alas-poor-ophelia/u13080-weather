@@ -84,7 +84,27 @@ export function validate(ast: CalendarAst): string[] {
   // one id grammar for every declared id, so every calendar has a text form (§4.1)
   for (const id of new Set(ids)) if (typeof id !== "string" || !ID_GRAMMAR.test(id)) errors.push(`id ${show(id)} must match [a-z][a-z0-9-]*`);
   if (typeof ast.name !== "string" || CONTROL.test(ast.name)) errors.push(`the calendar's name must be a string without control characters`);
+  const marks = (ms: unknown, where: string): void => {
+    if (!Array.isArray(ms)) return void errors.push(`${where}: marks must be a list`);
+    for (const [i, m] of (ms as unknown[]).entries()) {
+      if (!isObj(m) || typeof m.name !== "string" || !m.name) errors.push(`${where}: mark ${i + 1} needs a name`);
+      else if (typeof m.from !== "number" || !Number.isFinite(m.from) || m.from < 0 || m.from >= 1) errors.push(`${where}: mark "${m.name}" must start at a phase in [0, 1)`);
+    }
+  };
+  if (ast.seasons !== undefined) {
+    const u = units.get(ast.seasons.unit);
+    if (!u) errors.push(`seasons: no unit "${String(ast.seasons.unit)}"`);
+    else if (u.kind !== "cycle") errors.push(`seasons: "${u.id}" is a slot unit; seasons follow a cycle unit's phase`);
+    marks(ast.seasons.marks, "seasons");
+  }
+  // predicates match moons by name, so two moons of one name would be one moon to every rule
+  const moonNames = (ast.bodies ?? []).flatMap((b) => (b.moon ? [b.moon.name] : []));
+  for (const n of new Set(moonNames.filter((n, i) => moonNames.indexOf(n) !== i))) errors.push(`moon "${n}" is declared more than once`);
   for (const b of ast.bodies ?? []) {
+    if (b.moon !== undefined) {
+      if (!isObj(b.moon) || typeof b.moon.name !== "string" || !b.moon.name) errors.push(`body "${b.id}": a moon needs a name`);
+      else if (b.moon.phases !== undefined) marks(b.moon.phases, `moon "${b.moon.name}" phases`);
+    }
     // the text prints rationals as stored, and its parser reads only lowest terms with a positive denominator
     if (!lowest(b.period) || !lowest(b.epoch)) {
       errors.push(`body "${b.id}": period and epoch must be n/d in lowest terms with d > 0`);
