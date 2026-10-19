@@ -1,0 +1,37 @@
+BEGIN:VCALENDAR
+SESHAT:1
+NAME:Tabular Islamic (astronomical epoch)
+
+BEGIN:VGEAR
+UID:leap
+POSITIONS:ON=year;PERIOD=30;AT=2,5,7,10,13,16,18,21,24,26,29;OFFSET=-1
+END:VGEAR
+
+BEGIN:VUNIT
+UID:year
+ANCHOR:D-492149
+LENGTH:354
+GEAR:leap*1
+END:VUNIT
+
+BEGIN:VUNIT
+UID:month
+IN:year
+SLOT:Muharram=30
+SLOT:Safar=29
+SLOT:Rabi al-Awwal=30
+SLOT:Rabi al-Thani=29
+SLOT:Jumada al-Ula=30
+SLOT:Jumada al-Akhirah=29
+SLOT:Rajab=30
+SLOT:Shaban=29
+SLOT:Ramadan=30
+SLOT:Shawwal=29
+SLOT:Dhu al-Qadah=30
+BEGIN:VSLOT
+NAME:Dhu al-Hijjah
+LENGTH:SLACK
+END:VSLOT
+END:VUNIT
+
+END:VCALENDAR

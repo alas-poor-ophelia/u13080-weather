@@ -5,7 +5,7 @@
 export { Body, bodyFor, bodyFromNumbers, moonPhase } from "./body";
 export { dayIn, dayOf, type FixedYearCalendar, type MoonDef } from "./calendar";
 export { positionIn, startOf, type FixedUnit } from "./unit";
-export type { CalendarAst, ConstantCycleAst, CrossingAst, CrossingCycleAst, CycleUnitAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, CycleRule, ConstantRule, CrossingRule, DayLabelAst, RuleDefAst, SlotAst, SlotsUnitAst, StageAst, StageRule, UnitAst } from "./ast";
+export type { CalendarAst, ConstantCycleAst, CrossingAst, CrossingCycleAst, CycleUnitAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, BodyAst, CycleRule, ConstantRule, CrossingRule, DayLabelAst, RuleDefAst, SlotAst, SlotsUnitAst, StageAst, StageRule, UnitAst } from "./ast";
 export { baseIndexAt, baseLengths, baseStart, linearBase, type LinearBase } from "./base";
 export { DAY_LIMIT } from "./day";
 export { gearBelow, gearDensity, gearDeviation, gearMatches, gearPeriod, type GearAst } from "./gear";
@@ -24,6 +24,7 @@ export { BAHAI } from "./calendars/bahai";
 export { wrap } from "./phase";
 export { evaluate, inPhase, TimeView, type By, type DayView, type EvalOptions, type HostKey, type Recur, type RuleAst, type TimeLike } from "./rule";
 export { COUNT_WORK_MAX, EngineDays, SETPOS_PERIOD_MAX } from "./engine-view";
+export { ID, parse, print, SeshatSyntaxError } from "./text";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
 

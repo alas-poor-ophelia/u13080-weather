@@ -17,6 +17,7 @@ import { gearMatches, gearPeriod, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
 import { stageReach } from "./start";
+import { Body } from "./body";
 import { gcd } from "./rational";
 import type { By, RuleAst } from "./rule";
 
@@ -42,6 +43,10 @@ const INDEX_MAX = 3 * DAY_LIMIT;
 const PIN_MAX = 100_000;
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
+/** Every declared id (units, gears, bodies, rules): the text syntax's id grammar. */
+const ID_GRAMMAR = /^[a-z][a-z0-9-]*$/;
+// eslint-disable-next-line no-control-regex -- the point is to find control characters
+const CONTROL = /[\u0000-\u001f\u007f]/;
 /** Longest period BYSETPOS scans: checked here for constant-length cycles, and when a rule runs for the rest (engine-view.ts). */
 export const SETPOS_PERIOD_MAX = 400;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
@@ -53,8 +58,22 @@ export function validate(ast: CalendarAst): string[] {
   const errors: string[] = [];
   const units = new Map(ast.units.map((u) => [u.id, u]));
   const gears = new Map(ast.gears.map((g) => [g.id, g]));
-  const ids = [...ast.units.map((u) => u.id), ...ast.gears.map((g) => g.id), ...(ast.rules ?? []).map((r) => r.id)];
+  const ids = [...ast.units.map((u) => u.id), ...ast.gears.map((g) => g.id), ...(ast.rules ?? []).map((r) => r.id), ...(ast.bodies ?? []).map((b) => b.id)];
   for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) errors.push(`id "${id}" is declared more than once`);
+  // one id grammar for every declared id, so every calendar has a text form (§4.1)
+  for (const id of new Set(ids)) if (typeof id !== "string" || !ID_GRAMMAR.test(id)) errors.push(`id ${show(id)} must match [a-z][a-z0-9-]*`);
+  if (typeof ast.name !== "string" || CONTROL.test(ast.name)) errors.push(`the calendar's name must be a string without control characters`);
+  for (const b of ast.bodies ?? []) {
+    try {
+      new Body(b.period, b.epoch);
+    } catch (e) {
+      errors.push(`body "${b.id}": ${(e as Error).message}`);
+    }
+  }
+  for (const [i, d] of (ast.days ?? []).entries()) {
+    if (!isInt(d.day)) errors.push(`day label ${i + 1}: day ${show(d.day)} is not a whole day`);
+    checkLabel(d, `day label ${i + 1}`, (msg) => errors.push(msg));
+  }
 
   // ids with a problem of their own; the slot-sum check needs its unit, parent and gears clean, whatever the declaration order
   const bad = new Set<string>();
@@ -336,6 +355,8 @@ function checkLedger(u: CycleUnitAst, units: ReadonlyMap<string, UnitAst>, fail:
 function checkLabel(l: unknown, where: string, fail: (msg: string) => void): void {
   if (!isObj(l)) return fail(`${where} must be an object with a name and/or tags`);
   if (l.name !== undefined && typeof l.name !== "string") fail(`${where}: name ${show(l.name)} is not a string`);
+  else if (typeof l.name === "string" && CONTROL.test(l.name)) fail(`${where}: name ${show(l.name)} has a control character`);
+  if (Array.isArray(l.tags) && (l.tags as unknown[]).some((t) => typeof t === "string" && CONTROL.test(t))) fail(`${where}: a tag has a control character`);
   if (l.tags === undefined) return;
   if (!Array.isArray(l.tags) || (l.tags as unknown[]).some((t) => typeof t !== "string" || !t)) return fail(`${where}: tags must be a list of non-empty strings`);
   if (new Set(l.tags).size !== l.tags.length) fail(`${where}: a tag is listed twice`);
@@ -547,8 +568,8 @@ function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], ge
 /**
  * A rule's references and shape against one calendar (§3.3, §3.5). Used for
  * the calendar's named rules and by EngineDays.bind for any other rule. A
- * calendar rule has no host leaves (regime and chance belong to Wadjet) and
- * no bodies yet (step 4). `freq` and `by` may also name the built-in "day".
+ * calendar rule has no host leaves (regime and chance belong to Wadjet).
+ * `freq` and `by` may also name the built-in "day".
  */
 export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): string[] {
   const errors: string[] = [];
@@ -577,7 +598,7 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
         return walk(r.of, `${at}.not`);
       case "phase":
         if ((r.unit === undefined) === (r.body === undefined)) errors.push(`${at}: phase names exactly one of unit and body`);
-        if (r.body !== undefined) errors.push(`${at}: no body "${r.body}" (calendars declare no bodies yet)`);
+        if (r.body !== undefined && !(ast.bodies ?? []).some((b) => b.id === r.body)) errors.push(`${at}: no body ${show(r.body)}`);
         if (r.unit !== undefined) unit(r.unit, at, false);
         if (!num(r.from) || !num(r.to)) errors.push(`${at}: phase bounds must be numbers`);
         return;

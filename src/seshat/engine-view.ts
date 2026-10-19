@@ -215,8 +215,8 @@ class EngineView implements DayView {
     return this.days.engine.isCycle(unit) ? this.days.engine.indexAt(unit, this.day) : undefined;
   }
 
-  bodyPhase(): number | undefined {
-    return undefined; // bodies join the AST in step 4; bind rejects a body reference until then
+  bodyPhase(body: string): number | undefined {
+    return this.days.engine.bodyPhase(body, this.day);
   }
 
   hasTag(tag: string): boolean {

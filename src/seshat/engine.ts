@@ -5,6 +5,7 @@
  * on safe integers.
  */
 import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
+import { Body } from "./body";
 import { DAY_LIMIT } from "./day";
 import { EngineDays } from "./engine-view";
 import { gearMatches, lcm, mod, type GearAst } from "./gear";
@@ -25,6 +26,7 @@ export class Engine {
   private readonly rules = new Map<string, StartRule>();
   /** ledger slot overrides (C6), by slot unit and parent path [cycle index, slot indices…] */
   private readonly overrides = new Map<string, readonly number[]>();
+  private readonly bodies = new Map<string, Body>();
   /** slot lengths of units that cannot vary (whole-number slots, no gears, no ledger overrides): computed once */
   private readonly fixedLengths = new Map<string, readonly number[]>();
   /** rules over this calendar (§3.5); the named rules (VRULE) are bound through it */
@@ -34,6 +36,7 @@ export class Engine {
     const errors = validate(ast);
     if (errors.length) throw new RangeError(`calendar "${ast.name}" is invalid: ${errors.join("; ")}`);
     for (const g of ast.gears) this.gears.set(g.id, g);
+    for (const b of ast.bodies ?? []) this.bodies.set(b.id, new Body(b.period, b.epoch));
     for (const u of ast.units) {
       this.units.set(u.id, u);
       if (u.kind !== "cycle") continue;
@@ -110,6 +113,11 @@ export class Engine {
     const at = this.locate(id, day);
     if (!at) return null;
     return { index: at.path[at.path.length - 1]!, start: day - at.offset, length: at.length };
+  }
+
+  /** Phase of body `id` on `day` in [0, 1), exact to one division; undefined for an unknown body. */
+  bodyPhase(id: string, day: number): number | undefined {
+    return this.bodies.get(id)?.phaseAt(day);
   }
 
   /** Whether `id` is a cycle unit (it never resets; its index counts from the epoch). */

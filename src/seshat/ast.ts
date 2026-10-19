@@ -179,8 +179,21 @@ export interface RuleDefAst {
   readonly tags?: readonly string[];
 }
 
+/**
+ * A body (C1, §2.2): a clock with an exact rational period and its phase at
+ * day 0 (`epoch`, a fraction of a turn). Rules read its phase (`phase body=`);
+ * a crossing base keeps its own normalized period and offset and does not
+ * reference a body.
+ */
+export interface BodyAst {
+  readonly id: string;
+  readonly period: Rational;
+  readonly epoch: Rational;
+}
+
 export interface CalendarAst {
   readonly name: string;
+  readonly bodies?: readonly BodyAst[];
   readonly gears: readonly GearAst[];
   readonly units: readonly UnitAst[];
   readonly days?: readonly DayLabelAst[];

@@ -1,0 +1,57 @@
+# Non-canonical on purpose (comments, blank lines, parameters out of order): parse must accept it and
+# give the same AST as hebrew.seshat. It is the draft reviewed 2026-10-19.
+# Hebrew (Dershowitz & Reingold), Seshat text, first draft for review (docs/SESHAT-v0.md §2.8, §4.1)
+# Day 0 is 1970-01-01. Year index k is year k + 1 AM.
+BEGIN:VCALENDAR
+SESHAT:1
+NAME:Hebrew
+
+BEGIN:VGEAR
+UID:leap
+POSITIONS:ON=year;PERIOD=19;AT=0,3,6,8,11,14,17;OFFSET=-1
+END:VGEAR
+
+BEGIN:VUNIT
+UID:year
+# the molad: 29 d 12 h 793 p, read at months elapsed floor((235(k + 1) - 234) / 19)
+CROSSING:765433/25920@D-2092590+1007/2160;INDEX=235/1/19
+BEGIN:VSTAGE
+# lo ADU rosh
+RESIDUE:7;ADD=1;IN=2,4,6;OFFSET=-2092590
+END:VSTAGE
+BEGIN:VSTAGE
+# length correction: reads stage 1 one year either side
+LENGTH:AT=0;IS=356;ADD=2
+LENGTH:AT=-1;IS=382;ADD=1
+END:VSTAGE
+END:VUNIT
+
+BEGIN:VUNIT
+UID:month
+IN:year
+SLOT:Tishri=30
+BEGIN:VSLOT
+NAME:Heshvan
+LENGTH:SLACK;MIN=29;MAX=30;FILL=2
+END:VSLOT
+BEGIN:VSLOT
+NAME:Kislev
+LENGTH:SLACK;MIN=29;MAX=30;FILL=1
+END:VSLOT
+SLOT:Tevet=29
+SLOT:Shevat=30
+BEGIN:VSLOT
+NAME:Adar I
+LENGTH:0
+GEAR:leap*30
+END:VSLOT
+SLOT:Adar=29
+SLOT:Nisan=30
+SLOT:Iyar=29
+SLOT:Sivan=30
+SLOT:Tamuz=29
+SLOT:Av=30
+SLOT:Elul=29
+END:VUNIT
+
+END:VCALENDAR
