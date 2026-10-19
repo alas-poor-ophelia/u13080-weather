@@ -25,6 +25,8 @@ export class Engine {
   private readonly rules = new Map<string, StartRule>();
   /** ledger slot overrides (C6), by slot unit and parent path [cycle index, slot indices…] */
   private readonly overrides = new Map<string, readonly number[]>();
+  /** slot lengths of units that cannot vary (whole-number slots, no gears, no ledger overrides): computed once */
+  private readonly fixedLengths = new Map<string, readonly number[]>();
   /** rules over this calendar (§3.5); the named rules (VRULE) are bound through it */
   readonly days: EngineDays;
 
@@ -37,6 +39,11 @@ export class Engine {
       if (u.kind !== "cycle") continue;
       this.rules.set(u.id, compileUnit(u, this.gears));
       for (const e of u.ledger ?? []) if (e.kind === "slots") this.overrides.set(overrideKey(e.unit, [e.from, ...(e.path ?? [])]), e.lengths);
+    }
+    const overridden = new Set(ast.units.flatMap((u) => (u.kind === "cycle" ? (u.ledger ?? []) : [])).flatMap((e) => (e.kind === "slots" ? [e.unit] : [])));
+    for (const u of ast.units) {
+      if (u.kind !== "slots" || overridden.has(u.id)) continue;
+      if (u.slots.every((x) => typeof x.length === "number" && !x.gears?.length)) this.fixedLengths.set(u.id, u.slots.map((x) => x.length as number));
     }
     this.days = new EngineDays(this);
   }
@@ -64,8 +71,15 @@ export class Engine {
    * [year, month] for a décade. Gear terms read the cycle index, path[0].
    */
   slotLengths(id: string, path: readonly number[]): number[] {
+    return [...this.slotLengthsWithin(id, path, this.occurrenceLength(this.slots(id).in, path))];
+  }
+
+  /** slotLengths when the parent occurrence's length is already known (locate walks down with it). Read-only: it may be the shared memo. */
+  private slotLengthsWithin(id: string, path: readonly number[], parentLength: number): readonly number[] {
+    const fixed = this.fixedLengths.get(id);
+    if (fixed) return fixed; // the validator makes fixed slots fill every parent occurrence
     const u = this.slots(id);
-    const lens = slotLengthsIn(u, this.occurrenceLength(u.in, path), (g) => gearMatches(this.gears.get(g)!, path[0]!), this.overrides.get(overrideKey(id, path)));
+    const lens = slotLengthsIn(u, parentLength, (g) => gearMatches(this.gears.get(g)!, path[0]!), this.overrides.get(overrideKey(id, path)));
     if (typeof lens === "string") throw new Error(`unreachable: "${id}" at [${path.join(", ")}]: ${lens}`); // the validator checks every reachable occurrence
     return lens;
   }
@@ -95,8 +109,7 @@ export class Engine {
     }
     const at = this.locate(id, day);
     if (!at) return null;
-    const i = at.path[at.path.length - 1]!;
-    return { index: i, start: day - at.offset, length: this.slotLengths(id, at.path.slice(0, -1))[i]! };
+    return { index: at.path[at.path.length - 1]!, start: day - at.offset, length: at.length };
   }
 
   /** Whether `id` is a cycle unit (it never resets; its index counts from the epoch). */
@@ -125,20 +138,26 @@ export class Engine {
     return d + offset;
   }
 
-  /** The path of every occurrence holding `day` from the cycle down to `id`, and the days into the last one. */
-  private locate(id: string, day: number): { path: number[]; offset: number } | null {
+  /**
+   * The path of every occurrence holding `day` from the cycle down to `id`,
+   * the days into the last one, and its length. Each level reuses its parent's
+   * length rather than recomputing it (that recomputation made nested slot
+   * units cost about depth³ per lookup).
+   */
+  private locate(id: string, day: number): { path: number[]; offset: number; length: number } | null {
     const u = this.units.get(id);
     if (!u) throw new RangeError(`no unit "${id}"`);
     if (u.kind === "cycle") {
       const index = this.indexAt(id, day);
-      return { path: [index], offset: day - this.start(id, index) };
+      const start = this.start(id, index);
+      return { path: [index], offset: day - start, length: this.start(id, index + 1) - start };
     }
     const parent = this.locate(u.in, day);
     if (!parent || this.isFiller(u.in, parent.path)) return null;
     let offset = parent.offset;
-    const lens = this.slotLengths(id, parent.path);
+    const lens = this.slotLengthsWithin(id, parent.path, parent.length);
     for (let i = 0; i < lens.length; i++) {
-      if (offset < lens[i]!) return { path: [...parent.path, i], offset };
+      if (offset < lens[i]!) return { path: [...parent.path, i], offset, length: lens[i]! };
       offset -= lens[i]!;
     }
     throw new Error(`unreachable: day ${day} falls past the slots of "${id}"`); // the validator makes the slots fill the parent
