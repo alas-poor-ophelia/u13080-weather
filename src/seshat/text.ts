@@ -23,6 +23,7 @@ import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, FormatAst, GearTerm,
 import type { GearAst } from "./gear";
 import { gcd, type Rational } from "./rational";
 import type { By, RuleAst } from "./rule";
+import { RULE_DEPTH_MAX } from "./validate";
 
 export const ID = /^[a-z][a-z0-9-]*$/;
 const SPECIAL = new Set(["\\", ",", ";", ":", "=", "#"]);
@@ -122,7 +123,12 @@ function toDay(s: string, line: number): number {
   return x;
 }
 
-const ratText = (r: Rational) => (r.d === 1 ? num(r.n) : `${num(r.n)}/${num(r.d)}`);
+/** A rational as stored; the parser reads only lowest terms with a positive denominator, so nothing else is printed. */
+function ratText(r: Rational): string {
+  fields(r, "a rational", "n", "d");
+  if (!Number.isSafeInteger(r.n) || !Number.isSafeInteger(r.d) || r.d < 1 || gcd(r.n, r.d) !== 1) throw new RangeError(`${num(r.n)}/${num(r.d)} is not a rational in lowest terms`);
+  return r.d === 1 ? num(r.n) : `${num(r.n)}/${num(r.d)}`;
+}
 function toRat(s: string, line: number): Rational {
   const m = /^(-?\d+)(?:\/(\d+))?$/.exec(s);
   if (!m) throw new SeshatSyntaxError(`"${s}" is not a rational (n or n/d)`, line);
@@ -135,6 +141,7 @@ function toRat(s: string, line: number): Rational {
 
 /** A day position: D<floor> or D<floor>+<r>/<d> with 0 < r < d. Exact for safe integers. */
 function dayRatText(x: Rational): string {
+  ratText(x);
   if (x.d === 1) return day(x.n);
   let r = x.n % x.d;
   let q = (x.n - r) / x.d;
@@ -161,6 +168,15 @@ function toDayRat(s: string, line: number): Rational {
 const list = (xs: readonly string[]) => xs.join(",");
 const toList = (s: string): string[] => (s === "" ? [] : split(s, ","));
 
+/**
+ * The printer writes every field it knows; a field it does not know would
+ * vanish on the next save, so it refuses instead (a stored calendar must
+ * never lose data silently). Keys holding `undefined` count as absent.
+ */
+function fields(o: object, what: string, ...known: string[]): void {
+  for (const [k, v] of Object.entries(o)) if (v !== undefined && !known.includes(k)) throw new RangeError(`${what} has a field "${k}" with no text form`);
+}
+
 function id(s: string): string {
   if (!ID.test(s)) throw new RangeError(`"${s}" is not an id ([a-z][a-z0-9-]*)`);
   return s;
@@ -171,6 +187,9 @@ function id(s: string): string {
 // ---------------------------------------------------------------------------
 
 export function print(ast: CalendarAst): string {
+  fields(ast, "the calendar", "name", "formats", "bodies", "gears", "units", "days", "rules");
+  for (const f of ast.formats ?? []) fields(f, `format "${f.name}"`, "name", "pattern");
+  for (const b of ast.bodies ?? []) fields(b, `body "${b.id}"`, "id", "period", "epoch");
   const head = ["BEGIN:VCALENDAR", "SESHAT:1", `NAME:${esc(ast.name)}`];
   if (ast.bodies?.length === 0) head.push("BODIES:");
   if (ast.days?.length === 0) head.push("DAYS:");
@@ -192,6 +211,11 @@ const tags = (t: readonly string[], key = "TAGS:") => `${key}${list(t.map(esc))}
 
 /** Gears read as RRULE/EXRULE (§4): `on` sits in every term (FREQ) or in POSITIONS (ON); an `ON:` line only for a gear with no terms. */
 function gearLines(g: GearAst): string[] {
+  if (g.kind === "positions") fields(g, `gear "${g.id}"`, "id", "on", "kind", "period", "positions", "offset");
+  else {
+    fields(g, `gear "${g.id}"`, "id", "on", "kind", "terms");
+    for (const t of g.terms) fields(t, `a term of gear "${g.id}"`, "every", "offset", "sign");
+  }
   const out = [`UID:${id(g.id)}`];
   if (g.kind === "positions") out.push(`POSITIONS:ON=${id(g.on)};PERIOD=${num(g.period)};AT=${list(g.positions.map(num))}${g.offset !== undefined ? `;OFFSET=${num(g.offset)}` : ""}`);
   else if (g.terms.length === 0) out.push(`ON:${id(g.on)}`);
@@ -203,6 +227,8 @@ function baseLines(r: CycleRule): string[] {
   const out: string[] = [];
   if (r.crossing !== undefined) {
     const c = r.crossing;
+    fields(c, "a crossing", "period", "at", "index");
+    if (c.index) fields(c.index, "a crossing index", "a", "c", "L");
     out.push(`CROSSING:${ratText(c.period)}@${dayRatText(c.at)}${c.index ? `;INDEX=${num(c.index.a)}/${num(c.index.c)}/${num(c.index.L)}` : ""}`);
   } else out.push(`ANCHOR:${day(r.anchor)}`, `LENGTH:${num(r.length)}`);
   out.push(...gearTermLines(r.gears));
@@ -213,15 +239,28 @@ function baseLines(r: CycleRule): string[] {
 
 function gearTermLines(gears: readonly GearTerm[] | undefined): string[] {
   if (gears?.length === 0) return ["GEARS:"];
-  return (gears ?? []).map((t) => `GEAR:${id(t.gear)}*${num(t.add)}`);
+  return (gears ?? []).map((t) => {
+    fields(t, "a gear term", "gear", "add");
+    return `GEAR:${id(t.gear)}*${num(t.add)}`;
+  });
 }
 
 function stageRuleLine(r: StageRule): string {
+  if ("residue" in r) {
+    fields(r, "a stage rule", "add", "residue");
+    fields(r.residue, "a residue", "mod", "offset", "in");
+  } else {
+    fields(r, "a stage rule", "add", "length");
+    fields(r.length, "a stage length", "at", "is");
+  }
   if ("residue" in r) return `RESIDUE:${num(r.residue.mod)}${r.residue.offset !== undefined ? `;OFFSET=${num(r.residue.offset)}` : ""};IN=${list(r.residue.in.map(num))};ADD=${num(r.add)}`;
   return `LENGTH:AT=${num(r.length.at)};IS=${num(r.length.is)};ADD=${num(r.add)}`;
 }
 
 function unitLines(u: UnitAst): string[] {
+  if (u.kind === "slots") fields(u, `unit "${u.id}"`, "id", "kind", "number", "in", "slots");
+  else fields(u, `unit "${u.id}"`, "id", "kind", "number", "anchor", "length", "crossing", "gears", "stages", "labels", "ledger");
+  for (const s of (u.kind === "cycle" ? u.stages : undefined) ?? []) fields(s, `a stage of "${u.id}"`, "rules");
   const out = [`UID:${id(u.id)}`];
   if (u.number !== undefined) out.push(`NUMBER:${num(u.number)}`);
   if (u.kind === "slots") {
@@ -238,11 +277,14 @@ function unitLines(u: UnitAst): string[] {
 }
 
 function labelLines(l: LabelAst): string[] {
+  fields(l, "a label", "name", "tags");
   if (l.name !== undefined && l.tags === undefined) return [`LABEL:${esc(l.name)}`];
   return block("VLABEL", [...(l.name !== undefined ? [`NAME:${esc(l.name)}`] : []), ...(l.tags !== undefined ? [tags(l.tags)] : [])]);
 }
 
 function slotLines(s: SlotAst): string[] {
+  fields(s, `slot "${s.name ?? ""}"`, "name", "tags", "length", "min", "max", "fill", "gears", "filler");
+  if (typeof s.length === "object") fields(s.length, "a keyed length", "by", "table");
   const plain = s.name !== undefined && typeof s.length === "number" && s.tags === undefined && s.min === undefined && s.max === undefined && s.fill === undefined && s.gears === undefined && s.filler === undefined;
   if (plain) return [`SLOT:${esc(s.name)}=${num(s.length)}`];
   const len = typeof s.length === "number" ? num(s.length) : s.length === "slack" ? "SLACK" : `KEYED;TABLE=${list(s.length.table.map(([p, l]) => `${num(p)}:${num(l)}`))}`;
@@ -257,27 +299,50 @@ function slotLines(s: SlotAst): string[] {
 }
 
 function ledgerLines(e: LedgerEntry): string[] {
+  if (e.kind === "switch") {
+    fields(e, "a ledger switch", "kind", "from", "rule");
+    fields(e.rule, "a switch rule", "anchor", "length", "crossing", "gears", "stages");
+  } else if (e.kind === "starts") fields(e, "a ledger pin", "kind", "from", "startsOn", "lengths");
+  else fields(e, "a ledger slot override", "kind", "from", "unit", "path", "lengths");
+  for (const s of (e.kind === "switch" ? e.rule.stages : undefined) ?? []) fields(s, "a stage of a switch", "rules");
   if (e.kind === "switch") return block("VSWITCH", [`FROM:${num(e.from)}`, ...baseLines(e.rule)]);
   if (e.kind === "starts") return [`STARTS:FROM=${num(e.from)};ON=${day(e.startsOn)}${e.lengths !== undefined ? `;LENGTHS=${list(e.lengths.map(num))}` : ""}`];
   return [`SLOTS:FROM=${num(e.from)};UNIT=${id(e.unit)}${e.path !== undefined ? `;PATH=${list(e.path.map(num))}` : ""};LENGTHS=${list(e.lengths.map(num))}`];
 }
 
 function dayLine(d: DayLabelAst): string {
+  fields(d, "a day label", "day", "name", "tags");
   return `RDATE:${day(d.day)}${d.name !== undefined ? `;NAME=${esc(d.name)}` : ""}${d.tags !== undefined ? `;${tags(d.tags, "TAGS=")}` : ""}`;
 }
 
 function ruleDefLines(r: RuleDefAst): string[] {
+  fields(r, `rule "${r.id}"`, "id", "rule", "tags");
   return [`UID:${id(r.id)}`, ...(r.tags !== undefined ? [tags(r.tags)] : []), ...ruleLines(r.rule)];
 }
 
-/** One rule node as lines. */
-export function ruleLines(r: RuleAst): string[] {
+const NODE_FIELDS: Record<string, readonly string[]> = {
+  all: ["kind", "of"],
+  any: ["kind", "of"],
+  not: ["kind", "of"],
+  phase: ["kind", "unit", "body", "from", "to"],
+  dayIn: ["kind", "unit", "from", "to"],
+  index: ["kind", "unit", "from", "to"],
+  tag: ["kind", "tag"],
+  dates: ["kind", "days"],
+  recur: ["kind", "freq", "interval", "anchor", "by", "setpos", "count", "until"],
+};
+
+/** One rule node as lines; nesting past RULE_DEPTH_MAX is refused here as the validator refuses it (the parser would). */
+export function ruleLines(r: RuleAst, depth = 0): string[] {
+  if (depth > RULE_DEPTH_MAX) throw new RangeError(`rules nest deeper than ${RULE_DEPTH_MAX}`);
+  const known = NODE_FIELDS[r.kind];
+  if (known) fields(r, `a "${r.kind}" rule`, ...known);
   switch (r.kind) {
     case "all":
     case "any":
-      return block(r.kind.toUpperCase(), r.of.flatMap(ruleLines));
+      return block(r.kind.toUpperCase(), r.of.flatMap((q) => ruleLines(q, depth + 1)));
     case "not":
-      return block("NOT", ruleLines(r.of));
+      return block("NOT", ruleLines(r.of, depth + 1));
     case "phase":
       return [`PHASE:${[r.unit !== undefined ? `UNIT=${id(r.unit)}` : "", r.body !== undefined ? `BODY=${id(r.body)}` : "", `FROM=${num(r.from)}`, `TO=${num(r.to)}`].filter(Boolean).join(";")}`];
     case "dayIn":
@@ -305,6 +370,7 @@ export function ruleLines(r: RuleAst): string[] {
 }
 
 function byParam(b: By): string {
+  fields(b, "a recur filter", "unit", "nth", "label", "day");
   if ("nth" in b) return `BYNTH=${id(b.unit)}:${list(b.nth.map(num))}`;
   if ("label" in b) return `BYLABEL=${id(b.unit)}:${list(b.label.map(esc))}`;
   return `BYDAY=${id(b.unit)}:${list(b.day.map(num))}`;

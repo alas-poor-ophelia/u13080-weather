@@ -44,6 +44,18 @@ export function ceilDiv(a: number, b: number): number {
   return -Math.floor(-a / b);
 }
 
+/**
+ * gearMatches for one gear, with its positions in a Set: build one per
+ * validation pass or per engine (both treat the AST as fixed), never cache it
+ * on the AST object (the Studio edits ASTs in place).
+ */
+export function gearMatcher(g: GearAst): (n: number) => boolean {
+  if (g.kind !== "positions") return (n) => gearMatches(g, n);
+  const at = new Set(g.positions);
+  const off = g.offset ?? 0;
+  return (n) => at.has(mod(n - off, g.period));
+}
+
 /** Whether occurrence index n matches the gear. */
 export function gearMatches(g: GearAst, n: number): boolean {
   if (g.kind === "positions") return g.positions.includes(mod(n - (g.offset ?? 0), g.period));

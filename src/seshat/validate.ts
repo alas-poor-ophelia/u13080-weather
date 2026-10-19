@@ -13,7 +13,7 @@
 import type { CalendarAst, CycleRule, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
 import { baseLengths, linearBase } from "./base";
-import { gearMatches, gearPeriod, lcm, mod, type GearAst } from "./gear";
+import { gearMatcher, gearPeriod, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
 import { stageReach } from "./start";
@@ -42,8 +42,28 @@ const SCAN_MAX = 1_000_000;
 const INDEX_MAX = 3 * DAY_LIMIT;
 /** Most pinned starts in one unit's ledger. */
 const PIN_MAX = 100_000;
+/** Ledger switches per unit: a decree is rare, and the validator and engine walk them (quadratic past this). */
+const SWITCH_MAX = 1_000;
+/** Deepest all/any/not nesting in a rule: the text parser refuses blocks nested past NESTING_MAX (200). */
+export const RULE_DEPTH_MAX = 64;
+
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
+/** n/d as the text writes it: safe integers, lowest terms, positive denominator. */
+const lowest = (r: unknown): boolean => isObj(r) && isInt(r.n) && isInt(r.d) && (r.d as number) > 0 && gcd(r.n as number, r.d as number) === 1;
+/** No unpaired UTF-16 surrogate (by code unit, so this source holds no escape sequences). */
+function wellFormed(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xdc00 && c <= 0xdfff) return false;
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = s.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      i++;
+    }
+  }
+  return true;
+}
 /** Every declared id (units, gears, bodies, rules): the text syntax's id grammar. */
 const ID_GRAMMAR = /^[a-z][a-z0-9-]*$/;
 // eslint-disable-next-line no-control-regex -- the point is to find control characters
@@ -65,12 +85,31 @@ export function validate(ast: CalendarAst): string[] {
   for (const id of new Set(ids)) if (typeof id !== "string" || !ID_GRAMMAR.test(id)) errors.push(`id ${show(id)} must match [a-z][a-z0-9-]*`);
   if (typeof ast.name !== "string" || CONTROL.test(ast.name)) errors.push(`the calendar's name must be a string without control characters`);
   for (const b of ast.bodies ?? []) {
+    // the text prints rationals as stored, and its parser reads only lowest terms with a positive denominator
+    if (!lowest(b.period) || !lowest(b.epoch)) {
+      errors.push(`body "${b.id}": period and epoch must be n/d in lowest terms with d > 0`);
+      continue;
+    }
     try {
       new Body(b.period, b.epoch);
     } catch (e) {
       errors.push(`body "${b.id}": ${(e as Error).message}`);
     }
   }
+  // a stored calendar travels as UTF-8: a lone surrogate would come back as U+FFFD, a different string.
+  // And one spelling per string (NFC, ruled 2026-10-19): a tag in another Unicode form would silently stop matching.
+  const broken = new Set<string>();
+  const unnormal = new Set<string>();
+  const strings = (x: unknown): void => {
+    if (typeof x === "string") {
+      if (!wellFormed(x)) broken.add(x);
+      else if (x.normalize("NFC") !== x) unnormal.add(x);
+    } else if (Array.isArray(x)) x.forEach(strings);
+    else if (isObj(x)) Object.values(x).forEach(strings);
+  };
+  strings(ast);
+  for (const s of broken) errors.push(`${show(s)} is not well-formed text (a lone surrogate)`);
+  for (const s of unnormal) errors.push(`${show(s)} is not in Unicode NFC (store names and tags in NFC)`);
   for (const [i, d] of (ast.days ?? []).entries()) {
     if (!isInt(d.day)) errors.push(`day label ${i + 1}: day ${show(d.day)} is not a whole day`);
     checkLabel(d, `day label ${i + 1}`, (msg) => errors.push(msg));
@@ -298,6 +337,8 @@ function checkKeyed(k: Record<string, unknown>, fail: (msg: string) => void): vo
  */
 function checkLedger(u: CycleUnitAst, units: ReadonlyMap<string, UnitAst>, fail: (msg: string) => void, checkRule: (rule: CycleRule, where: string) => void): void {
   if (!Array.isArray(u.ledger)) return fail("ledger must be a list");
+  const switchCount = (u.ledger as unknown[]).filter((e) => isObj(e) && e.kind === "switch").length;
+  if (switchCount > SWITCH_MAX) return fail(`${switchCount} ledger switches; at most ${SWITCH_MAX}`);
   let lastSwitch = -Infinity;
   const switches = new Set<number>();
   const pinned = new Set<number>();
@@ -448,10 +489,11 @@ function cycleStates(chain: UnitAst[], involved: string[], gears: ReadonlyMap<st
     // occurrences a slot override names are checked one by one; the rest by distinct state
     const overridden = new Set((root.ledger ?? []).flatMap((e) => (e.kind === "slots" ? [e.from] : [])));
     const seen = new Map<string, CycleState>();
+    const match = involved.map((id) => gearMatcher(gears.get(id)!));
     for (let k = lo, s = rule.start(lo); k <= hi; k++) {
       const next = rule.start(k + 1);
       let mask = 0;
-      for (let i = 0; i < involved.length; i++) if (gearMatches(gears.get(involved[i]!)!, k)) mask |= 1 << i;
+      for (let i = 0; i < involved.length; i++) if (match[i]!(k)) mask |= 1 << i;
       const key = overridden.has(k) ? `k${k}` : `${next - s}|${mask}`;
       if (!seen.has(key)) {
         const m = mask;
@@ -482,13 +524,14 @@ function cycleStates(chain: UnitAst[], involved: string[], gears: ReadonlyMap<st
  */
 function ruleStates(root: CycleUnitAst, switchRules: CycleRule[], involved: string[], gears: ReadonlyMap<string, GearAst>): CycleState[] {
   const states: CycleState[] = [];
+  const match = involved.map((g) => gearMatcher(gears.get(g)!));
   const bitsAt = (k: number) => {
-    const bits = involved.map((g) => gearMatches(gears.get(g)!, k));
+    const bits = match.map((m) => m(k));
     return (g: string) => bits[involved.indexOf(g)] ?? false;
   };
   for (const [j, rule] of [root, ...switchRules].entries()) {
     const name = j === 0 ? `"${root.id}"` : `"${root.id}" switch ${j}`;
-    const terms = (rule.gears ?? []).map((t) => ({ add: t.add, g: gears.get(t.gear)! }));
+    const terms = (rule.gears ?? []).map((t) => ({ add: t.add, g: gears.get(t.gear)!, m: gearMatcher(gears.get(t.gear)!) }));
     const base = baseLengths(linearBase(rule));
     // lengths and every gear bit the slots read repeat together with the lcm of all their periods
     let period = 1;
@@ -509,7 +552,7 @@ function ruleStates(root: CycleUnitAst, switchRules: CycleRule[], involved: stri
     const seen = new Set<string>();
     for (let k = 0; k < period; k++) {
       const on = bitsAt(k);
-      const add = terms.reduce((a, t) => a + (gearMatches(t.g, k) ? t.add : 0), 0);
+      const add = terms.reduce((a, t) => a + (t.m(k) ? t.add : 0), 0);
       for (const len of base) {
         const key = `${len + add}|${involved.map((g) => (on(g) ? 1 : 0)).join("")}`;
         if (seen.has(key)) continue;
@@ -588,16 +631,17 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
   const ints = (xs: unknown, at: string, nonzero: boolean) => {
     if (!Array.isArray(xs) || xs.length === 0 || xs.some((x) => !isInt(x) || (nonzero && x === 0))) errors.push(`${at} must be a non-empty list of ${nonzero ? "non-zero " : ""}whole numbers`);
   };
-  const walk = (r: RuleAst, at: string): void => {
+  const walk = (r: RuleAst, at: string, depth = 0): void => {
+    if (depth > RULE_DEPTH_MAX) return void errors.push(`${at}: rules nest deeper than ${RULE_DEPTH_MAX}`);
     // not isObj: its Record guard would drop the interface-typed recur member from the union
     if (typeof r !== "object" || r === null) return void errors.push(`${at}: not a rule`);
     switch (r.kind) {
       case "all":
       case "any":
         if (!Array.isArray(r.of)) return void errors.push(`${at}: ${r.kind} needs a list`);
-        return (r.of as readonly RuleAst[]).forEach((q, i) => walk(q, `${at}.${r.kind}[${i}]`));
+        return (r.of as readonly RuleAst[]).forEach((q, i) => walk(q, `${at}.${r.kind}[${i}]`, depth + 1));
       case "not":
-        return walk(r.of, `${at}.not`);
+        return walk(r.of, `${at}.not`, depth + 1);
       case "phase":
         if ((r.unit === undefined) === (r.body === undefined)) errors.push(`${at}: phase names exactly one of unit and body`);
         if (r.body !== undefined && !(ast.bodies ?? []).some((b) => b.id === r.body)) errors.push(`${at}: no body ${show(r.body)}`);

@@ -28,6 +28,8 @@ import { DAY_LIMIT } from "./day";
 import type { Engine } from "./engine";
 
 type Field = "num" | "name" | "day" | "day0";
+
+const DISPLAY_MAX = 2 ** 40;
 interface Token {
   readonly unit: string;
   readonly field: Field;
@@ -112,20 +114,22 @@ export function compileFormat(f: FormatAst, ast: CalendarAst): { compiled: Compi
 
   // coordinate levels: a number, or a slot name that names exactly one slot
   const coord = new Set(tokens.filter((t) => t.field === "num" || (t.field === "name" && isSlots(units.get(t.unit)) && namesAreCoordinates(units.get(t.unit) as SlotsUnitAst))).map((t) => t.unit));
-  const depth = (id: string): number => {
-    let d = 0;
-    for (let u = units.get(id); isSlots(u); u = units.get(u.in)) d++;
-    return d;
-  };
-  const chainOf = (id: string): string[] => {
+  // a unit that is its own ancestor (a typo in IN) is the validator's error; here it must only not loop
+  const chainOf = (id: string): string[] | null => {
     const out = [id];
-    for (let u = units.get(id); isSlots(u); u = units.get(u.in)) out.unshift(u.in);
+    for (let u = units.get(id); isSlots(u); u = units.get(u.in)) {
+      if (out.includes(u.in)) return null;
+      out.unshift(u.in);
+    }
     return out;
   };
+  const looping = tokens.map((t) => t.unit).filter((id) => chainOf(id) === null);
+  if (looping.length) return { compiled: null, errors: [`format "${f.name}": unit "${looping[0]}" has a parent chain that loops`] };
+  const depth = (id: string): number => chainOf(id)!.length - 1;
   let chain: string[] | null = null;
   // the deepest complete chain of slot coordinates; a derived extra token does not spoil it
   for (const id of [...coord].filter((x) => isSlots(units.get(x))).sort((a, b) => depth(b) - depth(a))) {
-    const c = chainOf(id);
+    const c = chainOf(id)!;
     if (c.every((x) => coord.has(x))) {
       chain = c;
       break;
@@ -165,7 +169,8 @@ export function checkFormats(ast: CalendarAst): string[] {
     if (typeof f.pattern !== "string") errors.push(`format "${f.name}": the pattern is not a string`);
     else errors.push(...compileFormat(f, ast).errors);
   }
-  for (const u of ast.units) if (u.number !== undefined && !Number.isSafeInteger(u.number)) errors.push(`unit "${u.id}": number ${String(u.number)} is not a whole number`);
+  // a display number past 2^40 would print digits that are not the occurrence's
+  for (const u of ast.units) if (u.number !== undefined && (!Number.isSafeInteger(u.number) || Math.abs(u.number) > DISPLAY_MAX)) errors.push(`unit "${u.id}": number ${String(u.number)} is not a whole number within ±2^40`);
   return errors;
 }
 

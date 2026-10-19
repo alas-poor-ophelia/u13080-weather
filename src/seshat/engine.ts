@@ -8,7 +8,7 @@ import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { Body } from "./body";
 import { DAY_LIMIT } from "./day";
 import { EngineDays } from "./engine-view";
-import { gearMatches, lcm, mod, type GearAst } from "./gear";
+import { gearMatcher, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
 import type { StartRule } from "./start";
@@ -23,6 +23,8 @@ export interface Position {
 export class Engine {
   private readonly units = new Map<string, CycleUnitAst | SlotsUnitAst>();
   private readonly gears = new Map<string, GearAst>();
+  /** each gear's matcher, built once: the engine treats its AST as fixed */
+  private readonly matchers = new Map<string, (n: number) => boolean>();
   private readonly rules = new Map<string, StartRule>();
   /** ledger slot overrides (C6), by slot unit and parent path [cycle index, slot indices…] */
   private readonly overrides = new Map<string, readonly number[]>();
@@ -35,7 +37,10 @@ export class Engine {
   constructor(readonly ast: CalendarAst) {
     const errors = validate(ast);
     if (errors.length) throw new RangeError(`calendar "${ast.name}" is invalid: ${errors.join("; ")}`);
-    for (const g of ast.gears) this.gears.set(g.id, g);
+    for (const g of ast.gears) {
+      this.gears.set(g.id, g);
+      this.matchers.set(g.id, gearMatcher(g));
+    }
     for (const b of ast.bodies ?? []) this.bodies.set(b.id, new Body(b.period, b.epoch));
     for (const u of ast.units) {
       this.units.set(u.id, u);
@@ -82,7 +87,7 @@ export class Engine {
     const fixed = this.fixedLengths.get(id);
     if (fixed) return fixed; // the validator makes fixed slots fill every parent occurrence
     const u = this.slots(id);
-    const lens = slotLengthsIn(u, parentLength, (g) => gearMatches(this.gears.get(g)!, path[0]!), this.overrides.get(overrideKey(id, path)));
+    const lens = slotLengthsIn(u, parentLength, (g) => this.matchers.get(g)!(path[0]!), this.overrides.get(overrideKey(id, path)));
     if (typeof lens === "string") throw new Error(`unreachable: "${id}" at [${path.join(", ")}]: ${lens}`); // the validator checks every reachable occurrence
     return lens;
   }
