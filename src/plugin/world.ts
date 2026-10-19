@@ -101,6 +101,25 @@ export class World {
   ) {
     this.indexOverrides();
     this.keys = this.snapshotKeys();
+    // an adapter registering or leaving can change the active calendar: re-key, or the next edit is misread
+    this.time.onChange(() => this.rekeyCalendar());
+  }
+
+  /** Make `id` the active adapter, and re-key so the next calendar edit is measured against it. */
+  setActiveAdapter(id: string): void {
+    this.time.setActive(id);
+    this.rekeyCalendar();
+  }
+
+  /**
+   * Record which adapter is active and its calendarHash() now, without firing
+   * profiles-changed: a switch is not a profile change (it fires time-changed
+   * and adapters-changed). Without this, setState compared a later edit
+   * against the adapter active before the switch and fired all: false
+   * although every report moved (wadjet-439).
+   */
+  rekeyCalendar(): void {
+    this.keys = { ...this.keys, calendar: this.snapshotKeys().calendar };
   }
 
   // --- state management -------------------------------------------------

@@ -850,16 +850,60 @@ describe("review fixes", () => {
     expect(of(h, "time-changed")).toEqual([{ type: "time-changed", current: 20, adapterId: "ext" }]);
   });
 
-  test("registerTimeAdapter refuses the id internal with wadjet-reserved-id", () => {
+  test("registerTimeAdapter refuses the ids internal and seshat with wadjet-reserved-id", () => {
     const h = harness();
-    let err: unknown;
-    try {
-      h.api.registerTimeAdapter({ id: "internal", now: () => null, toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 1, source: "internal" }), configHash: () => "x" });
-    } catch (e) {
-      err = e;
+    for (const id of ["internal", "seshat"]) {
+      let err: unknown;
+      try {
+        h.api.registerTimeAdapter({ id, now: () => null, toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 1, source: id }), configHash: () => "x" });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toMatchObject({ code: "wadjet-reserved-id" });
+      expect((err as Error).message).toContain(`"${id}"`);
     }
-    expect(err).toMatchObject({ code: "wadjet-reserved-id" });
     expect(h.time.get("internal")).toBe(h.cal);
+    expect(h.time.get("seshat")).toBeUndefined();
+  });
+
+  // wadjet-439: a calendar edit right after the active adapter changed fired profiles-changed all: false
+  describe("a calendar edit after the active adapter changes fires all: true", () => {
+    const ext = () => {
+      let hash = "ext:1";
+      const adapter: TimeAdapter = { id: "ext", now: () => null, toContext: (d) => ({ dayOrdinal: d, yearPhase: 0, yearLength: 365, source: "ext" }), configHash: () => hash };
+      return { adapter, edit: (h: string) => (hash = h) };
+    };
+    const lastProfiles = (h: Harness) => h.events.filter((e) => e.event === "profiles-changed").at(-1)!.payload as { all: boolean };
+    const state: WorldState = { seed: "s", zones: [zoneNamed("Greywold")], overrides: [] };
+
+    test("after a switch (setActiveAdapter)", () => {
+      const h = harness();
+      const b = ext();
+      h.time.register(b.adapter);
+      h.world.setState(state);
+      h.world.setActiveAdapter("ext");
+      b.edit("ext:2");
+      h.world.setState(state);
+      expect(lastProfiles(h).all).toBe(true);
+      // and an unchanged calendar after the switch is not an edit
+      h.world.setState(state);
+      expect(lastProfiles(h).all).toBe(false);
+    });
+
+    test("after the active adapter registers late, and after it leaves", () => {
+      const h = harness();
+      h.world.setActiveAdapter("ext"); // not registered yet: internal answers
+      h.world.setState(state);
+      const b = ext();
+      const off = h.time.register(b.adapter); // now ext is active
+      b.edit("ext:2");
+      h.world.setState(state);
+      expect(lastProfiles(h).all).toBe(true);
+      off(); // internal answers again
+      h.cal.update({ yearLength: 361, epochYear: 1, moons: [], seasons: SEASONS });
+      h.world.setState(state);
+      expect(lastProfiles(h).all).toBe(true);
+    });
   });
 
   test("interpreter unregister uses the id it registered under", () => {

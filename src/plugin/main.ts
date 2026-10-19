@@ -173,7 +173,7 @@ export default class WadjetPlugin extends Plugin {
   async setActiveTimeAdapter(id: string): Promise<void> {
     const before = this.time.active;
     this.settings.activeTimeAdapter = id;
-    this.time.setActive(id);
+    this.world.setActiveAdapter(id);
     this.controller.syncActiveSubscription();
     if (this.time.active !== before) {
       this.controller.emitTimeChanged();

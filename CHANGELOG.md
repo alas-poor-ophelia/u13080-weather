@@ -4,6 +4,14 @@ Release notes are taken from the matching `## <version>` section by the release 
 
 ## Unreleased
 
+- **Switching calendars no longer hides the next calendar edit from integrations.** After the
+  active calendar changed (choosing another *Calendar source*, or a calendar plugin loading or
+  being disabled), the next edit to that calendar's settings fired `profiles-changed` with
+  `all: false`, although every report had moved; an integration that clears its caches only on
+  `all: true` (Windrose) could keep showing stale weather until it reloaded. The edit now fires
+  `all: true`, as any calendar edit does.
+- **`registerTimeAdapter` also refuses the id `"seshat"`** (`wadjet-reserved-id`), reserved for
+  the plugin's own calendar alongside `"internal"`.
 - **The generator-change notice no longer promises something the plugin does not do.** Older
   versions said past weather "stays as it was until you upgrade the world". Only the current
   generator ships, so a generator change already applies to every report. The notice and the

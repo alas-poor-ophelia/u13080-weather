@@ -287,7 +287,7 @@ registerTimeAdapter(adapter: TimeAdapter): () => void
 ```
 
 Registers a `TimeAdapter` (see §5) under `adapter.id`. If an adapter with the same `id` is
-already registered, it is replaced. The id `"internal"` is reserved for the built-in calendar.
+already registered, it is replaced. The ids `"internal"` and `"seshat"` are reserved for the plugin's own calendars.
 Registering it throws an `Error` with `code: "wadjet-reserved-id"`. Every register and every
 unregister fires `"adapters-changed"` (§2). If `adapter.id` matches the active adapter id in
 settings, it also fires `"time-changed"`, because the active calendar's effective

@@ -84,6 +84,8 @@ export interface ApiHost {
 export const UNLOADED_CODE = "wadjet-unloaded";
 /** `registerTimeAdapter` refuses this id: it belongs to the plugin's own calendar. */
 export const RESERVED_ADAPTER_ID = "internal";
+/** Every id `registerTimeAdapter` refuses: the built-in calendar, and the Seshat calendar a world can opt into. */
+export const RESERVED_ADAPTER_IDS: readonly string[] = [RESERVED_ADAPTER_ID, "seshat"];
 export const RESERVED_ID_CODE = "wadjet-reserved-id";
 
 /** A deep copy for an interpreter; values structuredClone refuses (functions) fall back to a one-level copy. */
@@ -298,7 +300,7 @@ export class ApiController {
 
       registerTimeAdapter: (a) => {
         live();
-        if (typeof a === "object" && a !== null && a.id === RESERVED_ADAPTER_ID) throw codedError(RESERVED_ID_CODE, `The time adapter id "${RESERVED_ADAPTER_ID}" is reserved for the built-in calendar; choose another id.`);
+        if (typeof a === "object" && a !== null && RESERVED_ADAPTER_IDS.includes(a.id)) throw codedError(RESERVED_ID_CODE, `The time adapter id "${a.id}" is reserved for the plugin's own calendars; choose another id.`);
         return this.once(time.register(a));
       },
       registerZoneResolver: (r) => (live(), this.once(world.registerZoneResolver(r))),
