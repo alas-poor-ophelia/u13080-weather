@@ -29,11 +29,13 @@ const EPOCH = -2_092_590;
 
 export const HEBREW: CalendarAst = {
   name: "Hebrew",
+  formats: [{ name: "default", pattern: "{month:day} {month:name} {year}" }],
   gears: [{ id: "leap", on: "year", kind: "positions", period: 19, positions: [0, 3, 6, 8, 11, 14, 17], offset: -1 }],
   units: [
     {
       id: "year",
       kind: "cycle",
+      number: 1,
       crossing: {
         period: rational(765_433, 25_920),
         at: rational(EPOCH * 25_920 + 12_084, 25_920),

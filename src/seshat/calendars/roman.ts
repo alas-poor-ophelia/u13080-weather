@@ -29,6 +29,8 @@ const REPUBLICAN_0 = -995085;
 
 export const ROMAN: CalendarAst = {
   name: "Roman (Varronian years, Bennett's reconstruction)",
+  // occurrence k is AUC k; days are counted forward in the month, not back from the Kalends
+  formats: [{ name: "default", pattern: "{month:day} {month:name} AUC {year}" }],
   gears: [
     // the Republican ideal: an Intercalaris of 22 or 23 days every other year
     { id: "intercalary", on: "year", kind: "intervals", terms: [{ every: 2, offset: 1, sign: 1 }] },

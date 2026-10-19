@@ -17,10 +17,11 @@ const COPTIC_EPOCH = -615_558;
 function alexandrian(name: string, epoch: number, months: readonly string[], last: string): CalendarAst {
   return {
     name,
+    formats: [{ name: "default", pattern: "{month:day} {month:name} {year}" }],
     // leap when year mod 4 = 3, i.e. index mod 4 = 2
     gears: [{ id: "leap", on: "year", kind: "intervals", terms: [{ every: 4, offset: 2, sign: 1 }] }],
     units: [
-      { id: "year", kind: "cycle", anchor: epoch, length: 365, gears: [{ gear: "leap", add: 1 }] },
+      { id: "year", kind: "cycle", number: 1, anchor: epoch, length: 365, gears: [{ gear: "leap", add: 1 }] },
       { id: "month", kind: "slots", in: "year", slots: [...months.map((m) => ({ name: m, length: 30 })), { name: last, length: "slack" as const }] },
     ],
   };

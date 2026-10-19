@@ -1,6 +1,7 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Tabular Islamic (civil epoch)
+FORMAT:default={month\:day} {month\:name} {year} AH
 
 BEGIN:VGEAR
 UID:leap
@@ -9,6 +10,7 @@ END:VGEAR
 
 BEGIN:VUNIT
 UID:year
+NUMBER:1
 ANCHOR:D-492148
 LENGTH:354
 GEAR:leap*1

@@ -19,7 +19,7 @@
  * refuses others. Host and throw rule leaves belong to Wadjet, not to a
  * calendar, and have no spelling.
  */
-import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
+import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, FormatAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
 import type { GearAst } from "./gear";
 import { gcd, type Rational } from "./rational";
 import type { By, RuleAst } from "./rule";
@@ -175,6 +175,8 @@ export function print(ast: CalendarAst): string {
   if (ast.bodies?.length === 0) head.push("BODIES:");
   if (ast.days?.length === 0) head.push("DAYS:");
   if (ast.rules?.length === 0) head.push("RULES:");
+  if (ast.formats?.length === 0) head.push("FORMATS:");
+  for (const f of ast.formats ?? []) head.push(`FORMAT:${esc(f.name)}=${esc(f.pattern)}`);
   const chunks: string[][] = [head];
   for (const b of ast.bodies ?? []) chunks.push(block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`]));
   for (const g of ast.gears) chunks.push(block("VGEAR", gearLines(g)));
@@ -221,6 +223,7 @@ function stageRuleLine(r: StageRule): string {
 
 function unitLines(u: UnitAst): string[] {
   const out = [`UID:${id(u.id)}`];
+  if (u.number !== undefined) out.push(`NUMBER:${num(u.number)}`);
   if (u.kind === "slots") {
     out.push(`IN:${id(u.in)}`);
     for (const s of u.slots) out.push(...slotLines(s));
@@ -435,7 +438,7 @@ const texts = (s: string, l: Line) => toList(s).map((x) => unesc(x, l.no));
 
 export function parse(text: string): CalendarAst {
   const cal = components(lex(text));
-  const p = new Props(cal, ["SESHAT", "NAME", "BODIES", "DAYS", "RULES", "RDATE"], ["VBODY", "VGEAR", "VUNIT", "VRULE"]);
+  const p = new Props(cal, ["SESHAT", "NAME", "BODIES", "DAYS", "RULES", "FORMATS", "FORMAT", "RDATE"], ["VBODY", "VGEAR", "VUNIT", "VRULE"]);
   const version = p.req("SESHAT");
   if (version.value !== "1") throw new SeshatSyntaxError(`SESHAT:${version.value} is not a version this reader knows (1)`, version.no);
   const bodiesMarked = p.marker("BODIES");
@@ -444,8 +447,15 @@ export function parse(text: string): CalendarAst {
   const bodies = p.blocks("VBODY").map(body);
   const days = p.all("RDATE").map(dayLabel);
   const rules = p.blocks("VRULE").map(ruleDef);
+  const formatsMarked = p.marker("FORMATS");
+  const formats = p.all("FORMAT").map((l): FormatAst => {
+    const kv = cut(l.value, "=");
+    if (!kv) throw new SeshatSyntaxError("FORMAT is <name>=<pattern>", l.no);
+    return { name: unesc(kv[0], l.no), pattern: unesc(kv[1], l.no) };
+  });
   return {
     name: unesc(p.req("NAME").value, p.req("NAME").no),
+    ...(formats.length || formatsMarked ? { formats } : {}),
     ...(bodies.length || bodiesMarked ? { bodies } : {}),
     gears: p.blocks("VGEAR").map(gear),
     units: p.blocks("VUNIT").map(unit),
@@ -541,12 +551,12 @@ function stage(c: Component): StageAst {
 function unit(c: Component): UnitAst {
   const inLine = c.items.find((it) => "line" in it && it.line.key === "IN");
   if (inLine) {
-    const p = new Props(c, ["UID", "IN", "SLOT"], ["VSLOT"]);
+    const p = new Props(c, ["UID", "NUMBER", "IN", "SLOT"], ["VSLOT"]);
     const [u, i] = [p.req("UID"), p.req("IN")];
     const slots = p.seq(["SLOT"], ["VSLOT"]).map((it) => ("line" in it ? slotLine(it.line) : slotBlock(it.block)));
-    return { id: toId(u.value, u), kind: "slots", in: toId(i.value, i), slots };
+    return { id: toId(u.value, u), kind: "slots", ...unitNumber(p), in: toId(i.value, i), slots };
   }
-  const p = new Props(c, ["UID", ...BASE_LINES, "LABEL", "LABELS", "LEDGER", "STARTS", "SLOTS"], ["VSTAGE", "VLABEL", "VSWITCH"]);
+  const p = new Props(c, ["UID", "NUMBER", ...BASE_LINES, "LABEL", "LABELS", "LEDGER", "STARTS", "SLOTS"], ["VSTAGE", "VLABEL", "VSWITCH"]);
   const u = p.req("UID");
   const labelsMarked = p.marker("LABELS");
   const labels = p.seq(["LABEL"], ["VLABEL"]).map((it) => ("line" in it ? { name: unesc(it.line.value, it.line.no) } : labelBlock(it.block)));
@@ -555,10 +565,16 @@ function unit(c: Component): UnitAst {
   return {
     id: toId(u.value, u),
     kind: "cycle",
+    ...unitNumber(p),
     ...cycleRule(p, c),
     ...(labels.length || labelsMarked ? { labels } : {}),
     ...(ledger.length || ledgerMarked ? { ledger } : {}),
   };
+}
+
+function unitNumber(p: Props): { number?: number } {
+  const n = p.one("NUMBER");
+  return n ? { number: toNum(n.value, n.no) } : {};
 }
 
 function labelBlock(c: Component): LabelAst {

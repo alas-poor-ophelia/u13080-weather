@@ -5,6 +5,7 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Hebrew
+FORMAT:default={month\:day} {month\:name} {year}
 
 BEGIN:VGEAR
 UID:leap
@@ -13,6 +14,8 @@ END:VGEAR
 
 BEGIN:VUNIT
 UID:year
+# year index k is year k + 1 AM
+NUMBER:1
 # the molad: 29 d 12 h 793 p, read at months elapsed floor((235(k + 1) - 234) / 19)
 CROSSING:765433/25920@D-2092590+1007/2160;INDEX=235/1/19
 BEGIN:VSTAGE

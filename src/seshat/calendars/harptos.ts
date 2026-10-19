@@ -14,9 +14,14 @@ const festival = (name: string): SlotAst => ({ name, length: 1, filler: true });
 
 export const HARPTOS: CalendarAst = {
   name: "Harptos",
+  // festival days are named alone: "Midwinter 1372 DR"
+  formats: [
+    { name: "default", pattern: "{month:day} {month:name} {year} DR" },
+    { name: "filler", pattern: "{month:name} {year} DR" },
+  ],
   gears: [{ id: "shieldmeet", on: "year", kind: "intervals", terms: [{ every: 4, offset: -1, sign: 1 }] }],
   units: [
-    { id: "year", kind: "cycle", anchor: 0, length: 365, gears: [{ gear: "shieldmeet", add: 1 }] },
+    { id: "year", kind: "cycle", number: 1, anchor: 0, length: 365, gears: [{ gear: "shieldmeet", add: 1 }] },
     {
       id: "month",
       kind: "slots",

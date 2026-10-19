@@ -31,6 +31,7 @@ const MONTHS = ["Bahá", "Jalál", "Jamál", "ʻAẓamat", "Núr", "Raḥmat", "
 
 export const BAHAI: CalendarAst = {
   name: "Baháʼí (Badíʻ)",
+  formats: [{ name: "default", pattern: "{month:day} {month:name} {year} BE" }],
   gears: [
     // Gregorian leap years of the year after BE k + 1 begins: year 1845 + k divisible by 4, except by 100 unless by 400
     {
@@ -48,6 +49,7 @@ export const BAHAI: CalendarAst = {
     {
       id: "year",
       kind: "cycle",
+      number: 1,
       anchor: BE_1,
       length: 365,
       gears: [{ gear: "leap", add: 1 }],

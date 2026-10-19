@@ -13,6 +13,11 @@ const YEAR_0 = -719_528;
 
 export const GREGORIAN: CalendarAst = {
   name: "Gregorian",
+  // the year number is the astronomical year (index 0 is year 0, 1 BC); ISO 8601 shape for years 1-9999
+  formats: [
+    { name: "default", pattern: "{year}-{month:pad2}-{month:day:pad2}" },
+    { name: "long", pattern: "{weekday:name} {month:day} {month:name} {year}" },
+  ],
   gears: [
     {
       id: "leap",

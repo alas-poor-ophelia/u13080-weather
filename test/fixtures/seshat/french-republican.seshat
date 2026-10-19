@@ -1,6 +1,7 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:French Republican (Romme)
+FORMAT:default={month\:day} {month\:name} An {year}
 
 BEGIN:VGEAR
 UID:leap
@@ -12,6 +13,7 @@ END:VGEAR
 
 BEGIN:VUNIT
 UID:year
+NUMBER:1
 ANCHOR:D-64748
 LENGTH:365
 GEAR:leap*1

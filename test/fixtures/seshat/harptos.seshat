@@ -1,6 +1,8 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Harptos
+FORMAT:default={month\:day} {month\:name} {year} DR
+FORMAT:filler={month\:name} {year} DR
 
 BEGIN:VGEAR
 UID:shieldmeet
@@ -9,6 +11,7 @@ END:VGEAR
 
 BEGIN:VUNIT
 UID:year
+NUMBER:1
 ANCHOR:D0
 LENGTH:365
 GEAR:shieldmeet*1

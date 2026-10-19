@@ -80,6 +80,8 @@ export type CycleRule = ConstantRule | CrossingRule;
 interface CycleCommon {
   readonly id: string;
   readonly kind: "cycle";
+  /** display number of occurrence 0 (default 0); display data, not part of the calendar's meaning */
+  readonly number?: number;
   /** occurrence k carries labels[k mod labels.length] (C5, §2.6): modular weekday names, or one table over a cycle */
   readonly labels?: readonly LabelAst[];
   /** C6 (§2.7.1): rule switches, pinned starts and slot overrides, ordered by `from` (V7) */
@@ -154,6 +156,8 @@ export interface KeyedLength {
 export interface SlotsUnitAst {
   readonly id: string;
   readonly kind: "slots";
+  /** display number of slot 0 (default 1); display data */
+  readonly number?: number;
   /** the parent: a cycle unit, or a slot unit (a décade in a month) */
   readonly in: string;
   readonly slots: readonly SlotAst[];
@@ -191,8 +195,15 @@ export interface BodyAst {
   readonly epoch: Rational;
 }
 
+/** A named format pattern (§4.2): "default" formats a day, "filler" a day in a filler slot. Display data. */
+export interface FormatAst {
+  readonly name: string;
+  readonly pattern: string;
+}
+
 export interface CalendarAst {
   readonly name: string;
+  readonly formats?: readonly FormatAst[];
   readonly bodies?: readonly BodyAst[];
   readonly gears: readonly GearAst[];
   readonly units: readonly UnitAst[];

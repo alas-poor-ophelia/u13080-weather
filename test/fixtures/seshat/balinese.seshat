@@ -1,6 +1,7 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Balinese pawukon
+FORMAT:default={saptawara\:name} {pancawara\:name} {wuku\:name}
 
 BEGIN:VUNIT
 UID:pawukon

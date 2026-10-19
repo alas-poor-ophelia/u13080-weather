@@ -20,10 +20,11 @@ const MONTHS = ["Muharram", "Safar", "Rabi al-Awwal", "Rabi al-Thani", "Jumada a
 function tabularIslamic(name: string, epoch: number): CalendarAst {
   return {
     name,
+    formats: [{ name: "default", pattern: "{month:day} {month:name} {year} AH" }],
     // positions are AH year numbers mod 30; index i is year i + 1, hence offset −1
     gears: [{ id: "leap", on: "year", kind: "positions", period: 30, positions: [2, 5, 7, 10, 13, 16, 18, 21, 24, 26, 29], offset: -1 }],
     units: [
-      { id: "year", kind: "cycle", anchor: epoch, length: 354, gears: [{ gear: "leap", add: 1 }] },
+      { id: "year", kind: "cycle", number: 1, anchor: epoch, length: 354, gears: [{ gear: "leap", add: 1 }] },
       {
         id: "month",
         kind: "slots",

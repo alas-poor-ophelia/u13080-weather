@@ -33,6 +33,7 @@ const UNITS_BELOW_YEAR: CalendarAst["units"] = [
 
 export const FRENCH_REPUBLICAN: CalendarAst = {
   name: "French Republican (Romme)",
+  formats: [{ name: "default", pattern: "{month:day} {month:name} An {year}" }],
   gears: [
     {
       id: "leap",
@@ -46,7 +47,7 @@ export const FRENCH_REPUBLICAN: CalendarAst = {
       ],
     },
   ],
-  units: [{ id: "year", kind: "cycle", anchor: EPOCH, length: 365, gears: [{ gear: "leap", add: 1 }] }, ...UNITS_BELOW_YEAR],
+  units: [{ id: "year", kind: "cycle", number: 1, anchor: EPOCH, length: 365, gears: [{ gear: "leap", add: 1 }] }, ...UNITS_BELOW_YEAR],
 };
 
 /**
@@ -63,10 +64,11 @@ export const FRENCH_REPUBLICAN: CalendarAst = {
  */
 export const FRENCH_REPUBLICAN_EQUINOX: CalendarAst = {
   name: "French Republican (equinox rule)",
+  formats: [{ name: "default", pattern: "{month:day} {month:name} An {year}" }],
   gears: [],
   units: [
     // EPOCH + 9:18:30 = −64748 + 1117/2880; 365.24202 = 18262101/50000
-    { id: "year", kind: "cycle", crossing: { period: { n: 18_262_101, d: 50_000 }, at: { n: -186_473_123, d: 2880 } } },
+    { id: "year", kind: "cycle", number: 1, crossing: { period: { n: 18_262_101, d: 50_000 }, at: { n: -186_473_123, d: 2880 } } },
     ...UNITS_BELOW_YEAR,
   ],
 };

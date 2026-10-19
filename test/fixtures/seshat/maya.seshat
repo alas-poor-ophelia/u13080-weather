@@ -1,6 +1,8 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Maya (GMT correlation)
+FORMAT:default={baktun}.{katun}.{tun}.{uinal}.{kin}
+FORMAT:round={tzolkin-number\:name} {tzolkin-name\:name} {haab-month\:day0} {haab-month\:name}
 
 BEGIN:VUNIT
 UID:baktun
@@ -10,6 +12,7 @@ END:VUNIT
 
 BEGIN:VUNIT
 UID:katun
+NUMBER:0
 IN:baktun
 BEGIN:VSLOT
 LENGTH:7200
@@ -75,6 +78,7 @@ END:VUNIT
 
 BEGIN:VUNIT
 UID:tun
+NUMBER:0
 IN:katun
 BEGIN:VSLOT
 LENGTH:360
@@ -140,6 +144,7 @@ END:VUNIT
 
 BEGIN:VUNIT
 UID:uinal
+NUMBER:0
 IN:tun
 BEGIN:VSLOT
 LENGTH:20
@@ -199,6 +204,7 @@ END:VUNIT
 
 BEGIN:VUNIT
 UID:kin
+NUMBER:0
 IN:uinal
 BEGIN:VSLOT
 LENGTH:1

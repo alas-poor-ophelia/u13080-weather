@@ -1,6 +1,7 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Roman (Varronian years\, Bennett's reconstruction)
+FORMAT:default={month\:day} {month\:name} AUC {year}
 
 BEGIN:VGEAR
 UID:intercalary

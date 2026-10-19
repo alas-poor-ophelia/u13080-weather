@@ -1,6 +1,8 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Gregorian
+FORMAT:default={year}-{month\:pad2}-{month\:day\:pad2}
+FORMAT:long={weekday\:name} {month\:day} {month\:name} {year}
 
 BEGIN:VGEAR
 UID:leap

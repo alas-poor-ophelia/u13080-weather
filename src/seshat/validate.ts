@@ -18,6 +18,7 @@ import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
 import { stageReach } from "./start";
 import { Body } from "./body";
+import { checkFormats } from "./format";
 import { gcd } from "./rational";
 import type { By, RuleAst } from "./rule";
 
@@ -189,6 +190,7 @@ export function validate(ast: CalendarAst): string[] {
     const chain = u.kind === "slots" ? chainOf(u, units) : null;
     if (u.kind === "slots" && Array.isArray(chain)) sums(u, chain);
   }
+  errors.push(...checkFormats(ast));
   for (const r of ast.rules ?? []) {
     if (r.tags !== undefined) checkLabel({ tags: r.tags }, `rule "${r.id}"`, (msg) => errors.push(msg));
     errors.push(...checkRule(r.rule, ast, `rule "${r.id}"`));

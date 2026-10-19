@@ -1,9 +1,11 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:French Republican (equinox rule)
+FORMAT:default={month\:day} {month\:name} An {year}
 
 BEGIN:VUNIT
 UID:year
+NUMBER:1
 CROSSING:18262101/50000@D-64748+1117/2880
 END:VUNIT
 

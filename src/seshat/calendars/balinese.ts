@@ -61,6 +61,8 @@ function irregular(d: number): LabelAst {
 
 export const BALINESE: CalendarAst = {
   name: "Balinese pawukon",
+  // the pawukon has no year count: the conventional name of a day repeats every 210 days (format-only)
+  formats: [{ name: "default", pattern: "{saptawara:name} {pancawara:name} {wuku:name}" }],
   gears: [],
   units: [
     { id: "pawukon", kind: "cycle", anchor: EPOCH, length: 210 },

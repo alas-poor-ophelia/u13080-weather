@@ -112,8 +112,8 @@ function fuzzAst(seed: number): CalendarAst {
   });
   const unit = (): UnitAst =>
     r.next() < 0.5
-      ? ({ id: id(), kind: "cycle", ...rule(), ...opt("labels", r.listOf(label, 4)), ...opt("ledger", ledger()) })
-      : { id: id(), kind: "slots", in: id(), slots: Array.from({ length: r.int(0, 4) }, slot) };
+      ? ({ id: id(), kind: "cycle", ...opt("number", r.maybe(int)), ...rule(), ...opt("labels", r.listOf(label, 4)), ...opt("ledger", ledger()) })
+      : { id: id(), kind: "slots", ...opt("number", r.maybe(int)), in: id(), slots: Array.from({ length: r.int(0, 4) }, slot) };
   const node = (depth: number): RuleAst => {
     const leaves: Array<() => RuleAst> = [
       () => ({ kind: "phase", ...opt("unit", r.maybe(id)), ...opt("body", r.maybe(id)), from: float(), to: float() }),
@@ -137,6 +137,7 @@ function fuzzAst(seed: number): CalendarAst {
   };
   return {
     name: text(),
+    ...opt("formats", r.listOf(() => ({ name: text(), pattern: `${text()}{${id()}}${text()}` }))),
     ...opt("bodies", r.listOf(() => ({ id: id(), period: rat(), epoch: rat() }))),
     gears: Array.from({ length: r.int(0, 2) }, () => (r.next() < 0.5 ? { id: id(), on: id(), kind: "intervals" as const, terms: Array.from({ length: r.int(0, 3) }, () => ({ every: int(), ...opt("offset", r.maybe(int)), sign: r.pick([1, -1] as const) })) } : { id: id(), on: id(), kind: "positions" as const, period: int(), positions: Array.from({ length: r.int(0, 3) }, int), ...opt("offset", r.maybe(int)) })),
     units: Array.from({ length: r.int(0, 3) }, unit),
@@ -195,7 +196,7 @@ describe("Seshat text: grammar fuzz", () => {
       }
     };
     for (let seed = 1; seed <= 10_000; seed++) walk(fuzzAst(seed));
-    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "crossing index", "rule depth 3+"];
+    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "crossing index", "rule depth 3+"];
     for (const k of want) expect([k, (seen.get(k) ?? 0) >= 20]).toEqual([k, true]);
   });
 });

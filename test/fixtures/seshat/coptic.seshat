@@ -1,6 +1,7 @@
 BEGIN:VCALENDAR
 SESHAT:1
 NAME:Coptic
+FORMAT:default={month\:day} {month\:name} {year}
 
 BEGIN:VGEAR
 UID:leap
@@ -9,6 +10,7 @@ END:VGEAR
 
 BEGIN:VUNIT
 UID:year
+NUMBER:1
 ANCHOR:D-615558
 LENGTH:365
 GEAR:leap*1
