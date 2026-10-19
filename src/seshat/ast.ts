@@ -6,11 +6,12 @@
  * This is the subset the first calendars need: cycle units (never reset; a
  * constant or crossing base plus gear terms) and slot units (tile a parent
  * cycle or slot unit; constant, gear-adjusted or slack slots, any of them
- * filler, or keyed on the parent's length), stages, labels with tags, and
- * the ledger (C6).
+ * filler, or keyed on the parent's length), stages, labels with tags, the
+ * ledger (C6), and named rules (VRULE, §3) whose tags reach tagsAt.
  */
 import type { GearAst } from "./gear";
 import type { Rational } from "./rational";
+import type { RuleAst } from "./rule";
 
 /** Add `add` days to a length when `gear` matches. */
 export interface GearTerm {
@@ -165,9 +166,23 @@ export interface DayLabelAst extends LabelAst {
   readonly day: number;
 }
 
+/**
+ * A named rule (VRULE, docs/SESHAT-v0.md §3): every day it matches carries its
+ * tags (a holiday). Rules read unit and day tags, never other rules' tags, so
+ * no rule can depend on itself. A BYSETPOS over a variable-length period past
+ * 400 days, or a COUNT walk past 10⁶ days, passes validation and throws when
+ * the rule runs, and then tagsAt throws for that day.
+ */
+export interface RuleDefAst {
+  readonly id: string;
+  readonly rule: RuleAst;
+  readonly tags?: readonly string[];
+}
+
 export interface CalendarAst {
   readonly name: string;
   readonly gears: readonly GearAst[];
   readonly units: readonly UnitAst[];
   readonly days?: readonly DayLabelAst[];
+  readonly rules?: readonly RuleDefAst[];
 }

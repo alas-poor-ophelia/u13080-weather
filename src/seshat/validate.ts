@@ -18,6 +18,7 @@ import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
 import { stageReach } from "./start";
 import { gcd } from "./rational";
+import type { By, RuleAst } from "./rule";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
 const GEAR_PERIOD_MAX = 100_000;
@@ -41,6 +42,8 @@ const INDEX_MAX = 3 * DAY_LIMIT;
 const PIN_MAX = 100_000;
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
+/** Longest period BYSETPOS scans: checked here for constant-length cycles, and when a rule runs for the rest (engine-view.ts). */
+export const SETPOS_PERIOD_MAX = 400;
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
 /** An unchecked value as it appears in the AST, for messages. */
 const show = (x: unknown): string => String(JSON.stringify(x));
@@ -50,7 +53,7 @@ export function validate(ast: CalendarAst): string[] {
   const errors: string[] = [];
   const units = new Map(ast.units.map((u) => [u.id, u]));
   const gears = new Map(ast.gears.map((g) => [g.id, g]));
-  const ids = [...ast.units.map((u) => u.id), ...ast.gears.map((g) => g.id)];
+  const ids = [...ast.units.map((u) => u.id), ...ast.gears.map((g) => g.id), ...(ast.rules ?? []).map((r) => r.id)];
   for (const id of new Set(ids.filter((id, i) => ids.indexOf(id) !== i))) errors.push(`id "${id}" is declared more than once`);
 
   // ids with a problem of their own; the slot-sum check needs its unit, parent and gears clean, whatever the declaration order
@@ -166,6 +169,10 @@ export function validate(ast: CalendarAst): string[] {
   for (const u of ast.units) {
     const chain = u.kind === "slots" ? chainOf(u, units) : null;
     if (u.kind === "slots" && Array.isArray(chain)) sums(u, chain);
+  }
+  for (const r of ast.rules ?? []) {
+    if (r.tags !== undefined) checkLabel({ tags: r.tags }, `rule "${r.id}"`, (msg) => errors.push(msg));
+    errors.push(...checkRule(r.rule, ast, `rule "${r.id}"`));
   }
   return errors;
 }
@@ -535,4 +542,94 @@ function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], ge
     }
   }
   return true;
+}
+
+/**
+ * A rule's references and shape against one calendar (§3.3, §3.5). Used for
+ * the calendar's named rules and by EngineDays.bind for any other rule. A
+ * calendar rule has no host leaves (regime and chance belong to Wadjet) and
+ * no bodies yet (step 4). `freq` and `by` may also name the built-in "day".
+ */
+export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): string[] {
+  const errors: string[] = [];
+  const units = new Map(ast.units.map((u) => [u.id, u]));
+  const own = new Set([...ast.units.flatMap((u) => (u.kind === "cycle" ? (u.labels ?? []) : u.slots)).flatMap((l) => l.tags ?? []), ...(ast.days ?? []).flatMap((d) => d.tags ?? [])]);
+  const ruleTags = new Set((ast.rules ?? []).flatMap((x) => x.tags ?? []).filter((t) => !own.has(t)));
+  const unit = (id: unknown, at: string, allowDay: boolean): boolean => {
+    if (allowDay && id === "day") return true;
+    if (typeof id === "string" && units.has(id)) return true;
+    errors.push(`${at}: no unit ${show(id)}`);
+    return false;
+  };
+  const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+  const ints = (xs: unknown, at: string, nonzero: boolean) => {
+    if (!Array.isArray(xs) || xs.length === 0 || xs.some((x) => !isInt(x) || (nonzero && x === 0))) errors.push(`${at} must be a non-empty list of ${nonzero ? "non-zero " : ""}whole numbers`);
+  };
+  const walk = (r: RuleAst, at: string): void => {
+    // not isObj: its Record guard would drop the interface-typed recur member from the union
+    if (typeof r !== "object" || r === null) return void errors.push(`${at}: not a rule`);
+    switch (r.kind) {
+      case "all":
+      case "any":
+        if (!Array.isArray(r.of)) return void errors.push(`${at}: ${r.kind} needs a list`);
+        return (r.of as readonly RuleAst[]).forEach((q, i) => walk(q, `${at}.${r.kind}[${i}]`));
+      case "not":
+        return walk(r.of, `${at}.not`);
+      case "phase":
+        if ((r.unit === undefined) === (r.body === undefined)) errors.push(`${at}: phase names exactly one of unit and body`);
+        if (r.body !== undefined) errors.push(`${at}: no body "${r.body}" (calendars declare no bodies yet)`);
+        if (r.unit !== undefined) unit(r.unit, at, false);
+        if (!num(r.from) || !num(r.to)) errors.push(`${at}: phase bounds must be numbers`);
+        return;
+      case "dayIn":
+        unit(r.unit, at, false);
+        if (!num(r.from) || !num(r.to)) errors.push(`${at}: dayIn bounds must be numbers`);
+        return;
+      case "index":
+        if (unit(r.unit, at, true) && r.unit !== "day" && units.get(r.unit)!.kind !== "cycle") errors.push(`${at}: index reads a cycle unit; "${r.unit}" is a slot unit`);
+        if ((r.from !== undefined && !num(r.from)) || (r.to !== undefined && !num(r.to))) errors.push(`${at}: index bounds must be numbers`);
+        return;
+      case "tag":
+        if (typeof r.tag !== "string" || !r.tag) errors.push(`${at}: a tag is a non-empty string`);
+        // rules read unit and day tags only (no rule depends on another), so a named rule's tag is never seen
+        else if (ruleTags.has(r.tag)) errors.push(`${at}: tag "${r.tag}" is set only by a named rule, and rules never see those`);
+        return;
+      case "dates":
+        return ints(r.days, `${at}: dates`, false);
+      case "recur":
+        return checkRecur(r, at);
+      case "host":
+        return void errors.push(`${at}: a calendar rule cannot read "${r.key}" (Wadjet's, not the calendar's)`);
+      default:
+        return void errors.push(`${at}: unknown rule kind ${show((r as { kind?: unknown }).kind)}`);
+    }
+  };
+  const checkRecur = (r: Extract<RuleAst, { kind: "recur" }>, at: string): void => {
+    const freqOk = unit(r.freq, `${at} freq`, true);
+    const cycle = r.freq === "day" || units.get(r.freq)?.kind === "cycle";
+    if (r.interval !== undefined && (!isInt(r.interval) || r.interval < 1)) errors.push(`${at}: interval must be a whole number ≥ 1`);
+    else if (freqOk && (r.interval ?? 1) > 1 && !cycle) errors.push(`${at}: interval > 1 needs a cycle unit; "${r.freq}" is a slot unit, which has no global count`);
+    if (r.anchor !== undefined && !isInt(r.anchor)) errors.push(`${at}: anchor must be a whole day`);
+    if (r.until !== undefined && !isInt(r.until)) errors.push(`${at}: until must be a whole day`);
+    if (r.count !== undefined && (!isInt(r.count) || r.count < 1)) errors.push(`${at}: count must be a whole number ≥ 1`);
+    if (r.count !== undefined && freqOk && !cycle && r.anchor === undefined) errors.push(`${at}: count over slot unit "${r.freq}" needs an anchor (a slot unit has no occurrence 0)`);
+    if (r.setpos !== undefined) ints(r.setpos, `${at}: setpos`, true);
+    // a constant-length cycle's period is known here; a variable one is checked when the rule runs
+    const f = units.get(r.freq);
+    const constant = f?.kind === "cycle" && f.length !== undefined && !f.gears?.length && !f.stages?.length && !f.ledger?.length ? f.length : undefined;
+    if (r.setpos !== undefined && constant !== undefined && constant > SETPOS_PERIOD_MAX) errors.push(`${at}: setpos over "${r.freq}", whose ${constant}-day period is past the ${SETPOS_PERIOD_MAX}-day limit`);
+    if (r.by !== undefined && !Array.isArray(r.by)) return void errors.push(`${at}: by must be a list of filters`);
+    for (const [i, b] of ((r.by ?? []) as readonly By[]).entries()) checkBy(b, `${at} by[${i}]`);
+  };
+  const checkBy = (b: By, at: string): void => {
+    if (typeof b !== "object" || b === null) return void errors.push(`${at}: not a filter`);
+    const kinds = ["nth", "label", "day"].filter((k) => k in b);
+    if (kinds.length !== 1) return void errors.push(`${at}: a filter has exactly one of nth, label and day`);
+    if (!unit(b.unit, at, !("label" in b))) return;
+    if ("label" in b) {
+      if (!Array.isArray(b.label) || b.label.length === 0 || b.label.some((x) => typeof x !== "string" || !x || x === "#")) errors.push(`${at}: label must be a non-empty list of names or #tags`);
+    } else ints("nth" in b ? b.nth : b.day, `${at}: ${kinds[0]}`, true);
+  };
+  walk(rule, where);
+  return errors;
 }

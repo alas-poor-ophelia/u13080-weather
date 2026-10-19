@@ -6,6 +6,7 @@
  */
 import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
+import { EngineDays } from "./engine-view";
 import { gearMatches, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
@@ -24,6 +25,8 @@ export class Engine {
   private readonly rules = new Map<string, StartRule>();
   /** ledger slot overrides (C6), by slot unit and parent path [cycle index, slot indices…] */
   private readonly overrides = new Map<string, readonly number[]>();
+  /** rules over this calendar (§3.5); the named rules (VRULE) are bound through it */
+  readonly days: EngineDays;
 
   constructor(readonly ast: CalendarAst) {
     const errors = validate(ast);
@@ -35,6 +38,7 @@ export class Engine {
       this.rules.set(u.id, compileUnit(u, this.gears));
       for (const e of u.ledger ?? []) if (e.kind === "slots") this.overrides.set(overrideKey(e.unit, [e.from, ...(e.path ?? [])]), e.lengths);
     }
+    this.days = new EngineDays(this);
   }
 
   /** The day on which occurrence `index` of cycle unit `id` starts. */
@@ -74,6 +78,41 @@ export class Engine {
   positionOf(id: string, day: number): Position | null {
     const at = this.locate(id, day);
     return at && { index: at.path[at.path.length - 1]!, offset: at.offset };
+  }
+
+  /**
+   * The occurrence of unit `id` that holds `day`: a cycle's index, or a slot's
+   * index in its parent, with its first day and length. Null when the day lies
+   * in a filler slot of an enclosing unit.
+   */
+  occurrenceAt(id: string, day: number): { readonly index: number; readonly start: number; readonly length: number } | null {
+    const u = this.units.get(id);
+    if (!u) throw new RangeError(`no unit "${id}"`);
+    if (u.kind === "cycle") {
+      const index = this.indexAt(id, day);
+      const start = this.start(id, index);
+      return { index, start, length: this.start(id, index + 1) - start };
+    }
+    const at = this.locate(id, day);
+    if (!at) return null;
+    const i = at.path[at.path.length - 1]!;
+    return { index: i, start: day - at.offset, length: this.slotLengths(id, at.path.slice(0, -1))[i]! };
+  }
+
+  /** Whether `id` is a cycle unit (it never resets; its index counts from the epoch). */
+  isCycle(id: string): boolean {
+    return this.units.get(id)?.kind === "cycle";
+  }
+
+  /** The parent of slot unit `id`; undefined for a cycle or an unknown id. */
+  parentOf(id: string): string | undefined {
+    const u = this.units.get(id);
+    return u?.kind === "slots" ? u.in : undefined;
+  }
+
+  /** Declared slots of slot unit `id` (length-0 slots included). */
+  slotCount(id: string): number {
+    return this.slots(id).slots.length;
   }
 
   /** The day `offset` days into slot `slot` of unit `id`, inside the parent occurrence at `path` (see slotLengths). */
@@ -160,8 +199,15 @@ export class Engine {
     return s.name === undefined && s.tags === undefined ? null : { ...(s.name !== undefined && { name: s.name }), ...(s.tags && { tags: s.tags }) };
   }
 
-  /** Every tag `day` carries, unit by unit in declaration order (tags are hashed; names are not). */
+  /** Every tag `day` carries: unit by unit in declaration order, then day labels, then named rules (tags are hashed; names are not). */
   tagsAt(day: number): string[] {
+    const tags = this.baseTagsAt(day);
+    for (const r of this.ast.rules ?? []) if (r.tags?.length && this.days.holds(r.rule, day)) tags.push(...r.tags);
+    return tags;
+  }
+
+  /** The tags of units and day labels only: what a rule reads, so that no named rule can depend on itself. */
+  baseTagsAt(day: number): string[] {
     const tags: string[] = [];
     for (const u of this.ast.units) tags.push(...(this.labelAt(u.id, day)?.tags ?? []));
     for (const d of this.ast.days ?? []) if (d.day === day) tags.push(...(d.tags ?? []));
