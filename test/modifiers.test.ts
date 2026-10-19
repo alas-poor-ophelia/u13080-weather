@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { gregorianTime } from "../src/core/generator";
-import { ModifierEngine, evaluatePredicate, inPhaseRange, sampleEnvelope, type PredicateContext } from "../src/core/modifiers";
+import { ModifierEngine, sampleEnvelope } from "../src/core/modifiers";
+import type { Predicate } from "../src/core/types";
+import { inPhase as inPhaseRange } from "../src/seshat/rule";
+import { COMPILED_EVALUATORS } from "./golden/golden-pred";
+import type { PredicateContext } from "./golden/old-evaluator";
+
+// the engine's predicate path since Seshat P2: compiled rule, generation mode
+const evaluatePredicate = (p: Predicate, ctx: PredicateContext): boolean => COMPILED_EVALUATORS.gen(p, ctx) === true;
 import type { DayTime, Modifier } from "../src/core/types";
 
 const base: PredicateContext = { dayOrdinal: 100, yearPhase: 0.3, dayOfYear: 109, regime: "normal", seed: "s", zoneId: "z", modifierId: "m", moons: [{ name: "Sable", phase: 0.95 }], tags: ["witch-month"] };

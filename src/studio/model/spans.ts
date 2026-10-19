@@ -96,7 +96,7 @@ export function dayOrdinalAt(year: number, cal: SpanCalendar): number {
 
 /**
  * A moon's phase on `dayOrdinal`: the same function `InternalCalendar.toContext`
- * hands the predicate, so a pulse's edge lands exactly where `inPhaseRange` flips.
+ * hands the predicate, so a pulse's edge lands exactly where Seshat's `inPhase` flips.
  */
 export function moonPhaseAt(moon: SpanCalendar["moons"][number], dayOrdinal: number): number {
   return moonPhase(moon.cycleDays, moon.phaseAtEpoch ?? 0, dayOrdinal);
@@ -215,7 +215,7 @@ function perYear(startPhase: number, lengthYears: number, w: Window, max: number
  * `yearPhase [a, b]` — one editable clip per year. A wrapping range (`a > b`)
  * is ONE span from `year + a` to `year + 1 + b`, not two halves: fractional
  * years are continuous, so the clip that crosses new year is one clip and one
- * drag. `a === b` is the engine's "never" (`inPhaseRange`), so no spans.
+ * drag. `a === b` is the engine's "never" (Seshat's `inPhase`), so no spans.
  */
 function yearPhaseSpans(range: readonly [number, number], w: Window, max: number): Derived {
   if (range[0] === range[1]) return timed([]);

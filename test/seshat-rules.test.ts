@@ -7,29 +7,22 @@
  * that compiling never writes onto the stored predicate.
  */
 import { describe, expect, test } from "bun:test";
-import { evaluatePredicate, evaluateStatic, type PredicateContext } from "../src/core/modifiers";
+import { eraActive as oldEraActive, evaluatePredicate, evaluateStatic, type PredicateContext } from "./golden/old-evaluator";
+import { eraActive } from "../src/core/eras";
+import type { Era } from "../src/core/types";
 import { compilePredicate, generationOptions, staticOptions } from "../src/core/rules";
+import { ModifierEngine } from "../src/core/modifiers";
+import type { Modifier } from "../src/core/types";
+import { InternalCalendar } from "../src/plugin/time/internal";
 import { validateProfile } from "../src/core/profile";
 import type { Predicate, ZoneProfile } from "../src/core/types";
 import { PRESETS } from "../src/generated/presets";
 import { Engine, GREGORIAN } from "../src/seshat";
-import { evaluate, TimeView, type RuleAst } from "../src/seshat/rule";
+import { evaluate, TimeView } from "../src/seshat/rule";
 import { yearOf } from "../src/seshat/year";
 import { compareGoldenCal, type GoldenCal } from "./golden/golden-cal";
-import { buildGoldenPred, type Evaluators } from "./golden/golden-pred";
+import { buildGoldenPred, COMPILED_EVALUATORS as NEW } from "./golden/golden-pred";
 import storedPred from "./golden/predicates.json";
-
-const compiled = new WeakMap<object, RuleAst>();
-const ruleOf = (p: Predicate): RuleAst => {
-  let r = compiled.get(p);
-  if (!r) compiled.set(p, (r = compilePredicate(p)));
-  return r;
-};
-
-const NEW: Evaluators = {
-  gen: (p, ctx) => evaluate(ruleOf(p), new TimeView(ctx, ctx.dayOrdinal), generationOptions(ctx)),
-  static: (p, ctx) => evaluate(ruleOf(p), new TimeView(ctx, ctx.dayOrdinal), staticOptions(ctx)),
-};
 
 // `over` may set fields to undefined on purpose (an adapter that omits them)
 const ctx = (over: Record<string, unknown> = {}): PredicateContext =>
@@ -136,6 +129,74 @@ describe("Seshat rules: compiled predicates", () => {
     NEW.static(p, ctx());
     expect(keyPaths(p)).toEqual(before);
     expect(JSON.stringify(p)).toBe(json);
+  });
+});
+
+describe("Seshat rules: the engine's wiring", () => {
+  // golden-cal has no regime or chance modifiers, so this is the gate for the host context: the
+  // regime the generator chose, and chance draws keyed by each modifier's own id
+  test("forDay activates exactly the modifiers the old evaluator would, day by day (regime, chance, chained tags, nesting)", () => {
+    const cal = new InternalCalendar({ yearLength: 365, epochYear: 1, moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }], seasons: [{ name: "Spring", from: 0 }, { name: "Summer", from: 0.25 }, { name: "Autumn", from: 0.5 }, { name: "Winter", from: 0.75 }] }, () => 0);
+    const timeOf = (d: number) => cal.toContext(d);
+    const mods: Modifier[] = [
+      { id: "c1", when: { chance: 0.3 }, apply: [], tag: "c1" },
+      { id: "c2", when: { chance: 0.3 }, apply: [], tag: "c2" },
+      { id: "wet", when: { regime: "wet" }, apply: [], tag: "wet" },
+      { id: "chain", when: { all: [{ tag: "c1" }, { not: { tag: "c2" } }] }, apply: [], tag: "chain" },
+      { id: "mixed", when: { any: [{ all: [{ chance: 0.5 }, { not: { regime: "wet" } }] }, { all: [{ tag: "season:Winter" }, { moon: { name: "Sable", phase: [0.9, 0.1] } }] }] }, apply: [] },
+      { id: "always", apply: [], tag: "always" },
+    ];
+    const seed = "wiring-seed";
+    const engine = new ModifierEngine({ seed, zoneId: "z", modifiers: mods, timeOf });
+    let checked = 0;
+    for (let d = -500; d <= 500; d++) {
+      for (const regime of ["wet", "dry"]) {
+        // the old forDay loop for non-spell modifiers: tags pushed so far are visible to later ones
+        const base = timeOf(d);
+        const tags: string[] = [];
+        const want: string[] = [];
+        for (const m of mods) {
+          const time = tags.length ? { ...base, tags: [...(base.tags ?? []), ...tags] } : base;
+          if (m.when && !evaluatePredicate(m.when, { ...time, dayOrdinal: d, regime, seed, zoneId: "z", modifierId: m.id })) continue;
+          if (m.tag) tags.push(m.tag);
+          want.push(m.id);
+        }
+        const got = engine.forDay(d, regime);
+        if (JSON.stringify(got.active) !== JSON.stringify(want)) expect({ d, regime, active: got.active }).toEqual({ d, regime, active: want });
+        expect(got.tags).toEqual(tags);
+        checked++;
+      }
+    }
+    expect(checked).toBe(2002);
+  });
+});
+
+describe("Seshat rules: eras", () => {
+  test("eraActive answers like the old range test, including bounds no validated era has", () => {
+    const eras = [
+      { name: "a", from: 3, to: 5 },
+      { name: "b", from: -10 },
+      { name: "c", from: 0, to: 0 },
+      { name: "d", from: 4, to: 2 },
+      { name: "e", from: 1, to: 9, enabled: false },
+      { name: "f", from: undefined, to: 5 },
+      { name: "g", from: null, to: null },
+      { name: "h", from: 2.5, to: 7.5 },
+    ] as unknown as Era[];
+    for (const e of eras) for (let y = -12; y <= 12; y += 0.5) expect([e.name, y, eraActive(e, y)]).toEqual([e.name, y, oldEraActive(e, y)]);
+    for (const y of [Number.NaN, Infinity, -Infinity]) for (const e of eras) expect(eraActive(e, y)).toBe(oldEraActive(e, y));
+  });
+
+  // the Studio's span edit assigns from/to on the live Era (era-edit.ts setSpan)
+  test("an era edited in place answers from its new span at once", () => {
+    const e: Era = { name: "Thaw", from: 3, to: 5 };
+    expect(eraActive(e, 4)).toBe(true);
+    e.from = 6;
+    e.to = 8;
+    expect(eraActive(e, 4)).toBe(false);
+    expect(eraActive(e, 7)).toBe(true);
+    delete e.to;
+    expect(eraActive(e, 100)).toBe(true);
   });
 });
 

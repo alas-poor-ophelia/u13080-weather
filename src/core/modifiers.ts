@@ -1,15 +1,18 @@
 /**
  * The modifier engine (DESIGN-v1.md §3): evaluates the closed predicate
- * grammar, the deterministic `chance` and `spell` primitives, and produces
- * the day's ops + tags for the generator's dailyModifiers hook.
+ * grammar (compiled once per engine to Seshat rules, src/core/rules.ts), the
+ * deterministic `chance` and `spell` primitives, and produces the day's ops +
+ * tags for the generator's dailyModifiers hook.
  *
  * Determinism: every random decision is hash(seed, zone, day, "mod:<id>:…").
  * A spell's activity on day d is recomputed by scanning a bounded window of
  * earlier days with the same hashed draws, so it is a pure function of d.
  */
 import { wrap } from "../seshat/phase";
+import { evaluate, TimeView, type EvalOptions, type RuleAst } from "../seshat/rule";
 import { DEFAULT_YEAR_LENGTH } from "../seshat/year";
 import { DrawStream, bernoulli, drawKey, geometricDuration } from "./rng";
+import { compilePredicate, generationOptions, staticOptions, type RuleHostContext } from "./rules";
 import type { DayTime, Modifier, ModifierOp, Predicate } from "./types";
 
 /**
@@ -56,19 +59,34 @@ function gateFactor(m: Modifier, time: DayTime): number {
   return f;
 }
 
+/** A daily modifier as the engine runs it: the stored object (never written to), its compiled rule and envelope carrier. */
+interface Compiled {
+  readonly m: Modifier;
+  /** absent: no `when`, always on */
+  readonly rule?: RuleAst;
+  /** the moon named by a bare top-level `{ moon }` predicate; absent: the day's first moon */
+  readonly carrier?: string;
+}
+
+function compileModifier(m: Modifier): Compiled {
+  const w = m.when;
+  if (!w) return { m };
+  const rule = compilePredicate(w);
+  return "moon" in w ? { m, rule, carrier: w.moon.name } : { m, rule };
+}
+
 /**
  * The carrier moon's phase: the moon named in a bare `{ moon }` predicate,
  * else the first moon of the day, else undefined (no carrier → factor 1).
  */
-function carrierPhase(m: Modifier, time: DayTime): number | undefined {
-  const w = m.when;
-  if (w && "moon" in w) return time.moons?.find((x) => x.name === w.moon.name)?.phase;
+function carrierPhase(c: Compiled, time: DayTime): number | undefined {
+  if (c.carrier !== undefined) return time.moons?.find((x) => x.name === c.carrier)?.phase;
   return time.moons?.[0]?.phase;
 }
 
-function envelopeFactor(m: Modifier, op: ModifierOp, time: DayTime): number {
+function envelopeFactor(c: Compiled, op: ModifierOp, time: DayTime): number {
   if (!op.envelope?.length) return 1;
-  const phase = carrierPhase(m, time);
+  const phase = carrierPhase(c, time);
   return phase === undefined ? 1 : sampleEnvelope(op.envelope, phase);
 }
 
@@ -91,45 +109,6 @@ function scaleOpMagnitude(op: ModifierOp, f: number): ModifierOp {
   if (out.op === "offset") return { ...out, value: out.value * f };
   if (out.op === "scale") return { ...out, value: 1 + (out.value - 1) * f };
   return out;
-}
-
-export interface PredicateContext extends DayTime {
-  dayOrdinal: number;
-  regime: string;
-  seed: string;
-  zoneId: string;
-  modifierId: string;
-}
-
-/** Is x inside [lo, hi) on the unit circle (wraps if lo > hi)? */
-export function inPhaseRange(x: number, lo: number, hi: number): boolean {
-  const t = wrap(x);
-  if (lo === hi) return false;
-  if (lo < hi) return t >= lo && t < hi;
-  return t >= lo || t < hi;
-}
-
-export function evaluatePredicate(p: Predicate, ctx: PredicateContext): boolean {
-  if ("all" in p) return p.all.every((q) => evaluatePredicate(q, ctx));
-  if ("any" in p) return p.any.some((q) => evaluatePredicate(q, ctx));
-  if ("not" in p) return !evaluatePredicate(p.not, ctx);
-  if ("moon" in p) {
-    const m = ctx.moons?.find((x) => x.name === p.moon.name);
-    if (!m) return false;
-    return inPhaseRange(m.phase, p.moon.phase[0], p.moon.phase[1]);
-  }
-  if ("yearPhase" in p) return inPhaseRange(ctx.yearPhase, p.yearPhase[0], p.yearPhase[1]);
-  if ("dayOfYear" in p) {
-    if (ctx.dayOfYear === undefined) return false;
-    return ctx.dayOfYear >= p.dayOfYear[0] && ctx.dayOfYear <= p.dayOfYear[1];
-  }
-  if ("tag" in p) return ctx.tags?.includes(p.tag) ?? false;
-  if ("regime" in p) return ctx.regime === p.regime;
-  if ("chance" in p) {
-    const s = new DrawStream(drawKey(ctx.seed, ctx.zoneId, ctx.dayOrdinal, `mod:${ctx.modifierId}:chance`));
-    return bernoulli(s, p.chance);
-  }
-  return false;
 }
 
 /** Does the predicate reference anything only known at generation time (regime)? */
@@ -162,14 +141,21 @@ export const SPELL_LOOKBACK_MAX = 400;
 export const YEAR_LENGTH_MAX = 10_000;
 
 export class ModifierEngine {
-  private readonly daily: Modifier[];
+  private readonly daily: Compiled[];
   private readonly windowDays = new Map<string, number>();
+  /** one host context, filled in before each evaluation; both option sets read it */
+  private readonly host: RuleHostContext;
+  private readonly generation: EvalOptions;
+  private readonly estimate: EvalOptions;
 
   constructor(readonly cfg: ModifierEngineConfig) {
+    this.host = { seed: cfg.seed, zoneId: cfg.zoneId, modifierId: "", dayOrdinal: 0, regime: "" };
+    this.generation = generationOptions(this.host);
+    this.estimate = staticOptions(this.host);
     // a disabled modifier never reaches a day: no ops, no tag, not in `active`, and no spell window
-    this.daily = cfg.modifiers.filter((m) => (m.stage ?? "daily") === "daily" && m.enabled !== false);
-    for (const m of this.daily) {
-      if (m.spell) this.windowDays.set(m.id, this.estimateWindowDays(m));
+    this.daily = cfg.modifiers.filter((m) => (m.stage ?? "daily") === "daily" && m.enabled !== false).map(compileModifier);
+    for (const c of this.daily) {
+      if (c.m.spell) this.windowDays.set(c.m.id, this.estimateWindowDays(c));
     }
   }
 
@@ -179,29 +165,34 @@ export class ModifierEngine {
     const tags: string[] = [];
     const active: string[] = [];
     const base = this.cfg.timeOf(dayOrdinal);
-    for (const m of this.daily) {
+    for (const c of this.daily) {
+      const m = c.m;
       // tags set by earlier modifiers today are visible to later ones (spells replay past days and see only calendar tags)
       const time = tags.length ? { ...base, tags: [...(base.tags ?? []), ...tags] } : base;
-      const on = m.spell ? this.spellActive(m, dayOrdinal, regime) : this.matches(m, dayOrdinal, time, regime);
+      const on = m.spell ? this.spellActive(c, dayOrdinal, regime) : this.matches(c, dayOrdinal, time, regime);
       if (!on) continue;
       // gates and envelopes only rewrite MAGNITUDE: the modifier stays active and still sets its
       // tag even at factor 0, and `time` here is the same object the predicate saw (so a gate can
       // read a tag pushed by an earlier modifier today).
       const gate = gateFactor(m, time);
-      ops.push(...m.apply.filter((o) => o.enabled !== false).map((o) => scaleOpMagnitude(o, gate * envelopeFactor(m, o, time))));
+      ops.push(...m.apply.filter((o) => o.enabled !== false).map((o) => scaleOpMagnitude(o, gate * envelopeFactor(c, o, time))));
       if (m.tag) tags.push(m.tag);
       active.push(m.id);
     }
     return { ops, tags, active };
   }
 
-  private ctx(m: Modifier, dayOrdinal: number, time: DayTime, regime: string): PredicateContext {
-    return { ...time, dayOrdinal, regime, seed: this.cfg.seed, zoneId: this.cfg.zoneId, modifierId: m.id };
+  /** Evaluate c's rule on one day; the host context carries what the chance and regime leaves read. */
+  private evaluate(c: Compiled, rule: RuleAst, dayOrdinal: number, time: DayTime, regime: string, opts: EvalOptions): boolean | undefined {
+    this.host.modifierId = c.m.id;
+    this.host.dayOrdinal = dayOrdinal;
+    this.host.regime = regime;
+    return evaluate(rule, new TimeView(time, dayOrdinal), opts);
   }
 
-  private matches(m: Modifier, dayOrdinal: number, time: DayTime, regime: string): boolean {
-    if (!m.when) return true;
-    return evaluatePredicate(m.when, this.ctx(m, dayOrdinal, time, regime));
+  private matches(c: Compiled, dayOrdinal: number, time: DayTime, regime: string): boolean {
+    if (!c.rule) return true;
+    return this.evaluate(c, c.rule, dayOrdinal, time, regime, this.generation) === true;
   }
 
   /**
@@ -215,14 +206,14 @@ export class ModifierEngine {
    * correctly too. Tags from other modifiers are not visible to it. A year longer than YEAR_LENGTH_MAX is sampled on its first
    * YEAR_LENGTH_MAX days and the count scaled to the full year.
    */
-  private estimateWindowDays(m: Modifier): number {
+  private estimateWindowDays(c: Compiled): number {
     const reported = (this.cfg.timeOf(0) as DayTime & { yearLength?: number }).yearLength;
     const year = typeof reported === "number" && Number.isFinite(reported) && reported >= 1 ? Math.floor(reported) : DEFAULT_YEAR_LENGTH;
-    if (!m.when) return year;
+    if (!c.rule) return year;
     const scanned = Math.min(year, YEAR_LENGTH_MAX);
     let n = 0;
     for (let d = 0; d < scanned; d++) {
-      if (evaluateStatic(m.when, this.ctx(m, d, this.cfg.timeOf(d), "")) !== false) n++;
+      if (this.evaluate(c, c.rule, d, this.cfg.timeOf(d), "", this.estimate) !== false) n++;
     }
     // no day of the reference year qualifies: fall back to a whole year rather than collapsing to a
     // per-day start probability of meanStartsPerYear
@@ -230,9 +221,10 @@ export class ModifierEngine {
     return scanned === year ? n : Math.max(1, Math.round((n * year) / scanned));
   }
 
-  private startsAt(m: Modifier, d: number, regime: string): boolean {
+  private startsAt(c: Compiled, d: number, regime: string): boolean {
+    const m = c.m;
     const time = this.cfg.timeOf(d);
-    if (!this.matches(m, d, time, regime)) return false;
+    if (!this.matches(c, d, time, regime)) return false;
     const p = Math.min(1, m.spell!.meanStartsPerYear / this.windowDays.get(m.id)!);
     const s = new DrawStream(drawKey(this.cfg.seed, this.cfg.zoneId, d, `mod:${m.id}:spell`));
     return bernoulli(s, p);
@@ -249,37 +241,14 @@ export class ModifierEngine {
    * regime for the whole scan (documented approximation: spells gated on a
    * regime are unusual; regimes have their own duration).
    */
-  private spellActive(m: Modifier, d: number, regime: string): boolean {
+  private spellActive(c: Compiled, d: number, regime: string): boolean {
+    const m = c.m;
     const L = Math.min(SPELL_LOOKBACK_MAX, Math.ceil(m.spell!.meanDurationDays * 8) + 1);
     let activeUntil = -Infinity;
     for (let s = d - L; s <= d; s++) {
       if (s <= activeUntil) continue;
-      if (this.startsAt(m, s, regime)) activeUntil = s + this.durationAt(m, s) - 1;
+      if (this.startsAt(c, s, regime)) activeUntil = s + this.durationAt(m, s) - 1;
     }
     return d <= activeUntil;
   }
-}
-
-/**
- * A predicate evaluated before generation, three-valued: `undefined` means
- * unknown. Regime and era terms are unknown (see estimateWindowDays); `all`,
- * `any` and `not` follow Kleene logic, so an unknown never turns into a
- * definite answer by negation. Every other leaf is evaluated as usual.
- */
-export function evaluateStatic(p: Predicate, ctx: PredicateContext): boolean | undefined {
-  if ("all" in p) {
-    const r = p.all.map((q) => evaluateStatic(q, ctx));
-    return r.includes(false) ? false : r.includes(undefined) ? undefined : true;
-  }
-  if ("any" in p) {
-    const r = p.any.map((q) => evaluateStatic(q, ctx));
-    return r.includes(true) ? true : r.includes(undefined) ? undefined : false;
-  }
-  if ("not" in p) {
-    const r = evaluateStatic(p.not, ctx);
-    return r === undefined ? undefined : !r;
-  }
-  if ("regime" in p) return undefined;
-  if ("tag" in p && p.tag.startsWith("era:")) return undefined;
-  return evaluatePredicate(p, ctx);
 }

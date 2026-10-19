@@ -5,7 +5,9 @@
  *
  * Keys are tested in the evaluator's historical order (all, any, not, moon,
  * yearPhase, dayOfYear, tag, regime, chance), so an object with several keys
- * compiles to the first. A node whose fields cannot be read compiles to a
+ * compiles to the first (the old spell-window evaluator tested `regime` and
+ * `era:` tags first, so `{ moon, regime }` differs there; validateProfile
+ * rejects multi-key nodes). A node whose fields cannot be read compiles to a
  * `throw` leaf, which raises only when evaluation reaches it. validateProfile
  * rejects such shapes before any engine sees them, so this only matters to
  * callers that build engines directly.

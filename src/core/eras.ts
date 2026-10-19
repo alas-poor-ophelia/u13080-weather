@@ -4,6 +4,7 @@
  * on the absolute timeline — a pure function of the day — so they sit inside
  * the determinism contract; they are not cycles (NON-GOALS.md).
  */
+import { evaluate, TimeView, type EvalOptions, type RuleAst } from "../seshat/rule";
 import { yearOf } from "../seshat/year";
 import { hash32 } from "./rng";
 import { canonicalJson, type ValidationIssue, validateDailyOps } from "./profile";
@@ -14,10 +15,22 @@ export { ERA_TAG_PREFIX };
 /** The calendar year of a day (one definition, in Seshat; re-exported for era callers). */
 export { yearOf };
 
+const NO_HOST: EvalOptions = { host: () => undefined };
+
+/**
+ * An era's span as a Seshat rule: closed years, open-ended without `to`. Built
+ * per call, never cached: the Studio edits `from`/`to` in place on the live
+ * Era (era-edit.ts setSpan), and a cached rule would keep the old span.
+ */
+function eraRule(e: Era): RuleAst {
+  return { kind: "index", unit: "year", from: e.from, ...(e.to !== undefined ? { to: e.to } : {}) };
+}
 
 export function eraActive(e: Era, year: number): boolean {
   if (e.enabled === false) return false;
-  return year >= e.from && (e.to === undefined || year <= e.to);
+  // the rule reads an absent lower bound as open; an era without `from` was never active
+  if (e.from === undefined) return false;
+  return evaluate(eraRule(e), new TimeView({ yearPhase: 0, year }, 0), NO_HOST) === true;
 }
 
 /** Tags for every era covering `year`, in list order. */

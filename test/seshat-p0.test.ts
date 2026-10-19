@@ -4,7 +4,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import { gregorianTime } from "../src/core/generator";
-import { ModifierEngine, YEAR_LENGTH_MAX, inPhaseRange, sampleEnvelope } from "../src/core/modifiers";
+import { ModifierEngine, YEAR_LENGTH_MAX, sampleEnvelope } from "../src/core/modifiers";
+import { inPhase as inPhaseRange } from "../src/seshat/rule";
 import type { DayTime, Modifier, Predicate } from "../src/core/types";
 import { badMoonsLine } from "../src/plugin/calendar-text";
 import { InternalCalendar } from "../src/plugin/time/internal";

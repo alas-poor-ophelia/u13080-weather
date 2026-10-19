@@ -1,10 +1,12 @@
 /**
  * Frozen predicate oracle for Seshat P2 (docs/SESHAT-v0.md §9, step 0).
  *
- * P2 replaces `evaluatePredicate` / `evaluateStatic` with compiled Seshat
- * rules and deletes the old code. This file pins what the OLD evaluator
- * answered, so the new one is checked against fixed outputs rather than a
- * live copy that could drift with it. Two matrices:
+ * P2 replaced `evaluatePredicate` / `evaluateStatic` with compiled Seshat
+ * rules and deleted the old code from src. predicates.json pins what the OLD
+ * evaluator answered, so the compiled rules (the default here, and what the
+ * golden check runs) are held to fixed outputs. `windowDays` comes from the
+ * real ModifierEngine, so the spell-window path is checked end to end. Two
+ * matrices:
  *
  *   - real days: every predicate below × the golden-cal worlds and zones ×
  *     days −1000..1000, through the same `dayTimeFn` the generator uses
@@ -19,7 +21,10 @@
  * `windowDays`, which turns meanStartsPerYear into every start probability.
  */
 import type { DayTime, Modifier, Predicate } from "../../src/core/types";
-import { evaluatePredicate, evaluateStatic, ModifierEngine, type PredicateContext } from "../../src/core/modifiers";
+import { ModifierEngine } from "../../src/core/modifiers";
+import { compilePredicate, generationOptions, staticOptions } from "../../src/core/rules";
+import { evaluate, TimeView, type RuleAst } from "../../src/seshat/rule";
+import { evaluatePredicate, evaluateStatic, type PredicateContext } from "./old-evaluator";
 import { eraModifiers } from "../../src/core/eras";
 import { resolveProfile } from "../../src/core/profile";
 import { dayTimeFn } from "../../src/plugin/world";
@@ -133,8 +138,21 @@ export interface Evaluators {
   static(p: Predicate, ctx: PredicateContext): boolean | undefined;
 }
 
-/** The evaluator the fixture was frozen from. */
+/** The evaluator the fixture was frozen from (a verbatim copy, test/golden/old-evaluator.ts). */
 export const OLD_EVALUATORS: Evaluators = { gen: evaluatePredicate, static: evaluateStatic };
+
+const compiled = new WeakMap<object, RuleAst>();
+function ruleOf(p: Predicate): RuleAst {
+  let r = compiled.get(p);
+  if (!r) compiled.set(p, (r = compilePredicate(p)));
+  return r;
+}
+
+/** What the engine runs since Seshat P2: the stored predicate compiled once, evaluated over a TimeView. */
+export const COMPILED_EVALUATORS: Evaluators = {
+  gen: (p, ctx) => evaluate(ruleOf(p), new TimeView(ctx, ctx.dayOrdinal), generationOptions(ctx)),
+  static: (p, ctx) => evaluate(ruleOf(p), new TimeView(ctx, ctx.dayOrdinal), staticOptions(ctx)),
+};
 
 function symbols(ev: Evaluators, p: Predicate, t: DayTime, d: number, zoneId: string): { gen: Sym; static: Sym } {
   return {
@@ -155,7 +173,7 @@ export function rle(s: string): string {
   return out;
 }
 
-export function buildGoldenPred(ev: Evaluators = OLD_EVALUATORS): GoldenPred {
+export function buildGoldenPred(ev: Evaluators = COMPILED_EVALUATORS): GoldenPred {
   const worlds = WORLDS.map((w) => {
     const adapter = w.adapter();
     return {
