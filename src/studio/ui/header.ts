@@ -97,8 +97,8 @@ function koppenColour(group: KoppenResult["group"]): string {
  * with the active calendar's year length: `d0 – d365 · 1962` inside one year,
  * `1962 – 2962` once it spans 2.5 years or more.
  */
-export function formatWindow(w: Window, calendar: CalendarDescription | null, years?: YearSeam | null): string {
-  return windowLabel(w.a, w.b, calendar?.yearLength ?? DEFAULT_YEAR_LENGTH, years);
+export function formatWindow(w: Window, calendar: CalendarDescription | null, years?: YearSeam | null, formatDay?: (day: number) => string): string {
+  return windowLabel(w.a, w.b, calendar?.yearLength ?? DEFAULT_YEAR_LENGTH, years, formatDay);
 }
 
 /** The zone's base station, as the dropdown and the SRC chip name it. */
@@ -483,7 +483,10 @@ export function createHeaderSurface(): Surface {
     flipLed?.update({ on: true, level: flip === "on" ? "ok" : "warn" });
 
     const w = state.view.window;
-    readoutRange?.setText(formatWindow(w, description, c.years()));
+    // the active calendar writes its own dates in the readout on exact years (bead wadjet-qfk)
+    const active = c.plugin.time.active;
+    const formatDay = active?.format ? (d: number) => active.format!(d) : undefined;
+    readoutRange?.setText(formatWindow(w, description, c.years(), formatDay));
     presets?.update({ value: zoomLabel(w) });
 
     if (jsonButton) jsonButton.toggleClass("is-on", state.view.jsonOpen);

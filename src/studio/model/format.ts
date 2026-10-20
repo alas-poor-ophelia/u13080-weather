@@ -262,6 +262,16 @@ export function dayRangeLabelOf(from: number, to: number, opts?: { tight?: boole
   return opts?.tight === true ? `d${from}–${to}` : `d${from} – d${to}`;
 }
 
+/** windowLabel's dated form: one day for a window of 8 days or less, else the first and last day it shows. */
+function datedWindowLabel(a: number, b: number, years: YearSeam, formatDay: (day: number) => string): string {
+  const first = years.dayAt(a);
+  // the last day whose start lies before b (a window ending exactly on a day edge does not show that day)
+  let last = years.dayAt(b);
+  if (last > first && years.fractionalYear(last) >= b) last--;
+  if (last - first + 1 <= 8) return formatDay(years.dayAt((a + b) / 2));
+  return `${formatDay(first)} – ${formatDay(last)}`;
+}
+
 /** "Y 1962" — negative years use a real minus. */
 export function yearLabel(year: number): string {
   return `Y ${tabular(year, 0)}`;
@@ -282,12 +292,18 @@ export function yearLabel(year: number): string {
  * With an exact year seam the days are counted in each year's own length:
  * the centre day in the centre year's, a range in the length of the year it
  * starts in (Seshat P3b). Without one, the constant length, as it has always been.
+ *
+ * With an exact seam AND the calendar's own date format (`formatDay`, a
+ * definition's or a calendar plugin's), days are written as dates instead
+ * (bead wadjet-qfk): the day under the centre (`2024-02-27`), or the first and
+ * last day of the window (`2024-01-01 – 2025-12-23`). Wide windows keep bare years.
  */
-export function windowLabel(a: number, b: number, yearLength: number, years?: YearSeam | null): string {
+export function windowLabel(a: number, b: number, yearLength: number, years?: YearSeam | null, formatDay?: (day: number) => string): string {
   const widthYears = b - a;
   const mid = (a + b) / 2;
   const midYear = Math.floor(mid);
   if (widthYears >= 2.5) return `${tabular(Math.round(a), 0)} – ${tabular(Math.round(b), 0)}`;
+  if (years?.exact && formatDay) return datedWindowLabel(a, b, years, formatDay);
   const midLength = years?.exact ? years.yearLength(midYear) : yearLength;
   if (widthYears * midLength <= 8) return `day ${Math.round((mid - midYear) * midLength)} · ${tabular(midYear, 0)}`;
   const startLength = years?.exact ? years.yearLength(Math.floor(a)) : yearLength;

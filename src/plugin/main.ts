@@ -8,7 +8,7 @@ import { ApiController, type WadjetAPI } from "./api";
 import { Calendars } from "./calendars";
 import { calendarOfDefinition } from "../studio/model/definition";
 import type { StudioSettingsLike } from "../studio/model/state";
-import { parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
+import { blockRepaintOn, parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
 import { SaveQueue, setAndSave } from "./persist";
@@ -251,9 +251,10 @@ export default class WadjetPlugin extends Plugin {
     const spec = parseCodeblock(src);
     if (spec.errors.length) return renderError(el, spec.errors.join("; "));
     const shown = this.renderBlock(spec, el, ctx.sourcePath);
-    // Re-render when the answer can change under the block: a zone from the
-    // note's frontmatter, or interpreters registered after the note rendered.
-    if (spec.zone === undefined || spec.interpret) ctx.addChild(new BlockWatcher(el, this, spec, ctx.sourcePath, shown));
+    // Re-render when the answer can change under the block: the current day or the calendar (every
+    // block: its day and its date label move with them, bead wadjet-6tu), a weather edit to its zone,
+    // a zone from the note's frontmatter, or interpreters registered after the note rendered.
+    ctx.addChild(new BlockWatcher(el, this, spec, ctx.sourcePath, shown));
   }
 
   /** Which zone a block without `zone:` shows right now. */
@@ -409,6 +410,15 @@ class BlockWatcher extends MarkdownRenderChild {
 
   override onload(): void {
     this.shownExisted = this.zoneExists(this.shown);
+    if (!this.plugin.controller.unloaded) {
+      this.register(this.plugin.api.on("time-changed", () => this.rerender()));
+      this.register(this.plugin.api.on("adapters-changed", () => this.rerender()));
+      this.register(
+        this.plugin.api.on("profiles-changed", (p) => {
+          if (blockRepaintOn("profiles-changed", p, this.shown)) this.rerender();
+        }),
+      );
+    }
     if (this.spec.zone === undefined) {
       this.registerEvent(
         this.plugin.app.metadataCache.on("changed", (file) => {

@@ -13,7 +13,7 @@ import { describe, expect, test } from "bun:test";
 import { GREGORIAN, HEBREW, print } from "../src/seshat";
 import { SeshatCalendar } from "../src/plugin/time/seshat";
 import { dayLabel, windowLabel } from "../src/studio/model/format";
-import { constantYears, engineYears } from "../src/studio/model/years";
+import { constantYears, engineYears, openingWindow } from "../src/studio/model/years";
 import { ticks, type Window } from "../src/studio/model/zoom";
 
 const fmt = (L: number) => ({ year: (y: number) => String(y), day: (y: number, i: number) => `${y}:${i}:${dayLabel(i, L)}` });
@@ -144,5 +144,51 @@ describe("the header readout on exact years", () => {
   test("the day under the centre counts in the centre year's own length", () => {
     const feb29 = years.fractionalYear(years.yearStart(2024) + 59.5);
     expect(windowLabel(feb29 - 2 / 366, feb29 + 2 / 366, 365, years)).toBe("day 60 · 2024");
+  });
+});
+
+describe("the readout writes the calendar's own dates on exact years (bead wadjet-qfk)", () => {
+  const cal = new SeshatCalendar(print(GREGORIAN), () => 0);
+  const years = engineYears(cal)!;
+  const fmt = (d: number) => cal.format(d);
+
+  test("a whole year, two years, and the day view", () => {
+    expect(windowLabel(2024, 2025, 365, years, fmt)).toBe("2024-01-01 – 2024-12-31");
+    // the Guildmaster's live-check window: was "d0 – d722 · 2024"; 2025.97 lies inside day 354 of 2025
+    // (21 December, starting at 354/365 = 0.9699), which is on screen, so it is the last day shown
+    expect(windowLabel(2024, 2025.97, 365, years, fmt)).toBe("2024-01-01 – 2025-12-21");
+    const feb27 = years.fractionalYear(years.yearStart(2024) + 57.5);
+    expect(windowLabel(feb27 - 1 / 366, feb27 + 1 / 366, 365, years, fmt)).toBe("2024-02-27");
+  });
+
+  test("a window that ends exactly on a day edge does not show that day; wide windows keep bare years", () => {
+    const s = years.yearStart(2024);
+    expect(windowLabel(years.fractionalYear(s), years.fractionalYear(s + 31), 365, years, fmt)).toBe("2024-01-01 – 2024-01-31");
+    expect(windowLabel(2020, 2030, 365, years, fmt)).toBe("2020 – 2030");
+  });
+
+  test("the constant seam ignores the formatter: a legacy readout is unchanged", () => {
+    const seam = constantYears(365, 1);
+    for (const [a, b] of [[1, 2], [1.5, 1.51], [2, 4]] as const) expect(windowLabel(a, b, 365, seam, () => "SHOULD NOT APPEAR")).toBe(windowLabel(a, b, 365));
+  });
+});
+
+describe("a fresh Studio opens on the year that holds today (bead wadjet-xou)", () => {
+  test("a legacy world opens on today's year, not the year before day 0", () => {
+    expect(openingWindow(constantYears(365, 1), 3, { a: 0, b: 1 })).toEqual({ a: 1, b: 2 });
+    expect(openingWindow(constantYears(365, 1), 800, { a: 0, b: 1 })).toEqual({ a: 3, b: 4 });
+  });
+
+  test("a definition world opens on its own year (the live check opened in 1924)", () => {
+    const cal = new SeshatCalendar(print(GREGORIAN), () => 0);
+    const years = engineYears(cal)!;
+    const today = years.yearStart(2024) + 57;
+    expect(openingWindow(years, today, { a: 0, b: 1 })).toEqual({ a: 2024, b: 2025 });
+  });
+
+  test("no calendar or no current day keeps the fixed window", () => {
+    expect(openingWindow(null, 3, { a: 0, b: 1 })).toEqual({ a: 0, b: 1 });
+    expect(openingWindow(constantYears(365, 1), null, { a: 0, b: 1 })).toEqual({ a: 0, b: 1 });
+    expect(openingWindow(constantYears(365, 1), undefined, { a: 0, b: 1 })).toEqual({ a: 0, b: 1 });
   });
 });

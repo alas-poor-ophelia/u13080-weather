@@ -313,3 +313,15 @@ export function yearsFor(adapter: TimeAdapter | undefined, description: Calendar
   }
   return seam ?? constantYearsFor(description, settingsEpochYear);
 }
+
+/**
+ * The window a freshly opened Studio shows (bead wadjet-xou): the whole year
+ * that holds the current day. Without a calendar or a current day, the fixed
+ * window the Studio has always opened on. A Studio restored from the
+ * workspace layout keeps its own saved window instead (view.ts setState).
+ */
+export function openingWindow(years: YearSeam | null, today: number | null | undefined, fallback: { a: number; b: number }): { a: number; b: number } {
+  if (years === null || today === null || today === undefined || !Number.isFinite(today)) return { ...fallback };
+  const year = years.yearOf(today).year;
+  return { a: year, b: year + 1 };
+}

@@ -117,3 +117,24 @@ export function resolveDate(date: string, today: number | null, parse?: (s: stri
   const parsed = parse?.(d) ?? null;
   return parsed === null ? { day: null, error: `cannot parse date "${d}"` } : { day: parsed };
 }
+
+/**
+ * Whether a rendered block must repaint on a world event (bead wadjet-6tu).
+ * A block shows a day's weather and that day's date as the calendar writes
+ * it, so it is stale when:
+ *  - the current day moves or the calendar changes (`time-changed`): `today`
+ *    is another day, or the same day number now reads as another date;
+ *  - the active calendar or its description changes (`adapters-changed`):
+ *    the date label is written by another calendar;
+ *  - a save changes the weather of the zone it shows (`profiles-changed`
+ *    with `all`, or naming that zone).
+ * `shownZone` is the zone the block rendered (undefined after an error that
+ * came before a zone was picked: repaint on any profile change, as a fix in
+ * settings may be what it waits for).
+ */
+export function blockRepaintOn(event: "time-changed" | "adapters-changed" | "profiles-changed", payload: { all?: boolean; zoneIds?: readonly string[] } | undefined, shownZone: string | undefined): boolean {
+  if (event === "time-changed" || event === "adapters-changed") return true;
+  if (payload?.all === true) return true;
+  if (shownZone === undefined) return true;
+  return payload?.zoneIds?.includes(shownZone) === true;
+}

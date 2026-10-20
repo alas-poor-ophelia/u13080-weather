@@ -25,7 +25,7 @@
  */
 import { ItemView, Notice, Scope, type IconName, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { canonicalJson } from "../../core/profile";
-import { yearsFor } from "../model/years";
+import { openingWindow, yearsFor } from "../model/years";
 import type { ZoneProfile } from "../../core/types";
 import type WadjetPlugin from "../../plugin/main";
 import { applyStash, takeStash } from "../model/stash";
@@ -157,6 +157,8 @@ export class StudioView extends ItemView {
     const win: Window = typeof activeWindow === "undefined" ? window : activeWindow;
     const start = plugin.settings.zones[0]?.id ?? null;
     let state = initialState(plugin.studioSettings(), start);
+    // open on the year that holds today, not on a fixed window the world's bounds then clamp (bead wadjet-xou)
+    state.view.window = openingWindow(yearsFor(plugin.time.active, plugin.api.calendar(), plugin.settings.calendar), plugin.world.now()?.dayOrdinal, state.view.window);
     // A leaf closed dirty earlier this session (`onClose` below): reapply the
     // stashed drafts over the fresh copy before anything renders, then clear
     // it — a stash is consumed once, never reused across two reopens.
