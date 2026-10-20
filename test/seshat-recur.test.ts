@@ -16,6 +16,7 @@
  * express as setpos); a DTSTART inside its period (recur counts from the
  * period's first day); BYHOUR and finer.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { RRule, type Options } from "rrule";
 import { BALINESE, checkRule, COUNT_WORK_MAX, Engine, GREGORIAN, HEBREW, MAYA, validate, type CalendarAst, type RuleAst } from "../src/seshat";
@@ -221,14 +222,14 @@ describe("named rules (VRULE) and binding", () => {
     const readers: string[] = [];
     for await (const f of glob.scan(".")) {
       if (f.replaceAll("\\", "/").startsWith("src/seshat/")) continue;
-      if ((await Bun.file(f).text()).includes("tagsAt(")) readers.push(f.replaceAll("\\", "/"));
+      if (readFileSync(f, "utf8").includes("tagsAt(")) readers.push(f.replaceAll("\\", "/"));
     }
     expect(readers).toEqual(["src/plugin/time/seshat.ts"]);
   });
 
   test("rrule is a test oracle only: nothing under src imports it", async () => {
     const importers: string[] = [];
-    for await (const f of new Bun.Glob("src/**/*.ts").scan(".")) if (/from\s+["']rrule["']/.test(await Bun.file(f).text())) importers.push(f);
+    for await (const f of new Bun.Glob("src/**/*.ts").scan(".")) if (/from\s+["']rrule["']/.test(readFileSync(f, "utf8"))) importers.push(f);
     expect(importers).toEqual([]);
   });
 });

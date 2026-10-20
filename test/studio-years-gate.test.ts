@@ -13,6 +13,7 @@
  * is usually next to code that reads it), not counting a call of the seam's
  * own `yearLength(year)`.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 
 const ALLOWED: Record<string, number> = {
@@ -52,10 +53,12 @@ const PATTERN = /\byearLength\b(?!\s*\()|\bepochYear\b|\bDEFAULT_YEAR_LENGTH\b/;
 describe("the year seam's ratchet", () => {
   test("no Studio file reads a year length or epoch more often than allowed, and the list is exact", async () => {
     const counts: Record<string, number> = {};
-    for await (const f of new Bun.Glob("src/studio/**/*.ts").scan(".")) {
-      const path = f.replaceAll("\\", "/");
+    // rooted at src/studio: scanning from "." walks node_modules first (seconds on this box, past bun's 5 s timeout)
+    for await (const rel of new Bun.Glob("**/*.ts").scan("src/studio")) {
+      const path = `src/studio/${rel.replaceAll("\\", "/")}`;
       if (path === "src/studio/model/years.ts") continue;
-      const n = (await Bun.file(f).text()).split("\n").filter((l) => PATTERN.test(l)).length;
+      // readFileSync: Bun.file().text() measured about 50 ms a file on this box under load, readFileSync about 1 ms
+      const n = readFileSync(path, "utf8").split(/\r?\n/).filter((l) => PATTERN.test(l)).length;
       if (n > 0) counts[path] = n;
     }
     // exact: a rise is a new direct read; a drop must be written down so the ratchet tightens

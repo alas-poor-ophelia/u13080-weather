@@ -30,6 +30,7 @@
  *
  * Pure: no DOM, no Obsidian, no roll (PLAN D3).
  */
+import { seamOf } from "./years";
 import { wrap } from "../../seshat/phase";
 import { ERA_TAG_PREFIX } from "../../core/eras";
 import { canonicalJson } from "../../core/profile";
@@ -269,9 +270,13 @@ export function dragToWhen(m: Modifier, span: Span, newFrom: number, newTo: numb
   }
 
   if ("dayOfYear" in w) {
-    const len = cal.yearLength;
-    const lo = clampDay(Math.round((newFrom - year) * len), len);
-    const hi = clampDay(Math.round((newTo - year) * len) - 1, len);
+    // the day indices of the span's own year, clamped to that year (ruled 2026-10-19, Q2): a drag in a
+    // 366-day year may write day 365, the same drag in a 365-day year stops at 364. The constant seam's
+    // dayIndexAt is round((x - year) · L) and its length L, as this has always been (§14.8 C5).
+    const seam = seamOf(cal);
+    const len = seam.exact ? seam.yearLength(year) : cal.yearLength;
+    const lo = clampDay(seam.dayIndexAt(year, newFrom), len);
+    const hi = clampDay(seam.dayIndexAt(year, newTo) - 1, len);
     if (hi < lo) return null;
     return { ...m, when: { dayOfYear: [lo, hi] } };
   }

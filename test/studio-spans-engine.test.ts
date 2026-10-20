@@ -24,6 +24,7 @@ import type { Predicate } from "../src/core/types";
 import { InternalCalendar } from "../src/plugin/time/internal";
 import { evaluate, TimeView } from "../src/seshat/rule";
 import { fractionalYear, spansFor, type SpanCalendar } from "../src/studio/model/spans";
+import { dragToWhen } from "../src/studio/model/device-lanes";
 import { SeshatCalendar } from "../src/plugin/time/seshat";
 import { engineYears } from "../src/studio/model/years";
 import { GREGORIAN, HEBREW, print, ROMAN, type CalendarAst } from "../src/seshat";
@@ -150,5 +151,38 @@ describe("Studio spans agree with the engine on worlds that run a definition (ex
     expect(Object.is(s2024.to, years.fractionalYear(feb29 + 1))).toBe(true);
     // 2025 has no day 365: the [365, 365] lane draws 2024 only
     expect(spansFor({ dayOfYear: [365, 365] }, undefined, scal, { window }).map((x) => x.id)).toEqual(["doy:2024"]);
+  });
+});
+
+describe("a dayOfYear drag on exact years writes what the engine then matches (Seshat P3b step 4)", () => {
+  const cal = new SeshatCalendar(print(GREGORIAN), () => 0);
+  const years = engineYears(cal)!;
+  const d = cal.describe();
+  const scal: SpanCalendar = { yearLength: d.yearLength, epochYear: d.epochYear!, seasons: [], moons: [], eras: [], years };
+  const mod = (when: Predicate) => ({ id: "m", when, apply: [], tag: "m" }) as unknown as Parameters<typeof dragToWhen>[0];
+  const span = (year: number) => ({ id: `doy:${year}`, from: year, to: year + 0.1, kind: "clip" as const, editable: true });
+
+  test("dropping a span where it is drawn writes back the same bounds, in a leap year and a common one", () => {
+    for (const [year, range] of [
+      [2024, [59, 59]],
+      [2023, [59, 59]],
+      [2024, [300, 365]],
+      [2025, [0, 0]],
+    ] as const) {
+      const drawn = spansFor({ dayOfYear: [...range] }, undefined, scal, { window: { a: year - 0.5, b: year + 1.5 } }).find((s) => s.id === `doy:${year}`)!;
+      const next = dragToWhen(mod({ dayOfYear: [0, 1] }), span(year), drawn.from, drawn.to, scal);
+      expect([year, next?.when]).toEqual([year, { dayOfYear: [...range] }]);
+    }
+  });
+
+  test("a drag to the year's end clamps to that year's own last day: 365 in 2024, 364 in 2025", () => {
+    const leap = dragToWhen(mod({ dayOfYear: [0, 1] }), span(2024), 2024 + 300 / 366, 2024 + 1.2, scal);
+    const common = dragToWhen(mod({ dayOfYear: [0, 1] }), span(2025), 2025 + 300 / 365, 2025 + 1.2, scal);
+    expect(leap?.when).toEqual({ dayOfYear: [300, 365] });
+    expect(common?.when).toEqual({ dayOfYear: [300, 364] });
+    // and the engine matches exactly those days: the written bounds are in the year's own count
+    const lastOf2024 = years.yearStart(2025) - 1;
+    expect(cal.format(lastOf2024)).toBe("2024-12-31");
+    expect(cal.toContext(lastOf2024).dayOfYear).toBe(365);
   });
 });

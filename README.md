@@ -351,13 +351,17 @@ years and named holidays that modifiers can match as tags. Bring the world's sea
 along, and keep day numbers or anchor today to a date. A world on a definition needs this version
 of the plugin or later; an older one would quietly run it on the internal calendar again. It is a
 calendar, not an almanac: it does not compute real sunrise, solstices or moon phases for Earth, and
-a definition's moons are the ones you give it.
+a definition's moons are the ones you give it. The Studio measures such a world's years exactly: a
+leap year has its 366 days on the ruler, in its lanes and in the header readout, and a lane that
+names day 365 shows it only in the years that have one.
 
 **Third-party calendars.** Seasons and moons come from whichever calendar is active. If a calendar
 plugin describes its own (see the [`CalendarDescription`](docs/API.md#calendardescription)
 contract), the Seasons and cycle windows mirror it read-only — the badge reads
 `<plugin> · read-only` and points you back at that plugin to edit it. The internal calendar stays
-editable in place.
+editable in place. When a calendar plugin gives every day its year number, the Studio places its
+years exactly too, however their lengths vary; otherwise it draws a year of the length the plugin
+describes.
 
 The ids the studio writes into `modifiers[]` (`layer:*`, `forcings:*`) and its `frc.warmth`
 automation lane are documented in [docs/API.md](docs/API.md#7c-the-climate-studio). A hand-written

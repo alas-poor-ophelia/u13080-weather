@@ -18,6 +18,12 @@ Release notes are taken from the matching `## <version>` section by the release 
   the full text is edited in settings. A definition that stops working (a hand edit to
   `data.json`) is kept as it is, and the world makes no weather until it is fixed, rather than
   silently switching calendars.
+- **The Studio measures years exactly on worlds that run a calendar definition** (and for calendar
+  plugins whose days carry year numbers). The ruler counts each year's own days, so a leap year's
+  29 February has its tick and its label; lanes, the day card, the playlist and the regimes row
+  place every day where the calendar puts it; a day-of-year lane is drawn only in years that reach
+  its days, and dragging one writes that year's own day numbers. Worlds on the internal calendar
+  are drawn exactly as before.
 - **A world on a calendar definition needs this version or later.** An older version does not
   know definitions and would run such a world on its internal calendar settings again, without
   saying so.
