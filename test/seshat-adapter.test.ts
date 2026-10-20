@@ -173,11 +173,11 @@ describe("hash, describe, format, parse, setNow", () => {
     expect(h({ ...ast, seasons: { unit: "year", marks: FOUR.slice(1) } })).not.toBe(h(ast));
   });
 
-  test("describe gives the Studio the legacy shape, read-only for now", () => {
+  test("describe gives the Studio the legacy shape, editable", () => {
     const d = new SeshatCalendar(text, () => 0).describe();
     const l = new InternalCalendar(cfg, () => 0).describe();
-    expect(d.readOnly).toBe(true); // until the Studio edits definitions (P3a step 4)
-    expect(d.editHint).toBe("the calendar definition in settings");
+    expect(d.readOnly).toBe(false);
+    expect(d.editHint).toBeUndefined();
     expect(d.yearLength).toBe(l.yearLength);
     expect(d.epochYear).toBe(l.epochYear);
     expect(d.seasons).toEqual(l.seasons);

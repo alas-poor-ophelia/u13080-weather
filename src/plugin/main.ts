@@ -6,6 +6,8 @@ import type { WeatherReport } from "../core/report";
 import { GENERATOR_VERSION } from "../core/version";
 import { ApiController, type WadjetAPI } from "./api";
 import { Calendars } from "./calendars";
+import { calendarOfDefinition } from "../studio/model/definition";
+import type { StudioSettingsLike } from "../studio/model/state";
 import { parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
@@ -203,6 +205,18 @@ export default class WadjetPlugin extends Plugin {
   /** The settings tab's "Calendar source" choice. Fires time-changed and adapters-changed when the effective calendar changes. */
   setActiveTimeAdapter(id: string): Promise<void> {
     return this.calendars.setActive(id);
+  }
+
+  /**
+   * What the Studio opens on: the settings, with the calendar a Seshat world runs (its definition's
+   * seasons and moons) in place of the legacy fields it never edits there.
+   */
+  studioSettings(): StudioSettingsLike {
+    const seshat = this.calendars.seshat;
+    if (!seshat || this.time.active !== seshat) return { ...this.settings, calendarSource: "legacy" };
+    const ast = seshat.definition();
+    // a definition that cannot run has no calendar to edit; the legacy fields are shown, never saved (source "fault")
+    return ast ? { ...this.settings, calendar: calendarOfDefinition(ast), calendarSource: "seshat" } : { ...this.settings, calendarSource: "fault" };
   }
 
   /**

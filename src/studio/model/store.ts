@@ -195,6 +195,7 @@ export function createStore(initial: StudioState, schedule: (flush: () => void) 
 
     markSaved() {
       state.saved = structuredClone({ zones: state.zones, world: state.world });
+      state.calendarBase = structuredClone(state.world.calendar);
       notify();
     },
 

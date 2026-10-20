@@ -14,13 +14,17 @@
  * unit-tested without a leaf, a store scheduler or a plugin instance.
  */
 import type { ZoneProfile } from "../../core/types";
-import type { StudioState, WorldDraft } from "./state";
+import { canonicalJson } from "../../core/profile";
+import type { CalendarSource, StudioState, WorldDraft } from "./state";
 import type { Store } from "./store";
 
 /** What survives a leaf close: dirty zone drafts, and the world draft iff it is dirty. */
 export interface StudioStash {
   zones: Record<string, ZoneProfile>;
   world?: WorldDraft;
+  /** the calendar the stashed world draft was seeded from, and its source: they travel with the draft */
+  calendarBase?: WorldDraft["calendar"];
+  calendarSource?: CalendarSource;
 }
 
 /**
@@ -40,7 +44,11 @@ export function takeStash(state: StudioState, store: Pick<Store, "dirtyZones" | 
     if (draft !== undefined) zones[id] = structuredClone(draft);
   }
   const stash: StudioStash = { zones };
-  if (worldDirty) stash.world = structuredClone(state.world);
+  if (worldDirty) {
+    stash.world = structuredClone(state.world);
+    if (state.calendarBase) stash.calendarBase = structuredClone(state.calendarBase);
+    stash.calendarSource = state.calendarSource ?? "legacy";
+  }
   return stash;
 }
 
@@ -66,6 +74,12 @@ export function applyStash(state: StudioState, stash: StudioStash): StudioState 
     if (!(id in zones)) continue;
     zones[id] = structuredClone(draft);
   }
-  const world = stash.world === undefined ? state.world : structuredClone(stash.world);
-  return { ...state, zones, world };
+  if (stash.world === undefined) return { ...state, zones };
+  const world = structuredClone(stash.world);
+  // The calendar source changed while the studio was closed: an untouched stashed calendar takes the current one;
+  // an edited one stays, with its own base and source, and Save refuses it rather than write it into the wrong calendar.
+  const movedSource = (stash.calendarSource ?? "legacy") !== (state.calendarSource ?? "legacy");
+  const untouched = stash.calendarBase !== undefined && canonicalJson(stash.world.calendar) === canonicalJson(stash.calendarBase);
+  if (movedSource && untouched) return { ...state, zones, world: { ...world, calendar: structuredClone(state.world.calendar) } };
+  return { ...state, zones, world, ...(stash.calendarBase ? { calendarBase: structuredClone(stash.calendarBase) } : {}), calendarSource: stash.calendarSource ?? "legacy" };
 }

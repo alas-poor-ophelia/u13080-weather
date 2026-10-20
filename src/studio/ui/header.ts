@@ -41,6 +41,9 @@ import { windowLabel } from "../model/format";
 import { flipHint, flipState, straddlesEquator } from "../model/hemisphere";
 import { hintAttr } from "../model/hints";
 import { zoneForSave } from "../model/json-view";
+import { calendarOfDefinition, planCalendarSave } from "../model/definition";
+import { parse as parseDefinition } from "../../seshat";
+import { confirmRewrite } from "./rewrite-confirm-modal";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
 import { panBy, presetWindow, width, worldBounds, zoomAt, zoomLabel, type Window, type ZoomBounds, type ZoomPreset } from "../model/zoom";
@@ -330,7 +333,6 @@ export function createHeaderSurface(): Surface {
     // button and a second click can still race the frame that disables it.
     if (c === null || saving) return;
     const state = c.store.get();
-    const settings = c.plugin.settings;
     const dirtyIds = c.store.dirtyZones();
     const worldWasDirty = c.store.worldDirty();
     const dirtyNames = [...dirtyIds].map((id) => state.zones[id]?.name ?? id);
@@ -340,38 +342,79 @@ export function createHeaderSurface(): Surface {
     saving = true;
     paint(c.store.get());
     try {
-      for (const id of dirtyIds) {
-        const draft = state.zones[id];
-        if (draft === undefined) continue;
-        const at = settings.zones.findIndex((z) => z.id === id);
-        const existing = settings.zones[at];
-        if (existing === undefined) continue;
-        // `zoneForSave` is the drawer's own "as it would be saved" clone
-        // (`model/json-view.ts`), so a zone that arrived out of order through
-        // the JSON escape hatch is written in the order the drawer showed.
-        settings.zones[at] = { ...zoneForSave(draft), id: existing.id };
-      }
-      settings.eras = structuredClone(state.world.eras);
-      settings.calendar.seasons = structuredClone(state.world.calendar.seasons);
-      settings.calendar.moons = structuredClone(state.world.calendar.moons);
-      settings.devicePresets = structuredClone(state.world.devicePresets);
-      settings.regimePresets = structuredClone(state.world.regimePresets);
-      settings.overrides = structuredClone(state.world.overrides);
-      await c.plugin.saveAndRebuild();
+      await save(c, state, dirtyIds, worldWasDirty, dirtyNames);
     } catch (e) {
       // The drafts are exactly as dirty as they were, so the button goes back
       // to `Save ●` rather than sitting on `Saving…` forever.
+      new Notice(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
       saving = false;
       paint(c.store.get());
-      new Notice(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** The save itself; `commit` owns the busy flag, so every way out of here (a refusal, a throw) ends it. */
+  async function save(c: SurfaceContext, state: StudioState, dirtyIds: ReadonlySet<string>, worldWasDirty: boolean, dirtyNames: string[]): Promise<void> {
+    const settings = c.plugin.settings;
+    // The calendar goes where the draft's calendar came from, or nowhere: a definition's edits merge into the
+    // stored text, the internal calendar's into its fields, and a draft from another source is refused.
+    const current = c.plugin.studioSettings();
+    const source = current.calendarSource ?? "legacy";
+    const stored = settings.calendar.definition;
+    const plan = planCalendarSave({ source, calendar: current.calendar }, stored, { calendar: state.world.calendar, base: state.calendarBase ?? state.saved.world.calendar, source: state.calendarSource ?? "legacy" });
+    const reseed = (calendar: StudioState["world"]["calendar"], history: boolean) =>
+      c.store.update(
+        (s) => {
+          s.world.calendar = structuredClone(calendar);
+          s.calendarBase = structuredClone(calendar);
+          s.calendarSource = source;
+        },
+        { history },
+      );
+    if (plan.kind === "refuse") {
+      if (plan.reseed) reseed(plan.reseed, true); // undo brings the edits back
+      new Notice(`Not saved: ${plan.message}`);
       return;
     }
-    // `markSaved` first, so the repaint below lands on `Saved ✓` directly
+    if (plan.kind === "definition" && plan.rewrites) {
+      if (!(await confirmRewrite(c.plugin.app))) return;
+      // the question can stay open a while: an edit in settings meanwhile is not overwritten
+      if (settings.calendar.definition !== stored) {
+        new Notice("Not saved: the calendar definition changed while the question was open. Save again to merge into it.");
+        return;
+      }
+    }
+    for (const id of dirtyIds) {
+      const draft = state.zones[id];
+      if (draft === undefined) continue;
+      const at = settings.zones.findIndex((z) => z.id === id);
+      const existing = settings.zones[at];
+      if (existing === undefined) continue;
+      // `zoneForSave` is the drawer's own "as it would be saved" clone
+      // (`model/json-view.ts`), so a zone that arrived out of order through
+      // the JSON escape hatch is written in the order the drawer showed.
+      settings.zones[at] = { ...zoneForSave(draft), id: existing.id };
+    }
+    settings.eras = structuredClone(state.world.eras);
+    if (plan.kind === "legacy") {
+      settings.calendar.seasons = structuredClone(state.world.calendar.seasons);
+      settings.calendar.moons = structuredClone(state.world.calendar.moons);
+    }
+    settings.devicePresets = structuredClone(state.world.devicePresets);
+    settings.regimePresets = structuredClone(state.world.regimePresets);
+    settings.overrides = structuredClone(state.world.overrides);
+    // saveDefinition saves every field above with it, then swaps the running calendar only once the write landed
+    if (plan.kind === "definition") await c.plugin.calendars.saveDefinition(plan.text);
+    else await c.plugin.saveAndRebuild();
+    // On a Seshat world the draft takes the stored calendar's own numbers (a new moon's cycle as its exact
+    // rational reads back), so the next save compares against exactly what is on disk; a draft from another
+    // source takes the calendar the world runs now.
+    if (plan.kind === "definition") reseed(calendarOfDefinition(parseDefinition(plan.text)), false);
+    else if (plan.kind === "none" && plan.reseed) reseed(plan.reseed, false);
+    // `markSaved` first, so the repaint lands on `Saved ✓` directly
     // instead of flashing `Save ●` on its way there.
     c.store.markSaved();
-    saving = false;
     c.plugin.refreshSettingsTab();
-    paint(c.store.get());
     new Notice(saveSummary(dirtyNames, worldWasDirty));
   }
 

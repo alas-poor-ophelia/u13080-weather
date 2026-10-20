@@ -24,6 +24,7 @@
  * surface is one import and one line in `SURFACES`.
  */
 import { ItemView, Notice, Scope, type IconName, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { canonicalJson } from "../../core/profile";
 import type { ZoneProfile } from "../../core/types";
 import type WadjetPlugin from "../../plugin/main";
 import { applyStash, takeStash } from "../model/stash";
@@ -154,7 +155,7 @@ export class StudioView extends ItemView {
     // second Electron window); plain `window` under a test harness.
     const win: Window = typeof activeWindow === "undefined" ? window : activeWindow;
     const start = plugin.settings.zones[0]?.id ?? null;
-    let state = initialState(plugin.settings, start);
+    let state = initialState(plugin.studioSettings(), start);
     // A leaf closed dirty earlier this session (`onClose` below): reapply the
     // stashed drafts over the fresh copy before anything renders, then clear
     // it — a stash is consumed once, never reused across two reopens.
@@ -305,9 +306,13 @@ export class StudioView extends ItemView {
 
     this.unsubscribeStore = this.store.subscribe(() => this.render());
     // An edit outside the studio (settings, a pin, a command) rebuilds the world.
-    // Switching the calendar source fires adapters-changed (not profiles-changed); the studio reads the active calendar on render.
+    // Switching the calendar source fires adapters-changed (not profiles-changed); the studio reads the active calendar on render,
+    // and a clean world draft reseeds, since the calendar it edits (the internal one or a definition) may have changed with it.
     const offProfiles = this.plugin.api.on("profiles-changed", () => this.refreshFromSettings());
-    const offAdapters = this.plugin.api.on("adapters-changed", () => this.render());
+    const offAdapters = this.plugin.api.on("adapters-changed", () => {
+      this.refreshFromSettings();
+      this.render();
+    });
     this.unsubscribeSettings = () => {
       offProfiles();
       offAdapters();
@@ -379,12 +384,24 @@ export class StudioView extends ItemView {
   refreshFromSettings(): void {
     const dirty = this.store.dirtyZones();
     const worldDirty = this.store.worldDirty();
-    const fresh = initialState(this.plugin.settings, this.store.get().view.zoneId);
+    const fresh = initialState(this.plugin.studioSettings(), this.store.get().view.zoneId);
     this.store.update((s) => {
+      // the calendar source moved (a switch to or from a definition) under a dirty world draft whose calendar
+      // is untouched: that calendar takes the new source's, so the draft never carries one calendar into another
+      const untouched = canonicalJson(s.world.calendar) === canonicalJson(s.calendarBase ?? s.saved.world.calendar);
+      if (worldDirty && untouched && (s.calendarSource ?? "legacy") !== fresh.calendarSource) {
+        s.world.calendar = structuredClone(fresh.world.calendar);
+        s.calendarBase = structuredClone(fresh.world.calendar);
+        s.calendarSource = fresh.calendarSource ?? "legacy";
+      }
       s.saved = fresh.saved;
       for (const id of Object.keys(s.zones)) if (!dirty.has(id) && !(id in fresh.zones)) delete s.zones[id];
       for (const [id, zone] of Object.entries(fresh.zones)) if (!dirty.has(id)) s.zones[id] = zone;
-      if (!worldDirty) s.world = fresh.world;
+      if (!worldDirty) {
+        s.world = fresh.world;
+        s.calendarBase = structuredClone(fresh.world.calendar);
+        s.calendarSource = fresh.calendarSource ?? "legacy";
+      }
       if (s.view.zoneId !== null && !(s.view.zoneId in s.zones)) s.view.zoneId = null;
     });
   }

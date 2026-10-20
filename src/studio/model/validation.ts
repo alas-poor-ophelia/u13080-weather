@@ -164,11 +164,63 @@ export function studioRules(input: StudioIssuesInput): StudioIssue[] {
   return issues;
 }
 
-/** `validateProfile` (which also runs `validateAutomation`) + `validateEras` + `studioRules`, mapped to units/windows, errors first then warnings, otherwise stable (input order). */
+/**
+ * A zone literal that looks like a calendar name but is spelled with other
+ * Unicode code points: equal to it only after NFC normalization (an accented
+ * letter typed as a letter plus a combining mark). Matching compares strings
+ * exactly, so such a literal never matches, though it reads the same. Stored
+ * zones are never rewritten (docs/SESHAT-v0.md §13.11, ruled 2026-10-19); the
+ * warning names the spelling to use. Covered: season, era and moon names in
+ * `tag` and `moon` predicates and in gate sources.
+ */
+export function nfcIssues(input: StudioIssuesInput): StudioIssue[] {
+  const names = new Map<string, string>(); // NFC form -> the calendar's own spelling
+  const add = (n: string) => {
+    if (n) names.set(n.normalize("NFC"), n);
+  };
+  for (const s of input.seasons) add(`season:${s.name}`);
+  for (const e of input.eras) add(`era:${e.name}`);
+  for (const m of input.moons) {
+    add(m.name);
+    add(`moon:${m.name}`);
+  }
+  const out: StudioIssue[] = [];
+  const check = (literal: string, path: string) => {
+    const want = names.get(literal.normalize("NFC"));
+    if (want === undefined || want === literal) return;
+    const issue = { level: "warning" as const, path, message: `"${literal}" reads like the calendar's "${want}" but is spelled with different Unicode characters, so it never matches. Retype it as the calendar writes it.` };
+    out.push(mapIssue(issue, input.zone, input.eras));
+  };
+  // the draft can be anything the JSON drawer accepted (validateProfile reports the shape errors): read it defensively
+  const walk = (p: unknown, path: string): void => {
+    if (!p || typeof p !== "object") return;
+    const q = p as { all?: unknown; any?: unknown; not?: unknown; tag?: unknown; moon?: { name?: unknown } | null };
+    if (Array.isArray(q.all)) q.all.forEach((x, i) => walk(x, `${path}.all[${i}]`));
+    if (Array.isArray(q.any)) q.any.forEach((x, i) => walk(x, `${path}.any[${i}]`));
+    if ("not" in q) walk(q.not, `${path}.not`);
+    if (typeof q.tag === "string") check(q.tag, `${path}.tag`);
+    if (q.moon && typeof q.moon === "object" && typeof q.moon.name === "string") check(q.moon.name, `${path}.moon.name`);
+  };
+  const modifiers: unknown = input.zone.modifiers;
+  if (!Array.isArray(modifiers)) return out;
+  modifiers.forEach((m: unknown, i) => {
+    if (!m || typeof m !== "object") return;
+    const mod = m as { when?: unknown; mods?: unknown };
+    walk(mod.when, `modifiers[${i}].when`);
+    if (Array.isArray(mod.mods))
+      mod.mods.forEach((g: unknown, j) => {
+        const source = g && typeof g === "object" ? (g as { source?: unknown }).source : undefined;
+        if (typeof source === "string") check(source, `modifiers[${i}].mods[${j}].source`);
+      });
+  });
+  return out;
+}
+
+/** `validateProfile` (which also runs `validateAutomation`) + `validateEras` + `studioRules` + `nfcIssues`, mapped to units/windows, errors first then warnings, otherwise stable (input order). */
 export function issuesFor(input: StudioIssuesInput): StudioIssue[] {
   const profileIssues = validateProfile(input.zone).map((i) => mapIssue(i, input.zone, input.eras));
   const eraIssues = validateEras(input.eras).map((i) => mapIssue(i, input.zone, input.eras));
-  const all = [...profileIssues, ...eraIssues, ...studioRules(input)];
+  const all = [...profileIssues, ...eraIssues, ...studioRules(input), ...nfcIssues(input)];
   const rank = (level: StudioIssue["level"]) => (level === "error" ? 0 : 1);
   // Array#sort is a stable sort (ES2019+): equal-rank issues keep their relative order.
   return all.sort((a, b) => rank(a.level) - rank(b.level));

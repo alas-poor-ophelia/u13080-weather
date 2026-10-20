@@ -253,9 +253,8 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     const year0 = e.occurrenceAt("year", 0)!;
     return {
       label: ast.name,
-      // the Studio edits the definition from step 4 of P3a; until then its seasons and moons are shown, not edited
-      readOnly: true,
-      editHint: "the calendar definition in settings",
+      // the Studio edits its seasons and moons, merged back into the definition (studio/model/definition.ts)
+      readOnly: false,
       // the year holding day 0 until the Studio reads each year's own length (P3b)
       yearLength: year0.length,
       epochYear: year0.index + (this.yearUnit()?.number ?? 0),

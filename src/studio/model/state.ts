@@ -55,13 +55,31 @@ export interface StudioState {
   saved: { zones: Record<string, ZoneProfile>; world: WorldDraft };
   world: WorldDraft;
   view: ViewState;
+  /**
+   * The calendar the world draft was seeded from or last saved as. Not part
+   * of undo or the dirty check: a Save on a Seshat world compares it with the
+   * stored definition to refuse overwriting an edit made outside the studio
+   * (docs/SESHAT-v0.md §13.11 B3). Absent in hand-built states: `saved` stands in.
+   */
+  calendarBase?: WorldDraft["calendar"];
+  /** where the world draft's calendar came from (absent: "legacy"); travels with `calendarBase` */
+  calendarSource?: CalendarSource;
 }
+
+/**
+ * Which calendar the world draft's `{ seasons, moons }` came from: the internal
+ * calendar's fields, a running Seshat definition, or a definition that cannot
+ * run (nothing to edit). A draft from one source is never saved into another.
+ */
+export type CalendarSource = "legacy" | "seshat" | "fault";
 
 /** The slice of `WadjetSettings` the studio opens on. `WadjetSettings` satisfies it. */
 export interface StudioSettingsLike {
   zones: ZoneProfile[];
   eras: Era[];
   calendar: { seasons: InternalCalendarConfig["seasons"]; moons: InternalCalendarConfig["moons"] };
+  /** absent: "legacy" */
+  calendarSource?: CalendarSource;
   devicePresets?: DevicePreset[];
   regimePresets?: RegimePreset[];
   overrides: Override[];
@@ -103,5 +121,5 @@ export function initialState(settingsLike: StudioSettingsLike, zoneId: string | 
     overrides: settingsLike.overrides,
   });
   const saved = structuredClone({ zones, world });
-  return { zones, saved, world, view: defaultView(zoneId !== null && zoneId in zones ? zoneId : null) };
+  return { zones, saved, world, view: defaultView(zoneId !== null && zoneId in zones ? zoneId : null), calendarBase: structuredClone(world.calendar), calendarSource: settingsLike.calendarSource ?? "legacy" };
 }
