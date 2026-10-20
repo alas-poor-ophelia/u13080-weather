@@ -139,7 +139,7 @@ function fuzzAst(seed: number): CalendarAst {
     name: text(),
     ...opt("formats", r.listOf(() => ({ name: text(), pattern: `${text()}{${id()}}${text()}` }))),
     ...opt("seasons", r.maybe(() => ({ unit: id(), marks: Array.from({ length: r.int(0, 3) }, () => ({ name: text(), from: float() })) }))),
-    ...opt("bodies", r.listOf(() => ({ id: id(), period: rat(), epoch: rat(), ...opt("moon", r.maybe(() => ({ name: text(), ...opt("phases", r.listOf(() => ({ name: text(), from: float() }))) }))) }))),
+    ...opt("bodies", r.listOf(() => ({ id: id(), period: rat(), epoch: rat(), ...opt("moon", r.maybe(() => ({ name: text(), ...opt("phases", r.listOf(() => ({ name: text(), at: float() }))) }))) }))),
     gears: Array.from({ length: r.int(0, 2) }, () => (r.next() < 0.5 ? { id: id(), on: id(), kind: "intervals" as const, terms: Array.from({ length: r.int(0, 3) }, () => ({ every: int(), ...opt("offset", r.maybe(int)), sign: r.pick([1, -1] as const) })) } : { id: id(), on: id(), kind: "positions" as const, period: int(), positions: Array.from({ length: r.int(0, 3) }, int), ...opt("offset", r.maybe(int)) })),
     units: Array.from({ length: r.int(0, 3) }, unit),
     ...opt("days", r.listOf(() => ({ day: int(), ...opt("name", r.maybe(text)), ...opt("tags", tagsOf()) }))),

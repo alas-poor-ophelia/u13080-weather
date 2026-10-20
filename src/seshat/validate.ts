@@ -84,11 +84,12 @@ export function validate(ast: CalendarAst): string[] {
   // one id grammar for every declared id, so every calendar has a text form (§4.1)
   for (const id of new Set(ids)) if (typeof id !== "string" || !ID_GRAMMAR.test(id)) errors.push(`id ${show(id)} must match [a-z][a-z0-9-]*`);
   if (typeof ast.name !== "string" || CONTROL.test(ast.name)) errors.push(`the calendar's name must be a string without control characters`);
-  const marks = (ms: unknown, where: string): void => {
+  /** named phase points: season marks start at `from`, moon phases sit `at` */
+  const marks = (ms: unknown, where: string, key: "from" | "at" = "from"): void => {
     if (!Array.isArray(ms)) return void errors.push(`${where}: marks must be a list`);
     for (const [i, m] of (ms as unknown[]).entries()) {
       if (!isObj(m) || typeof m.name !== "string" || !m.name) errors.push(`${where}: mark ${i + 1} needs a name`);
-      else if (typeof m.from !== "number" || !Number.isFinite(m.from) || m.from < 0 || m.from >= 1) errors.push(`${where}: mark "${m.name}" must start at a phase in [0, 1)`);
+      else if (typeof m[key] !== "number" || !Number.isFinite(m[key]) || (m[key]) < 0 || (m[key]) >= 1) errors.push(`${where}: mark "${m.name}" must be at a phase in [0, 1)`);
     }
   };
   if (ast.seasons !== undefined) {
@@ -103,7 +104,7 @@ export function validate(ast: CalendarAst): string[] {
   for (const b of ast.bodies ?? []) {
     if (b.moon !== undefined) {
       if (!isObj(b.moon) || typeof b.moon.name !== "string" || !b.moon.name) errors.push(`body "${b.id}": a moon needs a name`);
-      else if (b.moon.phases !== undefined) marks(b.moon.phases, `moon "${b.moon.name}" phases`);
+      else if (b.moon.phases !== undefined) marks(b.moon.phases, `moon "${b.moon.name}" phases`, "at");
     }
     // the text prints rationals as stored, and its parser reads only lowest terms with a positive denominator
     if (!lowest(b.period) || !lowest(b.epoch)) {

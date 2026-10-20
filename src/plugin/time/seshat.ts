@@ -1,0 +1,276 @@
+/**
+ * A world calendar from a stored Seshat definition (docs/SESHAT-v0.md §13).
+ * It sits beside the untouched InternalCalendar: a world opts in by storing
+ * a definition and making this adapter (id "seshat") active.
+ *
+ * - The stored form is canonical Seshat text. A text that does not parse,
+ *   validate or pass the world-calendar checks puts the adapter in a fault
+ *   state: it stays registered (so its id stays in every event and the Studio
+ *   takes its read-only path), describes itself read-only, hashes the raw
+ *   text, and never re-prints or saves it (§13.11 B2).
+ * - toContext is total (§13.11 B4): a named rule that throws loses its tags
+ *   for that day and is reported once. Beyond Seshat's day line (±DAY_LIMIT,
+ *   which the generator's warm-up and spell windows cross near the ends of
+ *   the world's day range) it extrapolates as the adapter contract asks: a
+ *   day reads as the day a whole number of edge years nearer, with the year
+ *   number moved on by as many years and the moons at the real day. For a
+ *   calendar of constant years (every legacy config) that is exact.
+ * - The hash covers definitionContent (§13.6): what reaches a day, a tag, a
+ *   year number, a moon or a match.
+ */
+import { hash32 } from "../../core/rng";
+import { canonicalJson } from "../../core/profile";
+import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, type BodyAst, type CalendarAst } from "../../seshat";
+import type { InternalCalendarConfig } from "../settings";
+import type { CalendarDescription, TimeAdapter, TimeContext } from "./adapter";
+import { assertDayInRange, assertInteger } from "../world";
+
+/** Joins SESHAT_VERSION in the hash: bump when this adapter changes how a day's context is assembled. */
+export const SESHAT_ADAPTER_VERSION = "seshat-adapter/1";
+/** Named rules a world calendar may carry (each is evaluated for every day the generator reads). */
+export const WORLD_RULES_MAX = 64;
+/** BYSETPOS scans a whole period per day: a world calendar keeps it to constant periods this short. */
+const WORLD_SETPOS_PERIOD_MAX = 400;
+
+/** Why a world cannot run a definition, beyond Seshat's own validation (§13.3, §13.11 B4). */
+export function checkWorldCalendar(ast: CalendarAst): string[] {
+  const errors: string[] = [];
+  const year = ast.units.find((u) => u.id === "year");
+  if (!year || year.kind !== "cycle") errors.push('a world calendar needs a cycle unit with the id "year"');
+  if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push(`a world calendar has at most ${WORLD_RULES_MAX} named rules`);
+  const units = new Map(ast.units.map((u) => [u.id, u]));
+  const walk = (r: unknown, at: string): void => {
+    if (typeof r !== "object" || r === null) return;
+    const n = r as { kind?: string; of?: unknown; count?: number; setpos?: unknown; freq?: string };
+    if (n.kind === "all" || n.kind === "any") for (const q of (n.of as unknown[]) ?? []) walk(q, at);
+    if (n.kind === "not") walk(n.of, at);
+    if (n.kind !== "recur") return;
+    // a COUNT walks every period from its anchor; on a weather path that is a walk per day
+    if (n.count !== undefined) errors.push(`${at}: a world calendar's rules cannot use COUNT`);
+    if (n.setpos !== undefined) {
+      const f = n.freq === "day" ? undefined : units.get(n.freq ?? "");
+      const constant = n.freq === "day" || (f?.kind === "cycle" && f.crossing === undefined && !f.gears?.length && !f.stages?.length && !f.ledger?.length && f.length <= WORLD_SETPOS_PERIOD_MAX);
+      if (!constant) errors.push(`${at}: a world calendar's BYSETPOS needs a constant period of at most ${WORLD_SETPOS_PERIOD_MAX} days`);
+    }
+  };
+  for (const r of ast.rules ?? []) walk(r.rule, `rule "${r.id}"`);
+  return errors;
+}
+
+/**
+ * A definition that runs a legacy internal-calendar config day for day, or why
+ * it cannot: a fractional year length or epoch year has no whole-day form.
+ * Each moon takes the legacy body's own rationals, so its phases are the same
+ * floats; `lossy` names a moon whose stored decimals those rationals only
+ * approximate (the legacy calendar already ran the approximation; the Studio
+ * will show the rational's value).
+ */
+export function definitionFromLegacy(cfg: InternalCalendarConfig): { ast: CalendarAst; lossy: string[] } | { refused: string } {
+  if (!Number.isSafeInteger(cfg.yearLength) || cfg.yearLength < 1) return { refused: `a year of ${cfg.yearLength} days has no whole-day form` };
+  if (!Number.isSafeInteger(cfg.epochYear)) return { refused: `epoch year ${cfg.epochYear} is not a whole year` };
+  const bodies: BodyAst[] = [];
+  const lossy: string[] = [];
+  for (const [i, m] of cfg.moons.entries()) {
+    const b = bodyFor(m.cycleDays, m.phaseAtEpoch);
+    if (!b) return { refused: `moon "${m.name}": a cycle of ${m.cycleDays} days cannot run` };
+    if (toNumber(b.period) !== m.cycleDays) lossy.push(m.name);
+    bodies.push({ id: `moon-${i + 1}`, period: b.period, epoch: b.epoch, moon: { name: m.name, ...(m.phases ? { phases: m.phases.map((p) => ({ name: p.name, at: p.at })) } : {}) } });
+  }
+  return {
+    ast: {
+      name: "Internal calendar",
+      formats: [{ name: "default", pattern: "Year {year}, day {year:day}" }],
+      seasons: { unit: "year", marks: cfg.seasons.map((s) => ({ name: s.name, from: s.from })) },
+      ...(bodies.length ? { bodies } : {}),
+      gears: [],
+      units: [{ id: "year", kind: "cycle", number: cfg.epochYear, anchor: 0, length: cfg.yearLength }],
+    },
+    lossy,
+  };
+}
+
+/** A day within the day line and the whole edge years it was moved by: the day itself when it is inside. */
+function inLine(e: Engine, day: number): { day: number; years: number } {
+  if (Math.abs(day) <= DAY_LIMIT) return { day, years: 0 };
+  const edge = day > 0 ? DAY_LIMIT : -DAY_LIMIT;
+  const length = e.occurrenceAt("year", edge)!.length;
+  const years = Math.sign(day) * Math.ceil((Math.abs(day) - DAY_LIMIT) / length);
+  return { day: day - years * length, years };
+}
+
+const hex = (n: number) => n.toString(16).padStart(8, "0");
+/** 64 bits from two hash32 seeds: a definition can be long, and the hash keys every cache. */
+function hash64(s: string): string {
+  return `${hex(hash32(s, 0x53455348))}${hex(hash32(s, 0x41544e31))}`;
+}
+
+export class SeshatCalendar implements TimeAdapter {
+  readonly id = "seshat";
+  private engine: Engine | null = null;
+  private ast: CalendarAst | null = null;
+  private raw: unknown;
+  /** why the stored definition cannot run, with its line when the text named one; null when it runs */
+  fault: { message: string; line?: number } | null = null;
+  private readonly listeners = new Set<() => void>();
+  private readonly reported = new Set<string>();
+
+  /**
+   * @param stored the stored definition (settings.calendar.definition), canonical text
+   * @param current reads the stored current day (shared with the internal calendar)
+   * @param write stores a new current day; `setNow` needs it
+   */
+  constructor(
+    stored: unknown,
+    private current: () => number,
+    private write?: (dayOrdinal: number) => void | Promise<void>,
+  ) {
+    this.raw = stored;
+    this.load(stored);
+  }
+
+  /** Load a stored definition (the raw value is kept as given, never rewritten). */
+  update(stored: unknown): void {
+    this.raw = stored;
+    this.load(stored);
+  }
+
+  private load(stored: unknown): void {
+    this.engine = null;
+    this.ast = null;
+    this.fault = null;
+    if (typeof stored !== "string") {
+      this.fault = { message: "the stored calendar definition is not text" };
+      return;
+    }
+    let ast: CalendarAst;
+    try {
+      ast = parse(stored);
+    } catch (e) {
+      if (!(e instanceof SeshatSyntaxError)) throw e;
+      this.fault = { message: e.message, line: e.line };
+      return;
+    }
+    const errors = [...validate(ast), ...checkWorldCalendar(ast)];
+    if (errors.length) {
+      this.fault = { message: errors[0]! };
+      return;
+    }
+    this.ast = ast;
+    this.engine = new Engine(ast);
+  }
+
+  /** The definition this adapter runs, or null in a fault. */
+  definition(): CalendarAst | null {
+    return this.ast;
+  }
+
+  /** The stored text as it would be written now (canonical), or null in a fault. */
+  text(): string | null {
+    return this.ast ? print(this.ast) : null;
+  }
+
+  now(): TimeContext | null {
+    return this.fault ? null : this.toContext(this.current());
+  }
+
+  toContext(dayOrdinal: number): TimeContext {
+    const e = this.engine;
+    if (!e) return { dayOrdinal, yearPhase: 0, yearLength: 1, tags: [], source: this.id }; // a fault: World refuses before it reads this
+    const { day, years } = inLine(e, dayOrdinal);
+    const year = e.occurrenceAt("year", day)!;
+    const dayOfYear = day - year.start;
+    const tags: string[] = [];
+    const season = e.seasonAt(day);
+    if (season) tags.push(`season:${season}`);
+    tags.push(...this.dayTags(e, day));
+    return {
+      dayOrdinal,
+      yearPhase: dayOfYear / year.length,
+      yearLength: year.length,
+      dayOfYear,
+      year: year.index + years + (this.yearUnit()?.number ?? 0),
+      moons: e.moonsAt(dayOrdinal),
+      tags,
+      source: this.id,
+    };
+  }
+
+  /** Unit, day-label and named-rule tags; a named rule that throws loses its tags for the day, reported once. */
+  private dayTags(e: Engine, day: number): string[] {
+    try {
+      return e.tagsAt(day);
+    } catch (err) {
+      const key = (err as Error).message;
+      if (!this.reported.has(key)) {
+        this.reported.add(key);
+        console.error(`U+13080 Weather: a named rule in the Seshat calendar failed on day ${day}; its tags are left out.`, err);
+      }
+      return e.baseTagsAt(day);
+    }
+  }
+
+  private yearUnit() {
+    return this.ast?.units.find((u) => u.id === "year");
+  }
+
+  configHash(): string {
+    if (!this.ast) return `seshat:fault:${hash64(typeof this.raw === "string" ? this.raw : JSON.stringify(this.raw) ?? "")}`;
+    return `seshat:${hash64(canonicalJson({ v: SESHAT_VERSION, a: SESHAT_ADAPTER_VERSION, c: definitionContent(this.ast) }))}`;
+  }
+
+  describe(): CalendarDescription {
+    const e = this.engine;
+    const ast = this.ast;
+    if (!e || !ast) return { label: `Seshat calendar · fault: ${this.fault?.message ?? "not loaded"}`, readOnly: true, yearLength: 1, seasons: [], moons: [] };
+    const year0 = e.occurrenceAt("year", 0)!;
+    return {
+      label: ast.name,
+      readOnly: false,
+      // the year holding day 0 until the Studio reads each year's own length (P3b)
+      yearLength: year0.length,
+      epochYear: year0.index + (this.yearUnit()?.number ?? 0),
+      seasons: [...(ast.seasons?.marks ?? [])].sort((a, b) => a.from - b.from).map((s) => ({ name: s.name, from: s.from })),
+      moons: (ast.bodies ?? []).flatMap((b) =>
+        b.moon ? [{ name: b.moon.name, cycleDays: toNumber(b.period), phaseAtEpoch: toNumber(b.epoch), ...(b.moon.phases ? { phases: b.moon.phases.map((p) => ({ name: p.name, at: p.at })) } : {}) }] : [],
+      ),
+    };
+  }
+
+  /** The definition's default format; a calendar without one prints its year and day. */
+  format(dayOrdinal: number): string {
+    const e = this.engine;
+    if (!e) return `Day ${dayOrdinal}`;
+    if (this.ast?.formats?.length) return formatDay(e, dayOrdinal);
+    const c = this.toContext(dayOrdinal);
+    return `Year ${c.year}, day ${(c.dayOfYear ?? 0) + 1}`;
+  }
+
+  /** A bare day number, or a day in any of the definition's parseable formats. */
+  parse(text: string): number | null {
+    const t = text.trim();
+    if (/^-?\d+$/.test(t)) return Number(t);
+    const e = this.engine;
+    return e && this.ast?.formats?.length ? parseDay(e, t) : null;
+  }
+
+  async setNow(dayOrdinal: number): Promise<void> {
+    assertInteger(dayOrdinal, "dayOrdinal");
+    assertDayInRange(dayOrdinal, "dayOrdinal");
+    if (!this.write) throw new Error("The Seshat calendar has no place to store the current day.");
+    await this.write(dayOrdinal);
+    for (const cb of [...this.listeners]) {
+      try {
+        cb();
+      } catch (e) {
+        console.error("U+13080 Weather: a Seshat calendar subscriber threw.", e);
+      }
+    }
+  }
+
+  subscribe(cb: () => void): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+}

@@ -87,7 +87,7 @@ describe("seasons and moons match the legacy internal calendar", () => {
 });
 
 describe("validation and text for seasons and moons", () => {
-  const base: CalendarAst = { ...GREGORIAN, seasons: { unit: "year", marks: FOUR }, bodies: [{ id: "luna", period: { n: 2953, d: 100 }, epoch: { n: 0, d: 1 }, moon: { name: "Luna", phases: [{ name: "Full", from: 0.5 }] } }] };
+  const base: CalendarAst = { ...GREGORIAN, seasons: { unit: "year", marks: FOUR }, bodies: [{ id: "luna", period: { n: 2953, d: 100 }, epoch: { n: 0, d: 1 }, moon: { name: "Luna", phases: [{ name: "Full", at: 0.5 }] } }] };
 
   test("a valid calendar with seasons and a moon round-trips through text", () => {
     expect(validate(base)).toEqual([]);
@@ -121,7 +121,7 @@ describe("definitionContent: what the hash covers", () => {
   const ast: CalendarAst = {
     ...GREGORIAN,
     seasons: { unit: "year", marks: FOUR },
-    bodies: [{ id: "luna", period: { n: 2953, d: 100 }, epoch: { n: 0, d: 1 }, moon: { name: "Luna", phases: [{ name: "Full", from: 0.5 }] } }],
+    bodies: [{ id: "luna", period: { n: 2953, d: 100 }, epoch: { n: 0, d: 1 }, moon: { name: "Luna", phases: [{ name: "Full", at: 0.5 }] } }],
     rules: [{ id: "harvest", tags: ["festival"], rule: { kind: "recur", freq: "year", by: [{ unit: "month", label: ["October"] }] } }],
   };
   const same = (b: CalendarAst) => JSON.stringify(definitionContent(b)) === JSON.stringify(definitionContent(ast));

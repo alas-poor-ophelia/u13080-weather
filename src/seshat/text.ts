@@ -19,7 +19,6 @@
  * refuses others. Host and throw rule leaves belong to Wadjet, not to a
  * calendar, and have no spelling.
  */
-import type { SeasonMark } from "./seasons";
 import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, FormatAst, SeasonsAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
 import type { GearAst } from "./gear";
 import { gcd, type Rational } from "./rational";
@@ -202,8 +201,8 @@ export function print(ast: CalendarAst): string {
   if (ast.formats?.length === 0) head.push("FORMATS:");
   for (const f of ast.formats ?? []) head.push(`FORMAT:${esc(f.name)}=${esc(f.pattern)}`);
   const chunks: string[][] = [head];
-  if (ast.seasons) chunks.push(block("VSEASONS", [`UNIT:${id(ast.seasons.unit)}`, ...markLines(ast.seasons.marks, "MARK", "MARKS")]));
-  for (const b of ast.bodies ?? []) chunks.push(block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`, ...(b.moon ? [`MOON:${esc(b.moon.name)}`, ...(b.moon.phases ? markLines(b.moon.phases, "PHASE", "PHASES") : [])] : [])]));
+  if (ast.seasons) chunks.push(block("VSEASONS", [`UNIT:${id(ast.seasons.unit)}`, ...markLines(ast.seasons.marks, "MARK", "MARKS", "from")]));
+  for (const b of ast.bodies ?? []) chunks.push(block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`, ...(b.moon ? [`MOON:${esc(b.moon.name)}`, ...(b.moon.phases ? markLines(b.moon.phases, "PHASE", "PHASES", "at") : [])] : [])]));
   for (const g of ast.gears) chunks.push(block("VGEAR", gearLines(g)));
   for (const u of ast.units) chunks.push(block("VUNIT", unitLines(u)));
   if (ast.days?.length) chunks.push(ast.days.map(dayLine));
@@ -214,24 +213,24 @@ export function print(ast: CalendarAst): string {
 
 const block = (type: string, lines: readonly string[]) => [`BEGIN:${type}`, ...lines, `END:${type}`];
 
-/** Named phase marks, one line each; an empty list is the marker alone. */
-function markLines(marks: readonly SeasonMark[], key: string, marker: string): string[] {
+/** Named phase points, one line each (`field` is "from" for season marks, "at" for moon phases); an empty list is the marker alone. */
+function markLines(marks: ReadonlyArray<{ readonly name: string } & Partial<Record<"from" | "at", number>>>, key: string, marker: string, field: "from" | "at"): string[] {
   if (marks.length === 0) return [`${marker}:`];
   return marks.map((m) => {
-    fields(m, `a ${key.toLowerCase()} mark`, "name", "from");
-    return `${key}:${esc(m.name)}=${num(m.from)}`;
+    fields(m, `a ${key.toLowerCase()} mark`, "name", field);
+    return `${key}:${esc(m.name)}=${num(m[field]!)}`;
   });
 }
 
-function toMarks(p: Props, key: string, marker: string): SeasonMark[] | undefined {
+function toMarks<F extends "from" | "at">(p: Props, key: string, marker: string, field: F): Array<{ name: string } & Record<F, number>> | undefined {
   const marked = p.marker(marker);
   const lines = p.all(key);
   if (!marked && lines.length === 0) return undefined;
   if (marked && lines.length) throw new SeshatSyntaxError(`${marker}: marks an empty list and stands alone`, lines[0]!.no);
   return lines.map((l) => {
     const kv = cut(l.value, "=");
-    if (!kv) throw new SeshatSyntaxError(`${key} is <name>=<from>`, l.no);
-    return { name: unesc(kv[0], l.no), from: toNum(kv[1], l.no) };
+    if (!kv) throw new SeshatSyntaxError(`${key} is <name>=<${field}>`, l.no);
+    return { name: unesc(kv[0], l.no), [field]: toNum(kv[1], l.no) } as { name: string } & Record<F, number>;
   });
 }
 const tags = (t: readonly string[], key = "TAGS:") => `${key}${list(t.map(esc))}`;
@@ -564,7 +563,7 @@ export function parse(text: string): CalendarAst {
 function body(c: Component): BodyAst {
   const p = new Props(c, ["UID", "PERIOD", "EPOCH", "MOON", "PHASE", "PHASES"], []);
   const [u, per, ep, moon] = [p.req("UID"), p.req("PERIOD"), p.req("EPOCH"), p.one("MOON")];
-  const phases = toMarks(p, "PHASE", "PHASES");
+  const phases = toMarks(p, "PHASE", "PHASES", "at");
   if (!moon && phases !== undefined) throw new SeshatSyntaxError("PHASE lines belong to a body with a MOON line", c.no);
   return {
     id: toId(u.value, u),
@@ -577,7 +576,7 @@ function body(c: Component): BodyAst {
 function seasonsBlock(c: Component): SeasonsAst {
   const p = new Props(c, ["UNIT", "MARK", "MARKS"], []);
   const u = p.req("UNIT");
-  return { unit: toId(u.value, u), marks: toMarks(p, "MARK", "MARKS") ?? [] };
+  return { unit: toId(u.value, u), marks: toMarks(p, "MARK", "MARKS", "from") ?? [] };
 }
 
 function gear(c: Component): GearAst {

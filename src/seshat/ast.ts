@@ -198,10 +198,10 @@ export interface BodyAst {
   readonly moon?: MoonAst;
 }
 
-/** A moon (§13.5): `name` reaches predicates; `phases` are named phase marks for display only. */
+/** A moon (§13.5): `name` reaches predicates; `phases` name points of the cycle for display only (the Studio's { name, at }). */
 export interface MoonAst {
   readonly name: string;
-  readonly phases?: readonly SeasonMark[];
+  readonly phases?: ReadonlyArray<{ readonly name: string; readonly at: number }>;
 }
 
 /** Seasons (§13.4): marks over the phase of one cycle unit, with the legacy calendar's rule (seasonAtPhase). */
