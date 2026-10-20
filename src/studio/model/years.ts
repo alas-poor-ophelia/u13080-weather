@@ -269,6 +269,18 @@ export function probedYears(adapter: TimeAdapter): YearSeam | null {
 const probed = new WeakMap<TimeAdapter, { hash: string; seam: YearSeam | null }>();
 const noted = new WeakSet<TimeAdapter>();
 
+/** A span calendar's seam: the one it carries, else the constant seam of its own numbers (legacy and hand-built calendars). */
+const ownSeams = new WeakMap<object, YearSeam>();
+export function seamOf(cal: { yearLength: number; epochYear: number; years?: YearSeam }): YearSeam {
+  if (cal.years) return cal.years;
+  let s = ownSeams.get(cal);
+  if (!s) {
+    s = constantYears(cal.yearLength, cal.epochYear);
+    ownSeams.set(cal, s);
+  }
+  return s;
+}
+
 /**
  * The seam for the active adapter: the engine seam for a world that runs a
  * definition (null in a fault: the Studio's no-calendar case), the constant
@@ -277,7 +289,8 @@ const noted = new WeakSet<TimeAdapter>();
  * (null without one). A probe is remembered per adapter object and
  * `configHash()`; a new registration is a new object, so it is probed again.
  */
-export function yearsFor(adapter: TimeAdapter | undefined, description: CalendarDescription | null | undefined, settingsEpochYear?: number): YearSeam | null {
+export function yearsFor(adapter: TimeAdapter | undefined, description: CalendarDescription | null | undefined, internal?: { epochYear?: number }): YearSeam | null {
+  const settingsEpochYear = internal?.epochYear;
   if (!adapter) return null;
   if (adapter instanceof SeshatCalendar) return engineYears(adapter);
   if (adapter.id === "internal") return constantYearsFor(description, settingsEpochYear);

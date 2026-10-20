@@ -25,6 +25,7 @@
  */
 import { ItemView, Notice, Scope, type IconName, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { canonicalJson } from "../../core/profile";
+import { yearsFor } from "../model/years";
 import type { ZoneProfile } from "../../core/types";
 import type WadjetPlugin from "../../plugin/main";
 import { applyStash, takeStash } from "../model/stash";
@@ -286,6 +287,7 @@ export class StudioView extends ItemView {
       shell,
       view: this,
       calendar: () => this.plugin.api.calendar(),
+      years: () => yearsFor(this.plugin.time.active, this.plugin.api.calendar(), this.plugin.settings.calendar),
       units: () => this.plugin.settings.units,
       windows: this.windows,
       // One registry per BUILD, so a leaf that is torn down and rebuilt starts

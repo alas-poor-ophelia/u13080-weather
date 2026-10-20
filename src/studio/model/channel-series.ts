@@ -76,7 +76,7 @@ export interface ChannelSeries {
 }
 
 /** The two calendar facts an x axis in fractional years needs (`spans.ts`'s `SpanCalendar`, narrowed). */
-export type YearGrid = Pick<SpanCalendar, "yearLength" | "epochYear">;
+export type YearGrid = Pick<SpanCalendar, "yearLength" | "epochYear" | "years">;
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -511,8 +511,10 @@ function roundKey(x: number): string {
 /**
  * The memo key a row holds its drawn SVG against (PLAN §7): the mode, the
  * data's own identity (the roll keys at fine zoom, the profile hash at wide
- * zoom), the window and the measured width. Nothing else can change a pixel.
+ * zoom), the window, the measured width and the calendar (its configHash: on
+ * a definition world a day's position on the axis moves with the definition,
+ * §14.8 C9). Nothing else can change a pixel.
  */
-export function seriesKey(parts: { mode: "composed" | "fine" | "ribbon" | "flat" | "empty"; source: string; a: number; b: number; widthPx: number }): string {
-  return `${parts.mode}|${parts.source}|${roundKey(parts.a)}|${roundKey(parts.b)}|${Math.round(parts.widthPx)}`;
+export function seriesKey(parts: { mode: "composed" | "fine" | "ribbon" | "flat" | "empty"; source: string; a: number; b: number; widthPx: number; calendar?: string }): string {
+  return `${parts.mode}|${parts.source}|${roundKey(parts.a)}|${roundKey(parts.b)}|${Math.round(parts.widthPx)}|${parts.calendar ?? ""}`;
 }

@@ -26,6 +26,7 @@
  * The ruler is not a component-bin part (SPEC law 3) — it is chrome, the same
  * status as the header's transport buttons and a floating window's ×.
  */
+import type { YearSeam } from "../model/years";
 import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import { dayLabel, tabular } from "../model/format";
@@ -143,6 +144,20 @@ export function calendarBands(ctx: SurfaceContext, state: StudioState, geo: RowG
  * Eras are always the world draft — the studio is the only place that edits
  * them.
  */
+/** The active calendar's identity for a memo key: its configHash (a definition edit moves it), "" when none answers. */
+export function calendarKey(ctx: SurfaceContext): string {
+  try {
+    return ctx.plugin.time.active?.configHash() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** The seam, when there is one, as an optional field (exactOptionalPropertyTypes: never `years: undefined`). */
+export function withYears(years: YearSeam | null): { years?: YearSeam } {
+  return years ? { years } : {};
+}
+
 export function spanCalendarFor(ctx: SurfaceContext, state: StudioState): SpanCalendar | null {
   const description: CalendarDescription | null = ctx.calendar();
   if (description === null) return null;
@@ -152,6 +167,7 @@ export function spanCalendarFor(ctx: SurfaceContext, state: StudioState): SpanCa
   return {
     yearLength: description.yearLength,
     epochYear: description.epochYear ?? ctx.plugin.settings.calendar.epochYear,
+    ...withYears(ctx.years()),
     seasons,
     moons: description.readOnly ? description.moons : state.world.calendar.moons,
     eras: state.world.eras,

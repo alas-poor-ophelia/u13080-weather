@@ -47,7 +47,7 @@ import type { StudioState } from "../../model/state";
 import type { Window } from "../../model/zoom";
 import { createLane, type LaneComponent } from "../components";
 import { registerRow, ROW_ORDER, unregisterRow, type PlaylistRow, type RowGeometry, type RowHost } from "../playlist";
-import { spanCalendarFor } from "../ruler";
+import { calendarKey, spanCalendarFor } from "../ruler";
 import { openCycleFor } from "../windows/cycle";
 import { deviceWindowId } from "../windows/device";
 
@@ -212,7 +212,7 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
     // The whole identity of what the runs are, not a sketch of it: the
     // modifier's and the eras' CONTENT are in the key, so editing a spell's
     // chance or an era's span invalidates the memo (`model/device-lanes.ts`).
-    const key = spellRunsKey({ modifier: m, eras: state.world.eras, seed: probe.seed, salt: probe.salt, firstYear: years[0] ?? 0, years: years.length });
+    const key = spellRunsKey({ modifier: m, eras: state.world.eras, seed: probe.seed, salt: probe.salt, firstYear: years[0] ?? 0, years: years.length, calendar: host?.ctx === undefined ? "" : calendarKey(host.ctx) });
     const memo = runsMemo;
     if (memo !== null && memo.key === key) return memo.days;
 

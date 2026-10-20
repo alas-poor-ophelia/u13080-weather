@@ -24,6 +24,7 @@
  * This file is types only — no runtime code, so importing it can never create a
  * module cycle.
  */
+import type { YearSeam } from "../model/years";
 import type { Units } from "../../core/units";
 import type { CalendarDescription } from "../../plugin/time/adapter";
 import type WadjetPlugin from "../../plugin/main";
@@ -51,6 +52,13 @@ export interface SurfaceContext {
    * which case a surface must degrade rather than invent one (SPEC §8).
    */
   calendar(): CalendarDescription | null;
+  /**
+   * The active calendar's year seam (model/years.ts): exact years for a world
+   * that runs a definition or a third-party calendar whose days carry years,
+   * the constant year otherwise, null with no calendar. Read at each use, never
+   * kept: a definition edit swaps the engine under the same adapter.
+   */
+  years(): YearSeam | null;
   /**
    * The reader's units (SPEC §8). Every readout in the studio converts through
    * `model/format.ts` on the way to the screen, and this is the one place the

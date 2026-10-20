@@ -276,6 +276,11 @@ describe("spellRunsKey", () => {
     expect(spellRunsKey({ ...base, modifier: reordered })).toBe(spellRunsKey(base));
   });
 
+  test("the calendar is in the key: it decides which days make up each year rolled (Seshat P3b, §14.8 C9)", () => {
+    expect(spellRunsKey({ ...base, calendar: "seshat:aaaa" })).not.toBe(spellRunsKey({ ...base, calendar: "seshat:bbbb" }));
+    expect(spellRunsKey({ ...base, calendar: "seshat:aaaa" })).not.toBe(spellRunsKey(base));
+  });
+
   test("editing the modifier's CONTENT changes the key, not just its id (H-1391)", () => {
     const rarer = structuredClone(SPELL);
     rarer.spell!.meanStartsPerYear = 12;

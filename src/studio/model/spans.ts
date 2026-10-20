@@ -27,6 +27,7 @@
  *   disabled era) is timed-and-empty instead: it does mute a composite,
  *   because that tag can never be on a day.
  */
+import { seamOf, type YearSeam } from "./years";
 import { wrap } from "../../seshat/phase";
 import type { ModGate, Predicate, SpellSpec } from "../../core/types";
 import { moonPhase } from "../../seshat/body";
@@ -42,6 +43,8 @@ import { zoomLabel, type Window } from "./zoom";
 export interface SpanCalendar {
   yearLength: number;
   epochYear: number;
+  /** the active calendar's year seam (model/years.ts); absent: the constant seam of yearLength and epochYear */
+  years?: YearSeam;
   seasons: ReadonlyArray<{ name: string; from: number }>;
   moons: ReadonlyArray<{ name: string; cycleDays: number; phaseAtEpoch?: number }>;
   eras: ReadonlyArray<{ name: string; from: number; to?: number; enabled?: boolean }>;
@@ -80,18 +83,18 @@ const EPS = 1e-9;
 // ---------------------------------------------------------------------------
 
 /**
- * `dayOrdinal` as a fractional year: `epochYear + dayOrdinal / yearLength`,
- * the internal calendar's model (`InternalCalendar.toContext`, where
- * `year = floor(d / yearLength) + epochYear` and `yearPhase = dayOfYear / yearLength`).
- * Adapters with variable-length years are approximated by it.
+ * `dayOrdinal` (a real number of days) as a position on the Studio's axis,
+ * through the calendar's year seam: the year it falls in plus its phase in
+ * that year (model/years.ts). On a constant-year calendar that is
+ * `epochYear + dayOrdinal / yearLength`, as it has always been.
  */
 export function fractionalYear(dayOrdinal: number, cal: SpanCalendar): number {
-  return cal.epochYear + dayOrdinal / cal.yearLength;
+  return seamOf(cal).fractionalYear(dayOrdinal);
 }
 
-/** The inverse of `fractionalYear`. */
+/** The inverse of `fractionalYear`: the real day at axis position `year`. */
 export function dayOrdinalAt(year: number, cal: SpanCalendar): number {
-  return (year - cal.epochYear) * cal.yearLength;
+  return seamOf(cal).dayOf(year);
 }
 
 /**
@@ -226,17 +229,42 @@ function yearPhaseSpans(range: readonly [number, number], w: Window, max: number
 }
 
 /**
- * `dayOfYear [a, b]` — the same clip after dividing by `yearLength`. The
+ * `dayOfYear [a, b]` — the same clip after dividing by the year's length. The
  * engine compares `d >= a && d <= b` on the day index, so both ends are
  * INCLUSIVE (day `b` occupies `[b/L, (b+1)/L)`) and the range never wraps:
  * `a > b` matches nothing.
+ *
+ * On an exact seam each year has its own length, and a bound past a short
+ * year's last day draws nothing in that year, as the engine matches nothing
+ * there (ruled 2026-10-19, Q2). The constant seam keeps the clamp it has
+ * always drawn (§14.8 C5), so a legacy world's lane does not move.
  */
 function dayOfYearSpans(range: readonly [number, number], cal: SpanCalendar, w: Window, max: number): Derived {
+  const seam = seamOf(cal);
+  if (seam.exact) return exactDayOfYearSpans(range, seam, w, max);
   const len = cal.yearLength;
   const lo = Math.max(0, Math.min(range[0], len - 1));
   const hi = Math.max(0, Math.min(range[1], len - 1));
   if (range[0] > range[1]) return timed([]);
   return perYear(lo / len, (hi + 1 - lo) / len, w, max, (year, from, to) => ({ id: `doy:${year}`, from, to, kind: "clip", editable: true }));
+}
+
+function exactDayOfYearSpans(range: readonly [number, number], seam: YearSeam, w: Window, max: number): Derived {
+  if (range[0] > range[1]) return timed([]);
+  const { y0, y1, count } = yearsIn(w);
+  if (count > max) return OVERFLOW;
+  const spans: Span[] = [];
+  for (let y = y0; y <= y1; y++) {
+    const len = seam.yearLength(y);
+    const lo = Math.max(0, range[0]);
+    const hi = Math.min(range[1], len - 1);
+    if (hi < lo) continue; // the bound starts past this year's last day: the engine matches nothing in it
+    // the same expression as the seam's position of day `lo` of year y: y + (D - start) / length
+    const from = y + lo / len;
+    const to = y + (hi + 1) / len;
+    if (overlaps(from, to, w)) spans.push({ id: `doy:${y}`, from, to, kind: "clip", editable: true });
+  }
+  return timed(spans);
 }
 
 /**

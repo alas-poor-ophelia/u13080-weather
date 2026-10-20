@@ -24,7 +24,7 @@ const ALLOWED: Record<string, number> = {
   "src/studio/model/format.ts": 11,
   "src/studio/model/hints-audition.ts": 2,
   "src/studio/model/mixer.ts": 5,
-  "src/studio/model/spans.ts": 10,
+  "src/studio/model/spans.ts": 8,
   "src/studio/model/zoom.ts": 1,
   "src/studio/ui/audition.ts": 6,
   "src/studio/ui/day-card.ts": 2,

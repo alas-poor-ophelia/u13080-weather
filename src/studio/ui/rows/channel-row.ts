@@ -29,6 +29,7 @@
  *    `seriesKey` — mode, profile identity, window and measured width — before
  *    it does any work, and returns on a hit.
  */
+import { calendarKey, withYears } from "../ruler";
 import type { AuditionInput } from "../../model/audition";
 import { erasHash } from "../../../core/eras";
 import { axisLabelled, axisTicks, composedAcross, HEADLINE_ROLE, RIBBON_FLAT_YEARS, ribbonSourceKey, seriesKey, statsOf, steppedAcross, yRangeFor, type ChannelSeries, type SeriesRole, type YearGrid } from "../../model/channel-series";
@@ -91,7 +92,7 @@ export function yearGridFor(ctx: SurfaceContext): YearGrid | null {
   const described = ctx.calendar();
   const yearLength = described?.yearLength ?? 0;
   if (yearLength <= 0) return null;
-  return { yearLength, epochYear: described?.epochYear ?? ctx.plugin.settings.calendar.epochYear ?? 1 };
+  return { yearLength, epochYear: described?.epochYear ?? ctx.plugin.settings.calendar.epochYear ?? 1, ...withYears(ctx.years()) };
 }
 
 /**
@@ -377,7 +378,7 @@ export function createChannelRow(channel: ChannelSpec): PlaylistRow {
       // leaf's zone — never the other leaf's).
       plotEl?.setAttr("data-zone", state.view.zoneId ?? "");
       const plan = planFor(state, geo);
-      const key = seriesKey({ mode: plan.mode, source: plan.source, a: geo.window.a, b: geo.window.b, widthPx: geo.widthPx });
+      const key = seriesKey({ mode: plan.mode, source: plan.source, a: geo.window.a, b: geo.window.b, widthPx: geo.widthPx, calendar: context === null ? "" : calendarKey(context) });
       // The bands follow the window, so they repaint whenever the key moves —
       // which is exactly when the curve under them does.
       if (key === painted) return;

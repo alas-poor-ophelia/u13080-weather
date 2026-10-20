@@ -294,6 +294,9 @@ describe("channel series · the memo key", () => {
     expect(seriesKey({ ...base, a: 4.5 })).not.toBe(seriesKey(base));
     expect(seriesKey({ ...base, b: 7.5 })).not.toBe(seriesKey(base));
     expect(seriesKey({ ...base, widthPx: 901 })).not.toBe(seriesKey(base));
+    // a definition edit moves where a day sits on the axis (Seshat P3b, brief §14.8 C9)
+    expect(seriesKey({ ...base, calendar: "seshat:aaaa" })).not.toBe(seriesKey({ ...base, calendar: "seshat:bbbb" }));
+    expect(seriesKey({ ...base, calendar: "seshat:aaaa" })).not.toBe(seriesKey(base));
   });
 
   test("a sub-pixel resize is not a repaint", () => {
