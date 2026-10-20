@@ -19,12 +19,14 @@ import { buildGolden, compareGolden, type Golden } from "../test/golden/golden";
 import { buildGoldenGen, compareGoldenGen, type GoldenGen } from "../test/golden/golden-gen";
 import { buildGoldenCal, compareGoldenCal, summarizeGoldenCalDiffs, type GoldenCal } from "../test/golden/golden-cal";
 import { buildGoldenPred, type GoldenPred } from "../test/golden/golden-pred";
+import { buildGoldenStudioYears, compareGoldenStudioYears, type GoldenStudioYears } from "../test/golden/golden-studio-years";
 
 const rngPath = new URL("../test/golden/rng-1.json", import.meta.url);
 // the generator golden is named after the version that wrote it: wadjet-gen/0.0.4 -> gen-0.0.4.json
 const genPath = new URL(`../test/golden/gen-${GENERATOR_VERSION.split("/")[1]}.json`, import.meta.url);
 const calPath = new URL("../test/golden/calendar.json", import.meta.url);
 const predPath = new URL("../test/golden/predicates.json", import.meta.url);
+const yearsPath = new URL("../test/golden/studio-years.json", import.meta.url);
 const write = process.argv.includes("--write");
 
 const freshRng: Golden = buildGolden(rng);
@@ -32,6 +34,7 @@ const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta
 const freshGen: GoldenGen = buildGoldenGen(fjord);
 const freshCal: GoldenCal = buildGoldenCal();
 const freshPred: GoldenPred = buildGoldenPred();
+const freshYears: GoldenStudioYears = buildGoldenStudioYears();
 
 if (write) {
   await Bun.write(rngPath, JSON.stringify(freshRng, null, 2) + "\n");
@@ -42,6 +45,8 @@ if (write) {
   console.log(`wrote ${calPath.pathname} (${freshCal.worlds.length} worlds)`);
   await Bun.write(predPath, JSON.stringify(freshPred, null, 1) + "\n");
   console.log(`wrote ${predPath.pathname} (${Object.keys(freshPred.edges).length} predicates)`);
+  await Bun.write(yearsPath, JSON.stringify(freshYears, null, 1) + "\n");
+  console.log(`wrote ${yearsPath.pathname} (${freshYears.worlds.length} legacy Studio worlds)`);
   process.exit(0);
 }
 
@@ -92,6 +97,17 @@ if (predDiffs.length === 0) {
   console.error(`PREDICATE GOLDEN DRIFT — ${predDiffs.length} difference(s):`);
   for (const d of predDiffs.slice(0, 40)) console.error("  " + d);
   if (predDiffs.length > 40) console.error(`  ... ${predDiffs.length - 40} more`);
+}
+
+const storedYears = (await Bun.file(yearsPath).json()) as GoldenStudioYears;
+const yearsDiffs = compareGoldenStudioYears(storedYears, freshYears);
+if (yearsDiffs.length === 0) {
+  console.log(`studio years golden OK (${storedYears.worlds.map((w) => w.id).join(", ")})`);
+} else {
+  failed = true;
+  console.error(`STUDIO YEARS GOLDEN DRIFT — ${yearsDiffs.length} difference(s):`);
+  for (const d of yearsDiffs.slice(0, 40)) console.error("  " + d);
+  if (yearsDiffs.length > 40) console.error(`  ... ${yearsDiffs.length - 40} more`);
 }
 
 process.exit(failed ? 1 : 0);
