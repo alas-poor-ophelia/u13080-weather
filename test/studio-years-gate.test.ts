@@ -10,7 +10,8 @@
  *
  * A count is the number of lines matching yearLength, epochYear or
  * DEFAULT_YEAR_LENGTH as words (comments included: a comment that names one
- * is usually next to code that reads it).
+ * is usually next to code that reads it), not counting a call of the seam's
+ * own `yearLength(year)`.
  */
 import { describe, expect, test } from "bun:test";
 
@@ -24,7 +25,7 @@ const ALLOWED: Record<string, number> = {
   "src/studio/model/format.ts": 11,
   "src/studio/model/hints-audition.ts": 2,
   "src/studio/model/mixer.ts": 5,
-  "src/studio/model/spans.ts": 8,
+  "src/studio/model/spans.ts": 7,
   "src/studio/model/zoom.ts": 1,
   "src/studio/ui/audition.ts": 6,
   "src/studio/ui/day-card.ts": 2,
@@ -45,7 +46,8 @@ const ALLOWED: Record<string, number> = {
   "src/studio/ui/windows/seasons.ts": 7,
 };
 
-const PATTERN = /\byearLength\b|\bepochYear\b|\bDEFAULT_YEAR_LENGTH\b/;
+// a call of the seam's own `yearLength(year)` is the replacement, not a direct read, so it does not count
+const PATTERN = /\byearLength\b(?!\s*\()|\bepochYear\b|\bDEFAULT_YEAR_LENGTH\b/;
 
 describe("the year seam's ratchet", () => {
   test("no Studio file reads a year length or epoch more often than allowed, and the list is exact", async () => {

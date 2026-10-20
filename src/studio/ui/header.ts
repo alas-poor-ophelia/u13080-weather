@@ -29,6 +29,7 @@
  * the window's × and the ruler's label. The four things that stand for an
  * *entity* (zone, Köppen class, station, hemisphere flag) are Chips.
  */
+import type { YearSeam } from "../model/years";
 import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import { Menu, Notice } from "obsidian";
 import { koppenOfClimate, type KoppenResult } from "../../core/koppen";
@@ -96,8 +97,8 @@ function koppenColour(group: KoppenResult["group"]): string {
  * with the active calendar's year length: `d0 – d365 · 1962` inside one year,
  * `1962 – 2962` once it spans 2.5 years or more.
  */
-export function formatWindow(w: Window, calendar: CalendarDescription | null): string {
-  return windowLabel(w.a, w.b, calendar?.yearLength ?? DEFAULT_YEAR_LENGTH);
+export function formatWindow(w: Window, calendar: CalendarDescription | null, years?: YearSeam | null): string {
+  return windowLabel(w.a, w.b, calendar?.yearLength ?? DEFAULT_YEAR_LENGTH, years);
 }
 
 /** The zone's base station, as the dropdown and the SRC chip name it. */
@@ -482,7 +483,7 @@ export function createHeaderSurface(): Surface {
     flipLed?.update({ on: true, level: flip === "on" ? "ok" : "warn" });
 
     const w = state.view.window;
-    readoutRange?.setText(formatWindow(w, description));
+    readoutRange?.setText(formatWindow(w, description, c.years()));
     presets?.update({ value: zoomLabel(w) });
 
     if (jsonButton) jsonButton.toggleClass("is-on", state.view.jsonOpen);

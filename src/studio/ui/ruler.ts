@@ -296,8 +296,11 @@ export function createRuler(props: RulerProps): RulerComponent {
    */
   function paintTicks(state: StudioState, geo: RowGeometry): void {
     stripEl.empty();
-    const yearLength = spanCalendarFor(props.ctx, state)?.yearLength ?? DEFAULT_YEAR_LENGTH;
-    const plan = ticks(geo.window, geo.widthPx, { year: tickYear, day: (_year, dayIndex) => tickDay(dayIndex, yearLength) });
+    const cal = spanCalendarFor(props.ctx, state);
+    const yearLength = cal?.yearLength ?? DEFAULT_YEAR_LENGTH;
+    const years = cal?.years ?? null;
+    // a day tick wraps in its own year's length on exact years, as the ticks are placed (model/zoom.ts yearTicks)
+    const plan = ticks(geo.window, geo.widthPx, { year: tickYear, day: (year, dayIndex) => tickDay(dayIndex, years?.exact ? years.yearLength(year) : yearLength) }, years);
     const measured = geo.widthPx > 0;
     for (const t of plan) {
       const el = stripEl.createDiv({ cls: "wadjet-studio-tick wadjet-studio-ruler-tick" });

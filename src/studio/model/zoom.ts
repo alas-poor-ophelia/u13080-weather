@@ -4,6 +4,7 @@
  * the tick plan. No DOM, no Obsidian — see PLAN.md §4 D3. The DOM ruler
  * component is the only thing that touches a pointer or the wheel event.
  */
+import type { YearSeam } from "./years";
 
 /** A visible span of the timeline, in fractional years. Always `b > a`. */
 export interface Window {
@@ -305,10 +306,13 @@ function chooseStep(pxPerDay: number, pxPerYear: number): Step {
 export function ticks(
   w: Window,
   laneWidthPx: number,
-  format: { year(y: number): string; day(y: number, dayIndex: number): string }
+  format: { year(y: number): string; day(y: number, dayIndex: number): string },
+  years?: YearSeam | null
 ): Tick[] {
   const { pxPerYear, pxPerDay } = morph(w, laneWidthPx);
   const step = chooseStep(pxPerDay, pxPerYear);
+  // exact years (§14.8 C3): day ticks are counted from each year's own start; the constant seam keeps the plan below
+  if (years?.exact && step.kind === "day") return yearTicks(w, laneWidthPx, format, years, Math.round(step.years * DAYS_PER_YEAR));
 
   const i0 = Math.ceil(w.a / step.years - EPSILON);
   const i1 = Math.floor(w.b / step.years + EPSILON);
@@ -339,6 +343,34 @@ export function ticks(
 }
 
 /** The x position (px) of `y` within a lane of `laneWidthPx`, given `w`. */
+/**
+ * Day ticks on exact years: every `stepDays` days from each year's d0, at the
+ * day's own position on the axis, so a tick sits on a day edge in a 366-day
+ * year as in a 365-day one. A year's last tick is dropped when it falls
+ * within half a step of the next year's d0, which is always drawn. Labels
+ * thin by the tick's place in its year (k / stepDays), so they do not shift
+ * while panning and d0 is always labelled.
+ */
+function yearTicks(w: Window, laneWidthPx: number, format: { day(y: number, dayIndex: number): string }, years: YearSeam, stepDays: number): Tick[] {
+  const raw: Array<{ year: number; y: number; k: number }> = [];
+  for (let Y = Math.floor(w.a); Y <= Math.floor(w.b); Y++) {
+    const L = years.yearLength(Y);
+    const start = years.yearStart(Y);
+    for (let k = 0; k < L; k += stepDays) {
+      if (k > 0 && L - k < stepDays / 2) break;
+      const year = years.fractionalYear(start + k);
+      if (year < w.a - EPSILON || year > w.b + EPSILON) continue;
+      raw.push({ year, y: Y, k });
+    }
+  }
+  const cap = Math.max(1, Math.floor(laneWidthPx / PX_PER_LABEL));
+  const thin = Math.max(1, Math.ceil(raw.length / cap));
+  return raw.map(({ year, y, k }) => {
+    const major = (k / stepDays) % thin === 0;
+    return { year, label: major ? format.day(y, k) : "", major };
+  });
+}
+
 export function yearToPx(y: number, w: Window, laneWidthPx: number): number {
   return ((y - w.a) / width(w)) * laneWidthPx;
 }

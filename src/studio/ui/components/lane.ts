@@ -19,6 +19,12 @@ export interface LaneProps {
   bounds?: { min: number; max: number };
   /** Shortest span a resize may leave. Default: two pixels worth of years. */
   minLength?: number;
+  /**
+   * One day of year `year`, in years: the ←/→ step at day resolution. Read at
+   * each key press (the calendar may have changed). Default 1/365, as the lane
+   * has always stepped (the constant seam's step).
+   */
+  dayYears?(year: number): number;
   onCreate?(from: number, to: number): void;
   onMove?(span: Span, from: number): void;
   onResize?(span: Span, zone: "start" | "end", to: number): void;
@@ -29,7 +35,7 @@ export interface LaneProps {
 
 const DEFAULT_HEIGHT = 28;
 const OPEN_BOUNDS = { min: -Infinity, max: Infinity };
-/** One day, in fractional years (of a 365-day year; the real year length arrives with Seshat P3). */
+/** One day, in fractional years, when the lane is not told the year's own length (`dayYears`). */
 const DAY_YEARS = 1 / 365;
 /** Below this, a year is too few pixels to drag by day — ←/→ moves a year instead (SPEC §3.8). */
 const YEAR_STEP_BELOW_PX_PER_YEAR = 50;
@@ -244,7 +250,7 @@ export function createLane(parent: HTMLElement, initial: LaneProps): LaneCompone
       if (!props.onMove) return;
       ev.preventDefault();
       const dir = ev.key === "ArrowRight" ? 1 : -1;
-      const stepYears = props.geometry.pxPerYear < YEAR_STEP_BELOW_PX_PER_YEAR ? 1 : DAY_YEARS;
+      const stepYears = props.geometry.pxPerYear < YEAR_STEP_BELOW_PX_PER_YEAR ? 1 : (props.dayYears?.(Math.floor(span.from)) ?? DAY_YEARS);
       const dYears = dir * stepYears * (ev.shiftKey ? FINE_MULTIPLIER : 1);
       const next = moveSpan(span, dYears, bounds());
       if (next.from !== span.from) props.onMove(span, next.from);

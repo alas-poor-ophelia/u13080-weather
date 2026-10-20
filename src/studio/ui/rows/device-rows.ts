@@ -362,6 +362,8 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
         spans: [],
         height: ROW_HEIGHT,
         color: DEFAULT_COLOR,
+        // one day of the clip's own year (§14.8 C3); the constant seam steps 1/365 as before
+        dayYears: (y) => host?.ctx.years()?.stepYears(y) ?? 1 / 365,
         onMove,
         onResize,
         onOpen,

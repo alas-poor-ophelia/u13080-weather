@@ -23,6 +23,7 @@
  * only on a value the user actually typed/dragged in display units. See the
  * "untouched value" example in `test/studio-format.test.ts`.
  */
+import type { YearSeam } from "./years";
 import { compassPoint, withMinus } from "../../core/report";
 import { cToF, fToC, inToMm, kphToMph, mmToIn, mphToKph, type Units } from "../../core/units";
 import { mod } from "../../seshat/gear";
@@ -277,12 +278,18 @@ export function yearLabel(year: number): string {
  *     `d0 – d365 · 1962`. Days are counted from 0 at the year boundary, so a
  *     whole year reads `d0 – d365` rather than `d 1–365` — `dayRangeLabel`'s
  *     convention, which is the whole studio's.
+ *
+ * With an exact year seam the days are counted in each year's own length:
+ * the centre day in the centre year's, a range in the length of the year it
+ * starts in (Seshat P3b). Without one, the constant length, as it has always been.
  */
-export function windowLabel(a: number, b: number, yearLength: number): string {
+export function windowLabel(a: number, b: number, yearLength: number, years?: YearSeam | null): string {
   const widthYears = b - a;
   const mid = (a + b) / 2;
   const midYear = Math.floor(mid);
   if (widthYears >= 2.5) return `${tabular(Math.round(a), 0)} – ${tabular(Math.round(b), 0)}`;
-  if (widthYears * yearLength <= 8) return `day ${Math.round((mid - midYear) * yearLength)} · ${tabular(midYear, 0)}`;
-  return `${dayRangeLabel(a, widthYears, yearLength)} · ${tabular(midYear, 0)}`;
+  const midLength = years?.exact ? years.yearLength(midYear) : yearLength;
+  if (widthYears * midLength <= 8) return `day ${Math.round((mid - midYear) * midLength)} · ${tabular(midYear, 0)}`;
+  const startLength = years?.exact ? years.yearLength(Math.floor(a)) : yearLength;
+  return `${dayRangeLabel(a, widthYears, startLength)} · ${tabular(midYear, 0)}`;
 }
