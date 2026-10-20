@@ -98,7 +98,7 @@ export function definitionFromLegacy(cfg: InternalCalendarConfig): { ast: Calend
  * same day of the year in the edge year, or the year next to it on the line
  * when the edge year itself crosses the line.
  */
-function yearOf(e: Engine, day: number): { index: number; start: number; length: number; tagDay: number } {
+export function yearAt(e: Engine, day: number): { index: number; start: number; length: number; tagDay: number } {
   if (Math.abs(day) <= DAY_LIMIT) {
     const o = e.occurrenceAt("year", day)!;
     return { index: o.index, start: o.start, length: o.length, tagDay: day };
@@ -110,6 +110,21 @@ function yearOf(e: Engine, day: number): { index: number; start: number; length:
   if (tagDay > DAY_LIMIT) tagDay -= edge.length;
   if (tagDay < -DAY_LIMIT) tagDay += edge.length;
   return { index: edge.index + years, start, length: edge.length, tagDay };
+}
+
+/**
+ * The first day of the year with occurrence index `index`, on the same model
+ * as yearAt: the calendar's own start within the day line; beyond it, the
+ * edge year's start plus whole edge-year lengths. yearAt(e, d).start ===
+ * yearStartAt(e, yearAt(e, d).index) for every day (tested), so the Studio's
+ * year seam and the adapter's toContext never disagree.
+ */
+export function yearStartAt(e: Engine, index: number): number {
+  const hi = e.occurrenceAt("year", DAY_LIMIT)!;
+  if (index > hi.index) return hi.start + (index - hi.index) * hi.length;
+  const lo = e.occurrenceAt("year", -DAY_LIMIT)!;
+  if (index < lo.index) return lo.start + (index - lo.index) * lo.length;
+  return e.start("year", index);
 }
 
 /**
@@ -248,7 +263,7 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
   toContext(dayOrdinal: number): TimeContext {
     const e = this.engine;
     if (!e) return { dayOrdinal, yearPhase: 0, yearLength: 1, tags: [], source: this.id }; // a fault: World refuses before it reads this
-    const year = yearOf(e, dayOrdinal);
+    const year = yearAt(e, dayOrdinal);
     const dayOfYear = dayOrdinal - year.start;
     const yearPhase = dayOfYear / year.length;
     const tags: string[] = [];
@@ -275,6 +290,20 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
       this.reported.add(ruleId);
       console.error(`U+13080 Weather: the named rule "${ruleId}" in the Seshat calendar failed on day ${day}; its tags are left out.`, err);
     });
+  }
+
+  /** The year holding `day` (its number, first day and length), as toContext reads it; null in a fault. The Studio's year seam reads this. */
+  yearOfDay(day: number): { year: number; start: number; length: number } | null {
+    const e = this.engine;
+    if (!e) return null;
+    const y = yearAt(e, day);
+    return { year: y.index + (this.yearUnit()?.number ?? 0), start: y.start, length: y.length };
+  }
+
+  /** The first day of year number `year`; null in a fault. */
+  yearStart(year: number): number | null {
+    const e = this.engine;
+    return e ? yearStartAt(e, year - (this.yearUnit()?.number ?? 0)) : null;
   }
 
   private yearUnit() {
