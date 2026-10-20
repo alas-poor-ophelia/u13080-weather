@@ -5,6 +5,7 @@ import { StudioView, VIEW_TYPE as STUDIO_VIEW_TYPE } from "../studio/ui/view";
 import type { WeatherReport } from "../core/report";
 import { GENERATOR_VERSION } from "../core/version";
 import { ApiController, type WadjetAPI } from "./api";
+import { Calendars } from "./calendars";
 import { parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
@@ -28,6 +29,8 @@ export default class WadjetPlugin extends Plugin {
   world!: World;
   api!: WadjetAPI;
   controller!: ApiController;
+  /** the stored Seshat definition and every calendar switch */
+  calendars!: Calendars;
   settingTab?: WadjetSettingTab;
   /**
    * Dirty studio drafts kept across a leaf close within this session (bead
@@ -73,8 +76,31 @@ export default class WadjetPlugin extends Plugin {
     this.world = new World(this.worldState(), this.time);
     this.controller = new ApiController({ version: this.manifest.version, world: this.world, time: this.time, units: () => this.settings.units });
     this.api = this.controller.api;
+    this.calendars = new Calendars({
+      settings: () => this.settings,
+      time: this.time,
+      world: this.world,
+      save: () => this.saveSettings(),
+      writeDay: (d) => this.writeCurrentDay(d),
+      rebuild: () => {
+        if (!this.dead) this.world.setState(this.worldState());
+      },
+      emitTimeChanged: () => this.controller.emitTimeChanged(),
+      emitAdaptersChanged: () => {
+        if (this.dead) return;
+        this.world.emit("adapters-changed");
+        this.refreshSettingsTab();
+      },
+      syncActiveSubscription: () => this.controller.syncActiveSubscription(),
+    });
+    const fault = this.calendars.fault();
+    // a stored definition the world has left changes no weather: it is shown in settings, not announced
+    if (fault !== null && this.time.active === this.calendars.seshat) {
+      console.error(`U+13080 Weather: the stored calendar definition cannot run (${fault}). It is kept as it is; fix it in settings.`);
+      new Notice(`Wadjet: the stored calendar definition cannot run (${fault}). It is kept as it is; fix it in settings.`, 15000);
+    }
     this.time.onChange((change) => {
-      if (this.dead) return;
+      if (this.dead || this.calendars.quiet) return;
       this.controller.syncActiveSubscription();
       if (change.id === this.settings.activeTimeAdapter) this.controller.emitTimeChanged();
       this.world.emit("adapters-changed");
@@ -161,25 +187,31 @@ export default class WadjetPlugin extends Plugin {
     this.refreshSettingsTab();
   }
 
-  /** The settings tab's "Current day" edit: the internal calendar's day, whichever calendar is active, through the same queue as `api.setNow`. */
+  /**
+   * The settings tab's "Current day" edit: the stored day, whichever calendar is active, through the same
+   * queue as `api.setNow`. The seshat adapter shares the day; when it is active it moves it, so its
+   * subscribers (the active subscription) hear of it.
+   */
   setInternalDay(d: number): Promise<void> {
     return this.controller.enqueue(async () => {
       if (this.dead) return;
-      await this.internalCalendar.setNow(d);
+      const seshat = this.calendars.seshat;
+      await (seshat && this.time.active === seshat ? seshat : this.internalCalendar).setNow(d);
     });
   }
 
   /** The settings tab's "Calendar source" choice. Fires time-changed and adapters-changed when the effective calendar changes. */
-  async setActiveTimeAdapter(id: string): Promise<void> {
-    const before = this.time.active;
-    this.settings.activeTimeAdapter = id;
-    this.world.setActiveAdapter(id);
-    this.controller.syncActiveSubscription();
-    if (this.time.active !== before) {
-      this.controller.emitTimeChanged();
-      this.world.emit("adapters-changed");
-    }
-    await this.saveSettings();
+  setActiveTimeAdapter(id: string): Promise<void> {
+    return this.calendars.setActive(id);
+  }
+
+  /**
+   * A day as the world's own calendar writes it: the definition's format on a seshat world, else the
+   * internal calendar's. A faulted definition writes the bare day number, never another calendar's date.
+   */
+  formatDay(d: number): string {
+    const seshat = this.calendars.seshat;
+    return seshat && this.time.active === seshat ? seshat.format(d) : this.internalCalendar.format(d);
   }
 
   /**
@@ -294,7 +326,7 @@ export default class WadjetPlugin extends Plugin {
         const now = this.world.now();
         if (!zone || !now) return void new Notice("Add a zone and set the current day first.");
         const r = this.world.getReport(zone.id, { dayOrdinal: now.dayOrdinal });
-        editor.replaceSelection(`${this.internalCalendar.format(now.dayOrdinal)} — ${this.world.describe(r, "short")}\n`);
+        editor.replaceSelection(`${this.formatDay(now.dayOrdinal)} — ${this.world.describe(r, "short")}\n`);
       },
     });
 
@@ -319,7 +351,7 @@ export default class WadjetPlugin extends Plugin {
         this.settings.overrides.push({ zoneId: zone.id, dayOrdinal: now.dayOrdinal, patch: { temperature: { ...r.temperature }, precipitation: { type: r.precipitation.type, amountMm: r.precipitation.amountMm }, wind: { ...r.wind }, note: "pinned" } });
         await this.saveAndRebuild();
         this.refreshSettingsTab();
-        new Notice(`Pinned ${zone.name} on ${this.internalCalendar.format(now.dayOrdinal)}.`);
+        new Notice(`Pinned ${zone.name} on ${this.formatDay(now.dayOrdinal)}.`);
       },
     });
 

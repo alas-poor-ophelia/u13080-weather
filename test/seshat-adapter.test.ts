@@ -20,6 +20,9 @@ import type { InternalCalendarConfig } from "../src/plugin/settings";
 import { World } from "../src/plugin/world";
 import { CAL_SEED, makeWorlds, MOONS_365, MOONS_400 } from "./golden/golden-cal";
 
+/** The rejection of `p`, or undefined if it resolved: asserted on directly, so no assertion floats. */
+const rejection = (p: Promise<unknown>): Promise<unknown> => p.then(() => undefined, (e: unknown) => e);
+
 const FOUR = [
   { name: "Spring", from: 0 },
   { name: "Summer", from: 0.25 },
@@ -170,10 +173,11 @@ describe("hash, describe, format, parse, setNow", () => {
     expect(h({ ...ast, seasons: { unit: "year", marks: FOUR.slice(1) } })).not.toBe(h(ast));
   });
 
-  test("describe gives the Studio the legacy shape", () => {
+  test("describe gives the Studio the legacy shape, read-only for now", () => {
     const d = new SeshatCalendar(text, () => 0).describe();
     const l = new InternalCalendar(cfg, () => 0).describe();
-    expect(d.readOnly).toBe(false);
+    expect(d.readOnly).toBe(true); // until the Studio edits definitions (P3a step 4)
+    expect(d.editHint).toBe("the calendar definition in settings");
     expect(d.yearLength).toBe(l.yearLength);
     expect(d.epochYear).toBe(l.epochYear);
     expect(d.seasons).toEqual(l.seasons);
@@ -200,8 +204,9 @@ describe("hash, describe, format, parse, setNow", () => {
     off();
     await a.setNow(1);
     expect(calls).toBe(1);
-    expect(a.setNow(1.5)).rejects.toThrow();
-    expect(new SeshatCalendar(text, () => 0).setNow(1)).rejects.toThrow(/no place to store/);
+    expect(await rejection(a.setNow(1.5))).toBeInstanceOf(TypeError);
+    expect(stored).toBe(1);
+    expect(((await rejection(new SeshatCalendar(text, () => 0).setNow(1))) as Error).message).toMatch(/no place to store/);
   });
 
   test("a named rule that throws loses its tags for that day and is reported once", () => {

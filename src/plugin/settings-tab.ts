@@ -23,6 +23,8 @@ import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
 import { MAX_DAY_ORDINAL } from "./world";
+import { SESHAT_ID } from "./calendars";
+import { prepareDefinition } from "./time/seshat";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
 
 const MAIN_PRESETS = PRESETS.filter((p) => !(p as { alternate?: boolean }).alternate);
@@ -56,6 +58,8 @@ export class WadjetSettingTab extends PluginSettingTab {
     const activeAdapter = this.plugin.time.active;
     const activeIsInternal = activeAdapter === undefined || activeAdapter.id === "internal";
     const activeDescription = activeIsInternal ? undefined : activeAdapter?.describe?.();
+    const onSeshat = () => this.plugin.time.active?.id === SESHAT_ID;
+    const fault = this.plugin.calendars.fault();
 
     return [
       {
@@ -102,12 +106,24 @@ export class WadjetSettingTab extends PluginSettingTab {
           },
           {
             name: "Current day",
-            desc: `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
+            desc: onSeshat() ? `Day number on the calendar definition's day line. Now: ${this.plugin.formatDay(s.currentDayOrdinal)}.` : `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
             control: { type: "number", key: "currentDayOrdinal", step: 1, validate: (v) => (!Number.isSafeInteger(v) ? "Whole days only." : Math.abs(v) > MAX_DAY_ORDINAL ? `Between ${withMinus(-MAX_DAY_ORDINAL)} and ${MAX_DAY_ORDINAL} only.` : undefined) },
+          },
+          {
+            name: "Calendar definition",
+            desc: fault
+              ? `It cannot run: ${fault}. No weather is made until it is fixed; the stored text is kept exactly as it is until you save one that runs.`
+              : "The world's calendar as Seshat text. Saving checks it and stores it in canonical form (comments are removed). A change to its years, seasons, moons or tags changes every day's weather.",
+            visible: onSeshat,
+            render: (setting) => {
+              // a modal with an explicit Save: a half-typed definition is never stored or re-printed under the cursor
+              setting.addButton((b) => b.setButtonText("Edit").onClick(() => new DefinitionModal(this.app, this.plugin, () => this.update()).open()));
+            },
           },
           {
             name: "Days in a year",
             desc: "Changing it moves the seasons, so every day's weather changes.",
+            visible: () => !onSeshat(),
             control: { type: "number", key: "calendar.yearLength", min: 1, max: YEAR_LENGTH_MAX, step: 1, validate: (v) => (Number.isInteger(v) && v >= 1 && v <= YEAR_LENGTH_MAX ? undefined : `Between 1 and ${YEAR_LENGTH_MAX.toLocaleString("en")} days.`) },
           },
           {
@@ -125,7 +141,7 @@ export class WadjetSettingTab extends PluginSettingTab {
           {
             name: `${activeDescription?.label ?? activeAdapter?.id ?? ""} · read-only`,
             desc: activeDescription ? calendarSummary(activeDescription) : "",
-            visible: () => !!this.plugin.time.active && this.plugin.time.active.id !== "internal" && !!this.plugin.time.active.describe,
+            visible: () => !!this.plugin.time.active && this.plugin.time.active.id !== "internal" && !onSeshat() && !!this.plugin.time.active.describe,
           },
           {
             name: `Calendar from ${activeAdapter?.id ?? ""}`,
@@ -201,7 +217,7 @@ export class WadjetSettingTab extends PluginSettingTab {
   private pinRow(o: Override): SettingGroupItem {
     const zone = this.plugin.settings.zones.find((z) => z.id === o.zoneId);
     return {
-      name: `${zone?.name ?? o.zoneId} · ${this.plugin.internalCalendar.format(o.dayOrdinal)}`,
+      name: `${zone?.name ?? o.zoneId} · ${this.plugin.formatDay(o.dayOrdinal)}`,
       desc: summarisePatch(o.patch, this.plugin.settings.units),
       render: (setting) => {
         setting.addButton((b) => b.setButtonText("Edit").onClick(() => new PinModal(this.app, this.plugin, o, () => this.update()).open()));
@@ -243,8 +259,13 @@ export class WadjetSettingTab extends PluginSettingTab {
         this.update(); // pin summaries are shown in the chosen units
         return;
       case "activeTimeAdapter":
-        await this.plugin.setActiveTimeAdapter(String(value));
-        this.update(); // Moons/Seasons visibility and the read-only calendar row depend on the active adapter
+        try {
+          await this.plugin.setActiveTimeAdapter(String(value));
+        } catch (e) {
+          new Notice(`The calendar source could not be saved, so it was left as it was: ${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          this.update(); // Moons/Seasons visibility and the read-only calendar row depend on the active adapter; a failed save shows the stored choice again
+        }
         return;
       case "currentDayOrdinal": {
         // The row validates whole days; anything else is left as it was.
@@ -276,6 +297,64 @@ export class WadjetSettingTab extends PluginSettingTab {
 }
 
 const ERAS_PLACEHOLDER = '[ { "name": "Ice Age", "from": 1200, "to": 1900, "apply": [ { "param": "temperature.mean", "op": "offset", "value": -6 } ] } ]';
+
+/** Validation for the calendar definition: the first error (with its line when known), or nothing. */
+function badDefinition(text: string): string | undefined {
+  const r = prepareDefinition(text);
+  return "error" in r ? (r.line === undefined ? r.error : `Line ${r.line}: ${r.error}`) : undefined;
+}
+
+/**
+ * The stored calendar definition, edited as text. Opens on the stored value
+ * exactly as it is (a faulted one included, never re-printed); Save checks
+ * it, stores the canonical form, and closes; an error stays in the modal.
+ */
+class DefinitionModal extends Modal {
+  constructor(
+    app: App,
+    private plugin: WadjetPlugin,
+    private onDone: () => void,
+  ) {
+    super(app);
+  }
+
+  override onOpen(): void {
+    const { contentEl } = this;
+    this.setTitle("Calendar definition");
+    const stored = this.plugin.settings.calendar.definition;
+    let text = typeof stored === "string" ? stored : stored === undefined ? "" : JSON.stringify(stored);
+    contentEl.createEl("p", { cls: "setting-item-description", text: "Seshat text. Saving checks it and stores it in canonical form; comments are removed." });
+    const area = contentEl.createEl("textarea", { cls: "wadjet-definition-text" });
+    area.rows = 20;
+    area.value = text;
+    area.addEventListener("input", () => (text = area.value));
+    const error = contentEl.createEl("p", { cls: "mod-warning" });
+    const fault = this.plugin.calendars.fault();
+    error.setText(fault ? `It cannot run: ${fault}.` : "");
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setButtonText("Save")
+          .setCta()
+          .onClick(async () => {
+            const bad = badDefinition(text);
+            if (bad) return void error.setText(bad);
+            try {
+              await this.plugin.calendars.saveDefinition(text);
+            } catch (e) {
+              return void error.setText(`Not saved: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            this.close();
+            this.onDone();
+          }),
+      );
+  }
+
+  override onClose(): void {
+    this.contentEl.empty();
+  }
+}
 
 /** Validation for the Eras JSON textarea: the first error, or nothing. Empty is fine. */
 function badEras(text: string): string | undefined {
@@ -433,7 +512,7 @@ class PinModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     const s = this.plugin.settings;
-    const cal = this.plugin.internalCalendar;
+    const fmt = (d: number) => this.plugin.formatDay(d);
     const isNew = this.existing === null;
     this.setTitle(isNew ? "Pin a day" : "Edit pinned day");
 
@@ -487,7 +566,7 @@ class PinModal extends Modal {
       );
       dayRow = new Setting(contentEl)
         .setName("Day")
-        .setDesc(`Day number. Today is ${dayOrdinal} (${cal.format(dayOrdinal)}).`)
+        .setDesc(`Day number. Today is ${dayOrdinal} (${fmt(dayOrdinal)}).`)
         .addText((t) =>
           t.setValue(String(dayOrdinal)).onChange((x) => {
             const n = Number(x);
@@ -497,7 +576,7 @@ class PinModal extends Modal {
           }),
         );
     } else {
-      contentEl.createEl("p", { cls: "setting-item-description", text: `${s.zones.find((z) => z.id === zoneId)?.name ?? zoneId} · ${cal.format(dayOrdinal)}` });
+      contentEl.createEl("p", { cls: "setting-item-description", text: `${s.zones.find((z) => z.id === zoneId)?.name ?? zoneId} · ${fmt(dayOrdinal)}` });
     }
 
     type NumKey = "low" | "high" | "amountMm" | "speedKph" | "directionDeg";

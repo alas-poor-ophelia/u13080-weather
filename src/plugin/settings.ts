@@ -53,6 +53,17 @@ export interface InternalCalendarConfig {
   seasons: Array<{ name: string; from: number }>;
 }
 
+/**
+ * The internal calendar's config, and the stored Seshat definition when the
+ * world has one (docs/SESHAT-v0.md §13.2): canonical text, read only by the
+ * seshat adapter and written only through its checked save paths. Typed
+ * unknown because a hand edit can store anything; the adapter faults on a
+ * value that is not a runnable definition and never rewrites it.
+ */
+export interface CalendarSettings extends InternalCalendarConfig {
+  definition?: unknown;
+}
+
 export interface WadjetSettings {
   settingsVersion: 1;
   worldSeed: string;
@@ -61,7 +72,7 @@ export interface WadjetSettings {
   activeTimeAdapter: string;
   /** the internal calendar's current day */
   currentDayOrdinal: number;
-  calendar: InternalCalendarConfig;
+  calendar: CalendarSettings;
   /** the era timeline (world-level; applies under any calendar) */
   eras: Era[];
   zones: ZoneProfile[];
@@ -180,7 +191,8 @@ function sanitizeEpochYear(v: unknown, warn: (msg: string) => void): number {
 /** Merge loaded data over defaults; fill a seed if missing; repair a broken calendar (reported through `warn`). Returns a new object. */
 export function migrateSettings(raw: unknown, warn: (msg: string) => void = () => {}): WadjetSettings {
   const r = (raw ?? {}) as Partial<WadjetSettings>;
-  const calendar: InternalCalendarConfig = { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) };
+  // spread, so a stored definition (any value) is kept as it is
+  const calendar: CalendarSettings = { ...DEFAULT_SETTINGS.calendar, ...(r.calendar ?? {}) };
   // each message names the value it replaced: the plugin saves on load, so the message is where the old value survives
   const moons = sanitizeMoons(calendar.moons, warn);
   const yearLength = sanitizeYearLength(calendar.yearLength, warn);

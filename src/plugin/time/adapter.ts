@@ -46,6 +46,21 @@ export interface TimeAdapter {
   subscribe?: (cb: () => void) => () => void;
 }
 
+/**
+ * Wadjet's own adapters only (not part of the public contract): an adapter
+ * that carries this method and returns a reason cannot run its calendar, and
+ * World refuses to make weather from it (code "wadjet-no-calendar") rather
+ * than fall back to another calendar.
+ */
+export const ADAPTER_FAULT: unique symbol = Symbol("wadjet.adapterFault");
+export interface FaultReporting {
+  [ADAPTER_FAULT](): string | null;
+}
+export function adapterFault(a: TimeAdapter): string | null {
+  const f = (a as Partial<FaultReporting>)[ADAPTER_FAULT];
+  return typeof f === "function" ? f.call(a) : null;
+}
+
 /** Registry change notification: a `TimeAdapter` was registered or unregistered. */
 export interface TimeRegistryChange {
   id: string;

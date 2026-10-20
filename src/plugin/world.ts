@@ -12,7 +12,11 @@ import { buildReport, describe, overrideKey, type DescriptorBands, type Override
 import { calendarHashOf, eraModifiers, erasHash, withEraTags } from "../core/eras";
 import type { DayTime, Era, ZoneProfile } from "../core/types";
 import { makePayload, type PayloadArgs, type WadjetEvent, type WadjetEventPayloads } from "./events";
-import type { TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
+import { adapterFault, type TimeAdapter, type TimeContext, type TimeRegistry } from "./time/adapter";
+import { codedError } from "./interpreters";
+
+/** World's error when no calendar can make weather: none is registered, or the active one is faulted. */
+export const NO_CALENDAR_CODE = "wadjet-no-calendar";
 import { flipSeasonTags } from "./time/seasons";
 
 export type ZoneLocator = { kind: "note"; path: string } | { kind: "hex"; mapId: string; q: number; r: number } | { kind: "point"; mapId: string; x: number; y: number } | { kind: "custom"; namespace: string; data: unknown };
@@ -172,15 +176,23 @@ export class World {
     return this.state.zones.find((z) => z.id === id);
   }
 
-  private adapterFor(): TimeAdapter {
+  private activeAdapter(): TimeAdapter {
     const a = this.time.active;
-    if (!a) throw new Error("No calendar is available.");
+    if (!a) throw codedError(NO_CALENDAR_CODE, "No calendar is available.");
     return a;
   }
 
-  /** The adapter's config hash plus the era timeline: everything calendar-side that changes past weather. */
+  /** The active adapter, if it can make weather: a faulted calendar is refused, never replaced by another. */
+  private adapterFor(): TimeAdapter {
+    const a = this.activeAdapter();
+    const fault = adapterFault(a);
+    if (fault !== null) throw codedError(NO_CALENDAR_CODE, `No calendar is available: the "${a.id}" calendar cannot run (${fault}).`);
+    return a;
+  }
+
+  /** The adapter's config hash plus the era timeline: everything calendar-side that changes past weather. A faulted calendar has a hash too (of its raw text), so its repair moves it. */
   calendarHash(): string {
-    return calendarHashOf(this.adapterFor().configHash(), this.state.eras ?? []);
+    return calendarHashOf(this.activeAdapter().configHash(), this.state.eras ?? []);
   }
 
   private generator(zoneId: string): { generator: Generator; hash: string } {

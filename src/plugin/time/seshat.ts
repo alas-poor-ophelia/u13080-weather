@@ -22,7 +22,7 @@ import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
 import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, type BodyAst, type CalendarAst } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
-import type { CalendarDescription, TimeAdapter, TimeContext } from "./adapter";
+import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
 
 /** Joins SESHAT_VERSION in the hash: bump when this adapter changes how a day's context is assembled. */
@@ -104,7 +104,26 @@ function hash64(s: string): string {
   return `${hex(hash32(s, 0x53455348))}${hex(hash32(s, 0x41544e31))}`;
 }
 
-export class SeshatCalendar implements TimeAdapter {
+/**
+ * A definition as typed (settings text, an import): names and tags to NFC
+ * (§13.8), parsed, validated and held to the world checks, then printed. Only
+ * the printed text is ever stored. An error carries the text's line when the
+ * parser named one.
+ */
+export function prepareDefinition(text: string): { text: string; ast: CalendarAst } | { error: string; line?: number } {
+  let ast: CalendarAst;
+  try {
+    ast = parse(text.normalize("NFC"));
+  } catch (e) {
+    if (!(e instanceof SeshatSyntaxError)) throw e;
+    return { error: e.message, line: e.line };
+  }
+  const errors = [...validate(ast), ...checkWorldCalendar(ast)];
+  if (errors.length) return { error: errors[0]! };
+  return { text: print(ast), ast };
+}
+
+export class SeshatCalendar implements TimeAdapter, FaultReporting {
   readonly id = "seshat";
   private engine: Engine | null = null;
   private ast: CalendarAst | null = null;
@@ -157,6 +176,15 @@ export class SeshatCalendar implements TimeAdapter {
     }
     this.ast = ast;
     this.engine = new Engine(ast);
+  }
+
+  [ADAPTER_FAULT](): string | null {
+    return this.fault ? (this.fault.line === undefined ? this.fault.message : `line ${this.fault.line}: ${this.fault.message}`) : null;
+  }
+
+  /** The stored value as it was given, never rewritten (a fault keeps it byte for byte). */
+  stored(): unknown {
+    return this.raw;
   }
 
   /** The definition this adapter runs, or null in a fault. */
@@ -225,7 +253,9 @@ export class SeshatCalendar implements TimeAdapter {
     const year0 = e.occurrenceAt("year", 0)!;
     return {
       label: ast.name,
-      readOnly: false,
+      // the Studio edits the definition from step 4 of P3a; until then its seasons and moons are shown, not edited
+      readOnly: true,
+      editHint: "the calendar definition in settings",
       // the year holding day 0 until the Studio reads each year's own length (P3b)
       yearLength: year0.length,
       epochYear: year0.index + (this.yearUnit()?.number ?? 0),

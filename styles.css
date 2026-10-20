@@ -5932,3 +5932,10 @@
     transition: none;
   }
 }
+
+/* the calendar definition editor (settings, Seshat calendar) */
+.wadjet-definition-text {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}

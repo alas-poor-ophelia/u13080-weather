@@ -10,6 +10,12 @@ Release notes are taken from the matching `## <version>` section by the release 
   `all: false`, although every report had moved; an integration that clears its caches only on
   `all: true` (Windrose) could keep showing stale weather until it reloaded. The edit now fires
   `all: true`, as any calendar edit does.
+- **Choosing another *Calendar source* is saved before it takes effect.** If the save fails, the
+  choice is left as it was and a notice says so; before, the switch applied in memory and could be
+  lost on the next restart.
+- **"No calendar is available" now has a code.** `getReport`, `getRange` and `timeAt`
+  throw it with `code: "wadjet-no-calendar"`, so an integration can tell it from
+  other errors.
 - **`registerTimeAdapter` also refuses the id `"seshat"`** (`wadjet-reserved-id`), reserved for
   the plugin's own calendar alongside `"internal"`.
 - **The generator-change notice no longer promises something the plugin does not do.** Older
