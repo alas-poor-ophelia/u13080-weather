@@ -197,13 +197,13 @@ export function createPlaylistSurface(): Surface {
   function jumpToDay(dayOrdinal: number): void {
     const c = ctx;
     if (c === null) return;
-    const cal = c.calendar();
-    const yearLength = cal?.yearLength ?? 0;
-    if (yearLength <= 0) return;
-    const epoch = cal?.epochYear ?? c.plugin.settings.calendar.epochYear ?? 1;
+    // no calendar (or one with no usable year) is no jump, as before
+    const years = c.years();
+    if (years === null) return;
     const w = c.store.get().view.window;
     const half = (w.b - w.a) / 2;
-    const centre = epoch + (dayOrdinal + 0.5) / yearLength;
+    // the middle of the day (the constant seam: epoch + (d + 0.5) / L, as it was)
+    const centre = years.dayMid(dayOrdinal);
     setWindow(clampWindow({ a: centre - half, b: centre + half }, bounds()));
   }
 

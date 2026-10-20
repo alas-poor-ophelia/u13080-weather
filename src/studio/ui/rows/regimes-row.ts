@@ -34,6 +34,7 @@
  * the `try` below, because a third-party calendar that cannot reach the year
  * throws and an empty row is a better answer than a dead leaf.
  */
+import { seamOf, type YearSeam } from "../../model/years";
 import { validateProfile } from "../../../core/profile";
 import { auditionKey, isRolled, rollCached, shareOfYear, type AuditionInput, type AuditionYear } from "../../model/audition";
 import { regimeBlockTip, regimeShareTip, rowHint } from "../../model/hints-rows";
@@ -86,6 +87,8 @@ interface RegimeSpan {
   colour: string;
   /** the run's length in days; 0 for a share-bar segment, which has no dwell to read */
   days: number;
+  /** the calendar year the run was rolled in (a block); its days are that year's length wide */
+  year?: number;
   /** the state's share of the year; only meaningful on a share-bar segment */
   share: number;
   /**
@@ -175,6 +178,10 @@ export function createRegimesRow(): PlaylistRow {
   /** the last `RowGeometry` the playlist measured, so the debounced roll can paint without one */
   let lastGeo: RowGeometry | null = null;
   let yearLength = 1;
+  /** the calendar's year seam at the last paint; exact years give each year its own day width */
+  let years: YearSeam | null = null;
+  /** the days in year `year`: its own length on exact years, the constant length otherwise */
+  const lengthOf = (year: number): number => (years?.exact ? years.yearLength(year) : yearLength);
   let memo = "";
   let timer: number | null = null;
 
@@ -217,10 +224,11 @@ export function createRegimesRow(): PlaylistRow {
       if (rolled === null) continue;
       for (const run of rolled.regimeRuns) {
         // Fractional years the way `spans.ts` defines them: year Y's day k is
-        // `Y + k / yearLength`, the same mapping the ruler's ticks use, so a
+        // `Y + k / (Y's length)`, the same mapping the ruler's ticks use, so a
         // block edge lands on the tick of the day it changed state on.
-        const from = year + run.from / yearLength;
-        const to = year + (run.to + 1) / yearLength;
+        const L = lengthOf(year);
+        const from = year + run.from / L;
+        const to = year + (run.to + 1) / L;
         const days = run.to - run.from + 1;
         const at = index.get(run.regime);
         const wide = (to - from) * geo.pxPerYear > LABEL_MIN_PX && geo.morph.pxPerDay > LABEL_MIN_PX_PER_DAY;
@@ -238,6 +246,7 @@ export function createRegimesRow(): PlaylistRow {
           regime: run.regime,
           colour: colourOf(at ?? 0, state.view.colours.regimes),
           days,
+          year,
           share: 0,
           alpha: writes.has(run.regime) ? ALPHA_APPLIES : ALPHA_PLAIN,
         });
@@ -336,7 +345,7 @@ export function createRegimesRow(): PlaylistRow {
     const item = byId.get(hit.span.id);
     const node = nodes.get(hit.span.id);
     if (item === undefined || node === undefined) return;
-    const into = Math.floor((pxToYear(x, g) - item.span.from) * yearLength) + 1;
+    const into = Math.floor((pxToYear(x, g) - item.span.from) * (item.year === undefined ? yearLength : lengthOf(item.year))) + 1;
     const day = Math.min(Math.max(1, item.days), Math.max(1, into));
     const attr = tipFor(item, day);
     if (node.getAttribute("data-hint") === attr) return;
@@ -415,6 +424,7 @@ export function createRegimesRow(): PlaylistRow {
     memo = p.key;
 
     yearLength = Math.max(1, p.cal?.yearLength ?? 1);
+    years = p.cal ? seamOf(p.cal) : null;
     const regimes = p.zone?.regimes ?? [];
     const index = new Map(regimes.map((r, i) => [r.id, i]));
     const writes = new Set(regimes.filter((r) => (r.apply ?? []).length > 0).map((r) => r.id));

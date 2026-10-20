@@ -13,6 +13,7 @@
  * (`overrides`) are keyed on the real `(zoneId, dayOrdinal)` and applied
  * regardless of salt — a re-roll keeps them.
  */
+import { yearsFor } from "./years";
 import { calendarHashOf, eraModifiers, erasHash, withEraTags, yearOf } from "../../core/eras";
 import type { DailyRecord } from "../../core/generator";
 import { canonicalJson, createGenerator, profileHash, validateProfile, type ValidationIssue } from "../../core/profile";
@@ -122,11 +123,15 @@ export function isRolled(input: AuditionInput): boolean {
  * the year boundary, then walks back to the year's first day.
  */
 export function firstDayOfYear(adapter: TimeAdapter, year: number): number {
+  // exact years know their own starts (a definition's engine, a probed third party): no parse, no walk (§14.8 C10)
+  const years = yearsFor(adapter, adapter.describe?.());
+  if (years?.exact) return years.yearStart(year);
+  const inYear = (d: number) => yearOf(adapter.toContext(d)) === year;
   const parsed = adapter.parse?.(`${year}-1`);
-  if (parsed !== null && parsed !== undefined) return parsed;
+  // a parse is trusted only when it is the year's first day: a format can read "Y-1" as something else
+  if (parsed !== null && parsed !== undefined && inYear(parsed) && !inYear(parsed - 1)) return parsed;
 
   const probeYearLength = Math.max(1, adapter.toContext(0).yearLength);
-  const inYear = (d: number) => yearOf(adapter.toContext(d)) === year;
 
   let d = Math.round((year - 1) * probeYearLength);
   const maxSteps = probeYearLength * 2 + 10;

@@ -18,6 +18,7 @@ import { SeshatCalendar, yearAt, yearStartAt } from "../src/plugin/time/seshat";
 import type { TimeAdapter, TimeContext } from "../src/plugin/time/adapter";
 import { engineYears, probeFault, probedYears, yearsFor, type YearSeam } from "../src/studio/model/years";
 import { makeAdapter } from "./fixtures/api/third-party-calendar";
+import { firstDayOfYear } from "../src/studio/model/audition";
 
 const CALS: Record<string, CalendarAst> = { GREGORIAN, HEBREW, ROMAN };
 const span = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
@@ -203,5 +204,52 @@ describe("yearsFor picks the seam per adapter", () => {
     hash = "b";
     yearsFor(watched, null);
     expect(calls).toBeGreaterThan(first); // probed again
+  });
+});
+
+describe("firstDayOfYear takes exact years from the seam, and trusts a parse only when it is the year's first day (C10)", () => {
+  test("a definition world: the seam's year start, no parse", () => {
+    const cal = new SeshatCalendar(print(HEBREW), () => 0);
+    const seam = engineYears(cal)!;
+    let parses = 0;
+    const inner = cal.parse.bind(cal);
+    cal.parse = (t) => (parses++, inner(t));
+    for (const Y of [seam.epochYear - 3, seam.epochYear, seam.epochYear + 7]) {
+      const d = firstDayOfYear(cal, Y);
+      expect(d).toBe(seam.yearStart(Y));
+      expect(cal.toContext(d).dayOfYear).toBe(0);
+      expect(cal.toContext(d - 1).year).toBe(Y - 1);
+    }
+    expect(parses).toBe(0);
+  });
+
+  test("a probed third party: its own year starts, the 401-day years included", () => {
+    const a = makeAdapter();
+    for (const Y of [1, 4, 5, 8, 9]) {
+      const d = firstDayOfYear(a, Y);
+      expect([Y, a.toContext(d).year, a.toContext(d - 1).year]).toEqual([Y, Y, Y - 1]);
+    }
+  });
+
+  test("the internal calendar still reads its own parse (unchanged)", () => {
+    const internal = new InternalCalendar({ yearLength: 365.25, epochYear: 1, moons: [], seasons: [] }, () => 0);
+    let parses = 0;
+    const inner = internal.parse.bind(internal);
+    internal.parse = (t) => (parses++, inner(t));
+    expect(firstDayOfYear(internal, 5)).toBe(inner("5-1")!);
+    expect(parses).toBe(1);
+  });
+
+  test("a parse that names another day is not trusted: the walk finds the year's first day", () => {
+    const base: TimeAdapter = {
+      id: "misparse",
+      now: () => null,
+      configHash: () => "m",
+      // no `year` in its contexts, so the probe refuses it and the old path runs (yearOf falls back to floor(d / 100) + 1)
+      toContext: (d) => ({ dayOrdinal: d, yearPhase: (((d % 100) + 100) % 100) / 100, yearLength: 100, dayOfYear: ((d % 100) + 100) % 100, source: "misparse" }),
+      parse: (t) => (t === "3-1" ? 205 : null), // day 5 of year 3, not its first
+    };
+    expect(probeFault(base)).not.toBeNull();
+    expect(firstDayOfYear(base, 3)).toBe(200);
   });
 });

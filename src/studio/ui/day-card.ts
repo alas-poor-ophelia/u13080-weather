@@ -21,6 +21,7 @@
  * Pinned days (`state.world.overrides`) carry the audition's gold ▼ and, when
  * the override wrote one, its note — the same marker the strip uses.
  */
+import { seamOf } from "../model/years";
 import { compassPoint } from "../../core/report";
 import { yearOf } from "../../seshat/year";
 import { rollCached, type AuditionDay, type AuditionYear } from "../model/audition";
@@ -124,7 +125,8 @@ function centreRoll(ctx: SurfaceContext, state: StudioState): Roll | null {
   const grid = yearGridFor(ctx);
   if (grid === null) return null;
   const centre = (state.view.window.a + state.view.window.b) / 2;
-  const target = Math.floor((centre - grid.epochYear) * grid.yearLength);
+  // the day under the centre, through the year seam (the constant seam's dayAt is floor((centre - epoch) · L), as it was)
+  const target = seamOf(grid).dayAt(centre);
 
   const rolls: AuditionYear[] = [];
   const by = new Map<number, AuditionDay>();
