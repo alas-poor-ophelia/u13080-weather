@@ -61,8 +61,9 @@ export class Calendars {
   quiet = false;
 
   constructor(private readonly host: CalendarsHost) {
-    const stored = host.settings().calendar.definition;
-    if (stored !== undefined) this.mount(stored);
+    const s = host.settings();
+    // a world set to run a definition that stores none (a hand edit, a sync conflict) is a fault, never the internal calendar
+    if (s.calendar.definition !== undefined || s.activeTimeAdapter === SESHAT_ID) this.mount(s.calendar.definition);
   }
 
   /** The adapter for the world's stored definition, created and registered once; later loads update it in place. */
@@ -121,14 +122,18 @@ export class Calendars {
   /**
    * Opt in: store `text` (checked and printed first) as the definition and
    * make `seshat` active, in one save. Throws DefinitionError, changing
-   * nothing, when the text cannot run as a world calendar. On a world that
-   * already runs `seshat` it is a definition edit (saveDefinition).
+   * nothing, when the text cannot run as a world calendar, or when it would
+   * replace a different stored definition (one kept from an earlier opt-out,
+   * or a faulted one kept byte for byte) without `replaceStored`. On a world
+   * that already runs `seshat` it is a definition edit (saveDefinition).
    */
-  async optIn(text: string): Promise<void> {
+  async optIn(text: string, opts: { replaceStored?: boolean } = {}): Promise<void> {
     if (this.seshat && this.host.time.active === this.seshat) return this.saveDefinition(text);
     const prepared = prepareDefinition(text);
     if ("error" in prepared) throw new DefinitionError(prepared.error, prepared.line);
     const s = this.host.settings();
+    const kept = s.calendar.definition;
+    if (kept !== undefined && kept !== prepared.text && !opts.replaceStored) throw new DefinitionError("This world already stores a calendar definition; switching to another one replaces it, so it has to be asked for.");
     const before = { definition: s.calendar.definition, had: "definition" in s.calendar, active: s.activeTimeAdapter };
     s.calendar.definition = prepared.text;
     s.activeTimeAdapter = SESHAT_ID;

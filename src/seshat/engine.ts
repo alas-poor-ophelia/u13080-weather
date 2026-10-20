@@ -248,9 +248,25 @@ export class Engine {
   }
 
   /** Every tag `day` carries: unit by unit in declaration order, then day labels, then named rules (tags are hashed; names are not). */
-  tagsAt(day: number): string[] {
+  /**
+   * Every tag on `day`. Without `onError`, a rule that throws makes this throw;
+   * with it, that rule's tags are left out, the others kept, and `onError`
+   * hears the rule's id and error.
+   */
+  tagsAt(day: number, onError?: (ruleId: string, error: unknown) => void): string[] {
     const tags = this.baseTagsAt(day);
-    for (const r of this.ast.rules ?? []) if (r.tags?.length && this.days.holds(r.rule, day)) tags.push(...r.tags);
+    for (const r of this.ast.rules ?? []) {
+      if (!r.tags?.length) continue;
+      if (!onError) {
+        if (this.days.holds(r.rule, day)) tags.push(...r.tags);
+        continue;
+      }
+      try {
+        if (this.days.holds(r.rule, day)) tags.push(...r.tags);
+      } catch (e) {
+        onError(r.id, e);
+      }
+    }
     return tags;
   }
 

@@ -28,6 +28,7 @@ export { ID, parse, print, SeshatSyntaxError } from "./text";
 export { checkFormats, compileFormat, formatDay, isParseable, parseDay, type CompiledFormat } from "./format";
 export { seasonAtPhase, type SeasonMark } from "./seasons";
 export { definitionContent } from "./content";
+export { translate } from "./translate";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
 

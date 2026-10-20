@@ -12,7 +12,7 @@
  *   - hash, describe, format/parse, setNow, and a named rule that throws.
  */
 import { describe, expect, test } from "bun:test";
-import { GREGORIAN, parse, print, type CalendarAst } from "../src/seshat";
+import { Engine, GREGORIAN, HEBREW, parse, print, ROMAN, type CalendarAst } from "../src/seshat";
 import { TimeRegistry, type TimeAdapter } from "../src/plugin/time/adapter";
 import { InternalCalendar } from "../src/plugin/time/internal";
 import { checkWorldCalendar, definitionFromLegacy, SeshatCalendar, WORLD_RULES_MAX } from "../src/plugin/time/seshat";
@@ -86,6 +86,27 @@ describe("a definition from a legacy config runs the world exactly as the legacy
     expect(greg.toContext(-10_009_999).dayOrdinal).toBe(-10_009_999);
   });
 
+  test("across the day line, years of any length run on without a jump (Parallax F4)", () => {
+    const seasons = { unit: "year", marks: [{ name: "Wet", from: 0 }, { name: "Dry", from: 0.5 }] };
+    for (const cal of [GREGORIAN, HEBREW, ROMAN]) {
+      const a = new SeshatCalendar(print({ ...cal, seasons }), () => 0);
+      for (const [from, to] of [
+        [10_000_000 - 900, 10_000_000 + 3000],
+        [-10_000_000 - 3000, -10_000_000 + 900],
+      ] as const) {
+        let prev = a.toContext(from);
+        for (let d = from + 1; d <= to; d++) {
+          const c = a.toContext(d);
+          if (c.year === prev.year) expect([cal.name, d, c.dayOfYear]).toEqual([cal.name, d, prev.dayOfYear! + 1]);
+          else expect([cal.name, d, c.year, c.dayOfYear, prev.dayOfYear]).toEqual([cal.name, d, prev.year! + 1, 0, prev.yearLength - 1]);
+          expect(Object.is(c.yearPhase, c.dayOfYear! / c.yearLength)).toBe(true);
+          expect(c.tags![0]).toBe(c.yearPhase < 0.5 ? "season:Wet" : "season:Dry");
+          prev = c;
+        }
+      }
+    }
+  });
+
   test("the stored text is canonical and reads back to the same definition", () => {
     const text = textOf(CONFIGS["internal-365"]!);
     expect(print(parse(text))).toBe(text);
@@ -118,6 +139,7 @@ describe("a stored definition that cannot run is a fault, never a fallback", () 
     ["a syntax error", good.replace("END:VCALENDAR", "END:VNOTHING"), /./],
     ["a validation error", good.replace("GEAR:leap*1", "GEAR:nogear*1"), /nogear/],
     ["no year unit (the world check)", print({ name: "annual", gears: [], units: [{ id: "annum", kind: "cycle", anchor: 0, length: 10 }] }), /id "year"/],
+    ["seasons over a unit other than the year (the world check, Parallax F3)", print({ ...GREGORIAN, seasons: { unit: "week", marks: [{ name: "A", from: 0 }] } }), /seasons run over its year, not "week"/],
     ["too many named rules (the world check)", print({ ...GREGORIAN, rules: Array.from({ length: WORLD_RULES_MAX + 1 }, (_, k) => ({ id: `r${k}`, tags: ["t"], rule: { kind: "recur", freq: "year" } })) }), /at most/],
   ];
   for (const [name, stored, msg] of faults) {
@@ -184,12 +206,18 @@ describe("hash, describe, format, parse, setNow", () => {
     expect(d.moons.map((m) => [m.name, m.cycleDays])).toEqual(l.moons.map((m) => [m.name, m.cycleDays]));
   });
 
-  test("format and parse round-trip a day; a bare number parses", () => {
+  test("a definition from the internal calendar writes and reads dates as it does (Parallax F9)", () => {
     const a = new SeshatCalendar(text, () => 0);
-    for (const d of [-800, -1, 0, 1, 364, 365, 100_000]) expect(a.parse(a.format(d))).toBe(d);
-    expect(a.format(0)).toBe("Year 1, day 1");
-    expect(a.parse(" 42 ")).toBe(42);
-    expect(a.parse("not a day")).toBeNull();
+    const legacy = new InternalCalendar(cfg, () => 0);
+    for (const d of [-800, -1, 0, 1, 90, 364, 365, 100_000, 9_999_999]) expect([d, a.format(d)]).toEqual([d, legacy.format(d)]);
+    expect(a.format(0)).toBe("Year 1, day 1 (Spring)");
+    for (const t of ["1-1", "3-14", "-5-365", "2-366", "2-0", " 42 ", "not a day", "1-1-1"]) expect([t, a.parse(t)]).toEqual([t, legacy.parse(t)]);
+  });
+
+  test("a calendar with formats writes and reads through them", () => {
+    const g = new SeshatCalendar(print(GREGORIAN), () => 0);
+    for (const d of [-800, -1, 0, 1, 364, 365, 100_000]) expect(g.parse(g.format(d))).toBe(d);
+    expect(g.format(0)).toBe("1970-01-01");
   });
 
   test("setNow checks the day, writes it and tells subscribers; now() reads the stored day", async () => {
@@ -209,21 +237,40 @@ describe("hash, describe, format, parse, setNow", () => {
     expect(((await rejection(new SeshatCalendar(text, () => 0).setNow(1))) as Error).message).toMatch(/no place to store/);
   });
 
-  test("a named rule that throws loses its tags for that day and is reported once", () => {
-    const a = new SeshatCalendar(print({ ...ast, days: [{ day: 7, tags: ["coronation"] }] }), () => 0);
-    const engine = (a as unknown as { engine: { tagsAt: (d: number) => string[] } }).engine;
-    engine.tagsAt = () => {
-      throw new Error("boom");
+  test("a named rule that throws loses only its own tags, and is reported once (Parallax F5)", () => {
+    const rules = [
+      { id: "fails", tags: ["bad"], rule: { kind: "dates" as const, days: [7, 8] } },
+      { id: "fine", tags: ["fair"], rule: { kind: "dates" as const, days: [7, 8] } },
+    ];
+    const a = new SeshatCalendar(print({ ...ast, days: [{ day: 7, tags: ["coronation"] }], rules }), () => 0);
+    // the real per-rule path: the engine's rule evaluation throws for one rule only
+    const days = (a as unknown as { engine: Engine }).engine.days;
+    const holds = days.holds.bind(days);
+    const failing = a.definition()!.rules![0]!.rule;
+    days.holds = (r, d) => {
+      if (r === failing) throw new Error("boom");
+      return holds(r, d);
     };
     const errors: unknown[] = [];
     const orig = console.error;
     console.error = (...args: unknown[]) => void errors.push(args);
     try {
-      expect(a.toContext(7).tags).toEqual(["season:Spring", "coronation"]);
-      expect(a.toContext(8).tags).toEqual(["season:Spring"]);
+      expect(a.toContext(7).tags).toEqual(["season:Spring", "coronation", "fair"]);
+      expect(a.toContext(8).tags).toEqual(["season:Spring", "fair"]);
     } finally {
       console.error = orig;
     }
     expect(errors.length).toBe(1);
+    expect(String((errors[0] as unknown[])[0])).toContain('"fails"');
+  });
+
+  test("Engine.tagsAt isolates a throwing rule only when asked to; otherwise it throws as before", () => {
+    // a COUNT walk past 10^6 days passes validation and throws when it runs (world calendars refuse COUNT)
+    const cal: CalendarAst = { ...GREGORIAN, rules: [{ id: "walk", tags: ["w"], rule: { kind: "recur", freq: "day", anchor: -2_000_000, count: 3_000_000 } }, { id: "ok", tags: ["ok"], rule: { kind: "dates", days: [5] } }] };
+    const e = new Engine(cal);
+    expect(() => e.tagsAt(5)).toThrow();
+    const seen: string[] = [];
+    expect(e.tagsAt(5, (id) => seen.push(id))).toEqual(["ok"]);
+    expect(seen).toEqual(["walk"]);
   });
 });

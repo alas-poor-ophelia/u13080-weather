@@ -343,6 +343,16 @@ until you press Save, which reads `Saved ✓` when there is nothing to write, `S
 is, carries a `⚠` count for warnings, and turns red with a count when something is actually wrong.
 Errors block saving; the offending unit's LED and its window's footer say what is wrong.
 
+**Calendar definitions.** The internal calendar is deliberately simple: one year length, seasons
+as fractions of the year, moons. *Settings → Calendar → Use a calendar definition* runs a world on
+an exact calendar instead: a real-world one (Gregorian, Hebrew, tabular Islamic, Coptic, Ethiopian,
+French Republican, Baháʼí, Roman, Harptos) or your own, written as Seshat text, with months, leap
+years and named holidays that modifiers can match as tags. Bring the world's seasons and moons
+along, and keep day numbers or anchor today to a date. A world on a definition needs this version
+of the plugin or later; an older one would quietly run it on the internal calendar again. It is a
+calendar, not an almanac: it does not compute real sunrise, solstices or moon phases for Earth, and
+a definition's moons are the ones you give it.
+
 **Third-party calendars.** Seasons and moons come from whichever calendar is active. If a calendar
 plugin describes its own (see the [`CalendarDescription`](docs/API.md#calendardescription)
 contract), the Seasons and cycle windows mirror it read-only — the badge reads

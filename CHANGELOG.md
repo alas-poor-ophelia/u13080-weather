@@ -4,6 +4,23 @@ Release notes are taken from the matching `## <version>` section by the release 
 
 ## Unreleased
 
+- **Calendar definitions (Seshat).** *Settings → Calendar → Use a calendar definition* runs a
+  world on an exact calendar instead of the simple internal one: Gregorian, Hebrew, the tabular
+  Islamic calendars, Coptic, Ethiopian, the French Republican calendar (two leap rules), Baháʼí,
+  Roman (Varronian years) and Harptos, or one you write as Seshat text, with real months, leap
+  years and named holidays whose tags modifiers can match. You can bring the world's seasons and
+  moons along, and either keep day numbers or anchor today to a date. When anchoring, the world's
+  moons stay where they are in the sky, and a definition's own bodies (a sun a rule reads) move
+  with its dates. Starting from *this world's internal calendar* gives the same weather on every
+  day. The internal calendar's settings are kept; choosing *internal* as the calendar source goes
+  back to them, and switching to another definition never replaces a stored one without asking.
+  The Studio edits a definition's seasons and moons and writes them back exactly;
+  the full text is edited in settings. A definition that stops working (a hand edit to
+  `data.json`) is kept as it is, and the world makes no weather until it is fixed, rather than
+  silently switching calendars.
+- **A world on a calendar definition needs this version or later.** An older version does not
+  know definitions and would run such a world on its internal calendar settings again, without
+  saying so.
 - **Switching calendars no longer hides the next calendar edit from integrations.** After the
   active calendar changed (choosing another *Calendar source*, or a calendar plugin loading or
   being disabled), the next edit to that calendar's settings fired `profiles-changed` with

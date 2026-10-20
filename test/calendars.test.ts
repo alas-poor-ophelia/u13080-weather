@@ -277,6 +277,13 @@ describe("a stored definition that cannot run is a fault, never a fallback", () 
     expect((r.saves.at(-1) as WadjetSettings).calendar.definition).toBe(broken);
   });
 
+  test("a world set to run a definition that stores none is a fault, not the internal calendar", () => {
+    const r = rig({ activeTimeAdapter: SESHAT_ID });
+    expect(r.calendars.fault()).toMatch(/none is stored/);
+    expect(r.time.active!.id).toBe(SESHAT_ID);
+    expect(codeOf(() => r.world.getReport(zone(r), { dayOrdinal: 1 }))).toBe(NO_CALENDAR_CODE);
+  });
+
   test("a non-string stored value is kept verbatim by migrateSettings and faults", () => {
     const odd = { units: [1, 2, 3] };
     const s = migrateSettings({ calendar: { definition: odd } });
@@ -303,6 +310,33 @@ describe("a stored definition that cannot run is a fault, never a fallback", () 
 
   test("the stored text is the one parse reads back", () => {
     expect(print(parse(TEXT))).toBe(TEXT);
+  });
+});
+
+describe("a stored definition is never replaced without being asked (Parallax F1)", () => {
+  const broken = TEXT.replace("GEAR:leap*1", "GEAR:nogear*1");
+  const other = print({ ...DEF, name: "Other", seasons: { unit: "year", marks: SEASONS.slice(0, 1) } });
+
+  test("broken, then opted out, then opted in to another calendar: refused, the broken text kept byte for byte", async () => {
+    const r = rig({ activeTimeAdapter: SESHAT_ID, calendar: { definition: broken } });
+    await r.calendars.setActive("internal");
+    expect(r.settings.calendar.definition).toBe(broken);
+    const e = await rejection(r.calendars.optIn(other));
+    expect(e).toBeInstanceOf(DefinitionError);
+    expect((e as Error).message).toMatch(/replaces it/);
+    expect(r.settings.calendar.definition).toBe(broken);
+    expect(r.settings.activeTimeAdapter).toBe("internal");
+  });
+
+  test("asked for, it replaces; the same text again needs no asking", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    await r.calendars.setActive("internal");
+    await r.calendars.optIn(TEXT); // the stored text itself: nothing is replaced
+    expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
+    await r.calendars.setActive("internal");
+    await r.calendars.optIn(other, { replaceStored: true });
+    expect(r.settings.calendar.definition).toBe(other);
   });
 });
 

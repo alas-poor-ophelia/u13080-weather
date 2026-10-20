@@ -8,19 +8,21 @@
  *   state: it stays registered (so its id stays in every event and the Studio
  *   takes its read-only path), describes itself read-only, hashes the raw
  *   text, and never re-prints or saves it (§13.11 B2).
- * - toContext is total (§13.11 B4): a named rule that throws loses its tags
- *   for that day and is reported once. Beyond Seshat's day line (±DAY_LIMIT,
- *   which the generator's warm-up and spell windows cross near the ends of
- *   the world's day range) it extrapolates as the adapter contract asks: a
- *   day reads as the day a whole number of edge years nearer, with the year
- *   number moved on by as many years and the moons at the real day. For a
+ * - toContext is total (§13.11 B4): a named rule that throws loses its own
+ *   tags for that day (the other rules keep theirs) and is reported once.
+ *   Beyond Seshat's day line (±DAY_LIMIT, which the generator's warm-up and
+ *   spell windows cross near the ends of the world's day range) it
+ *   extrapolates as the adapter contract asks: years of the edge year's
+ *   length, counted on from the edge year's start, so the year number only
+ *   grows and the day of the year runs on by one; moons at the real day; the
+ *   day's unit and rule tags from the same day of the edge year. For a
  *   calendar of constant years (every legacy config) that is exact.
  * - The hash covers definitionContent (§13.6): what reaches a day, a tag, a
  *   year number, a moon or a match.
  */
 import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
-import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, type BodyAst, type CalendarAst } from "../../seshat";
+import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, seasonAtPhase, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, type BodyAst, type CalendarAst } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
@@ -37,6 +39,8 @@ export function checkWorldCalendar(ast: CalendarAst): string[] {
   const errors: string[] = [];
   const year = ast.units.find((u) => u.id === "year");
   if (!year || year.kind !== "cycle") errors.push('a world calendar needs a cycle unit with the id "year"');
+  // seasons are phases of the year: yearPhase, describe() and the Studio's seasons window all read them so
+  if (ast.seasons && ast.seasons.unit !== "year") errors.push(`a world calendar's seasons run over its year, not "${ast.seasons.unit}"`);
   if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push(`a world calendar has at most ${WORLD_RULES_MAX} named rules`);
   const units = new Map(ast.units.map((u) => [u.id, u]));
   const walk = (r: unknown, at: string): void => {
@@ -68,18 +72,15 @@ export function checkWorldCalendar(ast: CalendarAst): string[] {
 export function definitionFromLegacy(cfg: InternalCalendarConfig): { ast: CalendarAst; lossy: string[] } | { refused: string } {
   if (!Number.isSafeInteger(cfg.yearLength) || cfg.yearLength < 1) return { refused: `a year of ${cfg.yearLength} days has no whole-day form` };
   if (!Number.isSafeInteger(cfg.epochYear)) return { refused: `epoch year ${cfg.epochYear} is not a whole year` };
-  const bodies: BodyAst[] = [];
-  const lossy: string[] = [];
-  for (const [i, m] of cfg.moons.entries()) {
-    const b = bodyFor(m.cycleDays, m.phaseAtEpoch);
-    if (!b) return { refused: `moon "${m.name}": a cycle of ${m.cycleDays} days cannot run` };
-    if (toNumber(b.period) !== m.cycleDays) lossy.push(m.name);
-    bodies.push({ id: `moon-${i + 1}`, period: b.period, epoch: b.epoch, moon: { name: m.name, ...(m.phases ? { phases: m.phases.map((p) => ({ name: p.name, at: p.at })) } : {}) } });
-  }
+  const off = cfg.seasons.find((s) => !(s.from >= 0 && s.from < 1));
+  if (off) return { refused: `the season "${off.name}" starts at ${off.from}; a definition needs every start from 0 up to (not including) 1 (Settings → Calendar → Seasons)` };
+  const m = moonBodies(cfg.moons, new Set());
+  if ("refused" in m) return m;
+  const { bodies, lossy } = m;
   return {
     ast: {
+      // no formats: the adapter then writes and reads dates as the internal calendar does ("Year 3, day 14 (Summer)", "3-14")
       name: "Internal calendar",
-      formats: [{ name: "default", pattern: "Year {year}, day {year:day}" }],
       seasons: { unit: "year", marks: cfg.seasons.map((s) => ({ name: s.name, from: s.from })) },
       ...(bodies.length ? { bodies } : {}),
       gears: [],
@@ -89,13 +90,47 @@ export function definitionFromLegacy(cfg: InternalCalendarConfig): { ast: Calend
   };
 }
 
-/** A day within the day line and the whole edge years it was moved by: the day itself when it is inside. */
-function inLine(e: Engine, day: number): { day: number; years: number } {
-  if (Math.abs(day) <= DAY_LIMIT) return { day, years: 0 };
-  const edge = day > 0 ? DAY_LIMIT : -DAY_LIMIT;
-  const length = e.occurrenceAt("year", edge)!.length;
-  const years = Math.sign(day) * Math.ceil((Math.abs(day) - DAY_LIMIT) / length);
-  return { day: day - years * length, years };
+/**
+ * The year holding `day`, and the day whose unit and rule tags it carries.
+ * Within the day line: the calendar's own year and the day itself. Beyond
+ * it: years of the edge year's length counted on from the edge year's start
+ * (so the index only grows and the day of the year runs on by one), and the
+ * same day of the year in the edge year, or the year next to it on the line
+ * when the edge year itself crosses the line.
+ */
+function yearOf(e: Engine, day: number): { index: number; start: number; length: number; tagDay: number } {
+  if (Math.abs(day) <= DAY_LIMIT) {
+    const o = e.occurrenceAt("year", day)!;
+    return { index: o.index, start: o.start, length: o.length, tagDay: day };
+  }
+  const edge = e.occurrenceAt("year", day > 0 ? DAY_LIMIT : -DAY_LIMIT)!;
+  const years = Math.floor((day - edge.start) / edge.length);
+  const start = edge.start + years * edge.length;
+  let tagDay = edge.start + (day - start);
+  if (tagDay > DAY_LIMIT) tagDay -= edge.length;
+  if (tagDay < -DAY_LIMIT) tagDay += edge.length;
+  return { index: edge.index + years, start, length: edge.length, tagDay };
+}
+
+/**
+ * The internal calendar's moons as bodies with the legacy body's own exact
+ * rationals (so their phases are the same floats), ids `moon-1`, `moon-2`, …
+ * skipping `taken`. `lossy` names a moon whose stored decimals the rationals
+ * only approximate.
+ */
+export function moonBodies(moons: InternalCalendarConfig["moons"], taken: ReadonlySet<string>): { bodies: BodyAst[]; lossy: string[] } | { refused: string } {
+  const bodies: BodyAst[] = [];
+  const lossy: string[] = [];
+  let n = 0;
+  for (const m of moons) {
+    const b = bodyFor(m.cycleDays, m.phaseAtEpoch);
+    if (!b) return { refused: `moon "${m.name}": a cycle of ${m.cycleDays} days cannot run` };
+    if (toNumber(b.period) !== m.cycleDays) lossy.push(m.name);
+    do n++;
+    while (taken.has(`moon-${n}`));
+    bodies.push({ id: `moon-${n}`, period: b.period, epoch: b.epoch, moon: { name: m.name, ...(m.phases ? { phases: m.phases.map((p) => ({ name: p.name, at: p.at })) } : {}) } });
+  }
+  return { bodies, lossy };
 }
 
 const hex = (n: number) => n.toString(16).padStart(8, "0");
@@ -157,6 +192,10 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     this.engine = null;
     this.ast = null;
     this.fault = null;
+    if (stored === undefined) {
+      this.fault = { message: "the world runs on a calendar definition, but none is stored" };
+      return;
+    }
     if (typeof stored !== "string") {
       this.fault = { message: "the stored calendar definition is not text" };
       return;
@@ -174,8 +213,13 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
       this.fault = { message: errors[0]! };
       return;
     }
+    try {
+      this.engine = new Engine(ast);
+    } catch (e) {
+      this.fault = { message: `the definition cannot run: ${e instanceof Error ? e.message : String(e)}` };
+      return;
+    }
     this.ast = ast;
-    this.engine = new Engine(ast);
   }
 
   [ADAPTER_FAULT](): string | null {
@@ -204,37 +248,33 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
   toContext(dayOrdinal: number): TimeContext {
     const e = this.engine;
     if (!e) return { dayOrdinal, yearPhase: 0, yearLength: 1, tags: [], source: this.id }; // a fault: World refuses before it reads this
-    const { day, years } = inLine(e, dayOrdinal);
-    const year = e.occurrenceAt("year", day)!;
-    const dayOfYear = day - year.start;
+    const year = yearOf(e, dayOrdinal);
+    const dayOfYear = dayOrdinal - year.start;
+    const yearPhase = dayOfYear / year.length;
     const tags: string[] = [];
-    const season = e.seasonAt(day);
+    // the year's phase, as the engine's seasonAt reads it (checkWorldCalendar keeps seasons on the year)
+    const season = this.ast?.seasons ? seasonAtPhase(this.ast.seasons.marks, yearPhase) : null;
     if (season) tags.push(`season:${season}`);
-    tags.push(...this.dayTags(e, day));
+    tags.push(...this.dayTags(e, year.tagDay));
     return {
       dayOrdinal,
-      yearPhase: dayOfYear / year.length,
+      yearPhase,
       yearLength: year.length,
       dayOfYear,
-      year: year.index + years + (this.yearUnit()?.number ?? 0),
+      year: year.index + (this.yearUnit()?.number ?? 0),
       moons: e.moonsAt(dayOrdinal),
       tags,
       source: this.id,
     };
   }
 
-  /** Unit, day-label and named-rule tags; a named rule that throws loses its tags for the day, reported once. */
+  /** Unit, day-label and named-rule tags; a named rule that throws loses its own tags for the day, reported once per rule. */
   private dayTags(e: Engine, day: number): string[] {
-    try {
-      return e.tagsAt(day);
-    } catch (err) {
-      const key = (err as Error).message;
-      if (!this.reported.has(key)) {
-        this.reported.add(key);
-        console.error(`U+13080 Weather: a named rule in the Seshat calendar failed on day ${day}; its tags are left out.`, err);
-      }
-      return e.baseTagsAt(day);
-    }
+    return e.tagsAt(day, (ruleId, err) => {
+      if (this.reported.has(ruleId)) return;
+      this.reported.add(ruleId);
+      console.error(`U+13080 Weather: the named rule "${ruleId}" in the Seshat calendar failed on day ${day}; its tags are left out.`, err);
+    });
   }
 
   private yearUnit() {
@@ -265,21 +305,34 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     };
   }
 
-  /** The definition's default format; a calendar without one prints its year and day. */
+  /** The definition's default format; a calendar without one writes as the internal calendar does: "Year 3, day 14 (Summer)". */
   format(dayOrdinal: number): string {
     const e = this.engine;
     if (!e) return `Day ${dayOrdinal}`;
     if (this.ast?.formats?.length) return formatDay(e, dayOrdinal);
     const c = this.toContext(dayOrdinal);
-    return `Year ${c.year}, day ${(c.dayOfYear ?? 0) + 1}`;
+    const season = c.tags?.find((t) => t.startsWith("season:"))?.slice(7);
+    return `Year ${c.year}, day ${(c.dayOfYear ?? 0) + 1}${season ? ` (${season})` : ""}`;
   }
 
-  /** A bare day number, or a day in any of the definition's parseable formats. */
+  /** A bare day number, or a day in the definition's parseable formats; without formats, "year-day" as the internal calendar reads it. */
   parse(text: string): number | null {
     const t = text.trim();
     if (/^-?\d+$/.test(t)) return Number(t);
     const e = this.engine;
-    return e && this.ast?.formats?.length ? parseDay(e, t) : null;
+    if (!e) return null;
+    if (this.ast?.formats?.length) return parseDay(e, t);
+    const m = /^(-?\d+)-(\d+)$/.exec(t);
+    if (!m) return null;
+    try {
+      const index = Number(m[1]) - (this.yearUnit()?.number ?? 0);
+      const start = e.start("year", index);
+      const day = start + Number(m[2]) - 1;
+      if (Number(m[2]) < 1 || Number(m[2]) > e.length("year", index) || Math.abs(day) > DAY_LIMIT) return null;
+      return day;
+    } catch {
+      return null;
+    }
   }
 
   async setNow(dayOrdinal: number): Promise<void> {
