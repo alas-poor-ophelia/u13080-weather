@@ -344,7 +344,7 @@ is, carries a `⚠` count for warnings, and turns red with a count when somethin
 Errors block saving; the offending unit's LED and its window's footer say what is wrong.
 
 **Calendar definitions.** The internal calendar is deliberately simple: one year length, seasons
-as fractions of the year, moons. *Settings → Calendar → Use a calendar definition* runs a world on
+as fractions of the year, moons. *Settings → Calendar → Change calendar…* runs a world on
 an exact calendar instead: a real-world one (Gregorian, Hebrew, tabular Islamic, Coptic, Ethiopian,
 French Republican, Baháʼí, Roman, Harptos) or your own, written as Seshat text, with months, leap
 years and named holidays that modifiers can match as tags. Bring the world's seasons and moons

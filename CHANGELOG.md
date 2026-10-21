@@ -4,7 +4,7 @@ Release notes are taken from the matching `## <version>` section by the release 
 
 ## Unreleased
 
-- **Calendar definitions (Seshat).** *Settings → Calendar → Use a calendar definition* runs a
+- **Calendar definitions (Seshat).** *Settings → Calendar → Change calendar…* runs a
   world on an exact calendar instead of the simple internal one: Gregorian, Hebrew, the tabular
   Islamic calendars, Coptic, Ethiopian, the French Republican calendar (two leap rules), Baháʼí,
   Roman (Varronian years) and Harptos, or one you write as Seshat text, with real months, leap
@@ -28,12 +28,17 @@ Release notes are taken from the matching `## <version>` section by the release 
   know definitions and would run such a world on its internal calendar settings again, without
   saying so.
 - **Switching calendars no longer hides the next calendar edit from integrations.** After the
-  active calendar changed (choosing another *Calendar source*, or a calendar plugin loading or
+  active calendar changed (choosing another calendar in settings, or a calendar plugin loading or
   being disabled), the next edit to that calendar's settings fired `profiles-changed` with
   `all: false`, although every report had moved; an integration that clears its caches only on
   `all: true` (Windrose) could keep showing stale weather until it reloaded. The edit now fires
   `all: true`, as any calendar edit does.
-- **Choosing another *Calendar source* is saved before it takes effect.** If the save fails, the
+- **Settings → Calendar says what the world runs on.** One row names the calendar in words
+  (the internal calendar's years, a definition's name, a calendar plugin's name) with today's date,
+  and offers *Change calendar…*, *Edit definition* and *Use the internal calendar* as they apply.
+  The old *Calendar source* dropdown, which listed adapter ids, is now a *Calendar plugin* chooser
+  by name, shown only when a calendar plugin is installed.
+- **Choosing another calendar is saved before it takes effect.** If the save fails, the
   choice is left as it was and a notice says so; before, the switch applied in memory and could be
   lost on the next restart.
 - **"No calendar is available" now has a code.** `getReport`, `getRange` and `timeAt`

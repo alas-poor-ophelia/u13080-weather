@@ -106,7 +106,7 @@ export default class WadjetPlugin extends Plugin {
       this.controller.syncActiveSubscription();
       if (change.id === this.settings.activeTimeAdapter) this.controller.emitTimeChanged();
       this.world.emit("adapters-changed");
-      this.refreshSettingsTab(); // the "Calendar source" row lists registered adapters
+      this.refreshSettingsTab(); // the Calendar row and the Calendar plugin chooser list registered adapters
     });
     this.controller.syncActiveSubscription();
     // First in the chain, registered through the public API like any other plugin's resolver.
@@ -202,7 +202,7 @@ export default class WadjetPlugin extends Plugin {
     });
   }
 
-  /** The settings tab's "Calendar source" choice. Fires time-changed and adapters-changed when the effective calendar changes. */
+  /** The settings tab's calendar choice (the Calendar plugin chooser, "Use the internal calendar"). Fires time-changed and adapters-changed when the effective calendar changes. */
   setActiveTimeAdapter(id: string): Promise<void> {
     return this.calendars.setActive(id);
   }

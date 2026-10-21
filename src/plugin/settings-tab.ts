@@ -26,6 +26,7 @@ import { MAX_DAY_ORDINAL } from "./world";
 import { SESHAT_ID } from "./calendars";
 import { prepareDefinition } from "./time/seshat";
 import { buildOptIn, WORLD_PRESETS, type OptInChoice } from "./opt-in";
+import { calendarRow, definitionSummary, type CalendarRow } from "./calendar-row";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
 
 const MAIN_PRESETS = PRESETS.filter((p) => !(p as { alternate?: boolean }).alternate);
@@ -52,7 +53,6 @@ export class WadjetSettingTab extends PluginSettingTab {
   override getSettingDefinitions(): SettingDefinitionItem[] {
     const s = this.plugin.settings;
     const cal = this.plugin.internalCalendar;
-    const adapters = this.plugin.time.list();
     // The resolved active adapter (not the raw `activeTimeAdapter` setting): TimeRegistry.active
     // falls back to "internal" once the setting names an adapter that has since unregistered, so
     // this is the source of truth for "is the internal calendar in charge right now".
@@ -60,7 +60,7 @@ export class WadjetSettingTab extends PluginSettingTab {
     const activeIsInternal = activeAdapter === undefined || activeAdapter.id === "internal";
     const activeDescription = activeIsInternal ? undefined : activeAdapter?.describe?.();
     const onSeshat = () => this.plugin.time.active?.id === SESHAT_ID;
-    const fault = this.plugin.calendars.fault();
+    const row = this.calendarRow();
 
     return [
       {
@@ -100,35 +100,27 @@ export class WadjetSettingTab extends PluginSettingTab {
         heading: "Calendar",
         items: [
           {
-            name: "Calendar source",
-            desc: "The internal calendar is always available. Other calendars appear here when their plugins register.",
-            visible: () => adapters.length > 1,
-            control: { type: "dropdown", key: "activeTimeAdapter", options: Object.fromEntries(adapters.map((a) => [a, a])) },
+            // what the world runs on, in words, and what can be done from there (bead wadjet-44d)
+            name: row.name,
+            desc: row.desc,
+            render: (setting) => {
+              for (const action of row.actions) {
+                if (action === "edit") setting.addButton((b) => b.setButtonText("Edit definition").onClick(() => new DefinitionModal(this.app, this.plugin, () => this.update()).open()));
+                if (action === "change") setting.addButton((b) => b.setButtonText("Change calendar…").onClick(() => new OptInModal(this.app, this.plugin, () => this.update()).open()));
+                if (action === "internal") setting.addButton((b) => b.setButtonText("Use the internal calendar").onClick(() => void this.useInternalCalendar()));
+              }
+            },
+          },
+          {
+            name: "Calendar plugin",
+            desc: "Calendars other plugins provide, by name, beside the internal calendar and a stored definition.",
+            visible: () => row.choices !== null,
+            control: { type: "dropdown", key: "activeTimeAdapter", options: row.choices ?? {} },
           },
           {
             name: "Current day",
             desc: onSeshat() ? `Day number on the calendar definition's day line. Now: ${this.plugin.formatDay(s.currentDayOrdinal)}.` : `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
             control: { type: "number", key: "currentDayOrdinal", step: 1, validate: (v) => (!Number.isSafeInteger(v) ? "Whole days only." : Math.abs(v) > MAX_DAY_ORDINAL ? `Between ${withMinus(-MAX_DAY_ORDINAL)} and ${MAX_DAY_ORDINAL} only.` : undefined) },
-          },
-          {
-            name: "Calendar definition",
-            desc: fault
-              ? `It cannot run: ${fault}. No weather is made until it is fixed; the stored text is kept exactly as it is until you save one that runs.`
-              : "The world's calendar as Seshat text. Saving checks it and stores it in canonical form (comments are removed). A change to its years, seasons, moons or tags changes every day's weather.",
-            visible: onSeshat,
-            render: (setting) => {
-              // a modal with an explicit Save: a half-typed definition is never stored or re-printed under the cursor
-              setting.addButton((b) => b.setButtonText("Edit").onClick(() => new DefinitionModal(this.app, this.plugin, () => this.update()).open()));
-            },
-          },
-          {
-            name: "Use a calendar definition",
-            desc: "Run this world on a real-world calendar (Gregorian, Hebrew, Islamic and others) or on one you write as Seshat text, with exact months, leap years and holidays. The internal calendar's settings are kept, and choosing \"internal\" as the calendar source goes back to them.",
-            // from the internal calendar only: the dialog's "today" and "the same days" are the internal calendar's
-            visible: () => this.plugin.time.active?.id === "internal",
-            render: (setting) => {
-              setting.addButton((b) => b.setButtonText("Choose…").onClick(() => new OptInModal(this.app, this.plugin, () => this.update()).open()));
-            },
           },
           {
             name: "Days in a year",
@@ -235,6 +227,56 @@ export class WadjetSettingTab extends PluginSettingTab {
     };
   }
 
+  /** The Calendar row's words and actions for the calendar the world runs on now (model: calendar-row.ts). */
+  private calendarRow(): CalendarRow {
+    const s = this.plugin.settings;
+    const time = this.plugin.time;
+    const active = time.active;
+    const activeId = active?.id ?? "internal";
+    const seshat = this.plugin.calendars.seshat;
+    const now = this.plugin.world.now();
+    let today = "not set";
+    try {
+      if (now) today = active?.format?.(now.dayOrdinal) ?? `day ${now.dayOrdinal}`;
+    } catch {
+      today = now ? `day ${now.dayOrdinal}` : today;
+    }
+    const plugins = time
+      .list()
+      .filter((id) => id !== "internal" && id !== SESHAT_ID)
+      .map((id) => {
+        let label = id;
+        try {
+          label = time.get(id)?.describe?.()?.label ?? id;
+        } catch {
+          // a plugin whose describe() throws is listed by its id
+        }
+        return { id, label };
+      });
+    return calendarRow({
+      activeId,
+      internal: { yearLength: s.calendar.yearLength, epochYear: s.calendar.epochYear },
+      definition: activeId === SESHAT_ID ? (seshat?.definition()?.name ?? null) : null,
+      structure: activeId === SESHAT_ID && seshat?.definition() ? definitionSummary(seshat.definition()!, s.currentDayOrdinal) : null,
+      fault: activeId === SESHAT_ID ? this.plugin.calendars.fault() : null,
+      stored: seshat?.definition()?.name ?? (s.calendar.definition !== undefined ? "Calendar definition" : null),
+      today,
+      plugins,
+    });
+  }
+
+  /** "Use the internal calendar": the world goes back to its internal calendar; any stored definition is kept. */
+  private async useInternalCalendar(): Promise<void> {
+    try {
+      await this.plugin.setActiveTimeAdapter("internal");
+      new Notice("This world now runs on its internal calendar. The calendar definition is kept.");
+    } catch (e) {
+      new Notice(`The calendar could not be changed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.update();
+    }
+  }
+
   // --- control bindings ----------------------------------------------------
   override getControlValue(key: string): unknown {
     const s = this.plugin.settings;
@@ -332,7 +374,7 @@ class OptInModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     const s = this.plugin.settings;
-    this.setTitle("Use a calendar definition");
+    this.setTitle("Change calendar");
     const stored = typeof s.calendar.definition === "string" ? s.calendar.definition : null;
     // a stored definition (kept from an earlier opt-out, or faulted and kept byte for byte) is where to start:
     // anything else replaces it, and that is asked for below

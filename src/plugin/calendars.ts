@@ -11,7 +11,7 @@
  *   `time-changed` and `adapters-changed` fire once each. While this class
  *   registers `seshat` itself, `quiet` is true and main.ts skips the registry
  *   echo it would otherwise turn into events. Opting out keeps the
- *   definition and the registration (the "Calendar source" row can switch
+ *   definition and the registration (the settings' Calendar plugin chooser can switch
  *   back); nothing unregisters `seshat` while the plugin runs.
  * - A definition is stored only as printed by `prepareDefinition` (NFC,
  *   parsed, validated, world-checked). A stored value that cannot run is a
@@ -95,7 +95,7 @@ export class Calendars {
   }
 
   /**
-   * Make `id` the active calendar (the "Calendar source" row, opt-out). The
+   * Make `id` the active calendar (the settings' Calendar plugin chooser, "Use the internal calendar"). The
    * stored definition stays when the world leaves `seshat`. Fires
    * time-changed and adapters-changed once each when the effective calendar
    * changed. A failed save puts the old choice back.

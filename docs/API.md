@@ -276,7 +276,7 @@ These move the active calendar's current day. See "Time control" in §5 for the 
   day edits) has settled, so `advance(1)` twice in a row moves two days.
 - On success `time-changed` fires once (§2). When Wadjet fires it itself (for an adapter without
   `subscribe`), `adapterId` names the adapter whose day moved. That is the adapter that was active
-  when the call's turn came, even if the Calendar source setting changed while the call ran.
+  when the call's turn came, even if the user switched calendars while the call ran.
 - If the internal calendar cannot save the new day (the write to `data.json` fails), the day
   goes back to what it was, the call resolves `false`, and no event fires.
 
@@ -296,11 +296,13 @@ Registering it throws an `Error` with `code: "wadjet-reserved-id"`. Every regist
 unregister fires `"adapters-changed"` (§2). If `adapter.id` matches the active adapter id in
 settings, it also fires `"time-changed"`, because the active calendar's effective
 `now()`/`toContext()` has changed. It also refreshes the settings tab if it is open, because the
-"Calendar source" dropdown lists registered adapters.
+*Calendar plugin* chooser lists registered adapters by their `describe().label` (or their id when
+they do not describe themselves).
 
 The user chooses the active adapter in settings. Registering an adapter does not make it the
 active one. A calendar plugin makes itself available, and the user picks it from the
-"Calendar source" dropdown.
+*Calendar plugin* chooser in *Settings → Calendar*, which appears once any calendar plugin is
+registered.
 
 **Returns:** an unregister function. It removes the adapter only if that adapter is still the one
 registered under its id. This way an earlier plugin's cleanup does not remove a later registration
@@ -502,9 +504,9 @@ set to the event name. *(API 1: before, callbacks got no argument.)*
 | Event | Payload | Fires when |
 |---|---|---|
 | `"ready"` | `{ type }` | Once, from inside `onload()`, immediately after `api.ready` is set to `true` and just before the `wadjet:ready` workspace event. Use it only if you obtained the API object before the plugin finished loading; otherwise wait on the workspace event below. |
-| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt: zones, overrides, the seed, eras, descriptor bands or calendar configuration, whether from an edit in settings, a pin or a studio save. The internal calendar's *Current day* write and the *Calendar source* switch do not rebuild the world and do not fire it. `zoneIds` lists the zones whose output may have changed (profile, name, `flipSeasons`, or that zone's pinned days), including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed. It is also `true` when the active calendar's configuration changed in a way that changes reports, that is, when its `configHash()` (`provenance.calendarHash`) changed. For the internal calendar this means an edit to year length, epoch year, seasons, or a moon's cycle length or epoch phase. Renaming named moon phases does not count, because they are display metadata outside the config hash. For the Seshat calendar (`"seshat"`) it means an edit to its stored definition that changes a day, a tag, a year number or a moon; renaming the calendar or editing its formats or named moon phases does not count, but fires `adapters-changed`, because `format()` and `describe()` changed. When `all` is `true`, `zoneIds` is every current zone. The event fires on every such save. When the save touched nothing that changes weather, it fires with `all: false` and `zoneIds: []`. |
-| `"time-changed"` | `{ type, current: number \| null, adapterId: string }` | Whenever the active calendar's "now" or its shape changes: `setNow`/`advance`, the *Advance/Rewind the calendar one day* commands, editing *Current day* in settings (while the internal calendar is active), switching *Calendar source*, editing the internal calendar's year length, epoch year, seasons, or a moon's cycle length or epoch phase while it is active, registering an adapter whose id is the active setting, unregistering the active adapter (fallback to the internal calendar), or the active adapter's own `subscribe` callback. `current` is `now()?.dayOrdinal` at that moment; `adapterId` is the active adapter. |
-| `"adapters-changed"` | `{ type }` | Whenever the set of registered time adapters changes. That includes every `registerTimeAdapter` call and every call to the unregister function it returns, whether or not the adapter is active. It also fires when *Calendar source* switches to another adapter. Use this to refresh a UI that lists adapters (`listTimeAdapters()`). Use `"time-changed"` for a UI that only needs the active calendar. |
+| `"profiles-changed"` | `{ type, all: boolean, zoneIds: string[] }` | Whenever the world state is saved and rebuilt: zones, overrides, the seed, eras, descriptor bands or calendar configuration, whether from an edit in settings, a pin or a studio save. The internal calendar's *Current day* write and a switch to another calendar do not rebuild the world and do not fire it. `zoneIds` lists the zones whose output may have changed (profile, name, `flipSeasons`, or that zone's pinned days), including zones added or removed. `all` is `true` when the seed, the era timeline or the descriptor bands changed. It is also `true` when the active calendar's configuration changed in a way that changes reports, that is, when its `configHash()` (`provenance.calendarHash`) changed. For the internal calendar this means an edit to year length, epoch year, seasons, or a moon's cycle length or epoch phase. Renaming named moon phases does not count, because they are display metadata outside the config hash. For the Seshat calendar (`"seshat"`) it means an edit to its stored definition that changes a day, a tag, a year number or a moon; renaming the calendar or editing its formats or named moon phases does not count, but fires `adapters-changed`, because `format()` and `describe()` changed. When `all` is `true`, `zoneIds` is every current zone. The event fires on every such save. When the save touched nothing that changes weather, it fires with `all: false` and `zoneIds: []`. |
+| `"time-changed"` | `{ type, current: number \| null, adapterId: string }` | Whenever the active calendar's "now" or its shape changes: `setNow`/`advance`, the *Advance/Rewind the calendar one day* commands, editing *Current day* in settings (while the internal calendar is active), switching to another calendar in settings, editing the internal calendar's year length, epoch year, seasons, or a moon's cycle length or epoch phase while it is active, registering an adapter whose id is the active setting, unregistering the active adapter (fallback to the internal calendar), or the active adapter's own `subscribe` callback. `current` is `now()?.dayOrdinal` at that moment; `adapterId` is the active adapter. |
+| `"adapters-changed"` | `{ type }` | Whenever the set of registered time adapters changes. That includes every `registerTimeAdapter` call and every call to the unregister function it returns, whether or not the adapter is active. It also fires when the user switches the world to another calendar in settings. Use this to refresh a UI that lists adapters (`listTimeAdapters()`). Use `"time-changed"` for a UI that only needs the active calendar. |
 | `"resolvers-changed"` *(API 1)* | `{ type }` | A zone resolver was registered or unregistered. |
 | `"interpreters-changed"` *(API 1)* | `{ type, facet: string }` | An interpreter was registered or unregistered; `facet` is that interpreter's facet. |
 | `"unload"` *(API 1)* | `{ type }` | Once, at the start of unload, after `ready` became `false` and before the `wadjet:unload` workspace event. Listeners are removed immediately afterwards. |
@@ -854,8 +856,8 @@ If that calendar cannot be moved, they show a notice saying so.
 The user chooses the active adapter in settings. The registering plugin does not; see
 `registerTimeAdapter` above. A calendar plugin should implement `describe()` whether or not it
 expects to be the active one. `listTimeAdapters()` reads `describe().label` for every registered
-adapter, and falls back to the id. The settings *Calendar source* dropdown currently labels each
-adapter by its bare `id`.
+adapter, and falls back to the id. The settings *Calendar plugin* chooser does the same: each
+adapter is listed by its `describe().label`, or by its `id` when it does not describe itself.
 
 ### `CalendarDescription`
 
@@ -1001,7 +1003,7 @@ export default class AlmanacOfFooPlugin extends Plugin {
 ```
 
 This plugin does not set itself active. It registers and waits. The user picks "Almanac of
-Foo" from the *Calendar source* dropdown in Wadjet's settings if they want it.
+Foo" from the *Calendar plugin* chooser in Wadjet's settings if they want it.
 
 ### `ZoneResolver` / `ZoneLocator`
 
