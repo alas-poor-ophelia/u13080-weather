@@ -62,6 +62,21 @@ export interface InternalCalendarConfig {
  */
 export interface CalendarSettings extends InternalCalendarConfig {
   definition?: unknown;
+  /**
+   * "definition" on a world that was born on a definition; absent on every
+   * world that came from the legacy calendar, which is every world made
+   * before this field existed (§15.1 R3). Read, never inferred from the
+   * legacy fields: defaults fill those on every world.
+   */
+  origin?: "definition";
+  /** the definition and adapter before the last calendar change, for one undo (§15.9 S6) */
+  previous?: PreviousCalendar;
+}
+
+export interface PreviousCalendar {
+  /** stored as it was, so it may be any value a hand edit left */
+  definition?: unknown;
+  activeTimeAdapter: string;
 }
 
 export interface WadjetSettings {
@@ -188,6 +203,24 @@ function sanitizeEpochYear(v: unknown, warn: (msg: string) => void): number {
   return fixed;
 }
 
+/** Only "definition" is an origin; anything else reads as legacy, the safe side (§15.1 R3). */
+function sanitizeOrigin(v: unknown, warn: (msg: string) => void): Pick<CalendarSettings, "origin"> {
+  if (v === undefined || v === "definition") return v === undefined ? {} : { origin: v };
+  warn(`The calendar's origin was ${shown(v)}, which is not one Wadjet knows, so it was dropped: this world counts as one that came from the legacy calendar.`);
+  return {};
+}
+
+/** The undo record keeps its definition as stored; one without an adapter id is dropped. */
+function sanitizePrevious(v: unknown, warn: (msg: string) => void): Pick<CalendarSettings, "previous"> {
+  if (v === undefined) return {};
+  if (typeof v === "object" && v !== null && typeof (v as PreviousCalendar).activeTimeAdapter === "string") {
+    const p = v as PreviousCalendar;
+    return { previous: { ...("definition" in p ? { definition: p.definition } : {}), activeTimeAdapter: p.activeTimeAdapter } };
+  }
+  warn(`The record of the calendar before its last change was ${shown(v)}, not one Wadjet can restore, so it was dropped; the last calendar change cannot be undone.`);
+  return {};
+}
+
 /** Merge loaded data over defaults; fill a seed if missing; repair a broken calendar (reported through `warn`). Returns a new object. */
 export function migrateSettings(raw: unknown, warn: (msg: string) => void = () => {}): WadjetSettings {
   const r = (raw ?? {}) as Partial<WadjetSettings>;
@@ -197,10 +230,11 @@ export function migrateSettings(raw: unknown, warn: (msg: string) => void = () =
   const moons = sanitizeMoons(calendar.moons, warn);
   const yearLength = sanitizeYearLength(calendar.yearLength, warn);
   const epochYear = sanitizeEpochYear(calendar.epochYear, warn);
+  const { origin, previous, ...rest } = calendar;
   const s: WadjetSettings = {
     ...DEFAULT_SETTINGS,
     ...r,
-    calendar: { ...calendar, yearLength, epochYear, moons },
+    calendar: { ...rest, yearLength, epochYear, moons, ...sanitizeOrigin(origin, warn), ...sanitizePrevious(previous, warn) },
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],

@@ -22,7 +22,7 @@
  */
 import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
-import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, seasonAtPhase, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, type BodyAst, type CalendarAst } from "../../seshat";
+import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, seasonAtPhase, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
@@ -36,28 +36,33 @@ const WORLD_SETPOS_PERIOD_MAX = 400;
 
 /** Why a world cannot run a definition, beyond Seshat's own validation (§13.3, §13.11 B4). */
 export function checkWorldCalendar(ast: CalendarAst): string[] {
-  const errors: string[] = [];
+  return worldProblems(ast).map((p) => p.message);
+}
+
+/** `checkWorldCalendar` with each problem's location (§15.9 S1). */
+export function worldProblems(ast: CalendarAst): Problem[] {
+  const errors: Problem[] = [];
   const year = ast.units.find((u) => u.id === "year");
-  if (!year || year.kind !== "cycle") errors.push('a world calendar needs a cycle unit with the id "year"');
+  if (!year || year.kind !== "cycle") errors.push({ message: 'a world calendar needs a cycle unit with the id "year"', ...(year ? { unit: "year" } : {}) });
   // seasons are phases of the year: yearPhase, describe() and the Studio's seasons window all read them so
-  if (ast.seasons && ast.seasons.unit !== "year") errors.push(`a world calendar's seasons run over its year, not "${ast.seasons.unit}"`);
-  if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push(`a world calendar has at most ${WORLD_RULES_MAX} named rules`);
+  if (ast.seasons && ast.seasons.unit !== "year") errors.push({ message: `a world calendar's seasons run over its year, not "${ast.seasons.unit}"` });
+  if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push({ message: `a world calendar has at most ${WORLD_RULES_MAX} named rules` });
   const units = new Map(ast.units.map((u) => [u.id, u]));
-  const walk = (r: unknown, at: string): void => {
+  const walk = (r: unknown, at: string, rule: string): void => {
     if (typeof r !== "object" || r === null) return;
     const n = r as { kind?: string; of?: unknown; count?: number; setpos?: unknown; freq?: string };
-    if (n.kind === "all" || n.kind === "any") for (const q of (n.of as unknown[]) ?? []) walk(q, at);
-    if (n.kind === "not") walk(n.of, at);
+    if (n.kind === "all" || n.kind === "any") for (const q of (n.of as unknown[]) ?? []) walk(q, at, rule);
+    if (n.kind === "not") walk(n.of, at, rule);
     if (n.kind !== "recur") return;
     // a COUNT walks every period from its anchor; on a weather path that is a walk per day
-    if (n.count !== undefined) errors.push(`${at}: a world calendar's rules cannot use COUNT`);
+    if (n.count !== undefined) errors.push({ message: `${at}: a world calendar's rules cannot use COUNT`, rule });
     if (n.setpos !== undefined) {
       const f = n.freq === "day" ? undefined : units.get(n.freq ?? "");
       const constant = n.freq === "day" || (f?.kind === "cycle" && f.crossing === undefined && !f.gears?.length && !f.stages?.length && !f.ledger?.length && f.length <= WORLD_SETPOS_PERIOD_MAX);
-      if (!constant) errors.push(`${at}: a world calendar's BYSETPOS needs a constant period of at most ${WORLD_SETPOS_PERIOD_MAX} days`);
+      if (!constant) errors.push({ message: `${at}: a world calendar's BYSETPOS needs a constant period of at most ${WORLD_SETPOS_PERIOD_MAX} days`, rule });
     }
   };
-  for (const r of ast.rules ?? []) walk(r.rule, `rule "${r.id}"`);
+  for (const r of ast.rules ?? []) walk(r.rule, `rule "${r.id}"`, r.id);
   return errors;
 }
 
@@ -158,18 +163,19 @@ function hash64(s: string): string {
  * A definition as typed (settings text, an import): names and tags to NFC
  * (§13.8), parsed, validated and held to the world checks, then printed. Only
  * the printed text is ever stored. An error carries the text's line when the
- * parser named one.
+ * parser named one; past the parser, `problems` holds every problem with its
+ * location and `error` is the first of them.
  */
-export function prepareDefinition(text: string): { text: string; ast: CalendarAst } | { error: string; line?: number } {
+export function prepareDefinition(text: string): { text: string; ast: CalendarAst } | { error: string; line?: number; problems: Problem[] } {
   let ast: CalendarAst;
   try {
     ast = parse(text.normalize("NFC"));
   } catch (e) {
     if (!(e instanceof SeshatSyntaxError)) throw e;
-    return { error: e.message, line: e.line };
+    return { error: e.message, line: e.line, problems: [{ message: e.message }] };
   }
-  const errors = [...validate(ast), ...checkWorldCalendar(ast)];
-  if (errors.length) return { error: errors[0]! };
+  const found = [...problems(ast), ...worldProblems(ast)];
+  if (found.length) return { error: found[0]!.message, problems: found };
   return { text: print(ast), ast };
 }
 

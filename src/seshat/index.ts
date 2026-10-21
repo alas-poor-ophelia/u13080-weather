@@ -10,7 +10,7 @@ export { baseIndexAt, baseLengths, baseStart, linearBase, type LinearBase } from
 export { DAY_LIMIT } from "./day";
 export { gearBelow, gearDensity, gearDeviation, gearMatches, gearPeriod, type GearAst } from "./gear";
 export { Engine, type Position } from "./engine";
-export { checkRule, validate } from "./validate";
+export { checkRule, problems, validate, type Problem } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
 export { COPTIC, ETHIOPIAN } from "./calendars/ethiopian";
