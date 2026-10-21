@@ -395,7 +395,7 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
       flagsEl.empty();
       daysEl.empty();
       rowsEl.empty();
-      bar.createSpan({ cls: "wadjet-studio-seasons-empty", text: "no seasons yet" });
+      bar.createSpan({ cls: "wadjet-studio-seasons-empty", text: view.readOnly ? "no seasons" : "no seasons yet: double-click the bar where the first one starts" });
       return;
     }
     const segs = segments(marks);
@@ -409,9 +409,8 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
     const state = ctx.store.get();
     const view = calendarView(ctx, state);
     if (view.readOnly) return;
-    const marks = currentMarks(view);
-    if (marks.length === 0) return;
-    trySplitAt(marks, phaseFromClientX(ev.clientX));
+    // with no seasons, a double-click starts the first one there (wadjet-hhp)
+    trySplitAt(currentMarks(view), phaseFromClientX(ev.clientX));
   }
 
   function onSplitClick(): void {
@@ -440,7 +439,8 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
 
     const marks = currentMarks(view);
     splitBtn.toggleClass("is-hidden", view.readOnly);
-    setDisabled(splitBtn, marks.length === 0 || marks.length >= SEASON_LIMITS.max);
+    setDisabled(splitBtn, marks.length >= SEASON_LIMITS.max);
+    splitBtn.setText(marks.length === 0 ? "＋ add the first season" : "＋ split the longest season");
 
     editLink.toggleClass("is-hidden", !view.readOnly || view.editHint === undefined);
     if (view.editHint !== undefined) editLink.setText(view.editHint);

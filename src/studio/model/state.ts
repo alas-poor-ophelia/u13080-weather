@@ -19,11 +19,12 @@
 import type { Override } from "../../core/report";
 import type { Era, ZoneProfile } from "../../core/types";
 import type { DevicePreset, InternalCalendarConfig, RegimePreset } from "../../plugin/settings";
+import type { MonthForm, YearForm } from "../../plugin/time/form";
 
 /** The world-scoped slice of settings: everything a world edit touches (`world · N zones`). */
 export interface WorldDraft {
   eras: Era[];
-  calendar: { seasons: InternalCalendarConfig["seasons"]; moons: InternalCalendarConfig["moons"] };
+  calendar: CalendarDraftShape;
   devicePresets: DevicePreset[];
   /** saved state sets, offered by the Regimes window's `preset ▾` (SPEC §3.4) */
   regimePresets: RegimePreset[];
@@ -73,11 +74,37 @@ export interface StudioState {
  */
 export type CalendarSource = "legacy" | "seshat" | "fault";
 
+/**
+ * A moon in the draft. On a world that runs a definition, `id` is its body's
+ * id, so a rename keeps the body (its exact period, the rules that read it);
+ * absent on the legacy calendar and on a moon the draft adds (wadjet-dea).
+ */
+export type DraftMoon = InternalCalendarConfig["moons"][number] & { id?: string };
+
+/**
+ * The parts of a definition the form model reads as fields (docs/SESHAT-v0.md
+ * §15.3), as the draft holds them. A part that is text on the stored
+ * definition is absent, so it is never an edit; absent on the legacy calendar.
+ */
+export interface FormDraft {
+  name?: string;
+  year?: YearForm;
+  months?: readonly MonthForm[] | null;
+  week?: readonly string[] | null;
+}
+
+/** The world draft's calendar: seasons and moons as every window reads them, and the definition's other fields. */
+export interface CalendarDraftShape {
+  seasons: InternalCalendarConfig["seasons"];
+  moons: DraftMoon[];
+  form?: FormDraft;
+}
+
 /** The slice of `WadjetSettings` the studio opens on. `WadjetSettings` satisfies it. */
 export interface StudioSettingsLike {
   zones: ZoneProfile[];
   eras: Era[];
-  calendar: { seasons: InternalCalendarConfig["seasons"]; moons: InternalCalendarConfig["moons"] };
+  calendar: CalendarDraftShape;
   /** absent: "legacy" */
   calendarSource?: CalendarSource;
   devicePresets?: DevicePreset[];
@@ -115,7 +142,7 @@ export function initialState(settingsLike: StudioSettingsLike, zoneId: string | 
   for (const z of structuredClone(settingsLike.zones)) zones[z.id] = z;
   const world = structuredClone<WorldDraft>({
     eras: settingsLike.eras,
-    calendar: { seasons: settingsLike.calendar.seasons, moons: settingsLike.calendar.moons },
+    calendar: { seasons: settingsLike.calendar.seasons, moons: settingsLike.calendar.moons, ...(settingsLike.calendar.form ? { form: settingsLike.calendar.form } : {}) },
     devicePresets: settingsLike.devicePresets ?? [],
     regimePresets: settingsLike.regimePresets ?? [],
     overrides: settingsLike.overrides,

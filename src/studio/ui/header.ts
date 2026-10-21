@@ -399,7 +399,8 @@ export function createHeaderSurface(): Surface {
     settings.eras = structuredClone(state.world.eras);
     if (plan.kind === "legacy") {
       settings.calendar.seasons = structuredClone(state.world.calendar.seasons);
-      settings.calendar.moons = structuredClone(state.world.calendar.moons);
+      // body ids belong to definitions: the legacy calendar's moons never store one
+      settings.calendar.moons = structuredClone(state.world.calendar.moons).map(({ id: _id, ...m }) => m);
     }
     settings.devicePresets = structuredClone(state.world.devicePresets);
     settings.regimePresets = structuredClone(state.world.regimePresets);

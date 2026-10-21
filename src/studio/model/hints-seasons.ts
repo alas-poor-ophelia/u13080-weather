@@ -20,10 +20,10 @@ export const SEASONS_HINTS: Record<string, Hint> = {
   "seasons.source": ["Calendar source", "internal calendar is edited here; a plugin calendar mirrors read-only"],
   "seasons.world": ["World scope", "seasons apply to every zone — the first edit this session asks to confirm"],
   "seasons.flag": ["Boundary", "drag to move the season's start"],
-  "seasons.bar": ["Seasons", "double-click to split the season under the pointer"],
+  "seasons.bar": ["Seasons", "double-click to split the season under the pointer; with none yet, to start the first one there"],
   "seasons.rename": ["Season name", "double-click to rename"],
   "seasons.merge": ["Merge", "removes this season into the one before it"],
-  "seasons.split": ["Split the longest", "halves the longest season into two"],
+  "seasons.split": ["Split the longest", "halves the longest season into two; with none yet, adds the first, starting at the year's start"],
   "seasons.day": ["Start day", "the season's first day, in the active calendar"],
   "seasons.editHint": ["Edit elsewhere", "this calendar is owned by another plugin"],
 };

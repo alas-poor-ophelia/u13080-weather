@@ -29,10 +29,12 @@ export interface MarkLimits {
   min: number;
   max: number;
   minGap: number;
+  /** the name of the first mark when there are none; absent: a split needs a mark to split */
+  first?: string;
 }
 
 /** Seasons · CALENDAR: 1–6 seasons, at least a week apart (a week of a 365-day year; follows the real year in Seshat P3). */
-export const SEASON_LIMITS: MarkLimits = { min: 1, max: 6, minGap: 7 / 365 };
+export const SEASON_LIMITS: MarkLimits = { min: 1, max: 6, minGap: 7 / 365, first: "Season" };
 /** Sable · CYCLE: unlimited named phases, at least 2% of the cycle apart. */
 export const PHASE_LIMITS: MarkLimits = { min: 1, max: Infinity, minGap: 0.02 };
 
@@ -142,13 +144,17 @@ function uniqueDefaultName(base: string, existing: readonly string[]): string {
 /**
  * Inserts a new mark at `phase`, inside whichever segment contains it.
  * Refuses (`null`) when the mark count is already at `limits.max`, or when
- * either resulting half would be shorter than `limits.minGap`. Default name
+ * either resulting half would be shorter than `limits.minGap`. With no marks,
+ * it adds the first one (named `limits.first`) at `phase`, or refuses when the
+ * limits name no first mark. Default name
  * is `"<segment name> 2"`, bumped (`… 3`, `… 4`, …) until unique; an empty
  * or omitted `newName` falls back to that default.
  */
 export function split(marks: readonly Mark[], phase: number, limits: MarkLimits, newName?: string): Mark[] | null {
   const s = normalise(marks);
-  if (s.length === 0 || s.length >= limits.max) return null;
+  if (s.length >= limits.max) return null;
+  // no marks yet: where the limits name a first mark, it starts at `phase` and covers the whole cycle (wadjet-hhp)
+  if (s.length === 0) return limits.first === undefined ? null : [{ name: newName?.trim() || limits.first, at: wrap(phase) }];
 
   const segs = segments(s);
   const p = wrap(phase);
@@ -168,7 +174,7 @@ export function split(marks: readonly Mark[], phase: number, limits: MarkLimits,
 /** Halves the longest segment (ties keep the first found, in `at` order). */
 export function splitLongest(marks: readonly Mark[], limits: MarkLimits, newName?: string): Mark[] | null {
   const segs = segments(marks);
-  if (segs.length === 0) return null;
+  if (segs.length === 0) return split(marks, 0, limits, newName);
   let best = segs[0]!;
   for (const seg of segs) if (seg.length > best.length) best = seg;
   const phase = wrap(best.from + best.length / 2);

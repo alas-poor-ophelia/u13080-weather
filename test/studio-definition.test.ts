@@ -48,11 +48,11 @@ const written = (r: ReturnType<typeof mergeCalendar>): CalendarAst => {
 };
 
 describe("the draft opens on the definition", () => {
-  test("seasons as stored, moons in declaration order with their numbers and phases", () => {
+  test("seasons as stored, moons in declaration order with their body ids, numbers and phases", () => {
     expect(BASE.seasons).toEqual(SEASONS);
     expect(BASE.moons).toEqual([
-      { name: "Luna", cycleDays: 295299734 / 9999991, phaseAtEpoch: 1234567 / 9999991, phases: [{ name: "Full", at: 0.5 }] },
-      { name: "Ember", cycleDays: 33, phaseAtEpoch: 0 },
+      { id: "luna", name: "Luna", cycleDays: 295299734 / 9999991, phaseAtEpoch: 1234567 / 9999991, phases: [{ name: "Full", at: 0.5 }] },
+      { id: "ember", name: "Ember", cycleDays: 33, phaseAtEpoch: 0 },
     ]);
   });
 });
@@ -155,7 +155,8 @@ describe("Save merges into a fresh parse of the stored text", () => {
   test("seasons can be cleared, and a calendar without seasons can gain them", () => {
     const none = clone(BASE);
     none.seasons = [];
-    expect(written(mergeCalendar(TEXT, BASE, none)).seasons).toEqual({ unit: "year", marks: [] });
+    // clearing the last season removes the field (an empty field is hashed, so adding and clearing again gives back the same calendar: §15.9)
+    expect(written(mergeCalendar(TEXT, BASE, none))).not.toHaveProperty("seasons");
     const bare = print({ ...DEF, seasons: undefined } as unknown as CalendarAst);
     const bareBase = calendarOfDefinition(parse(bare));
     const gained = { ...clone(bareBase), seasons: [{ name: "Wet", from: 0 }] };
