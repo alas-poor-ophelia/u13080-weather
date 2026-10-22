@@ -30,6 +30,15 @@ export const CALENDAR_HINTS: Record<string, Hint> = {
   "calendar.dayNew": ["Add a day", "the week gets one day longer; weekday rules move"],
   "calendar.weekNew": ["Add a week", "named days repeating in a week"],
   "calendar.asText": ["Edit as text", "opens the definition; this part is written in a way the fields cannot show"],
+  "calendar.ledgerRemove": ["Remove entry", "the calendar runs on its rules there again"],
+  "calendar.ledgerKind": ["Kind of entry", "a marked day, a day a rule skips, a moved year start, one year's month lengths, or a different rule"],
+  "calendar.ledgerDate": ["Date", "written as the calendar writes dates, or a day number"],
+  "calendar.ledgerName": ["Day name", "what the marked day is called"],
+  "calendar.ledgerTags": ["Tags", "stamped on the marked day; zone conditions can read them"],
+  "calendar.ledgerRule": ["Rule", "the named rule that skips the day"],
+  "calendar.ledgerYear": ["Year", "the year the entry corrects, by its number"],
+  "calendar.ledgerLengths": ["Month lengths", "one per month, in order; they must fill the year"],
+  "calendar.ledgerAdd": ["Add entry", "writes it into the draft; Save stores it"],
   "calendar.change": ["Change calendar", "switches this world to a calendar definition, or another one"],
 };
 

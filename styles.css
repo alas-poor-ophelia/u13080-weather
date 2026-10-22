@@ -6051,3 +6051,23 @@
   align-self: center;
   padding: 0 5px;
 }
+.wadjet-studio-calendar-entry {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wadjet-studio-calendar-problem {
+  color: var(--text-error);
+  font-size: var(--wadjet-studio-fs-caption);
+  padding-left: 12px;
+}
+.wadjet-studio-calendar-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--wadjet-studio-border-bright);
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] input.wadjet-studio-calendar-field.is-short-date {
+  width: 110px;
+}

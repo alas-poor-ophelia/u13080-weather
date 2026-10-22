@@ -24,9 +24,11 @@ import { Notice } from "obsidian";
 import { canonicalJson } from "../../../core/profile";
 import { YEAR_LENGTH_MAX } from "../../../core/modifiers";
 import type { LeapTerm, MonthForm, YearForm } from "../../../plugin/time/form";
-import { recognise, type CalendarForm } from "../../../plugin/time/form";
+import { compile, recognise, type CalendarForm, type LedgerForm } from "../../../plugin/time/form";
+import { prepareDefinition } from "../../../plugin/time/seshat";
+import { print, type LedgerEntry } from "../../../seshat";
 import { DefinitionModal, OptInModal } from "../../../plugin/calendar-modals";
-import { calendarGrammar, monthsWords, parseMonthLength, showMonthLength, weekWords, yearWords } from "../../model/calendar-window";
+import { calendarGrammar, ledgerRows, monthsWords, parseLengths, parseMonthLength, showMonthLength, weekWords, yearWords, type LedgerRow } from "../../model/calendar-window";
 import { calendarHint } from "../../model/hints-calendar";
 import type { FormDraft, StudioState } from "../../model/state";
 import { calendarOfDefinition } from "../../model/definition";
@@ -39,7 +41,7 @@ import { buildSeasonsWindow } from "./seasons";
 /** The id this window is registered and opened under. */
 export const CALENDAR_WINDOW = "calendar";
 
-export type CalendarTab = "seasons" | "year" | "months" | "week" | "calendar";
+export type CalendarTab = "seasons" | "year" | "months" | "week" | "ledger" | "calendar";
 
 /** Open windows' tab switches, by the manager that holds them. */
 const switchers = new WeakMap<WindowManager, (tab: CalendarTab) => void>();
@@ -107,6 +109,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
           { value: "year", label: "Year" },
           { value: "months", label: "Months" },
           { value: "week", label: "Week" },
+          { value: "ledger", label: "Ledger" },
         ]
       : [
           { value: "seasons", label: "Seasons" },
@@ -355,6 +358,221 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
     button(panel, "day.new", "＋ day", "Add a day to the week", calendarHint("calendar.dayNew"), () => editWeek((days) => [...days, `Day ${days.length + 1}`]));
   }
 
+  // ---- the ledger tab
+
+  /** what the "add" row holds while it is filled in; it survives redraws */
+  const adding = { kind: "mark", date: "", name: "", tags: "", rule: "", year: "", lengths: "" };
+
+  const editLedger = (fn: (l: LedgerForm) => LedgerForm) => write((f) => f.ledger && (f.ledger = fn(f.ledger)));
+
+  function removeRow(key: string): void {
+    const [kind, a, b] = key.split(":");
+    editLedger((l) => {
+      if (kind === "unit") {
+        const rest = (l.units[a!] ?? []).filter((_, i) => i !== Number(b));
+        const units = { ...l.units };
+        if (rest.length) units[a!] = rest;
+        else delete units[a!];
+        return { ...l, units };
+      }
+      if (kind === "day") return { ...l, days: l.days.filter((_, i) => i !== Number(a)) };
+      const rest = (l.skips[a!] ?? []).filter((d) => d !== Number(b));
+      const skips = { ...l.skips };
+      if (rest.length) skips[a!] = rest;
+      else delete skips[a!];
+      return { ...l, skips };
+    });
+  }
+
+  /** The draft's ledger checked against the stored definition: each problem on the row it names, the rest above the list. */
+  function ledgerProblems(ledger: LedgerForm): { byRow: Map<string, string[]>; loose: string[] } {
+    const byRow = new Map<string, string[]>();
+    const loose: string[] = [];
+    const ast = ctx.plugin.calendars.seshat?.definition();
+    if (!ast) return { byRow, loose };
+    let text: string;
+    try {
+      text = print(compile(ast, { ledger }));
+    } catch (e) {
+      return { byRow, loose: [e instanceof Error ? e.message : String(e)] };
+    }
+    const r = prepareDefinition(text);
+    if (!("error" in r)) return { byRow, loose };
+    const add = (key: string, m: string) => byRow.set(key, [...(byRow.get(key) ?? []), m]);
+    for (const p of r.problems) {
+      if (p.unit !== undefined && p.entry !== undefined) add(`unit:${p.unit}:${p.entry}`, p.message);
+      else if (p.day !== undefined) add(`day:${p.day}`, p.message);
+      else if (p.rule !== undefined && ledger.skips[p.rule]) for (const d of ledger.skips[p.rule]!) add(`skip:${p.rule}:${d}`, p.message);
+      else loose.push(p.message);
+    }
+    return { byRow, loose };
+  }
+
+  /** The draft's year, months or week differ from the stored definition's: dates are still read in the stored one. */
+  function unsavedStructure(): boolean {
+    const ast = ctx.plugin.calendars.seshat?.definition() ?? null;
+    if (!ast) return false;
+    const stored = calendarOfDefinition(ast).form ?? {};
+    const draft = ctx.store.get().world.calendar.form ?? {};
+    return (["year", "months", "week"] as const).some((k) => canonicalJson(draft[k] ?? null) !== canonicalJson(stored[k] ?? null));
+  }
+
+  /**
+   * @param firstYear the draft's first year: entries are shown and added by the year numbers Save will store
+   * @param storedFirstYear the stored definition's: the stored calendar's own yearStart counts from it
+   */
+  function renderLedger(ledger: LedgerForm, firstYear: number, storedFirstYear: number): void {
+    const cal = ctx.plugin.calendars.seshat;
+    const date = (d: number): string => {
+      try {
+        return cal?.format(d) ?? `day ${d}`;
+      } catch {
+        return `day ${d}`;
+      }
+    };
+    // a displayed year is an index plus the draft's first year; the stored calendar counts from its own
+    const rows: LedgerRow[] = ledgerRows(ledger, { date, yearStart: (y) => cal?.yearStart(y - firstYear + storedFirstYear) ?? null, firstYear });
+    const { byRow, loose } = ledgerProblems(ledger);
+    line(panel, rows.length ? `${rows.length} entr${rows.length === 1 ? "y" : "ies"}, in date order` : "No entries: the calendar runs on its rules alone.", "wadjet-studio-calendar-summary");
+    if (unsavedStructure()) line(panel, "Dates here are read and written in the saved calendar. Save the year, month and week edits to use the new ones.", "wadjet-studio-calendar-why");
+    for (const m of loose) line(panel, `⚠ ${m}`, "wadjet-studio-calendar-problem");
+    for (const row of rows) {
+      const r = panel.createDiv({ cls: "wadjet-studio-calendar-row" });
+      r.createSpan({ cls: "wadjet-studio-calendar-entry", text: row.text });
+      if (row.asText) asTextButton(r, `${row.key}.text`);
+      button(r, `${row.key}.remove`, "×", `Remove: ${row.text}`, calendarHint("calendar.ledgerRemove"), () => removeRow(row.key));
+      for (const m of byRow.get(row.key) ?? []) line(panel, `⚠ ${m}`, "wadjet-studio-calendar-problem");
+    }
+    renderAdd(firstYear, ledger);
+  }
+
+  function asTextButton(parent: HTMLElement, key: string): void {
+    button(parent, key, "Edit as text", "Edit the calendar definition as text", calendarHint("calendar.asText"), () => {
+      if (unsavedFields()) return void new Notice("Save or undo the calendar's field edits first: Edit as text opens the stored definition.");
+      new DefinitionModal(ctx.plugin.app, ctx.plugin, () => {}).open();
+    });
+  }
+
+  /** A plain input for the add row: it holds its text in `adding` and commits nothing itself. */
+  function addInput(parent: HTMLElement, key: keyof typeof adding, label: string, hint: string, placeholder: string, cls = "is-name"): void {
+    const input = parent.createEl("input", { cls: `wadjet-studio-calendar-field ${cls}`, type: "text", attr: { spellcheck: "false", placeholder, "aria-label": label, "data-hint": hint, "data-key": `add.${key}` } });
+    input.value = adding[key];
+    input.dataset.drawn = adding[key];
+    input.addEventListener("input", () => (adding[key] = input.value));
+  }
+
+  function renderAdd(firstYear: number, ledger: LedgerForm): void {
+    const box = panel.createDiv({ cls: "wadjet-studio-calendar-add" });
+    const head = box.createDiv({ cls: "wadjet-studio-calendar-row" });
+    head.createSpan({ text: "Add" });
+    const kind = head.createEl("select", { cls: "wadjet-studio-calendar-select dropdown", attr: { "aria-label": "Kind of entry", "data-hint": calendarHint("calendar.ledgerKind"), "data-key": "add.kind" } });
+    const kinds: Record<string, string> = { mark: "A marked day", skip: "A day a rule skips", start: "A year's start moved", lengths: "One year's month lengths", switch: "A different rule from a year on" };
+    for (const [value, text] of Object.entries(kinds)) kind.createEl("option", { value, text });
+    kind.value = adding.kind;
+    kind.addEventListener("change", () => {
+      adding.kind = kind.value;
+      paint(true);
+    });
+    const row = box.createDiv({ cls: "wadjet-studio-calendar-row" });
+    const rules = (ctx.plugin.calendars.seshat?.definition()?.rules ?? []).map((r) => r.id);
+    const dayOf = (text: string): number | null => {
+      const t = text.trim();
+      if (/^-?\d+$/.test(t)) return Number(t);
+      return ctx.plugin.calendars.seshat?.parse(t) ?? null;
+    };
+    const today = ctx.plugin.calendars.seshat?.format(ctx.plugin.settings.currentDayOrdinal) ?? "";
+    switch (adding.kind) {
+      case "mark":
+        addInput(row, "date", "Date", calendarHint("calendar.ledgerDate"), today, "is-short-date");
+        addInput(row, "name", "Name of the day", calendarHint("calendar.ledgerName"), "Coronation");
+        addInput(row, "tags", "Tags, separated by commas", calendarHint("calendar.ledgerTags"), "Tags, comma separated");
+        break;
+      case "skip": {
+        if (!rules.length) {
+          line(row, "This calendar has no named rules to skip a day of.", "wadjet-studio-calendar-why");
+          return;
+        }
+        const sel = row.createEl("select", { cls: "wadjet-studio-calendar-select dropdown", attr: { "aria-label": "Rule", "data-hint": calendarHint("calendar.ledgerRule"), "data-key": "add.rule" } });
+        for (const id of rules) sel.createEl("option", { value: id, text: id });
+        if (!rules.includes(adding.rule)) adding.rule = rules[0]!;
+        sel.value = adding.rule;
+        sel.addEventListener("change", () => (adding.rule = sel.value));
+        addInput(row, "date", "Date", calendarHint("calendar.ledgerDate"), today, "is-short-date");
+        break;
+      }
+      case "start":
+        addInput(row, "year", "Year", calendarHint("calendar.ledgerYear"), "Year", "is-short");
+        row.createSpan({ text: "starts on" });
+        addInput(row, "date", "Date", calendarHint("calendar.ledgerDate"), today, "is-short-date");
+        break;
+      case "lengths":
+        addInput(row, "year", "Year", calendarHint("calendar.ledgerYear"), "Year", "is-short");
+        addInput(row, "lengths", "Month lengths, separated by commas", calendarHint("calendar.ledgerLengths"), "31, 28, 31, …", "is-wide");
+        break;
+      default:
+        line(row, "A switch's rule is written as text.", "wadjet-studio-calendar-why");
+        asTextButton(row, "add.switch");
+        return;
+    }
+    button(box, "add.go", "＋ add", "Add the entry", calendarHint("calendar.ledgerAdd"), () => {
+      const fail = (m: string) => void new Notice(`Not added: ${m}`);
+      // what was typed, read once: a confirm may stay open while the row is redrawn
+      const { kind: k, rule, date, name: typedName, tags: typedTags, year, lengths: typedLengths } = adding;
+      // the row clears only once the entry is in the draft; a cancelled confirm keeps what was typed
+      const commit = (fn: (l: LedgerForm) => LedgerForm) =>
+        editLedger((l) => {
+          adding.date = adding.name = adding.tags = adding.year = adding.lengths = "";
+          return fn(l);
+        });
+      const yearIndex = (): number | null => (/^-?\d+$/.test(year.trim()) ? Number(year.trim()) - firstYear : null);
+      const ast = ctx.plugin.calendars.seshat?.definition() ?? null;
+      if (k === "mark") {
+        const day = dayOf(date);
+        if (day === null) return fail(`"${date}" is not a date in this calendar (write it as ${today}, or a day number).`);
+        if (ledger.days.some((d) => d.day === day)) return fail("that day is marked already; remove its entry first.");
+        const tags = typedTags.split(",").map((t) => t.trim().normalize("NFC")).filter((t) => t !== "");
+        const n = typedName.trim().normalize("NFC");
+        commit((l) => ({ ...l, days: [...l.days, { day, ...(n ? { name: n } : {}), ...(tags.length ? { tags } : {}) }].sort((a, b) => a.day - b.day) }));
+      } else if (k === "skip") {
+        const day = dayOf(date);
+        if (day === null) return fail(`"${date}" is not a date in this calendar.`);
+        if ((ledger.skips[rule] ?? []).includes(day)) return fail(`rule ${rule} skips that day already.`);
+        // a rule with tags can be checked: it must fall on the day it is to skip
+        const tag = ast?.rules?.find((r) => r.id === rule)?.tags?.[0];
+        if (tag !== undefined && !(ctx.plugin.calendars.seshat?.toContext(day).tags ?? []).includes(tag)) return fail(`rule ${rule} does not fall on ${date}, so there is nothing to skip.`);
+        commit((l) => ({ ...l, skips: { ...l.skips, [rule]: [...(l.skips[rule] ?? []), day] } }));
+      } else {
+        const from = yearIndex();
+        if (from === null) return fail("write a whole year.");
+        let entry: LedgerEntry;
+        if (k === "start") {
+          const day = dayOf(date);
+          if (day === null) return fail(`"${date}" is not a date in this calendar.`);
+          entry = { kind: "starts", from, startsOn: day };
+        } else {
+          const lengths = parseLengths(typedLengths);
+          if (!lengths) return fail("write the month lengths as whole numbers, separated by commas.");
+          const unit = calendarOfMonthsUnit();
+          if (unit === null) return fail("this calendar's months are written as text.");
+          // checked against the saved months: the entry is validated against the stored calendar
+          const slots = ast?.units.find((u) => u.id === unit);
+          const count = slots?.kind === "slots" ? slots.slots.length : 0;
+          if (lengths.length !== count) return fail(`write ${count} lengths, one per month of the saved calendar.`);
+          entry = { kind: "slots", from, unit, lengths };
+        }
+        // entries are kept in order of their first occurrence (V7)
+        commit((l) => ({ ...l, units: { ...l.units, year: [...(l.units.year ?? []), entry].sort((a, b) => a.from - b.from) } }));
+      }
+    });
+  }
+
+  /** The id of the months' slot unit in the stored definition, or null. */
+  function calendarOfMonthsUnit(): string | null {
+    const ast = ctx.plugin.calendars.seshat?.definition();
+    const m = ast?.units.filter((u) => u.kind === "slots" && u.in === "year") ?? [];
+    return m.length === 1 ? m[0]!.id : null;
+  }
+
   function renderPanel(state: StudioState): void {
     const src = sourceOf(ctx, state);
     const description = ctx.calendar();
@@ -373,11 +591,18 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
     }
     const form = state.world.calendar.form ?? {};
     const stored = storedForm(ctx);
-    const why = (k: "name" | "year" | "months" | "week"): string => {
+    const why = (k: "name" | "year" | "months" | "week" | "ledger"): string => {
       const p = stored?.[k];
       return p?.kind === "text" ? p.why : "the simple fields cannot show it";
     };
-    if (tab === "year") renderYear(form, stored, why);
+    if (tab === "ledger") {
+      const ast = ctx.plugin.calendars.seshat?.definition();
+      const yearUnit = ast?.units.find((u) => u.id === "year");
+      const storedFirstYear = yearUnit?.kind === "cycle" ? (yearUnit.number ?? 0) : 0;
+      const firstYear = form.year?.firstYear ?? storedFirstYear;
+      if (form.ledger) renderLedger(form.ledger, firstYear, storedFirstYear);
+      else asText(panel, "ledger.text", null, why("ledger"));
+    } else if (tab === "year") renderYear(form, stored, why);
     else if (tab === "months") {
       if (form.months !== undefined) renderMonths(form.months);
       else asText(panel, "months.text", null, why("months"));

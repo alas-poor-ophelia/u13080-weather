@@ -3,7 +3,7 @@
  * year, its leap rule and the definition's other parts read on screen, and
  * the WRITES line. Pure: no Obsidian imports (PLAN D3).
  */
-import type { LeapTerm, MonthForm, YearForm } from "../../plugin/time/form";
+import type { LeapTerm, LedgerForm, MonthForm, YearForm } from "../../plugin/time/form";
 import type { FormDraft } from "./state";
 import { grammar } from "./copy";
 
@@ -69,4 +69,66 @@ export function calendarGrammar(form: FormDraft | undefined): string {
   if (!form) return grammar("calendar", "the legacy calendar's fields");
   const parts = [form.year ? `year ${yearWords(form.year)}` : "year as text", form.months === undefined ? "months as text" : monthsWords(form.months), form.week === undefined ? "week as text" : weekWords(form.week)];
   return grammar(`calendar [${parts.join(" · ")}]`, "the stored definition");
+}
+
+/** What the ledger's words need from the calendar: dates in its own format, and where its years start. */
+export interface LedgerView {
+  /** a day in the calendar's own format */
+  date(day: number): string;
+  /** the first day of the year with this displayed number, or null when it cannot say */
+  yearStart(year: number): number | null;
+  /** the displayed number of the year with occurrence index 0 */
+  firstYear: number;
+}
+
+/** One ledger entry as the window lists it. */
+export interface LedgerRow {
+  /** stable within a draft: `unit:<id>:<i>`, `day:<i>`, `skip:<rule>:<day>` */
+  readonly key: string;
+  /** the first day it touches, for the order of the list (null: unknown, listed last) */
+  readonly first: number | null;
+  readonly text: string;
+  /** a switch's rule is edited as text */
+  readonly asText: boolean;
+}
+
+/**
+ * The ledger as sentences, sorted by the first day each entry touches:
+ * marked days, skipped days of named rules, moved year starts, one year's
+ * month lengths, and rule switches. Pure.
+ */
+export function ledgerRows(ledger: LedgerForm, v: LedgerView): LedgerRow[] {
+  const rows: LedgerRow[] = [];
+  const yearOf = (index: number) => index + v.firstYear;
+  for (const [unit, entries] of Object.entries(ledger.units)) {
+    entries.forEach((e, i) => {
+      const key = `unit:${unit}:${i}`;
+      const what = unit === "year" ? `Year ${yearOf(e.from)}` : `${unit} ${e.from}`;
+      const start = unit === "year" ? v.yearStart(yearOf(e.from)) : null;
+      if (e.kind === "starts") {
+        const more = e.lengths?.length ? `, then ${e.lengths.length} more pinned (${e.lengths.join(", ")} days)` : "";
+        rows.push({ key, first: e.startsOn, text: `${what} starts on ${v.date(e.startsOn)}${more}`, asText: false });
+      } else if (e.kind === "slots") {
+        rows.push({ key, first: start, text: `${what}: ${e.unit} lengths ${e.lengths.join(", ")}${e.path?.length ? ` (inside ${e.path.join(".")})` : ""}`, asText: false });
+      } else {
+        rows.push({ key, first: start, text: `From ${what} on: a different rule`, asText: true });
+      }
+    });
+  }
+  ledger.days.forEach((d, i) => {
+    const tags = d.tags?.length ? ` (${d.tags.join(", ")})` : "";
+    rows.push({ key: `day:${i}`, first: d.day, text: `${v.date(d.day)}: ${d.name ?? "marked"}${tags}`, asText: false });
+  });
+  for (const [rule, days] of Object.entries(ledger.skips)) {
+    for (const day of days) rows.push({ key: `skip:${rule}:${day}`, first: day, text: `${v.date(day)}: rule ${rule} skips this day`, asText: false });
+  }
+  return rows.sort((a, b) => (a.first ?? Infinity) - (b.first ?? Infinity));
+}
+
+/** Month lengths as typed: whole numbers of days, separated by commas or spaces; null when any is not. */
+export function parseLengths(text: string): number[] | null {
+  const parts = text.split(/[\s,]+/).filter((p) => p !== "");
+  if (parts.length === 0) return null;
+  const out = parts.map((p) => (/^\d+$/.test(p) ? Number(p) : Number.NaN));
+  return out.every((n) => Number.isSafeInteger(n)) ? out : null;
 }

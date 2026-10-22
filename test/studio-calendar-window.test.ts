@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { HINT_SEPARATOR, parseHint } from "../src/studio/model/hints";
 import { CALENDAR_HINTS, CALENDAR_HINT_KEYS, calendarHint } from "../src/studio/model/hints-calendar";
-import { calendarGrammar, monthsWords, parseMonthLength, showMonthLength, weekWords, yearWords } from "../src/studio/model/calendar-window";
+import { calendarGrammar, ledgerRows, monthsWords, parseLengths, parseMonthLength, showMonthLength, weekWords, yearWords } from "../src/studio/model/calendar-window";
 import { GREGORIAN, HEBREW } from "../src/seshat";
 import { recognise } from "../src/plugin/time/form";
 import { calendarOfDefinition } from "../src/studio/model/definition";
@@ -76,5 +76,45 @@ describe("calendar window words", () => {
     );
     expect(calendarGrammar(calendarOfDefinition(HEBREW).form)).toContain("year as text");
     expect(calendarGrammar(undefined)).toBe("calendar · the legacy calendar's fields");
+  });
+});
+
+describe("the ledger tab's words", () => {
+  const view = { date: (d: number) => `D${d}`, yearStart: (y: number) => (y - 1) * 10, firstYear: 1 };
+
+  test("every kind as a sentence, in the order of the first day each touches", () => {
+    const rows = ledgerRows(
+      {
+        units: {
+          year: [
+            { kind: "starts", from: 4, startsOn: 41 },
+            { kind: "slots", from: 1, unit: "month", lengths: [5, 5] },
+            { kind: "switch", from: 9, rule: { anchor: 0, length: 12 } },
+          ],
+        },
+        days: [{ day: 35, name: "Coronation", tags: ["coronation"] }],
+        skips: { feast: [7] },
+      },
+      view,
+    );
+    expect(rows.map((r) => [r.key, r.first, r.text, r.asText])).toEqual([
+      ["skip:feast:7", 7, "D7: rule feast skips this day", false],
+      ["unit:year:1", 10, "Year 2: month lengths 5, 5", false],
+      ["day:0", 35, "D35: Coronation (coronation)", false],
+      ["unit:year:0", 41, "Year 5 starts on D41", false],
+      ["unit:year:2", 90, "From Year 10 on: a different rule", true],
+    ]);
+  });
+
+  test("an empty ledger has no rows; a start pinning more starts says so", () => {
+    expect(ledgerRows({ units: {}, days: [], skips: {} }, view)).toEqual([]);
+    expect(ledgerRows({ units: { year: [{ kind: "starts", from: 0, startsOn: 3, lengths: [9, 11] }] }, days: [], skips: {} }, view)[0]!.text).toBe("Year 1 starts on D3, then 2 more pinned (9, 11 days)");
+  });
+
+  test("month lengths as typed", () => {
+    expect(parseLengths("31, 28 31")).toEqual([31, 28, 31]);
+    expect(parseLengths("31, x")).toBeNull();
+    expect(parseLengths("  ")).toBeNull();
+    expect(parseLengths("30.5")).toBeNull();
   });
 });
