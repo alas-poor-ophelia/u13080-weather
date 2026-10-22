@@ -9,6 +9,8 @@
 import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 
 export const CALENDAR_HINTS: Record<string, Hint> = {
+  "calendar.tabs": ["Calendar parts", "seasons, and the year, its months and its week; one at a time"],
+  "calendar.leapToggle": ["Leap rules", "shows the rules as fields, or folds them back into their sentence"],
   "calendar.source": ["Calendar source", "a definition is edited here; the legacy calendar and plugin calendars are described"],
   "calendar.name": ["Calendar name", "what settings and the studio call this calendar"],
   "calendar.days": ["Days in a year", "a common year's length; changing it moves where years start"],
@@ -29,7 +31,6 @@ export const CALENDAR_HINTS: Record<string, Hint> = {
   "calendar.weekNew": ["Add a week", "named days repeating in a week"],
   "calendar.asText": ["Edit as text", "opens the definition; this part is written in a way the fields cannot show"],
   "calendar.change": ["Change calendar", "switches this world to a calendar definition, or another one"],
-  "calendar.seasons": ["Seasons", "opens the Seasons window"],
 };
 
 /**

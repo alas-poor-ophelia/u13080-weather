@@ -18,7 +18,7 @@ export const PLAYLIST_HINTS: Record<string, Hint> = {
   // --- the calendar ruler (SPEC §3.2) ---
   // Chrome, so lower case (see the note over `HINTS` in `hints.ts`); the four
   // channel rows below name a *channel* and keep their capital.
-  "ruler.calendar": ["calendar", "season bands and era tint — opens the seasons window"],
+  "ruler.calendar": ["calendar", "season bands and era tint — opens the calendar window"],
   "ruler.ticks": ["timeline", "drag to pan; wheel to zoom under the cursor"],
 
   // --- the playlist itself ---

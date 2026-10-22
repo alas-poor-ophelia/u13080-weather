@@ -5957,17 +5957,6 @@
   border-color: #1c2f28;
   font-size: var(--wadjet-studio-fs-caption);
 }
-.wadjet-studio-calendar-section {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.wadjet-studio-calendar-head {
-  font-size: var(--wadjet-studio-fs-caption);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--wadjet-studio-text-dim);
-}
 .wadjet-studio-calendar-summary {
   color: var(--wadjet-studio-text);
 }
@@ -6022,6 +6011,43 @@
 .wadjet-studio-calendar-button:focus-visible {
   color: var(--wadjet-studio-text);
 }
-.wadjet-studio-header-readout[role="button"] {
-  cursor: pointer;
+/* One part per tab, in a stage of fixed height that scrolls inside (ruled
+   2026-10-21; a heavier design pass is bead wadjet-b6x). */
+.wadjet-studio-calendar-tabs {
+  display: flex;
+}
+.wadjet-studio-calendar-stage {
+  height: 300px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.wadjet-studio-calendar-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+.wadjet-studio-calendar-seasons.is-hidden,
+.wadjet-studio-calendar-panel.is-hidden {
+  display: none;
+}
+.wadjet-studio-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 3px 10px;
+}
+.wadjet-studio-calendar-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] .wadjet-studio-calendar-cell input.wadjet-studio-calendar-field.is-name {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.wadjet-studio-calendar-cell .wadjet-studio-calendar-button {
+  align-self: center;
+  padding: 0 5px;
 }

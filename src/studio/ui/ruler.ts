@@ -26,6 +26,7 @@
  * The ruler is not a component-bin part (SPEC law 3) — it is chrome, the same
  * status as the header's transport buttons and a floating window's ×.
  */
+import { openCalendarWindow } from "./windows/calendar";
 import type { YearSeam } from "../model/years";
 import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { CalendarDescription } from "../../plugin/time/adapter";
@@ -40,13 +41,6 @@ import type { RowGeometry } from "./playlist";
 import { beginDrag, DRAG_TARGET_CLASS, markDragTarget } from "./pointer";
 import type { SurfaceContext } from "./surfaces";
 
-/**
- * The id the Seasons window opens under (SPEC §3.4). Declared here rather than
- * imported so the ruler never depends on a panel bead landing first: bead
- * wadjet-9f9.27's `ui/windows/seasons.ts` registers the builder under the same
- * string, and until it does `windows.open` finds none and no-ops.
- */
-export const SEASONS_WINDOW = "seasons";
 
 
 /** The ruler's own band, under the season name and behind the tick labels. */
@@ -213,7 +207,7 @@ export function createRuler(props: RulerProps): RulerComponent {
   label.empty();
   label.createSpan({ cls: "wadjet-studio-ruler-label-text", text: "Calendar ⚑" });
   label.addClass("wadjet-studio-ruler-label-btn");
-  label.setAttrs({ role: "button", tabindex: "0", "aria-label": "Open the seasons window", "data-hint": playlistHint("ruler.calendar") });
+  label.setAttrs({ role: "button", tabindex: "0", "aria-label": "Open the calendar window", "data-hint": playlistHint("ruler.calendar") });
 
   ticksEl.empty();
   ticksEl.setAttr("data-hint", playlistHint("ruler.ticks"));
@@ -223,9 +217,8 @@ export function createRuler(props: RulerProps): RulerComponent {
   const stripEl = ticksEl.createDiv({ cls: "wadjet-studio-ruler-strip" });
 
   function openSeasons(): void {
-    // Not yet registered (bead wadjet-9f9.27): the manager finds no builder
-    // and returns — a click on the label is inert, never an error.
-    props.ctx.windows.open(SEASONS_WINDOW);
+    // one Calendar window, on its Seasons tab (ruled 2026-10-21)
+    openCalendarWindow(props.ctx, "seasons");
   }
 
   function onLabelClick(): void {

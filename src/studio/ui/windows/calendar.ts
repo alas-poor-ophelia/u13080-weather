@@ -1,21 +1,24 @@
 /**
- * Calendar · CALENDAR (docs/SESHAT-v0.md §15.4, §15.1 R1 R5): the world's
- * calendar as fields.
+ * Calendar · CALENDAR (docs/SESHAT-v0.md §15.4, §15.1 R1 R5; one window by
+ * ruling 2026-10-21): the world's calendar, one part per tab.
  *
- * - A world that runs a definition: one section per part (name, year, months,
- *   week), in the same order whatever the calendar. A part the form reads as
- *   fields is edited here, in the world draft (`world.calendar.form`); Save
- *   compiles it into the stored definition through the Save dialog. A part
- *   the form cannot show says what it is, why, and offers "Edit as text".
- *   Seasons and moons keep their own windows; this one summarises them.
- * - The legacy calendar: what it is, and "Change calendar…".
- * - A calendar plugin: the `<plugin> · read-only` chip and its own hint.
- * - A definition that cannot run: the fault, and "Edit as text".
+ * - Seasons: the Seasons editor (windows/seasons.ts), hosted as it is.
+ * - A world that runs a definition: Year (name, length, first year, leap
+ *   rules behind "edit rules"), Months, Week. A part the form reads as fields
+ *   is edited in the world draft (`world.calendar.form`); Save compiles it
+ *   into the stored definition through the Save dialog. A part the form
+ *   cannot show says what it is, why, and offers "Edit as text".
+ * - The legacy calendar: a Calendar tab saying what it is, with "Change
+ *   calendar…"; a calendar plugin: its `· read-only` chip and hint; a
+ *   definition that cannot run: the fault and "Edit as text".
+ *
+ * The tab panel has a fixed height and scrolls inside, so the window keeps
+ * its size whichever part is shown. A heavier design pass is bead wadjet-b6x.
  *
  * A field commits on change (Enter or leaving it). Every edit reads the
- * draft as it is at that moment, and the body is redrawn from the draft right
- * after it, with focus back on the control of the same key (a field being
- * typed in keeps what was typed): no control acts on a stale value.
+ * draft as it is at that moment, and the panel is redrawn from the draft
+ * right after it, with focus back on the control of the same key (a field
+ * being typed in keeps what was typed): no control acts on a stale value.
  */
 import { Notice } from "obsidian";
 import { canonicalJson } from "../../../core/profile";
@@ -27,14 +30,28 @@ import { calendarGrammar, monthsWords, parseMonthLength, showMonthLength, weekWo
 import { calendarHint } from "../../model/hints-calendar";
 import type { FormDraft, StudioState } from "../../model/state";
 import { calendarOfDefinition } from "../../model/definition";
-import { createChip, type ChipComponent } from "../components";
+import { createChip, createSegmented, type ChipComponent, type SegmentedOption } from "../components";
 import type { SurfaceContext } from "../surfaces";
-import type { WindowBuild, WindowBuilder } from "../windows";
+import type { WindowBuild, WindowBuilder, WindowManager } from "../windows";
 import { confirmWorldEdit } from "../world-confirm-modal";
-import { SEASONS_WINDOW } from "./seasons";
+import { buildSeasonsWindow } from "./seasons";
 
 /** The id this window is registered and opened under. */
 export const CALENDAR_WINDOW = "calendar";
+
+export type CalendarTab = "seasons" | "year" | "months" | "week" | "calendar";
+
+/** Open windows' tab switches, by the manager that holds them. */
+const switchers = new WeakMap<WindowManager, (tab: CalendarTab) => void>();
+/** The tab a window about to open starts on. */
+let opening: CalendarTab = "seasons";
+
+/** Open the Calendar window on `tab` (or bring it forward and switch to it). */
+export function openCalendarWindow(ctx: SurfaceContext, tab: CalendarTab): void {
+  opening = tab;
+  ctx.windows.open(CALENDAR_WINDOW);
+  switchers.get(ctx.windows)?.(tab);
+}
 
 type Source = "seshat" | "legacy" | "fault" | "plugin";
 
@@ -66,15 +83,53 @@ function yearRange(ctx: SurfaceContext): string | null {
   return sorted.length === 1 ? `${sorted[0]} days` : `${sorted[0]} to ${sorted[sorted.length - 1]} days, around today`;
 }
 
+
 export const buildCalendarWindow: WindowBuilder = (ctx) => {
   const body = createDiv({ cls: "wadjet-studio-calendar" });
   const sourceChip: ChipComponent = createChip(createDiv(), { label: "calendar", hint: calendarHint("calendar.source"), dot: false });
   sourceChip.el.addClasses(["wadjet-studio-calendar-source", "is-tail"]);
 
+  let tab: CalendarTab = opening;
+  /** whether the Year tab shows its leap rules as fields (else as their sentence) */
+  let rulesOpen = false;
+  const tabsEl = body.createDiv({ cls: "wadjet-studio-calendar-tabs", attr: { "data-hint": calendarHint("calendar.tabs") } });
+  const stage = body.createDiv({ cls: "wadjet-studio-calendar-stage" });
+  // the Seasons editor, hosted whole: built once, shown on its tab
+  const seasons: WindowBuild = buildSeasonsWindow(ctx);
+  const seasonsHost = stage.createDiv({ cls: "wadjet-studio-calendar-seasons" });
+  seasonsHost.appendChild(seasons.body);
+  const panel = stage.createDiv({ cls: "wadjet-studio-calendar-panel" });
+
+  const tabOptions = (src: Source): SegmentedOption[] =>
+    src === "seshat"
+      ? [
+          { value: "seasons", label: "Seasons" },
+          { value: "year", label: "Year" },
+          { value: "months", label: "Months" },
+          { value: "week", label: "Week" },
+        ]
+      : [
+          { value: "seasons", label: "Seasons" },
+          { value: "calendar", label: "Calendar" },
+        ];
+  /** a tab the current source does not offer falls back to the nearest one it does */
+  const fit = (src: Source, t: CalendarTab): CalendarTab => (tabOptions(src).some((o) => o.value === t) ? t : t === "seasons" ? "seasons" : src === "seshat" ? "year" : "calendar");
+  const tabs = createSegmented(tabsEl, {
+    options: tabOptions(sourceOf(ctx, ctx.store.get())),
+    value: fit(sourceOf(ctx, ctx.store.get()), tab),
+    onChange: (v) => show(v as CalendarTab),
+  });
+  function show(next: CalendarTab): void {
+    tab = fit(sourceOf(ctx, ctx.store.get()), next);
+    tabs.update({ value: tab });
+    paint(true);
+  }
+  switchers.set(ctx.windows, show);
+
   /**
    * One undoable edit of the draft's form fields, behind the session's world
    * confirm. `edit` reads the draft as it is at commit time, never a value
-   * captured when the body was drawn. A cancelled confirm redraws, so no
+   * captured when the panel was drawn. A cancelled confirm redraws, so no
    * field keeps a value the draft does not hold.
    */
   function write(edit: (form: FormDraft) => void): void {
@@ -107,12 +162,6 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
       const next = fn([...(f.week ?? [])]);
       f.week = next.length ? next : null;
     });
-
-  function section(title: string): HTMLElement {
-    const el = body.createDiv({ cls: "wadjet-studio-calendar-section" });
-    el.createDiv({ cls: "wadjet-studio-calendar-head", text: title });
-    return el;
-  }
 
   function line(parent: HTMLElement, text: string, cls = "wadjet-studio-calendar-line"): HTMLElement {
     return parent.createDiv({ cls, text });
@@ -193,26 +242,42 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
     });
   }
 
-  // ---- the parts of a definition
+  // ---- the tabs of a definition
 
-  function renderYear(y: YearForm): void {
-    const el = section("Year");
-    line(el, yearWords(y), "wadjet-studio-calendar-summary");
-    const row = el.createDiv({ cls: "wadjet-studio-calendar-row" });
-    row.createSpan({ text: "Days in a year" });
+  function renderYear(form: FormDraft, stored: CalendarForm | null, why: (k: "name" | "year" | "months" | "week") => string): void {
+    const top = panel.createDiv({ cls: "wadjet-studio-calendar-row" });
+    top.createSpan({ text: "Name" });
+    if (form.name !== undefined) field(top, "name", form.name, "Calendar name", calendarHint("calendar.name"), "is-name", name, (v) => write((f) => (f.name = v)));
+    else top.createSpan({ cls: "wadjet-studio-calendar-why", text: "written as text" });
+
+    const y = form.year;
+    if (!y) {
+      asText(panel, "year.text", yearRange(ctx), why("year"));
+      return;
+    }
+    const row = panel.createDiv({ cls: "wadjet-studio-calendar-row" });
+    row.createSpan({ text: "Days" });
     field(row, "year.length", String(y.length), "Days in a year", calendarHint("calendar.days"), "is-short", whole(1, YEAR_LENGTH_MAX), (n) => editYear((cur) => ({ ...cur, length: n })), true);
     row.createSpan({ text: "First year" });
     field(row, "year.first", String(y.firstYear), "First year", calendarHint("calendar.firstYear"), "is-short", anyWhole, (n) => editYear((cur) => ({ ...cur, firstYear: n })), true);
+    line(panel, yearWords(y), "wadjet-studio-calendar-summary");
 
     const leap = y.leap;
+    const actions = panel.createDiv({ cls: "wadjet-studio-calendar-row" });
     if (leap) {
-      const add = el.createDiv({ cls: "wadjet-studio-calendar-row" });
+      button(actions, "leap.toggle", rulesOpen ? "hide rules ▴" : "edit rules ▾", rulesOpen ? "Hide the leap rules" : "Edit the leap rules", calendarHint("calendar.leapToggle"), () => {
+        rulesOpen = !rulesOpen;
+        paint(true);
+      });
+    }
+    if (leap && rulesOpen) {
+      const add = panel.createDiv({ cls: "wadjet-studio-calendar-row is-indented" });
       add.createSpan({ text: "A leap year adds" });
       field(add, "leap.add", String(leap.add), "Days a leap year adds", calendarHint("calendar.leapDays"), "is-short", nonZero, (n) => editLeap((cur) => ({ ...cur, add: n })), true);
-      add.createSpan({ text: "days, in years matched by" });
+      add.createSpan({ text: "days" });
       const setTerm = (i: number, fn: (t: LeapTerm) => LeapTerm) => editLeap((cur) => ({ ...cur, terms: cur.terms.map((x, j) => (j === i ? fn(x) : x)) }));
       leap.terms.forEach((t, i) => {
-        const r = el.createDiv({ cls: "wadjet-studio-calendar-row is-indented" });
+        const r = panel.createDiv({ cls: "wadjet-studio-calendar-row is-indented" });
         // the first rule makes leap years; a later one is an exception, or an exception to an exception
         if (i === 0) r.createSpan({ text: "Every" });
         else {
@@ -223,7 +288,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
           sign.addEventListener("change", () => setTerm(i, (cur) => ({ ...cur, sign: sign.value === "-1" ? -1 : 1 })));
         }
         field(r, `leap.${i}.every`, String(t.every), "Every how many years", calendarHint("calendar.leapEvery"), "is-short", whole(1), (n) => setTerm(i, (cur) => ({ ...cur, every: n })), true);
-        r.createSpan({ text: "years, counting from year" });
+        r.createSpan({ text: "years, from year" });
         field(r, `leap.${i}.at`, String(t.at), "Counting from year", calendarHint("calendar.leapFrom"), "is-short", anyWhole, (n) => setTerm(i, (cur) => ({ ...cur, at: n })), true);
         button(r, `leap.${i}.remove`, "×", "Remove this leap rule", calendarHint("calendar.leapRemove"), () =>
           editLeap((cur) => {
@@ -233,24 +298,28 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
         );
       });
     }
-    button(el, "leap.new", leap ? "＋ another rule" : "＋ leap years", "Add a leap rule", calendarHint("calendar.leapNew"), () =>
-      editYear((cur) => {
-        const l = cur.leap;
-        // exceptions alternate: every 4th, except every 100th, but every 400th
-        const next: LeapTerm = l ? { every: (l.terms[l.terms.length - 1]?.every ?? 1) * 25, at: 0, sign: l.terms.length % 2 === 1 ? -1 : 1 } : { every: 4, at: 0, sign: 1 };
-        return { ...cur, leap: { add: l?.add ?? 1, terms: [...(l?.terms ?? []), next] } };
-      }),
-    );
+    if (!leap || rulesOpen) {
+      button(actions, "leap.new", leap ? "＋ rule" : "＋ leap years", "Add a leap rule", calendarHint("calendar.leapNew"), () => {
+        rulesOpen = true;
+        editYear((cur) => {
+          const l = cur.leap;
+          // exceptions alternate: every 4th, except every 100th, but every 400th
+          const next: LeapTerm = l ? { every: (l.terms[l.terms.length - 1]?.every ?? 1) * 25, at: 0, sign: l.terms.length % 2 === 1 ? -1 : 1 } : { every: 4, at: 0, sign: 1 };
+          return { ...cur, leap: { add: l?.add ?? 1, terms: [...(l?.terms ?? []), next] } };
+        });
+      });
+    }
+    if (stored && stored.others.length) asText(panel, "others.text", `Also ${stored.others.length} more unit${stored.others.length === 1 ? "" : "s"}: ${stored.others.join(", ")}`, "the fields show a year, its months and its week only");
   }
 
   function renderMonths(months: readonly MonthForm[] | null): void {
-    const el = section("Months");
-    line(el, monthsWords(months), "wadjet-studio-calendar-summary");
+    line(panel, monthsWords(months), "wadjet-studio-calendar-summary");
+    const grid = panel.createDiv({ cls: "wadjet-studio-calendar-grid" });
     (months ?? []).forEach((m, i) => {
-      const r = el.createDiv({ cls: "wadjet-studio-calendar-row" });
-      field(r, `month.${i}.name`, m.name, `Name of month ${i + 1}`, calendarHint("calendar.monthName"), "is-name", name, (v) => editMonths((list) => list.map((x, j) => (j === i ? { ...x, name: v } : x))));
+      const cell = grid.createDiv({ cls: "wadjet-studio-calendar-cell" });
+      field(cell, `month.${i}.name`, m.name, `Name of month ${i + 1}`, calendarHint("calendar.monthName"), "is-name", name, (v) => editMonths((list) => list.map((x, j) => (j === i ? { ...x, name: v } : x))));
       field(
-        r,
+        cell,
         `month.${i}.length`,
         showMonthLength(m.length),
         `Days in month ${i + 1}, or rest`,
@@ -264,103 +333,92 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
         (len) => editMonths((list) => list.map((x, j) => (j === i ? { ...x, length: len } : len === "slack" && x.length === "slack" ? { ...x, length: 30 } : x))),
         true,
       );
-      button(r, `month.${i}.remove`, "×", `Remove month ${i + 1}`, calendarHint("calendar.monthRemove"), () => editMonths((list) => list.filter((_, j) => j !== i)));
+      button(cell, `month.${i}.remove`, "×", `Remove month ${i + 1}`, calendarHint("calendar.monthRemove"), () => editMonths((list) => list.filter((_, j) => j !== i)));
     });
-    button(el, "month.new", months?.length ? "＋ month" : "＋ months", "Add a month", calendarHint("calendar.monthNew"), () =>
+    button(panel, "month.new", months?.length ? "＋ month" : "＋ months", "Add a month", calendarHint("calendar.monthNew"), () =>
       editMonths((list) => [...list, { name: `Month ${list.length + 1}`, length: list.some((x) => x.length === "slack") ? 30 : "slack" }]),
     );
   }
 
   function renderWeek(week: readonly string[] | null): void {
-    const el = section("Week");
-    line(el, weekWords(week), "wadjet-studio-calendar-summary");
+    line(panel, weekWords(week), "wadjet-studio-calendar-summary");
     if (week === null || week.length === 0) {
-      button(el, "week.new", "＋ a week", "Add a week", calendarHint("calendar.weekNew"), () => editWeek(() => ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"]));
+      button(panel, "week.new", "＋ a week", "Add a week", calendarHint("calendar.weekNew"), () => editWeek(() => ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"]));
       return;
     }
+    const grid = panel.createDiv({ cls: "wadjet-studio-calendar-grid" });
     week.forEach((d, i) => {
-      const r = el.createDiv({ cls: "wadjet-studio-calendar-row" });
-      field(r, `day.${i}.name`, d, `Name of day ${i + 1}`, calendarHint("calendar.dayName"), "is-name", name, (v) => editWeek((days) => days.map((x, j) => (j === i ? v : x))));
-      button(r, `day.${i}.remove`, "×", `Remove day ${i + 1}`, calendarHint("calendar.dayRemove"), () => editWeek((days) => days.filter((_, j) => j !== i)));
+      const cell = grid.createDiv({ cls: "wadjet-studio-calendar-cell" });
+      field(cell, `day.${i}.name`, d, `Name of day ${i + 1}`, calendarHint("calendar.dayName"), "is-name", name, (v) => editWeek((days) => days.map((x, j) => (j === i ? v : x))));
+      button(cell, `day.${i}.remove`, "×", `Remove day ${i + 1}`, calendarHint("calendar.dayRemove"), () => editWeek((days) => days.filter((_, j) => j !== i)));
     });
-    button(el, "day.new", "＋ day", "Add a day to the week", calendarHint("calendar.dayNew"), () => editWeek((days) => [...days, `Day ${days.length + 1}`]));
+    button(panel, "day.new", "＋ day", "Add a day to the week", calendarHint("calendar.dayNew"), () => editWeek((days) => [...days, `Day ${days.length + 1}`]));
   }
 
-  function renderDefinition(state: StudioState): void {
+  function renderPanel(state: StudioState): void {
+    const src = sourceOf(ctx, state);
+    const description = ctx.calendar();
+    sourceChip.update({ label: src === "plugin" ? `${description?.label ?? "calendar"} · read-only` : src === "legacy" ? "legacy calendar" : src === "fault" ? "definition · cannot run" : "calendar definition" });
+    if (tab === "calendar") {
+      if (src === "plugin") {
+        line(panel, `${description?.label ?? "A calendar plugin"} supplies this world's days. Edit it there.`);
+        if (description?.editHint) line(panel, description.editHint, "wadjet-studio-calendar-why");
+      } else if (src === "legacy") {
+        // the legacy calendar's years are all one length: the seam's nominal length is that length
+        const days = ctx.years()?.nominalLength;
+        line(panel, `This world runs on the legacy calendar: ${days === undefined ? "years of one length" : `${days}-day years`}, days numbered within the year. Its seasons are edited on the Seasons tab, its moons in their own windows.`);
+        button(panel, "change", "Change calendar…", "Change calendar", calendarHint("calendar.change"), () => new OptInModal(ctx.plugin.app, ctx.plugin, () => {}).open());
+      } else asText(panel, "fault.text", null, `the stored definition cannot run (${ctx.plugin.calendars.fault() ?? "unknown"})`);
+      return;
+    }
     const form = state.world.calendar.form ?? {};
     const stored = storedForm(ctx);
     const why = (k: "name" | "year" | "months" | "week"): string => {
       const p = stored?.[k];
       return p?.kind === "text" ? p.why : "the simple fields cannot show it";
     };
-
-    const nameEl = section("Name");
-    if (form.name !== undefined) field(nameEl, "name", form.name, "Calendar name", calendarHint("calendar.name"), "is-wide", name, (v) => write((f) => (f.name = v)));
-    else asText(nameEl, "name.text", null, why("name"));
-
-    if (form.year) renderYear(form.year);
-    else asText(section("Year"), "year.text", yearRange(ctx), why("year"));
-
-    if (form.months !== undefined) renderMonths(form.months);
-    else asText(section("Months"), "months.text", null, why("months"));
-
-    if (form.week !== undefined) renderWeek(form.week);
-    else asText(section("Week"), "week.text", null, why("week"));
-
-    const seasons = state.world.calendar.seasons;
-    const moons = state.world.calendar.moons;
-    const sky = section("Seasons and moons");
-    line(sky, `${seasons.length ? `${seasons.length} season${seasons.length === 1 ? "" : "s"}` : "no seasons"} · ${moons.length ? moons.map((m) => m.name).join(", ") : "no moons"}`);
-    button(sky, "seasons.open", "Seasons ▸", "Open the seasons window", calendarHint("calendar.seasons"), () => ctx.windows.open(SEASONS_WINDOW));
-
-    if (stored && stored.others.length) asText(section("Also"), "others.text", `${stored.others.length} more unit${stored.others.length === 1 ? "" : "s"}: ${stored.others.join(", ")}`, "the fields show a year, its months and its week only");
-  }
-
-  function render(state: StudioState): void {
-    const src = sourceOf(ctx, state);
-    const description = ctx.calendar();
-    sourceChip.update({ label: src === "plugin" ? `${description?.label ?? "calendar"} · read-only` : src === "legacy" ? "legacy calendar" : src === "fault" ? "definition · cannot run" : "calendar definition" });
-    if (src === "plugin") {
-      const el = section("Calendar");
-      line(el, `${description?.label ?? "A calendar plugin"} supplies this world's days. Edit it there.`);
-      if (description?.editHint) line(el, description.editHint, "wadjet-studio-calendar-why");
-      return;
+    if (tab === "year") renderYear(form, stored, why);
+    else if (tab === "months") {
+      if (form.months !== undefined) renderMonths(form.months);
+      else asText(panel, "months.text", null, why("months"));
+    } else if (tab === "week") {
+      if (form.week !== undefined) renderWeek(form.week);
+      else asText(panel, "week.text", null, why("week"));
     }
-    if (src === "legacy") {
-      const el = section("Calendar");
-      // the legacy calendar's years are all one length: the seam's nominal length is that length
-      const days = ctx.years()?.nominalLength;
-      line(el, `This world runs on the legacy calendar: ${days === undefined ? "years of one length" : `${days}-day years`}, days numbered within the year. Its seasons and moons are edited in their own windows.`);
-      button(el, "change", "Change calendar…", "Change calendar", calendarHint("calendar.change"), () => new OptInModal(ctx.plugin.app, ctx.plugin, () => {}).open());
-      return;
-    }
-    if (src === "fault") {
-      asText(section("Calendar"), "fault.text", null, `the stored definition cannot run (${ctx.plugin.calendars.fault() ?? "unknown"})`);
-      return;
-    }
-    renderDefinition(state);
   }
 
   /**
-   * Redraw when what the window shows changed, or always after its own edit
-   * (`force`): the controls are drawn from the draft, so an edit's indices
-   * and values are never stale. Focus returns to the control of the same key,
-   * and a field being typed in keeps what was typed.
+   * Redraw when what the panel shows changed, or always after its own edit
+   * or a tab switch (`force`): the controls are drawn from the draft, so an
+   * edit's indices and values are never stale. Focus returns to the control
+   * of the same key, and a field being typed in keeps what was typed.
    */
   let signature = "";
+  let drawnTabs = "";
   function paint(force = false): void {
     const state = ctx.store.get();
-    const sig = canonicalJson([sourceOf(ctx, state), state.world.calendar.form ?? null, state.world.calendar.seasons, state.world.calendar.moons.map((m) => m.name), ctx.calendar()?.label ?? null, ctx.plugin.calendars.seshat?.text() ?? null]);
+    const src = sourceOf(ctx, state);
+    tab = fit(src, tab);
+    // the strip redraws only when its options or its choice change
+    const tabsKey = `${src === "seshat"}:${tab}`;
+    if (tabsKey !== drawnTabs) {
+      drawnTabs = tabsKey;
+      tabs.update({ options: tabOptions(src), value: tab });
+    }
+    seasonsHost.toggleClass("is-hidden", tab !== "seasons");
+    panel.toggleClass("is-hidden", tab === "seasons");
+    if (tab === "seasons") return;
+    const sig = canonicalJson([tab, rulesOpen, src, state.world.calendar.form ?? null, ctx.calendar()?.label ?? null, ctx.plugin.calendars.seshat?.text() ?? null]);
     if (sig === signature && !force) return;
     signature = sig;
     const active = activeDocument.activeElement;
-    const focused = active?.instanceOf(HTMLElement) && body.contains(active) ? active : null;
+    const focused = active?.instanceOf(HTMLElement) && panel.contains(active) ? active : null;
     const key = focused?.dataset.key;
     const typed = focused?.instanceOf(HTMLInputElement) && focused.value !== focused.dataset.drawn ? focused.value : null;
-    body.empty();
-    render(state);
+    panel.empty();
+    renderPanel(state);
     if (key === undefined) return;
-    const again = body.querySelector<HTMLElement>(`[data-key="${key}"]`);
+    const again = panel.querySelector<HTMLElement>(`[data-key="${key}"]`);
     if (!again) return;
     if (typed !== null && again.instanceOf(HTMLInputElement)) again.value = typed;
     again.focus();
@@ -368,7 +426,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
 
   const unsubStore = ctx.store.subscribe(() => paint());
   const unsubAdapters = ctx.plugin.api.on("adapters-changed", () => paint());
-  paint();
+  paint(true);
 
   const build: WindowBuild = {
     title: "Calendar",
@@ -377,8 +435,15 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
     badgeColor: "var(--wadjet-studio-gold)",
     head: (slot) => slot.appendChild(sourceChip.el),
     body,
-    writes: () => calendarGrammar(ctx.store.get().world.calendar.form),
+    // the Seasons tab keeps the Seasons editor's LED, WRITES and issues
+    ...(seasons.led ? { led: seasons.led } : {}),
+    level: (byUnit) => seasons.level?.(byUnit) ?? "ok",
+    writes: () => (tab === "seasons" ? (seasons.writes?.() ?? "") : calendarGrammar(ctx.store.get().world.calendar.form)),
+    issues: () => (tab === "seasons" ? (seasons.issues?.() ?? []) : []),
     onClose: () => {
+      switchers.delete(ctx.windows);
+      seasons.onClose?.();
+      tabs.destroy();
       unsubStore();
       unsubAdapters();
     },

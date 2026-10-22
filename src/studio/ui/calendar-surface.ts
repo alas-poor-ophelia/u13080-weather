@@ -16,13 +16,12 @@
  * surface stays Seasons-only.
  */
 import { buildCalendarWindow, CALENDAR_WINDOW } from "./windows/calendar";
-import { buildSeasonsWindow, SEASONS_WINDOW } from "./windows/seasons";
 import type { Surface, SurfaceContext } from "./surfaces";
 
 export function createCalendarSurface(): Surface {
   return {
     mount(ctx: SurfaceContext) {
-      ctx.windows.register(SEASONS_WINDOW, buildSeasonsWindow);
+      // one Calendar window; the Seasons editor is its first tab (ruled 2026-10-21)
       ctx.windows.register(CALENDAR_WINDOW, buildCalendarWindow);
     },
 
