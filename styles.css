@@ -5939,3 +5939,89 @@
   font-family: var(--font-monospace);
   font-size: var(--font-ui-small);
 }
+
+/* Calendar · CALENDAR (docs/SESHAT-v0.md §15.4): one section per part of the
+   calendar, fields where the form reads them, a plain line and Edit as text
+   where it cannot. */
+.wadjet-studio-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 4px 6px;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-calendar-source {
+  color: var(--wadjet-studio-wind);
+  background: #101a16;
+  border-color: #1c2f28;
+  font-size: var(--wadjet-studio-fs-caption);
+}
+.wadjet-studio-calendar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wadjet-studio-calendar-head {
+  font-size: var(--wadjet-studio-fs-caption);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-calendar-summary {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-calendar-why {
+  color: var(--wadjet-studio-text-dim);
+  font-size: var(--wadjet-studio-fs-caption);
+}
+.wadjet-studio-calendar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.wadjet-studio-calendar-row.is-indented {
+  padding-left: 12px;
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] input.wadjet-studio-calendar-field {
+  box-sizing: border-box;
+  height: auto;
+  line-height: 18px;
+  padding: 1px 4px;
+  font-size: var(--wadjet-studio-fs-chip);
+  background: var(--wadjet-studio-panel);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] input.wadjet-studio-calendar-field.is-short {
+  width: 56px;
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] input.wadjet-studio-calendar-field.is-name {
+  width: 140px;
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] input.wadjet-studio-calendar-field.is-wide {
+  width: 100%;
+}
+.wadjet-studio .wadjet-studio-window[data-kind="calendar"] select.wadjet-studio-calendar-select {
+  height: auto;
+  padding: 1px 18px 1px 4px;
+  font-size: var(--wadjet-studio-fs-chip);
+}
+.wadjet-studio-calendar-button {
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text-dim);
+  background: #26282c;
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.wadjet-studio-calendar-button:hover,
+.wadjet-studio-calendar-button:focus-visible {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-header-readout[role="button"] {
+  cursor: pointer;
+}

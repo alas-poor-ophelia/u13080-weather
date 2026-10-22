@@ -15,6 +15,7 @@
  * overwrite the same builder map entry every tick for no gain, so this
  * surface stays Seasons-only.
  */
+import { buildCalendarWindow, CALENDAR_WINDOW } from "./windows/calendar";
 import { buildSeasonsWindow, SEASONS_WINDOW } from "./windows/seasons";
 import type { Surface, SurfaceContext } from "./surfaces";
 
@@ -22,6 +23,7 @@ export function createCalendarSurface(): Surface {
   return {
     mount(ctx: SurfaceContext) {
       ctx.windows.register(SEASONS_WINDOW, buildSeasonsWindow);
+      ctx.windows.register(CALENDAR_WINDOW, buildCalendarWindow);
     },
 
     render() {

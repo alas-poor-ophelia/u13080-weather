@@ -18,10 +18,10 @@ import { markWorldConfirmed, needsWorldConfirm } from "../model/world-confirm";
 import type { SurfaceContext } from "./surfaces";
 
 /** What the edit is about to change. The title and the sentence are built from it. */
-export type WorldSubject = "eras" | "seasons" | "moons";
+export type WorldSubject = "eras" | "seasons" | "moons" | "calendar";
 
 /** Sentence-leading noun per subject — "Eras are world-level: …". */
-const SUBJECT_LABEL: Record<WorldSubject, string> = { eras: "Eras", seasons: "Seasons", moons: "Moons" };
+const SUBJECT_LABEL: Record<WorldSubject, string> = { eras: "Eras", seasons: "Seasons", moons: "Moons", calendar: "Calendar fields" };
 
 /**
  * Who the edit reaches: a surface context (the zone names are read off its

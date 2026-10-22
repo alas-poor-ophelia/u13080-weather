@@ -1,5 +1,5 @@
 /**
- * Pure parse/serialise/validate helpers for the settings-tab Moons textarea.
+ * Pure parse/serialise/validate helpers for the settings-tab Moons and Seasons textareas.
  * Kept out of settings-tab.ts (which imports "obsidian") so they can be unit
  * tested directly.
  */
@@ -66,6 +66,34 @@ export function badMoonsLine(text: string): string | undefined {
       seen.add(phase.name);
       prevAt = phase.at;
     }
+  }
+  return undefined;
+}
+
+/**
+ * Seasons textarea: one season per line, "name, start (0–1 through the
+ * year)". A start outside [0, 1) is clamped into it; a line without a name or
+ * a start is dropped. An empty text is no seasons.
+ */
+export function parseSeasonsText(text: string): Array<{ name: string; from: number }> {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.split(",").map((x) => x.trim()))
+    .filter((p) => p.length >= 2 && p[0])
+    .map((p) => ({ name: p[0]!, from: Math.min(0.999, Math.max(0, Number(p[1]) || 0)) }));
+}
+
+/** Inverse of parseSeasonsText: one line per season. */
+export function serialiseSeasonsText(seasons: ReadonlyArray<{ name: string; from: number }>): string {
+  return seasons.map((x) => `${x.name}, ${x.from}`).join("\n");
+}
+
+/** Validation for the Seasons textarea: the first line without a name and a number, or nothing. */
+export function badSeasonsLine(text: string): string | undefined {
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const p = raw.split(",").map((x) => x.trim());
+    if (!p[0] || p.length < 2 || p.slice(1, 2).some((x) => !Number.isFinite(Number(x)) || x === "")) return `Can't read "${raw.trim()}" — expected a name and a number, separated by commas.`;
   }
   return undefined;
 }

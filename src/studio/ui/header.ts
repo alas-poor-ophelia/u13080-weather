@@ -46,6 +46,7 @@ import { calendarOfDefinition, planCalendarSave } from "../model/definition";
 import { parse as parseDefinition } from "../../seshat";
 import { confirmRewrite } from "./rewrite-confirm-modal";
 import { confirmCalendarChange } from "../../plugin/calendar-modals";
+import { CALENDAR_WINDOW } from "./windows/calendar";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
 import { panBy, presetWindow, width, worldBounds, zoomAt, zoomLabel, type Window, type ZoomBounds, type ZoomPreset } from "../model/zoom";
@@ -574,8 +575,16 @@ export function createHeaderSurface(): Surface {
 
       // One dark inset pill, no zoom-name prefix: the presets to its right
       // already say which scale this is (gap-shell §1).
-      const readout = shell.headerTools.createDiv({ cls: "wadjet-studio-header-readout", attr: { "data-hint": hintAttr("transport.readout") } });
+      // the readout writes the calendar's own dates: a click opens the Calendar window (§15.4)
+      const readout = shell.headerTools.createDiv({ cls: "wadjet-studio-header-readout", attr: { "data-hint": hintAttr("transport.readout"), role: "button", tabindex: "0", "aria-label": "Open the calendar window" } });
       readoutRange = readout.createSpan({ cls: "wadjet-studio-header-readout-range" });
+      const openCalendar = () => next.windows.open(CALENDAR_WINDOW);
+      readout.addEventListener("click", openCalendar);
+      readout.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        ev.preventDefault();
+        openCalendar();
+      });
 
       const transport = shell.headerTools.createDiv({ cls: "wadjet-studio-header-transport" });
       headerButton(transport, { text: "◀", label: "Pan back", hint: hintAttr("transport.back"), onClick: () => setWindow(panBy(currentWindow(), -width(currentWindow()) * PAN_FRACTION, bounds())) });

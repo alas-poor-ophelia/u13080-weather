@@ -45,7 +45,7 @@ export const HINTS: Record<string, Hint> = {
   "zone.flip": ["opposite hemisphere", "the record's curves are shifted half a year here · on: season tag gates remap to this zone's seasons · off: tags read the world calendar"],
 
   // --- header · tools (SPEC §3.1) ---
-  "transport.readout": ["window", "the span the playlist is showing"],
+  "transport.readout": ["window", "the span the playlist is showing, in the calendar's dates; click to open the calendar"],
   "transport.back": ["back", "pan a quarter window earlier"],
   "transport.forward": ["forward", "pan a quarter window later"],
   "transport.out": ["zoom out", "widen the window around its centre"],

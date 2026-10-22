@@ -16,7 +16,8 @@ import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import { openStudio } from "../studio/ui/open";
 import { calendarSummary } from "./calendar-summary";
-import { badMoonsLine, parseMoonsText, serialiseMoonsText } from "./calendar-text";
+import { badMoonsLine, badSeasonsLine, parseMoonsText, parseSeasonsText, serialiseMoonsText, serialiseSeasonsText } from "./calendar-text";
+import { badYearLength, definitionRowEdit, definitionRows, MOONS_DESC, SEASONS_DESC, type DefinitionRow, type DefinitionRowKey, type DefinitionRows } from "./calendar-rows";
 import type WadjetPlugin from "./main";
 import { generatedPatch } from "./pins";
 import { parseJsonLenient } from "./json-lenient";
@@ -24,7 +25,7 @@ import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
 import { MAX_DAY_ORDINAL } from "./world";
 import { SESHAT_ID } from "./calendars";
-import { DefinitionModal, OptInModal } from "./calendar-modals";
+import { confirmCalendarChange, DefinitionModal, OptInModal } from "./calendar-modals";
 import { calendarRow, definitionSummary, type CalendarRow } from "./calendar-row";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
 
@@ -60,6 +61,8 @@ export class WadjetSettingTab extends PluginSettingTab {
     const activeDescription = activeIsInternal ? undefined : activeAdapter?.describe?.();
     const onSeshat = () => this.plugin.time.active?.id === SESHAT_ID;
     const row = this.calendarRow();
+    // Days in a year, Moons and Seasons on a world that runs a definition (§15.2): bound to the stored definition
+    const def = this.definitionRows();
 
     return [
       {
@@ -125,20 +128,23 @@ export class WadjetSettingTab extends PluginSettingTab {
             name: "Days in a year",
             desc: "Changing it moves the seasons, so every day's weather changes.",
             visible: () => !onSeshat(),
-            control: { type: "number", key: "calendar.yearLength", min: 1, max: YEAR_LENGTH_MAX, step: 1, validate: (v) => (Number.isInteger(v) && v >= 1 && v <= YEAR_LENGTH_MAX ? undefined : `Between 1 and ${YEAR_LENGTH_MAX.toLocaleString("en")} days.`) },
+            control: { type: "number", key: "calendar.yearLength", min: 1, max: YEAR_LENGTH_MAX, step: 1, validate: badYearLength },
           },
           {
             name: "Moons",
-            desc: "One per line: name, cycle in days, phase at day 0 (0–1), then optionally named phases as name@fraction (e.g. Full@0.5), ascending and unique. Only modifiers that mention a moon use them.",
+            desc: MOONS_DESC,
             visible: () => this.plugin.time.active?.id === "internal",
             control: { type: "textarea", key: "moons", rows: 3, placeholder: "Moon, 29.53, 0, New@0, Full@0.5", validate: badMoonsLine },
           },
           {
             name: "Seasons",
-            desc: "One per line: name, start (0–1 through the year). Each becomes a season tag that modifiers can match.",
+            desc: SEASONS_DESC,
             visible: () => this.plugin.time.active?.id === "internal",
-            control: { type: "textarea", key: "seasons", rows: 3, placeholder: "Spring, 0.2", validate: (t) => badLine(t, 1) },
+            control: { type: "textarea", key: "seasons", rows: 3, placeholder: "Spring, 0.2", validate: badSeasonsLine },
           },
+          this.definitionRow(def, "year", "Days in a year"),
+          this.definitionRow(def, "moons", "Moons"),
+          this.definitionRow(def, "seasons", "Seasons"),
           {
             name: `${activeDescription?.label ?? activeAdapter?.id ?? ""} · read-only`,
             desc: activeDescription ? calendarSummary(activeDescription) : "",
@@ -264,6 +270,84 @@ export class WadjetSettingTab extends PluginSettingTab {
     });
   }
 
+  /** The definition rows' contents, when the world runs a stored definition that runs; null otherwise (legacy and third-party worlds keep their rows). */
+  private definitionRows(): DefinitionRows | null {
+    if (this.plugin.time.active?.id !== SESHAT_ID || this.plugin.calendars.fault() !== null) return null;
+    if (typeof this.plugin.settings.calendar.definition !== "string") return null;
+    const ast = this.plugin.calendars.seshat?.definition();
+    if (!ast) return null;
+    try {
+      return definitionRows(ast);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * One definition row: a control when the form model reads its part as
+   * fields, else read-only words. The control commits on change (a number on
+   * enter or leaving the field, a textarea on leaving it), so the Save dialog
+   * opens once per edit, never per keystroke.
+   */
+  private definitionRow(def: DefinitionRows | null, key: DefinitionRowKey, name: string): SettingGroupItem {
+    const r: DefinitionRow<number | string> | undefined = def?.[key];
+    return {
+      name,
+      desc: r?.desc ?? "",
+      visible: () => r !== undefined,
+      render: (setting) => {
+        if (r?.kind !== "edit") return;
+        if (key === "year") {
+          setting.addText((t) => {
+            t.inputEl.type = "number";
+            t.inputEl.min = "1";
+            t.inputEl.max = String(YEAR_LENGTH_MAX);
+            t.inputEl.step = "1";
+            t.setValue(String(r.value));
+            t.inputEl.addEventListener("input", () => {
+              setting.setErrorMessage(badYearLength(Number(t.getValue())) ?? null);
+            });
+            t.inputEl.addEventListener("change", () => void this.commitDefinitionRow(setting, key, Number(t.getValue())));
+          });
+        } else {
+          const bad = key === "moons" ? badMoonsLine : badSeasonsLine;
+          setting.addTextArea((t) => {
+            t.inputEl.rows = 3;
+            t.setPlaceholder(key === "moons" ? "Moon, 29.53, 0, New@0, Full@0.5" : "Spring, 0.2");
+            t.setValue(String(r.value));
+            t.inputEl.addEventListener("input", () => {
+              setting.setErrorMessage(bad(t.getValue()) ?? null);
+            });
+            t.inputEl.addEventListener("change", () => void this.commitDefinitionRow(setting, key, t.getValue()));
+          });
+        }
+      },
+    };
+  }
+
+  /**
+   * Store one definition row's edit: merge it into the stored definition, ask
+   * the Save dialog (§15.1 R6, R7), then save. A refused edit shows its reason
+   * under the row and stores nothing; a cancelled dialog shows the stored value again.
+   */
+  private async commitDefinitionRow(setting: Setting, key: DefinitionRowKey, value: number | string): Promise<void> {
+    const stored = this.plugin.settings.calendar.definition;
+    if (typeof stored !== "string") return;
+    const edit = definitionRowEdit(stored, key, value);
+    if ("error" in edit) return void setting.setErrorMessage(edit.error);
+    setting.setErrorMessage(null);
+    if ("unchanged" in edit) return;
+    try {
+      const chosen = await confirmCalendarChange(this.app, this.plugin, stored, edit.text);
+      if (chosen === null) return;
+      await this.plugin.calendars.saveDefinition(chosen);
+    } catch (e) {
+      new Notice(`The calendar was not saved: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      this.update(); // the rows show the stored definition again: the saved one, or the old one after a cancel or a failure
+    }
+  }
+
   /** "Use the internal calendar": the world goes back to its internal calendar; any stored definition is kept. */
   private async useInternalCalendar(): Promise<void> {
     try {
@@ -290,7 +374,7 @@ export class WadjetSettingTab extends PluginSettingTab {
       case "moons":
         return serialiseMoonsText(s.calendar.moons);
       case "seasons":
-        return s.calendar.seasons.map((x) => `${x.name}, ${x.from}`).join("\n");
+        return serialiseSeasonsText(s.calendar.seasons);
       case "eras":
         return s.eras.length ? JSON.stringify(s.eras, null, 2) : "";
       default:
@@ -331,9 +415,7 @@ export class WadjetSettingTab extends PluginSettingTab {
         s.calendar.moons = parseMoonsText(String(value));
         return this.plugin.saveAndRebuild();
       case "seasons":
-        s.calendar.seasons = lines(String(value))
-          .filter((p) => p.length >= 2 && p[0])
-          .map((p) => ({ name: p[0]!, from: Math.min(0.999, Math.max(0, Number(p[1]) || 0)) }));
+        s.calendar.seasons = parseSeasonsText(String(value));
         return this.plugin.saveAndRebuild();
       case "eras": {
         const text = String(value).trim();
@@ -360,20 +442,6 @@ function badEras(text: string): string | undefined {
   }
   const err = validateEras(eras).find((i) => i.level === "error");
   return err ? `${err.path}: ${err.message}` : undefined;
-}
-
-function lines(text: string): string[][] {
-  return text.split(/\r?\n/).map((l) => l.split(",").map((x) => x.trim()));
-}
-
-/** Validation for the "name, number[, number]" textareas: the first bad line, or nothing. */
-function badLine(text: string, numbers: number): string | undefined {
-  for (const raw of text.split(/\r?\n/)) {
-    if (!raw.trim()) continue;
-    const p = raw.split(",").map((x) => x.trim());
-    if (!p[0] || p.length < 2 || p.slice(1, 1 + numbers).some((x) => !Number.isFinite(Number(x)) || x === "")) return `Can't read "${raw.trim()}" — expected a name and ${numbers === 1 ? "a number" : "numbers"}, separated by commas.`;
-  }
-  return undefined;
 }
 
 // --- display units ---------------------------------------------------------
