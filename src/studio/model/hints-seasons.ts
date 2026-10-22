@@ -17,7 +17,7 @@
 import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 
 export const SEASONS_HINTS: Record<string, Hint> = {
-  "seasons.source": ["Calendar source", "internal calendar is edited here; a plugin calendar mirrors read-only"],
+  "seasons.source": ["Calendar source", "a definition or the legacy calendar is edited here; a plugin calendar mirrors read-only"],
   "seasons.world": ["World scope", "seasons apply to every zone — the first edit this session asks to confirm"],
   "seasons.flag": ["Boundary", "drag to move the season's start"],
   "seasons.bar": ["Seasons", "double-click to split the season under the pointer; with none yet, to start the first one there"],

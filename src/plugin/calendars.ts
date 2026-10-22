@@ -22,7 +22,7 @@
  */
 import type { TimeRegistry } from "./time/adapter";
 import { prepareDefinition, SeshatCalendar } from "./time/seshat";
-import type { WadjetSettings } from "./settings";
+import type { PreviousCalendar, WadjetSettings } from "./settings";
 import type { World } from "./world";
 
 export const SESHAT_ID = "seshat";
@@ -88,6 +88,19 @@ export class Calendars {
     }
   }
 
+  /** The calendar as it is now, for the undo record (§15.9 S6): the stored definition (if any) and the active adapter. */
+  private snapshot(): PreviousCalendar {
+    const c = this.host.settings().calendar;
+    return { ...("definition" in c ? { definition: c.definition } : {}), activeTimeAdapter: this.host.settings().activeTimeAdapter };
+  }
+
+  /** Put the undo record back as it was (a write that failed). */
+  private restorePrevious(was: PreviousCalendar | undefined): void {
+    const c = this.host.settings().calendar;
+    if (was === undefined) delete c.previous;
+    else c.previous = was;
+  }
+
   /** The stored definition's fault, or null (also null when the world stores none). */
   fault(): string | null {
     const f = this.seshat?.fault;
@@ -95,7 +108,7 @@ export class Calendars {
   }
 
   /**
-   * Make `id` the active calendar (the settings' Calendar plugin chooser, "Use the internal calendar"). The
+   * Make `id` the active calendar (the settings' Calendar plugin chooser, Change calendar…'s way back). The
    * stored definition stays when the world leaves `seshat`. Fires
    * time-changed and adapters-changed once each when the effective calendar
    * changed. A failed save puts the old choice back.
@@ -104,11 +117,14 @@ export class Calendars {
     const s = this.host.settings();
     const before = this.host.time.active;
     const prevId = s.activeTimeAdapter;
+    const wasPrevious = s.calendar.previous;
+    if (id !== prevId) s.calendar.previous = this.snapshot();
     s.activeTimeAdapter = id;
     try {
       await this.host.save();
     } catch (e) {
       if (s.activeTimeAdapter === id) s.activeTimeAdapter = prevId;
+      this.restorePrevious(wasPrevious);
       throw e;
     }
     this.host.world.setActiveAdapter(s.activeTimeAdapter);
@@ -134,12 +150,14 @@ export class Calendars {
     const s = this.host.settings();
     const kept = s.calendar.definition;
     if (kept !== undefined && kept !== prepared.text && !opts.replaceStored) throw new DefinitionError("This world already stores a calendar definition; switching to another one replaces it, so it has to be asked for.");
-    const before = { definition: s.calendar.definition, had: "definition" in s.calendar, active: s.activeTimeAdapter };
+    const before = { definition: s.calendar.definition, had: "definition" in s.calendar, active: s.activeTimeAdapter, previous: s.calendar.previous };
+    s.calendar.previous = this.snapshot();
     s.calendar.definition = prepared.text;
     s.activeTimeAdapter = SESHAT_ID;
     try {
       await this.host.save();
     } catch (e) {
+      this.restorePrevious(before.previous);
       if (s.calendar.definition === prepared.text) {
         if (before.had) s.calendar.definition = before.definition;
         else delete s.calendar.definition;
@@ -168,17 +186,72 @@ export class Calendars {
     const prev = s.calendar.definition;
     if (prev === prepared.text && !this.seshat?.fault) return;
     const hashBefore = this.seshat?.configHash();
+    const wasPrevious = s.calendar.previous;
+    s.calendar.previous = this.snapshot();
     s.calendar.definition = prepared.text;
     try {
       await this.host.save();
     } catch (e) {
       if (s.calendar.definition === prepared.text) s.calendar.definition = prev;
+      this.restorePrevious(wasPrevious);
       throw e;
     }
     const a = this.mount(prepared.text);
     this.host.rebuild();
     const active = this.host.time.active === a;
     if (active && a.configHash() !== hashBefore) this.host.emitTimeChanged();
+    this.host.emitAdaptersChanged();
+  }
+
+  /** Whether `undo` would succeed: there is a record, and a definition it would run can run. */
+  canUndo(): boolean {
+    const p = this.host.settings().calendar.previous;
+    if (!p) return false;
+    // a stored definition is text; anything else would be put back as garbage
+    if ("definition" in p && typeof p.definition !== "string") return false;
+    if (p.activeTimeAdapter !== SESHAT_ID) return true;
+    return typeof p.definition === "string" && !("error" in prepareDefinition(p.definition));
+  }
+
+  /**
+   * Undo the last calendar change (bead wadjet-24p, §15.9 S6): the stored
+   * definition and the active calendar go back to what they were before it,
+   * and the current pair becomes the record, so undoing again redoes. One
+   * save; a failed save changes nothing. Throws DefinitionError, changing
+   * nothing, when there is no record or the definition it would run cannot
+   * run. Fires time-changed when the running calendar changed, adapters-changed
+   * always, and profiles-changed through World when the calendar's key moved.
+   */
+  async undo(): Promise<void> {
+    const s = this.host.settings();
+    const p = s.calendar.previous;
+    if (!p) throw new DefinitionError("there is no calendar change to undo");
+    if (!this.canUndo()) throw new DefinitionError("the calendar before the last change cannot run, so it cannot be restored");
+    const was = { had: "definition" in s.calendar, definition: s.calendar.definition, active: s.activeTimeAdapter, previous: p };
+    const activeBefore = this.host.time.active;
+    const hashBefore = this.seshat?.configHash();
+    s.calendar.previous = this.snapshot();
+    if ("definition" in p) s.calendar.definition = p.definition;
+    else delete s.calendar.definition;
+    s.activeTimeAdapter = p.activeTimeAdapter;
+    try {
+      await this.host.save();
+    } catch (e) {
+      if (was.had) s.calendar.definition = was.definition;
+      else delete s.calendar.definition;
+      s.activeTimeAdapter = was.active;
+      s.calendar.previous = was.previous;
+      throw e;
+    }
+    // the adapter follows the stored value: a record with no definition leaves none loaded (Parallax, P3c step 5)
+    if (s.calendar.definition !== undefined || s.activeTimeAdapter === SESHAT_ID) this.mount(s.calendar.definition);
+    else this.seshat?.update(undefined);
+    // a switch re-keys World first (a switch is not a profile change); without one, rebuild sees the edit and fires all:true
+    if (s.activeTimeAdapter !== was.active) this.host.world.setActiveAdapter(s.activeTimeAdapter);
+    this.host.rebuild();
+    this.host.syncActiveSubscription();
+    const active = this.host.time.active;
+    if (active !== activeBefore || (active === this.seshat && this.seshat.configHash() !== hashBefore)) this.host.emitTimeChanged();
     this.host.emitAdaptersChanged();
   }
 }

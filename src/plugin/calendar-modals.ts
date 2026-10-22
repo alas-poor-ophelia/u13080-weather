@@ -39,7 +39,11 @@ export class OptInModal extends Modal {
     const stored = typeof s.calendar.definition === "string" ? s.calendar.definition : null;
     // a stored definition (kept from an earlier opt-out, or faulted and kept byte for byte) is where to start:
     // anything else replaces it, and that is asked for below
-    let source = stored !== null ? "text" : "internal";
+    // the legacy calendar is offered only on worlds that came from it (§15.1 R3): as a definition to start
+    // from, and, from another calendar, as the way back
+    const legacyOrigin = s.calendar.origin !== "definition";
+    const canGoBack = legacyOrigin && this.plugin.time.active?.id !== "internal";
+    let source = stored !== null ? "text" : legacyOrigin ? "internal" : (WORLD_PRESETS[0]?.id ?? "text");
     // a stored definition usually has its own seasons and moons already
     let carry = stored === null;
     let replace = false;
@@ -52,7 +56,9 @@ export class OptInModal extends Modal {
       ...(anchor ? { anchor: date } : {}),
     });
 
-    const options: Record<string, string> = { internal: "This world's internal calendar (the same days, seasons and moons)" };
+    const options: Record<string, string> = {};
+    if (canGoBack) options.back = "Go back to the legacy calendar";
+    if (legacyOrigin) options.internal = "This world's legacy calendar, as a definition (the same days, seasons and moons)";
     for (const p of WORLD_PRESETS) options[p.id] = p.ast.name;
     options.text = stored !== null ? "The stored definition (edit it below)" : "Paste a definition (Seshat text)";
     new Setting(contentEl).setName("Start from").addDropdown((d) =>
@@ -80,7 +86,7 @@ export class OptInModal extends Modal {
           refresh();
         }),
       );
-    new Setting(contentEl)
+    const dayRow = new Setting(contentEl)
       .setName("Day numbers")
       .setDesc("Today, pinned days and overrides are stored as day numbers. Keep them, and they fall on new dates; or anchor today to a date, and the calendar moves so today reads as that date.")
       .addDropdown((d) =>
@@ -111,7 +117,7 @@ export class OptInModal extends Modal {
     const problem = contentEl.createEl("p", { cls: "mod-warning" });
     contentEl.createEl("p", {
       cls: "setting-item-description",
-      text: "A world on a calendar definition needs this version of the plugin or a later one. An older version does not know definitions: it would run this world on the internal calendar's settings again, without saying so, and the weather would change.",
+      text: "A world on a calendar definition needs this version of the plugin or a later one. An older version does not know definitions: it would run this world on the legacy calendar's settings again, without saying so, and the weather would change.",
     });
     let save: ButtonComponent | null = null;
     let busy = false;
@@ -123,6 +129,21 @@ export class OptInModal extends Modal {
           .setCta()
           .onClick(async () => {
             if (busy) return;
+            if (source === "back") {
+              busy = true;
+              b.setDisabled(true);
+              try {
+                await this.plugin.setActiveTimeAdapter("internal");
+              } catch (e) {
+                busy = false;
+                b.setDisabled(false);
+                return void problem.setText(`Not switched: ${e instanceof Error ? e.message : String(e)}`);
+              }
+              new Notice("This world runs on the legacy calendar again. The calendar definition stays stored; Undo the last calendar change switches back to it.");
+              this.close();
+              this.onDone();
+              return;
+            }
             const r = buildOptIn(choice(), s.calendar, s.currentDayOrdinal);
             if ("error" in r) return void problem.setText(r.error);
             busy = true;
@@ -134,7 +155,7 @@ export class OptInModal extends Modal {
               b.setDisabled(false);
               return void problem.setText(`Not switched: ${e instanceof Error ? e.message : String(e)}`);
             }
-            const named = source === "internal" ? "its internal calendar, as a definition" : source === "text" ? "your calendar definition" : (WORLD_PRESETS.find((p) => p.id === source)?.ast.name ?? "a calendar definition");
+            const named = source === "internal" ? "its legacy calendar, as a definition" : source === "text" ? "your calendar definition" : (WORLD_PRESETS.find((p) => p.id === source)?.ast.name ?? "a calendar definition");
             new Notice(`This world now runs on ${named}. Today is ${r.today}.`);
             this.close();
             this.onDone();
@@ -142,9 +163,20 @@ export class OptInModal extends Modal {
       });
 
     const refresh = () => {
+      const back = source === "back";
       area.toggle(source === "text");
-      carryRow.settingEl.toggle(source !== "internal");
-      dateRow.settingEl.toggle(anchor);
+      carryRow.settingEl.toggle(!back && source !== "internal");
+      dayRow.settingEl.toggle(!back);
+      dateRow.settingEl.toggle(!back && anchor);
+      if (back) {
+        replaceRow.settingEl.toggle(false);
+        problem.setText("");
+        preview.setText(
+          `The world runs on the legacy calendar again, with its settings as they were before it moved to a definition: years of ${s.calendar.yearLength} days, its own seasons and moons. Changes made to the definition since do not carry back; the definition stays stored, and Undo the last calendar change switches back to it.`,
+        );
+        save?.setDisabled(false);
+        return;
+      }
       const r = buildOptIn(choice(), s.calendar, s.currentDayOrdinal);
       // replacing a stored definition with a different text is never the default
       const replaces = stored !== null && !("error" in r) && r.text !== stored;
@@ -156,7 +188,7 @@ export class OptInModal extends Modal {
         return;
       }
       const moved = r.shift === 0 ? "" : ` The calendar moves ${Math.abs(r.shift).toLocaleString("en")} days ${r.shift > 0 ? "later" : "earlier"} so that it does.`;
-      const lossy = r.lossy.length ? ` The cycle of ${r.lossy.join(", ")} is held as the nearest exact fraction, as the internal calendar already ran it.` : "";
+      const lossy = r.lossy.length ? ` The cycle of ${r.lossy.join(", ")} is held as the nearest exact fraction, as the legacy calendar already ran it.` : "";
       preview.setText(`Today (day ${s.currentDayOrdinal}) will read: ${r.today}.${moved}${lossy}`);
       problem.setText(
         r.renamed.length

@@ -390,10 +390,12 @@ export class StudioView extends ItemView {
     const worldDirty = this.store.worldDirty();
     const fresh = initialState(this.plugin.studioSettings(), this.store.get().view.zoneId);
     this.store.update((s) => {
-      // the calendar source moved (a switch to or from a definition) under a dirty world draft whose calendar
-      // is untouched: that calendar takes the new source's, so the draft never carries one calendar into another
-      const untouched = canonicalJson(s.world.calendar) === canonicalJson(s.calendarBase ?? s.saved.world.calendar);
-      if (worldDirty && untouched && (s.calendarSource ?? "legacy") !== fresh.calendarSource) {
+      // the stored calendar moved (a switch, an undo, an edit in settings) under a dirty world draft whose calendar
+      // is untouched: that calendar takes the stored one, so the draft never shows or carries a calendar that is gone
+      const base = s.calendarBase ?? s.saved.world.calendar;
+      const untouched = canonicalJson(s.world.calendar) === canonicalJson(base);
+      const moved = (s.calendarSource ?? "legacy") !== fresh.calendarSource || canonicalJson(fresh.world.calendar) !== canonicalJson(base);
+      if (worldDirty && untouched && moved) {
         s.world.calendar = structuredClone(fresh.world.calendar);
         s.calendarBase = structuredClone(fresh.world.calendar);
         s.calendarSource = fresh.calendarSource ?? "legacy";

@@ -19,6 +19,7 @@ import { WadjetSettingTab } from "./settings-tab";
 import { TimeRegistry } from "./time/adapter";
 import { InternalCalendar } from "./time/internal";
 import { World } from "./world";
+import { startNewWorld } from "./new-world";
 
 export type { WadjetAPI } from "./api";
 
@@ -62,6 +63,8 @@ export default class WadjetPlugin extends Plugin {
     if (this.dead) return;
     const repairs: string[] = [];
     this.settings = migrateSettings(loaded, (msg) => repairs.push(msg));
+    // no data.json at all: a new world, on a plain calendar definition (§15.6); a data.json missing a field never is
+    if (loaded === null || loaded === undefined) startNewWorld(this.settings);
     if (repairs.length) {
       // the repaired settings are saved below, so these messages are where the old values survive: show them and log them
       for (const msg of repairs) console.warn(`U+13080 Weather: ${msg}`);
@@ -202,7 +205,7 @@ export default class WadjetPlugin extends Plugin {
     });
   }
 
-  /** The settings tab's calendar choice (the Calendar plugin chooser, "Use the internal calendar"). Fires time-changed and adapters-changed when the effective calendar changes. */
+  /** The settings tab's calendar choice (the Calendar plugin chooser, Change calendar…'s way back to the legacy calendar). Fires time-changed and adapters-changed when the effective calendar changes. */
   setActiveTimeAdapter(id: string): Promise<void> {
     return this.calendars.setActive(id);
   }

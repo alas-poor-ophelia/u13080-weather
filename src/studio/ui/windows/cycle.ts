@@ -179,7 +179,7 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
     // between them (`0811-vst-sablemoon.html` l.8) — so it goes into the
     // chrome's head slot un-tailed, beside the caption. Built detached here
     // and handed over by `head` below.
-    const sourceChip: ChipComponent = createChip(createDiv(), { label: "internal calendar", color: "var(--wadjet-studio-wind)", hint: cycleHint("cycle.source"), dot: false });
+    const sourceChip: ChipComponent = createChip(createDiv(), { label: "calendar", color: "var(--wadjet-studio-wind)", hint: cycleHint("cycle.source"), dot: false });
     sourceChip.el.addClass("wadjet-studio-cycle-source");
     sourceChip.el.setAttr("data-part", "cycle-source");
 
@@ -201,7 +201,8 @@ export function buildCycleWindow(moonName: string): WindowBuilder {
 
     function sourceLabel(): string {
       const d = description();
-      return d !== null && d.readOnly ? `${d.label} · read-only` : "internal calendar";
+      if (d !== null && d.readOnly) return `${d.label} · read-only`;
+      return ctx.store.get().calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
     }
 
     function draftMoon(state: StudioState): StudioState["world"]["calendar"]["moons"][number] | undefined {

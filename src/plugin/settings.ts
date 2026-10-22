@@ -210,10 +210,11 @@ function sanitizeOrigin(v: unknown, warn: (msg: string) => void): Pick<CalendarS
   return {};
 }
 
-/** The undo record keeps its definition as stored; one without an adapter id is dropped. */
+/** The undo record keeps its definition as stored text; one without an adapter id, or with a definition that is not text, is dropped. */
 function sanitizePrevious(v: unknown, warn: (msg: string) => void): Pick<CalendarSettings, "previous"> {
   if (v === undefined) return {};
-  if (typeof v === "object" && v !== null && typeof (v as PreviousCalendar).activeTimeAdapter === "string") {
+  const ok = typeof v === "object" && v !== null && typeof (v as PreviousCalendar).activeTimeAdapter === "string";
+  if (ok && (!("definition" in v) || typeof (v as PreviousCalendar).definition === "string")) {
     const p = v as PreviousCalendar;
     return { previous: { ...("definition" in p ? { definition: p.definition } : {}), activeTimeAdapter: p.activeTimeAdapter } };
   }

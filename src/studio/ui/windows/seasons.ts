@@ -94,7 +94,7 @@ function calendarView(ctx: SurfaceContext, state: StudioState): CalendarView {
   const readOnly = description?.readOnly ?? false;
   const seasons = readOnly ? (description?.seasons ?? []) : state.world.calendar.seasons;
   const yearLength = description?.yearLength ?? DEFAULT_YEAR_LENGTH;
-  const label = readOnly ? (description?.label ?? "calendar") : "internal calendar";
+  const label = readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
   return { readOnly, label, seasons, yearLength, ...(description?.editHint !== undefined ? { editHint: description.editHint } : {}) };
 }
 
@@ -140,7 +140,7 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
   // `0853-vst-seasons.html` l.7 puts a `flex:1` before it) — so it goes into
   // the chrome's head slot as an `is-tail` child. Built detached here and
   // handed over by `head` below.
-  const sourceChip: ChipComponent = createChip(createDiv(), { label: "internal calendar", hint: seasonsHint("seasons.source"), dot: false });
+  const sourceChip: ChipComponent = createChip(createDiv(), { label: "calendar", hint: seasonsHint("seasons.source"), dot: false });
   sourceChip.el.addClasses(["wadjet-studio-seasons-source", "is-tail"]);
   sourceChip.el.setAttr("data-part", "source");
 

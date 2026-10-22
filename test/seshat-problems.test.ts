@@ -152,10 +152,15 @@ describe("calendar origin and the undo record (§15.1 R3, §15.9 S6)", () => {
     }
   });
 
-  test("a previous record keeps its definition as stored, even one that cannot run", () => {
-    const r = load({ previous: { definition: 42, activeTimeAdapter: "seshat", stray: true } });
-    expect(r.calendar.previous).toEqual({ definition: 42, activeTimeAdapter: "seshat" });
+  test("a previous record keeps its definition as stored text, even text that cannot run; a definition that is not text drops the record", () => {
+    const r = load({ previous: { definition: "not a calendar", activeTimeAdapter: "seshat", stray: true } });
+    expect(r.calendar.previous).toEqual({ definition: "not a calendar", activeTimeAdapter: "seshat" });
     expect(r.warnings).toEqual([]);
+    for (const definition of [42, null, { x: 1 }]) {
+      const bad = load({ previous: { definition, activeTimeAdapter: "internal" } });
+      expect(bad.calendar).not.toHaveProperty("previous");
+      expect(bad.warnings).toHaveLength(1);
+    }
     expect(load({ previous: { activeTimeAdapter: "internal" } }).calendar.previous).toEqual({ activeTimeAdapter: "internal" });
   });
 

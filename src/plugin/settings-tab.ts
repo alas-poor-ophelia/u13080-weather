@@ -109,13 +109,13 @@ export class WadjetSettingTab extends PluginSettingTab {
               for (const action of row.actions) {
                 if (action === "edit") setting.addButton((b) => b.setButtonText("Edit definition").onClick(() => new DefinitionModal(this.app, this.plugin, () => this.update()).open()));
                 if (action === "change") setting.addButton((b) => b.setButtonText("Change calendar…").onClick(() => new OptInModal(this.app, this.plugin, () => this.update()).open()));
-                if (action === "internal") setting.addButton((b) => b.setButtonText("Use the internal calendar").onClick(() => void this.useInternalCalendar()));
+                if (action === "undo") setting.addButton((b) => b.setButtonText("Undo the last calendar change").onClick(() => void this.undoCalendarChange()));
               }
             },
           },
           {
             name: "Calendar plugin",
-            desc: "Calendars other plugins provide, by name, beside the internal calendar and a stored definition.",
+            desc: "Calendars other plugins provide, by name, beside a stored definition (and the legacy calendar, on worlds that came from it).",
             visible: () => row.choices !== null,
             control: { type: "dropdown", key: "activeTimeAdapter", options: row.choices ?? {} },
           },
@@ -267,6 +267,8 @@ export class WadjetSettingTab extends PluginSettingTab {
       stored: seshat?.definition()?.name ?? (s.calendar.definition !== undefined ? "Calendar definition" : null),
       today,
       plugins,
+      legacyOrigin: s.calendar.origin !== "definition",
+      canUndo: this.plugin.calendars.canUndo(),
     });
   }
 
@@ -348,13 +350,13 @@ export class WadjetSettingTab extends PluginSettingTab {
     }
   }
 
-  /** "Use the internal calendar": the world goes back to its internal calendar; any stored definition is kept. */
-  private async useInternalCalendar(): Promise<void> {
+  /** "Undo the last calendar change" (bead wadjet-24p): the definition and the active calendar go back to what they were. */
+  private async undoCalendarChange(): Promise<void> {
     try {
-      await this.plugin.setActiveTimeAdapter("internal");
-      new Notice("This world now runs on its internal calendar. The calendar definition is kept.");
+      await this.plugin.calendars.undo();
+      new Notice("The last calendar change was undone. Undo it again to redo it.");
     } catch (e) {
-      new Notice(`The calendar could not be changed: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(`The calendar change could not be undone: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       this.update();
     }

@@ -12,19 +12,20 @@ import { calendarRow, definitionSummary, type CalendarRowInput } from "../src/pl
 import { WORLD_PRESETS } from "../src/plugin/opt-in";
 import { GREGORIAN, ROMAN, type CalendarAst } from "../src/seshat";
 
-const base: CalendarRowInput = { activeId: "internal", internal: { yearLength: 365, epochYear: 1 }, definition: null, fault: null, stored: null, today: "Year 1, day 4", plugins: [] };
+const base: CalendarRowInput = { activeId: "internal", internal: { yearLength: 365, epochYear: 1 }, definition: null, fault: null, stored: null, today: "Year 1, day 4", plugins: [], legacyOrigin: true, canUndo: false };
 
 describe("calendarRow says what the world runs on, and offers what can be done from there", () => {
-  test("the internal calendar: its years and today; Change calendar… is the way to a definition", () => {
+  test("the legacy calendar: named as such, its years and today; Change calendar… is the way to a definition", () => {
     const r = calendarRow(base);
-    expect(r.name).toBe("Internal calendar");
+    expect(r.name).toBe("Legacy calendar");
+    expect(r.desc).toContain("runs on the legacy calendar");
     expect(r.desc).toContain("years of 365 days from year 1");
     expect(r.desc).toContain("Today is Year 1, day 4.");
     expect(r.actions).toEqual(["change"]);
     expect(r.choices).toBeNull(); // no plugin installed: no chooser at all
   });
 
-  test("the internal calendar with a definition stored from an earlier switch says it is there", () => {
+  test("the legacy calendar with a definition stored from an earlier switch says it is there", () => {
     const r = calendarRow({ ...base, stored: "Gregorian" });
     expect(r.desc).toContain("A calendar definition (Gregorian) is also stored");
     expect(r.actions).toEqual(["change"]);
@@ -34,11 +35,11 @@ describe("calendarRow says what the world runs on, and offers what can be done f
     expect(calendarRow({ ...base, internal: { yearLength: 365.2422, epochYear: 1 } }).desc).toContain("years of 365.2422 days");
   });
 
-  test("a world on a definition: its name, today in its calendar; edit, change, or back to the internal calendar", () => {
+  test("a world on a definition: its name, today in its calendar; edit or change, never a button back to the legacy calendar", () => {
     const r = calendarRow({ ...base, activeId: "seshat", definition: "Gregorian", stored: "Gregorian", today: "2024-02-27" });
     expect(r.name).toBe("Gregorian (calendar definition)");
     expect(r.desc).toContain("Today is 2024-02-27.");
-    expect(r.actions).toEqual(["edit", "change", "internal"]);
+    expect(r.actions).toEqual(["edit", "change"]);
   });
 
   test("a definition that cannot run says so, says no weather is made, and still offers the repair", () => {
@@ -47,37 +48,48 @@ describe("calendarRow says what the world runs on, and offers what can be done f
     expect(r.desc).toContain("cannot run: line 9: no gear");
     expect(r.desc).toContain("No weather is made until it is fixed");
     expect(r.desc).not.toContain("Today is");
-    expect(r.actions).toEqual(["edit", "change", "internal"]);
+    expect(r.desc).not.toContain("internal calendar");
+    expect(r.actions).toEqual(["edit", "change"]);
   });
 
-  test("a calendar plugin: its own name; edited there; the only way out is back to the internal calendar", () => {
+  test("a calendar plugin: its own name; edited there; Change calendar… is the way out", () => {
     const r = calendarRow({ ...base, activeId: "foo", plugins: [{ id: "foo", label: "Almanac of Foo" }], today: "Wet 12, year 3" });
     expect(r.name).toBe("Almanac of Foo (calendar plugin)");
     expect(r.desc).toContain("edit it there");
-    expect(r.actions).toEqual(["internal"]);
+    expect(r.actions).toEqual(["change"]);
   });
 
-  test("the chooser appears only with a plugin installed, and lists every calendar by name", () => {
-    const r = calendarRow({ ...base, stored: "Gregorian", plugins: [{ id: "foo", label: "Almanac of Foo" }] });
-    expect(r.choices).toEqual({ internal: "Internal calendar", seshat: "Gregorian (calendar definition)", foo: "Almanac of Foo (calendar plugin)" });
+  test("undo is offered on every kind of world when the last change can be undone", () => {
+    expect(calendarRow({ ...base, canUndo: true }).actions).toEqual(["change", "undo"]);
+    expect(calendarRow({ ...base, activeId: "seshat", definition: "Gregorian", stored: "Gregorian", canUndo: true }).actions).toEqual(["edit", "change", "undo"]);
+    expect(calendarRow({ ...base, activeId: "foo", plugins: [{ id: "foo", label: "Foo" }], canUndo: true }).actions).toEqual(["change", "undo"]);
+  });
+
+  test("the chooser appears only with a plugin installed, and lists the legacy calendar only on worlds that came from it", () => {
+    const r = calendarRow({ ...base, activeId: "seshat", definition: "Gregorian", stored: "Gregorian", plugins: [{ id: "foo", label: "Almanac of Foo" }] });
+    expect(r.choices).toEqual({ internal: "Legacy calendar", seshat: "Gregorian (calendar definition)", foo: "Almanac of Foo (calendar plugin)" });
+    // a world born on a definition: no legacy calendar to go back to
+    const born = calendarRow({ ...base, activeId: "seshat", definition: "Calendar", stored: "Calendar", legacyOrigin: false, plugins: [{ id: "foo", label: "Almanac of Foo" }] });
+    expect(born.choices).toEqual({ seshat: "Calendar (calendar definition)", foo: "Almanac of Foo (calendar plugin)" });
     // no stored definition: it is not offered
-    expect(calendarRow({ ...base, plugins: [{ id: "foo", label: "Almanac of Foo" }] }).choices).toEqual({ internal: "Internal calendar", foo: "Almanac of Foo (calendar plugin)" });
+    expect(calendarRow({ ...base, plugins: [{ id: "foo", label: "Almanac of Foo" }] }).choices).toEqual({ internal: "Legacy calendar", foo: "Almanac of Foo (calendar plugin)" });
   });
 });
 
 describe("settings-tab.ts renders the row, and the raw-id dropdown is gone", () => {
   const src = readFileSync("src/plugin/settings-tab.ts", "utf8");
 
-  test("the old rows are gone: no adapter ids as labels, no 'Calendar source', no 'Use a calendar definition'", () => {
+  test("the old rows are gone: no adapter ids as labels, no 'Calendar source', no 'Use a calendar definition', no 'Use the internal calendar'", () => {
     expect(src).not.toContain('name: "Calendar source"');
     expect(src).not.toContain('name: "Use a calendar definition"');
+    expect(src).not.toContain('setButtonText("Use the internal calendar")');
     expect(src).not.toMatch(/options: Object\.fromEntries\(adapters\.map\(\(a\) => \[a, a\]\)\)/);
   });
 
-  test("the row's three actions each have their button, and the chooser shows only with plugins", () => {
+  test("the row's actions each have their button, and the chooser shows only with plugins", () => {
     expect(src).toContain('setButtonText("Edit definition")');
     expect(src).toContain('setButtonText("Change calendar…")');
-    expect(src).toContain('setButtonText("Use the internal calendar")');
+    expect(src).toContain('setButtonText("Undo the last calendar change")');
     expect(src).toMatch(/name: "Calendar plugin",[\s\S]{0,200}visible: \(\) => row\.choices !== null/);
   });
 });

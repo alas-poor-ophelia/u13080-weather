@@ -135,8 +135,10 @@ describe("opting in and out", () => {
     await r.calendars.optIn(TEXT.replace("\nBEGIN:VUNIT", "\n\n\nBEGIN:VUNIT")); // extra blank lines: not canonical
     expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
     expect(r.settings.calendar.definition).toBe(TEXT);
-    const { definition: _d, ...rest } = r.settings.calendar;
+    const { definition: _d, previous, ...rest } = r.settings.calendar;
     expect(JSON.stringify(rest)).toBe(legacy);
+    // the undo record: the world before the switch (wadjet-24p)
+    expect(previous).toEqual({ activeTimeAdapter: "internal" });
     expect([r.count("time-changed"), r.count("adapters-changed"), r.count("profiles-changed")]).toEqual([1, 1, 0]);
     expect(r.world.now()!.source).toBe(SESHAT_ID);
     expect(r.world.getReport(zone(r), { dayOrdinal: 10 }).provenance.calendarHash).toMatch(/^seshat:/);
@@ -411,5 +413,82 @@ describe("a ledger edit (P3c acceptance)", () => {
     await r.calendars.saveDefinition(text);
     expect(r.count("profiles-changed")).toBe(1);
     expect(all(r)).toBe(true);
+  });
+});
+
+/** Undo the last calendar change (bead wadjet-24p, docs/SESHAT-v0.md §15.9 S6). */
+describe("undo the last calendar change", () => {
+  test("undoing an opt-in goes back to the legacy calendar with no definition; undoing again redoes it", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    r.clear();
+    await r.calendars.undo();
+    expect(r.settings.activeTimeAdapter).toBe("internal");
+    expect(r.settings.calendar).not.toHaveProperty("definition");
+    expect(r.settings.calendar.previous).toEqual({ definition: TEXT, activeTimeAdapter: SESHAT_ID });
+    expect(r.world.now()!.source).toBe("internal");
+    expect([r.count("time-changed"), r.count("adapters-changed")]).toEqual([1, 1]);
+    // no definition is left loaded behind the stored value (Parallax, P3c step 5): nothing offers one
+    expect(r.calendars.seshat?.definition() ?? null).toBeNull();
+    r.clear();
+    await r.calendars.undo();
+    expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
+    expect(r.settings.calendar.definition).toBe(TEXT);
+    expect(r.world.now()!.source).toBe(SESHAT_ID);
+    expect(r.world.timeAt(0).tags).toContain("season:Spring");
+  });
+
+  test("undoing a definition edit (a preset replace) restores the text: profiles-changed all:true once", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    const replaced = print({ ...GREGORIAN, name: "Replaced" });
+    await r.calendars.saveDefinition(replaced);
+    expect(r.world.timeAt(0).tags).not.toContain("season:Spring");
+    r.clear();
+    expect(r.calendars.canUndo()).toBe(true);
+    await r.calendars.undo();
+    expect(r.settings.calendar.definition).toBe(TEXT);
+    expect(r.settings.calendar.previous).toEqual({ definition: replaced, activeTimeAdapter: SESHAT_ID });
+    expect(r.count("profiles-changed")).toBe(1);
+    expect(all(r)).toBe(true);
+    expect(r.world.timeAt(0).tags).toContain("season:Spring");
+  });
+
+  test("a save that changes nothing leaves the record alone", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    const record = r.settings.calendar.previous;
+    await r.calendars.saveDefinition(TEXT);
+    expect(r.settings.calendar.previous).toEqual(record);
+  });
+
+  test("a failed save changes nothing, record included", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    const before = JSON.stringify(r.settings.calendar);
+    r.failNextSave();
+    expect(await rejection(r.calendars.undo())).toBeInstanceOf(Error);
+    expect(JSON.stringify(r.settings.calendar)).toBe(before);
+    expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
+    // and a failed edit does not touch the record either
+    r.failNextSave();
+    expect(await rejection(r.calendars.saveDefinition(print({ ...DEF, name: "Other" })))).toBeInstanceOf(Error);
+    expect(JSON.stringify(r.settings.calendar)).toBe(before);
+  });
+
+  test("no record, or a record whose definition cannot run: refused, nothing changed", async () => {
+    const r = rig();
+    expect(r.calendars.canUndo()).toBe(false);
+    expect(await rejection(r.calendars.undo())).toBeInstanceOf(DefinitionError);
+    await r.calendars.optIn(TEXT);
+    r.settings.calendar.previous = { definition: "not a calendar", activeTimeAdapter: SESHAT_ID };
+    expect(r.calendars.canUndo()).toBe(false);
+    expect(await rejection(r.calendars.undo())).toBeInstanceOf(DefinitionError);
+    expect(r.settings.calendar.definition).toBe(TEXT);
+    // a record whose definition is not text is never put back, whichever calendar it names
+    r.settings.calendar.previous = { definition: 5, activeTimeAdapter: "internal" };
+    expect(r.calendars.canUndo()).toBe(false);
+    expect(await rejection(r.calendars.undo())).toBeInstanceOf(DefinitionError);
+    expect(r.settings.calendar.definition).toBe(TEXT);
   });
 });

@@ -90,8 +90,8 @@ units: imperial            # optional; otherwise the setting
   `visibility`, `regime`, `conditions`, `descriptors.temperature/precipitation/wind/sky`.
 
 Day numbers count from the first day of year 1 (which is day 0). Dates like `3-14` are
-*year-day* in the internal calendar: year 3, the 14th day. Units (metric or imperial) are a
-setting.
+*year-day* in a plain calendar (a new world's, or the legacy calendar): year 3, the 14th day. A
+world on a calendar with months writes its own dates. Units (metric or imperial) are a setting.
 
 ## Commands
 
@@ -99,7 +99,7 @@ Access these through Obsidian's Command Palette to access various shortcuts and 
 
 | Command | Does |
 |---|---|
-| Advance / Rewind the calendar one day | moves the internal calendar's current day |
+| Advance / Rewind the calendar one day | moves the world's current day |
 | Insert today's weather | writes a one-line summary at the cursor |
 | Insert a weather codeblock | inserts a ```` ```wadjet ```` block for the first zone |
 | Pin today's weather | freezes today's generated weather for the first zone as a pinned day |
@@ -343,23 +343,41 @@ until you press Save, which reads `Saved ✓` when there is nothing to write, `S
 is, carries a `⚠` count for warnings, and turns red with a count when something is actually wrong.
 Errors block saving; the offending unit's LED and its window's footer say what is wrong.
 
-**Calendar definitions.** The internal calendar is deliberately simple: one year length, seasons
-as fractions of the year, moons. *Settings → Calendar → Change calendar…* runs a world on
-an exact calendar instead: a real-world one (Gregorian, Hebrew, tabular Islamic, Coptic, Ethiopian,
-French Republican, Baháʼí, Roman, Harptos) or your own, written as Seshat text, with months, leap
-years and named holidays that modifiers can match as tags. Bring the world's seasons and moons
-along, and keep day numbers or anchor today to a date. A world on a definition needs this version
-of the plugin or later; an older one would quietly run it on the internal calendar again. It is a
-calendar, not an almanac: it does not compute real sunrise, solstices or moon phases for Earth, and
-a definition's moons are the ones you give it. The Studio measures such a world's years exactly: a
-leap year has its 366 days on the ruler, in its lanes and in the header readout, and a lane that
-names day 365 shows it only in the years that have one.
+**Calendars.** A world runs on a calendar definition. A new world starts on a plain one: 365-day
+years from year 1, one moon, no seasons. *Settings → Calendar → Change calendar…* switches to
+another: a real-world one (Gregorian, Hebrew, tabular Islamic, Coptic, Ethiopian, French
+Republican, Baháʼí, Roman, Harptos) or your own, written as Seshat text, with months, leap years and
+named holidays that modifiers can match as tags. Keep day numbers or anchor today to a date.
+
+Edit a definition in the Studio's **Calendar** window (the ruler's *Calendar ⚑* button): tabs for
+the seasons, the year (its length, its first year, its leap rules), the months, the week, and the
+**ledger**, the calendar's one-off corrections: a marked day, a day a named rule skips, a year that
+started on another day, one year's month lengths. A part the fields cannot show (a year that follows
+the moon, a month with its own leap rule) says so and offers *Edit as text*. Every change to a
+definition is saved through one dialog that says which days' weather it can change, and, when it
+moves where years start, asks whether to keep day numbers. *Undo the last calendar change*
+(Settings → Calendar) puts the previous calendar back, one step: undoing again redoes it.
+
+A world made before calendar definitions runs on the **legacy calendar**: one year length, seasons
+as fractions of the year, moons, edited in Settings. It runs exactly as it always did. Change
+calendar… can move it to a definition (its own days, seasons and moons, as a definition), and offers
+the way back; a world that started on a definition is not offered the legacy calendar.
+
+A new world is one with no settings file at all. On a new device with Obsidian Sync, let Sync
+deliver the plugin's settings before enabling the plugin: until it does, the plugin sees a new world.
+
+A world on a definition needs this version of the plugin or later; an older one would quietly run
+it on the legacy calendar's settings again. It is a calendar, not an almanac: it does not compute
+real sunrise, solstices or moon phases for Earth, and a definition's moons are the ones you give
+it. The Studio measures such a world's years exactly: a leap year has its 366 days on the ruler, in
+its lanes and in the header readout, and a lane that names day 365 shows it only in the years that
+have one.
 
 **Third-party calendars.** Seasons and moons come from whichever calendar is active. If a calendar
 plugin describes its own (see the [`CalendarDescription`](docs/API.md#calendardescription)
 contract), the Seasons and cycle windows mirror it read-only — the badge reads
-`<plugin> · read-only` and points you back at that plugin to edit it. The internal calendar stays
-editable in place. When a calendar plugin gives every day its year number, the Studio places its
+`<plugin> · read-only` and points you back at that plugin to edit it. A definition and the legacy
+calendar stay editable in place. When a calendar plugin gives every day its year number, the Studio places its
 years exactly too, however their lengths vary; otherwise it draws a year of the length the plugin
 describes.
 

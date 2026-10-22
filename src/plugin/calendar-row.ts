@@ -8,21 +8,23 @@
  *
  * One row names the calendar the world runs on, in words, with today's date
  * in it, and offers the actions that make sense from there:
- *  - `change`: the calendar dialog (a preset, the world's own calendar as a
- *    definition, the stored definition, pasted text), from the internal
- *    calendar or a definition;
+ *  - `change`: the calendar dialog (a preset, the stored definition, pasted
+ *    text; on a world that came from the legacy calendar, that calendar as a
+ *    definition, and the way back to it);
  *  - `edit`: the definition's text, on a world that runs one (a faulted one
  *    included, so it can be repaired);
- *  - `internal`: back to the internal calendar, from anything else.
- * A calendar plugin is chosen in a second row, by name, shown only when one
- * is installed.
+ *  - `undo`: the last calendar change undone (bead wadjet-24p), when there is
+ *    one that can run.
+ * The legacy calendar (the old internal calendar) is named and offered only
+ * on worlds that came from it (§15.1 R3, ruled 2026-10-21). A calendar plugin
+ * is chosen in a second row, by name, shown only when one is installed.
  *
  * A definition is described by its own structure (definitionSummary), not
  * by a fixed sentence: "years of 365 or 366 days · 12 months · 7-day weeks".
  */
 import { Engine, type CalendarAst, type SlotsUnitAst } from "../seshat";
 
-export type CalendarAction = "change" | "edit" | "internal";
+export type CalendarAction = "change" | "edit" | "undo";
 
 export interface CalendarRowInput {
   /** the resolved active adapter's id ("internal", "seshat", a plugin's) */
@@ -41,6 +43,10 @@ export interface CalendarRowInput {
   today: string;
   /** installed calendar plugins (not the internal calendar, not the definition) */
   plugins: ReadonlyArray<{ id: string; label: string }>;
+  /** the world came from the legacy calendar (its origin is not "definition") */
+  legacyOrigin: boolean;
+  /** the last calendar change can be undone */
+  canUndo: boolean;
 }
 
 export interface CalendarRow {
@@ -56,19 +62,20 @@ const lengthOf = (n: number) => (Number.isInteger(n) ? String(n) : String(Number
 
 export function calendarRow(i: CalendarRowInput): CalendarRow {
   const choices = i.plugins.length === 0 ? null : chooser(i);
+  const undo: CalendarAction[] = i.canUndo ? ["undo"] : [];
   if (i.activeId === "seshat") {
     if (i.fault !== null) {
       return {
         name: `${i.stored ?? "Calendar definition"} (cannot run)`,
-        desc: `The world's calendar definition cannot run: ${i.fault}. No weather is made until it is fixed; the stored text is kept exactly as it is. Edit it to repair it, or go back to the internal calendar.`,
-        actions: ["edit", "change", "internal"],
+        desc: `The world's calendar definition cannot run: ${i.fault}. No weather is made until it is fixed; the stored text is kept exactly as it is. Edit it to repair it, or choose another calendar with Change calendar….`,
+        actions: ["edit", "change", ...undo],
         choices,
       };
     }
     return {
       name: `${i.definition ?? i.stored ?? "Calendar definition"} (calendar definition)`,
       desc: `${i.structure ? `${capitalise(i.structure)}. ` : ""}Today is ${i.today}.`,
-      actions: ["edit", "change", "internal"],
+      actions: ["edit", "change", ...undo],
       choices,
     };
   }
@@ -77,22 +84,22 @@ export function calendarRow(i: CalendarRowInput): CalendarRow {
     return {
       name: `${label} (calendar plugin)`,
       desc: `This world takes its calendar from the ${label} plugin; edit it there. Today is ${i.today}.`,
-      actions: ["internal"],
+      actions: ["change", ...undo],
       choices,
     };
   }
   const kept = i.stored !== null ? ` A calendar definition (${i.stored}) is also stored; Change calendar… can switch back to it.` : "";
   return {
-    name: "Internal calendar",
-    desc: `This world runs on the internal calendar: years of ${lengthOf(i.internal.yearLength)} days from year ${i.internal.epochYear}, with the seasons and moons below. Today is ${i.today}.${kept}`,
-    actions: ["change"],
+    name: "Legacy calendar",
+    desc: `This world runs on the legacy calendar, the one Wadjet had before calendar definitions: years of ${lengthOf(i.internal.yearLength)} days from year ${i.internal.epochYear}, with the seasons and moons below. Today is ${i.today}.${kept}`,
+    actions: ["change", ...undo],
     choices,
   };
 }
 
-/** The calendar-plugin chooser, by name: the internal calendar, the stored definition (if any), every installed plugin. */
+/** The calendar-plugin chooser, by name: the legacy calendar (worlds that came from it), the stored definition (if any), every installed plugin. */
 function chooser(i: CalendarRowInput): Record<string, string> {
-  const out: Record<string, string> = { internal: "Internal calendar" };
+  const out: Record<string, string> = i.legacyOrigin || i.activeId === "internal" ? { internal: "Legacy calendar" } : {};
   if (i.stored !== null) out.seshat = `${i.stored} (calendar definition)`;
   for (const p of i.plugins) out[p.id] = `${p.label} (calendar plugin)`;
   return out;
