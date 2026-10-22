@@ -1206,7 +1206,7 @@ describe("climate studio · playlist ruler and zoom", () => {
       ob.page,
       (app, a: { type: string }) => {
         const leaf = app.workspace.getLeavesOfType(a.type)[0];
-        return (leaf.view.store.get().view.openWindows as string[]).filter((id) => id === "seasons").length;
+        return (leaf.view.store.get().view.openWindows as string[]).filter((id) => id === "calendar").length;
       },
       { type: VIEW_TYPE },
     );
@@ -1876,7 +1876,7 @@ describe("climate studio · cycle window", () => {
     // things the prototype does not have are asserted GONE rather than
     // reworded: the `world · N zones` chip (the world-edit confirm is the
     // warning) and the `epoch 0.000` readout (never a control here either).
-    expect(probe.source).toBe("internal calendar");
+    expect(probe.source).toBe("legacy calendar");
     expect(probe.period).toBe("↻ 29.53 d");
     expect(probe.worldChips).toBe(0);
     expect(probe.epochReadouts).toBe(0);
@@ -2056,7 +2056,7 @@ describe("climate studio · cycle window", () => {
     // Activate it the way the smoke walk does: the settings dropdown.
     await ob.page.waitForTimeout(500);
     await openWadjetSettings();
-    const source = settingsZoneRow("Calendar source");
+    const source = settingsZoneRow("Calendar plugin");
     await source.waitFor({ state: "visible", timeout: 10_000 });
     await source.locator("select:not(.is-measuring)").selectOption("fake-cycle-cal");
     await ob.page.waitForTimeout(500);
@@ -2082,8 +2082,8 @@ describe("climate studio · cycle window", () => {
       // calendar ACTIVE for the rest of the file, and the four describes after
       // it then failed on a world none of them had asked for.
       await openWadjetSettings();
-      await settingsZoneRow("Calendar source").waitFor({ state: "visible", timeout: 10_000 });
-      await settingsZoneRow("Calendar source").locator("select:not(.is-measuring)").selectOption("internal");
+      await settingsZoneRow("Calendar plugin").waitFor({ state: "visible", timeout: 10_000 });
+      await settingsZoneRow("Calendar plugin").locator("select:not(.is-measuring)").selectOption("internal");
       await ob.page.waitForTimeout(500);
       await withApp(ob.page, (app) => app.setting.close());
       await withApp(ob.page, () => {
@@ -2095,7 +2095,7 @@ describe("climate studio · cycle window", () => {
     await reopenCycle();
 
     const back = await probeCycle();
-    expect(back.source).toBe("internal calendar");
+    expect(back.source).toBe("legacy calendar");
     expect(back.handles).toBeGreaterThan(0);
     expect(back.editIn).toBe("");
     console.log(`  · restored: source "${back.source}", ${back.handles} handles back`);
@@ -3087,7 +3087,8 @@ describe("climate studio · regimes window", () => {
 
 /* ── The Seasons · CALENDAR window (SPEC §3.4 "Seasons", bead wadjet-9f9.27) ── */
 
-const SEASONS_WINDOW = "seasons";
+// Seasons is the first tab of the Calendar window (P3c), which opens on it
+const SEASONS_WINDOW = "calendar";
 
 interface SeasonsProbe {
   segments: number;
@@ -3120,7 +3121,8 @@ async function probeSeasons(): Promise<SeasonsProbe> {
       return {
         segments: segIndices.size,
         labels,
-        source: text('[data-part="source"] .wadjet-studio-chip-label'),
+        // hosted as the Calendar window's Seasons tab, the window's own chip names the calendar
+        source: text('.wadjet-studio-calendar-source .wadjet-studio-chip-label') || text('[data-part="source"] .wadjet-studio-chip-label'),
         caption: text(".wadjet-studio-seasons-caption"),
         flags: flags.length,
         flagsDisabled: flags.filter((f) => f.getAttribute("aria-disabled") === "true").length,
@@ -3209,7 +3211,7 @@ describe("climate studio · seasons window", () => {
     expect(seasons.length).toBe(4);
     expect(probe.segments).toBe(4);
     expect(probe.labels).toEqual(["Spring", "Summer", "Autumn", "Winter"]);
-    expect(probe.source).toBe("internal calendar");
+    expect(probe.source).toBe("legacy calendar");
     // The `world · N zones` chip gave way to the caption that says what a
     // season IS (F7) — the world scope is still stated, in product copy.
     expect(probe.caption).toContain("Seasons");
@@ -3350,7 +3352,7 @@ describe("climate studio · seasons window", () => {
     await reopenSeasons();
 
     const back = await probeSeasons();
-    expect(back.source).toBe("internal calendar");
+    expect(back.source).toBe("legacy calendar");
     expect(back.editLink).toBe("");
     console.log(`  · restored: source "${back.source}"`);
   });
@@ -9362,7 +9364,7 @@ describe("climate studio · hemisphere", () => {
     try {
       await ob.page.waitForTimeout(500);
       await openWadjetSettings();
-      const source = settingsZoneRow("Calendar source");
+      const source = settingsZoneRow("Calendar plugin");
       await source.waitFor({ state: "visible", timeout: 10_000 });
       await source.locator("select:not(.is-measuring)").selectOption("fake-hemi-cal");
       await ob.page.waitForTimeout(500);
@@ -9378,8 +9380,8 @@ describe("climate studio · hemisphere", () => {
     } finally {
       // Restore: back to the internal calendar, then drop the fake adapter.
       await openWadjetSettings();
-      await settingsZoneRow("Calendar source").waitFor({ state: "visible", timeout: 10_000 });
-      await settingsZoneRow("Calendar source").locator("select:not(.is-measuring)").selectOption("internal");
+      await settingsZoneRow("Calendar plugin").waitFor({ state: "visible", timeout: 10_000 });
+      await settingsZoneRow("Calendar plugin").locator("select:not(.is-measuring)").selectOption("internal");
       await ob.page.waitForTimeout(500);
       await withApp(ob.page, (app) => app.setting.close());
       await withApp(ob.page, () => {
@@ -9902,6 +9904,75 @@ describe("climate studio · theme", () => {
       await setSidebarsCollapsed(false);
       await setStudioWindowSize(before.width, before.height);
       await widenWindow();
+      await nextFrame();
+    }
+  });
+});
+
+/* ── A calendar definition world: the Exceptions tab and the Save calendar changes dialog (bead wadjet-eab) ── */
+
+const GREGORIAN_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "gregorian.seshat"), "utf8");
+
+/** Press Continue on whatever world-level or rewrite confirm is up; false when none came. */
+async function passAnyConfirm(): Promise<boolean> {
+  const modal = ob.page.locator(".modal-container .modal").filter({ has: ob.page.locator("button:has-text('Continue')") });
+  try {
+    await modal.waitFor({ state: "visible", timeout: 2_000 });
+  } catch {
+    return false;
+  }
+  await modal.locator("button:has-text('Continue')").click();
+  await modal.waitFor({ state: "detached", timeout: 5_000 });
+  await nextFrame();
+  return true;
+}
+
+describe("climate studio · calendar definition", () => {
+  test("step 90: on a Gregorian definition, Exceptions → Name a single day, then Save goes through the Save calendar changes dialog and stores the day", async () => {
+    // Move the fixture world onto a definition the way Change calendar does.
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const today: number = await withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.currentDayOrdinal);
+    try {
+      await revealStudio();
+      await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("calendar"), VIEW_TYPE);
+      await nextFrame();
+      const win = ob.page.locator(".wadjet-studio-window", { has: ob.page.locator(".wadjet-studio-calendar") }).first();
+      await win.locator('.wadjet-studio-calendar-tabs .wadjet-studio-segment[data-value="ledger"]').click();
+      await nextFrame();
+      expect((await win.locator('.wadjet-studio-calendar-tabs .wadjet-studio-segment[data-value="ledger"]').textContent())?.trim()).toBe("Exceptions");
+      expect((await win.locator(".wadjet-studio-calendar-source .wadjet-studio-chip-label").textContent())?.trim()).toBe("calendar definition");
+
+      const kind = win.locator('[data-key="add.kind"]');
+      expect(await kind.locator("option").allTextContents()).toEqual(["Name a single day", "Cancel one day of a rule", "Move one year's first day", "Set one year's month lengths", "Change a rule from a year onward"]);
+      await kind.selectOption("mark");
+      await win.locator('[data-key="add.date"]').fill(String(today));
+      await win.locator('[data-key="add.name"]').fill("Coronation");
+      await win.locator('[data-key="add.tags"]').fill("festival");
+      await win.locator('[data-key="add.go"]').click();
+      const confirmed = await passAnyConfirm();
+      await nextFrame();
+      const rows = await win.locator(".wadjet-studio-calendar-panel").textContent();
+      expect(rows).toContain("Coronation (festival)");
+
+      // Save: a calendar change on a definition world meets the dialog first.
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
+      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
+      const sentence = ((await dialog.locator("p").first().textContent()) ?? "").trim();
+      expect(sentence).not.toBe("Comparing the two calendars…");
+      await saveBtn.click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+
+      await expect
+        .poll(() => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string, { timeout: 10_000 })
+        .toContain(`RDATE:D${today};NAME=Coronation;TAGS=festival`);
+      console.log(`  · Exceptions: named D${today} Coronation (festival)${confirmed ? " behind the world confirm" : ""}; dialog said "${sentence}"; data.json holds the RDATE line`);
+    } finally {
+      // Back to the legacy calendar the fixture world came from (the way back inside Change calendar).
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("calendar"), VIEW_TYPE);
       await nextFrame();
     }
   });

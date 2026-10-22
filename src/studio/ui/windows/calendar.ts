@@ -576,7 +576,6 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
   function renderPanel(state: StudioState): void {
     const src = sourceOf(ctx, state);
     const description = ctx.calendar();
-    sourceChip.update({ label: src === "plugin" ? `${description?.label ?? "calendar"} · read-only` : src === "legacy" ? "legacy calendar" : src === "fault" ? "definition · cannot run" : "calendar definition" });
     if (tab === "calendar") {
       if (src === "plugin") {
         line(panel, `${description?.label ?? "A calendar plugin"} supplies this world's days. Edit it there.`);
@@ -630,6 +629,9 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
       drawnTabs = tabsKey;
       tabs.update({ options: tabOptions(src), value: tab });
     }
+    // the chip names the calendar on every tab, the Seasons tab included
+    const label = ctx.calendar()?.label ?? "calendar";
+    sourceChip.update({ label: src === "plugin" ? `${label} · read-only` : src === "legacy" ? "legacy calendar" : src === "fault" ? "definition · cannot run" : "calendar definition" });
     seasonsHost.toggleClass("is-hidden", tab !== "seasons");
     panel.toggleClass("is-hidden", tab === "seasons");
     if (tab === "seasons") return;

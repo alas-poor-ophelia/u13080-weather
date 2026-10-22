@@ -65,6 +65,8 @@ async function openWadjetSettings(): Promise<void> {
 
 const tab = () => sw.locator(".vertical-tab-content");
 const row = (name: string) => tab().locator(`.setting-item:has(> .setting-item-info > .setting-item-name:text-is("${name}"))`);
+// a legacy row and its calendar-definition twin share a name, and only one is ever shown
+const shown = async (name: string) => (await row(name).filter({ visible: true }).count()) > 0;
 const modal = () => sw.locator(".modal-container .modal");
 const modalRow = (name: string) => modal().locator(`.setting-item:has(.setting-item-name:text-is("${name}"))`);
 const listRows = (heading: string) => tab().locator(`.setting-group.mod-list:has(.setting-item-heading .setting-item-name:text-is("${heading}")) .setting-items > .setting-item:not(.mod-empty-state)`);
@@ -181,9 +183,9 @@ describe("smoke walk", () => {
 
   test("read-only calendar mirror: a describing adapter hides Moons/Seasons and shows a summary row (bead wadjet-9f9.11)", async () => {
     await openWadjetSettings();
-    expect(await row("Calendar source").isVisible()).toBe(false); // only the internal calendar is registered yet
-    expect(await row("Moons").isVisible()).toBe(true);
-    expect(await row("Seasons").isVisible()).toBe(true);
+    expect(await row("Calendar plugin").isVisible()).toBe(false); // only the internal calendar is registered yet
+    expect(await shown("Moons")).toBe(true);
+    expect(await shown("Seasons")).toBe(true);
 
     // Register a fake calendar adapter with describe(), the same way a third-party plugin would.
     await withApp(ob.page, () => {
@@ -209,8 +211,8 @@ describe("smoke walk", () => {
     });
 
     await openWadjetSettings();
-    expect(await row("Calendar source").isVisible()).toBe(true);
-    await row("Calendar source").locator("select:not(.is-measuring)").selectOption("fake-cal");
+    expect(await row("Calendar plugin").isVisible()).toBe(true);
+    await row("Calendar plugin").locator("select:not(.is-measuring)").selectOption("fake-cal");
     await ob.page.waitForTimeout(500);
 
     await openWadjetSettings();
@@ -221,8 +223,8 @@ describe("smoke walk", () => {
     note(`read-only calendar row: "${name}" — "${desc}"`);
     expect(name).toContain("Fake calendar · read-only");
     expect(desc).toContain("2 seasons");
-    expect(await row("Moons").isVisible()).toBe(false);
-    expect(await row("Seasons").isVisible()).toBe(false);
+    expect(await shown("Moons")).toBe(false);
+    expect(await shown("Seasons")).toBe(false);
 
     // Unregister (as a plugin would on its own unload) and confirm the settings tab self-heals.
     await withApp(ob.page, () => {
@@ -231,9 +233,9 @@ describe("smoke walk", () => {
     await ob.page.waitForTimeout(500);
 
     await openWadjetSettings();
-    expect(await row("Moons").isVisible()).toBe(true);
-    expect(await row("Seasons").isVisible()).toBe(true);
-    expect(await row("Calendar source").isVisible()).toBe(false); // back to a single registered adapter
+    expect(await shown("Moons")).toBe(true);
+    expect(await shown("Seasons")).toBe(true);
+    expect(await row("Calendar plugin").isVisible()).toBe(false); // back to a single registered adapter
     expect(await row("Fake calendar · read-only").count()).toBe(0);
     note("unregister restored Moons/Seasons and the Calendar source row fell back to hidden");
   });
