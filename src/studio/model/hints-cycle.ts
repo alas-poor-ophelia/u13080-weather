@@ -18,8 +18,8 @@ import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 export const CYCLE_HINTS: Record<string, Hint> = {
   "cycle.disc": ["Cycle", "one full moon cycle, from new to new"],
   "cycle.arc": ["Phase", "double-click to split it where you clicked"],
-  "cycle.handle": ["Phase boundary", "drag around the disc — writes calendar.moons[i].phases[j].at"],
-  "cycle.name": ["Phase name", "double-click to rename — writes calendar.moons[i].phases[j].name"],
+  "cycle.handle": ["Phase boundary", "drag around the disc to move where the phase begins"],
+  "cycle.name": ["Phase name", "double-click to rename the phase"],
   "cycle.remove": ["Remove phase", "merges it into the phase before it"],
   "cycle.split": ["Split phase", "halves the longest phase and names the new half"],
   "cycle.preview": ["Phase preview", "the disc shows the moon's lit shape at the last-touched boundary"],

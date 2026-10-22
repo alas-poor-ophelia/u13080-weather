@@ -204,7 +204,7 @@ export function definitionSummary(ast: CalendarAst, aroundDay = 0): string {
   const rules = (ast.rules ?? []).filter((r) => r.tags?.length).length;
   if (rules) parts.push(`${rules} named ${rules === 1 ? "rule" : "rules"}`);
   const days = ast.days?.length ?? 0;
-  if (days) parts.push(`${days} marked ${days === 1 ? "day" : "days"}`);
+  if (days) parts.push(`${days} named ${days === 1 ? "day" : "days"}`);
   const out = parts.join(" · ");
   if (byDay.size > 64) byDay.clear(); // the current day moves; keep the memo small
   byDay.set(aroundDay, out);

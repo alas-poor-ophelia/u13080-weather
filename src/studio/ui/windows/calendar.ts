@@ -109,7 +109,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
           { value: "year", label: "Year" },
           { value: "months", label: "Months" },
           { value: "week", label: "Week" },
-          { value: "ledger", label: "Ledger" },
+          { value: "ledger", label: "Exceptions" },
         ]
       : [
           { value: "seasons", label: "Seasons" },
@@ -465,8 +465,8 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
     const box = panel.createDiv({ cls: "wadjet-studio-calendar-add" });
     const head = box.createDiv({ cls: "wadjet-studio-calendar-row" });
     head.createSpan({ text: "Add" });
-    const kind = head.createEl("select", { cls: "wadjet-studio-calendar-select dropdown", attr: { "aria-label": "Kind of entry", "data-hint": calendarHint("calendar.ledgerKind"), "data-key": "add.kind" } });
-    const kinds: Record<string, string> = { mark: "A marked day", skip: "A day a rule skips", start: "A year's start moved", lengths: "One year's month lengths", switch: "A different rule from a year on" };
+    const kind = head.createEl("select", { cls: "wadjet-studio-calendar-select dropdown", attr: { "aria-label": "What to change", "data-hint": calendarHint("calendar.ledgerKind"), "data-key": "add.kind" } });
+    const kinds: Record<string, string> = { mark: "Name a single day", skip: "Cancel one day of a rule", start: "Move one year's first day", lengths: "Set one year's month lengths", switch: "Change a rule from a year onward" };
     for (const [value, text] of Object.entries(kinds)) kind.createEl("option", { value, text });
     kind.value = adding.kind;
     kind.addEventListener("change", () => {
@@ -489,7 +489,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
         break;
       case "skip": {
         if (!rules.length) {
-          line(row, "This calendar has no named rules to skip a day of.", "wadjet-studio-calendar-why");
+          line(row, "This calendar has no named rules to cancel a day of.", "wadjet-studio-calendar-why");
           return;
         }
         const sel = row.createEl("select", { cls: "wadjet-studio-calendar-select dropdown", attr: { "aria-label": "Rule", "data-hint": calendarHint("calendar.ledgerRule"), "data-key": "add.rule" } });
@@ -529,14 +529,14 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
       if (k === "mark") {
         const day = dayOf(date);
         if (day === null) return fail(`"${date}" is not a date in this calendar (write it as ${today}, or a day number).`);
-        if (ledger.days.some((d) => d.day === day)) return fail("that day is marked already; remove its entry first.");
+        if (ledger.days.some((d) => d.day === day)) return fail("that day has a name already; remove its entry first.");
         const tags = typedTags.split(",").map((t) => t.trim().normalize("NFC")).filter((t) => t !== "");
         const n = typedName.trim().normalize("NFC");
         commit((l) => ({ ...l, days: [...l.days, { day, ...(n ? { name: n } : {}), ...(tags.length ? { tags } : {}) }].sort((a, b) => a.day - b.day) }));
       } else if (k === "skip") {
         const day = dayOf(date);
         if (day === null) return fail(`"${date}" is not a date in this calendar.`);
-        if ((ledger.skips[rule] ?? []).includes(day)) return fail(`rule ${rule} skips that day already.`);
+        if ((ledger.skips[rule] ?? []).includes(day)) return fail(`rule ${rule} is already cancelled on that day.`);
         // a rule with tags can be checked: it must fall on the day it is to skip
         const tag = ast?.rules?.find((r) => r.id === rule)?.tags?.[0];
         if (tag !== undefined && !(ctx.plugin.calendars.seshat?.toContext(day).tags ?? []).includes(tag)) return fail(`rule ${rule} does not fall on ${date}, so there is nothing to skip.`);

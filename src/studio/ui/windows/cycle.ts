@@ -5,7 +5,9 @@
  * boundaries between them dragged around it, and a lit-shape moon in the
  * middle previewing the phase last touched. `MoonConfig.phases` is display
  * metadata (PLAN §2.2) — the engine never sees the names — so everything here
- * writes `settings.calendar.moons[i]` and nothing else.
+ * writes the draft's `calendar.moons[i]` and nothing else; Save stores it in
+ * `settings.calendar.moons` on a legacy world and in the moon's VBODY on a
+ * calendar definition.
  *
  * Four things worth knowing before editing this file:
  *

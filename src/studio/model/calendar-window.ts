@@ -117,10 +117,10 @@ export function ledgerRows(ledger: LedgerForm, v: LedgerView): LedgerRow[] {
   }
   ledger.days.forEach((d, i) => {
     const tags = d.tags?.length ? ` (${d.tags.join(", ")})` : "";
-    rows.push({ key: `day:${i}`, first: d.day, text: `${v.date(d.day)}: ${d.name ?? "marked"}${tags}`, asText: false });
+    rows.push({ key: `day:${i}`, first: d.day, text: `${v.date(d.day)}: ${d.name ?? "unnamed day"}${tags}`, asText: false });
   });
   for (const [rule, days] of Object.entries(ledger.skips)) {
-    for (const day of days) rows.push({ key: `skip:${rule}:${day}`, first: day, text: `${v.date(day)}: rule ${rule} skips this day`, asText: false });
+    for (const day of days) rows.push({ key: `skip:${rule}:${day}`, first: day, text: `${v.date(day)}: rule ${rule} cancelled this day`, asText: false });
   }
   return rows.sort((a, b) => (a.first ?? Infinity) - (b.first ?? Infinity));
 }

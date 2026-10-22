@@ -121,7 +121,7 @@ describe("definitionSummary describes a definition by its own structure (not a f
       rules: [{ id: "fair", tags: ["fair"], rule: { kind: "dates", days: [5] } }],
       days: [{ day: 10, tags: ["coronation"] }],
     };
-    expect(definitionSummary(ast)).toBe("years of 365 or 366 days · 12 months · 7-day weeks · 7 weekday names · 2 seasons · 1 moon · 1 named rule · 1 marked day");
+    expect(definitionSummary(ast)).toBe("years of 365 or 366 days · 12 months · 7-day weeks · 7 weekday names · 2 seasons · 1 moon · 1 named rule · 1 named day");
   });
 
   test("a part the engine cannot answer is left out; the rest still reads", () => {

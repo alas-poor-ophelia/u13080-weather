@@ -98,7 +98,7 @@ describe("the ledger tab's words", () => {
       view,
     );
     expect(rows.map((r) => [r.key, r.first, r.text, r.asText])).toEqual([
-      ["skip:feast:7", 7, "D7: rule feast skips this day", false],
+      ["skip:feast:7", 7, "D7: rule feast cancelled this day", false],
       ["unit:year:1", 10, "Year 2: month lengths 5, 5", false],
       ["day:0", 35, "D35: Coronation (coronation)", false],
       ["unit:year:0", 41, "Year 5 starts on D41", false],

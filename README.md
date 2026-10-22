@@ -351,8 +351,8 @@ named holidays that modifiers can match as tags. Keep day numbers or anchor toda
 
 Edit a definition in the Studio's **Calendar** window (the ruler's *Calendar ⚑* button): tabs for
 the seasons, the year (its length, its first year, its leap rules), the months, the week, and the
-**ledger**, the calendar's one-off corrections: a marked day, a day a named rule skips, a year that
-started on another day, one year's month lengths. A part the fields cannot show (a year that follows
+**exceptions**, the calendar's one-off corrections: name a single day, cancel one day of a named
+rule, move one year's first day, set one year's month lengths. A part the fields cannot show (a year that follows
 the moon, a month with its own leap rule) says so and offers *Edit as text*. Every change to a
 definition is saved through one dialog that says which days' weather it can change, and, when it
 moves where years start, asks whether to keep day numbers. *Undo the last calendar change*
