@@ -388,7 +388,7 @@ const NODE_FIELDS: Record<string, readonly string[]> = {
   all: ["kind", "of"],
   any: ["kind", "of"],
   not: ["kind", "of"],
-  phase: ["kind", "unit", "body", "from", "to"],
+  phase: ["kind", "unit", "body", "from", "to", "name"],
   dayIn: ["kind", "unit", "from", "to"],
   index: ["kind", "unit", "from", "to"],
   tag: ["kind", "tag"],
@@ -407,8 +407,13 @@ export function ruleLines(r: RuleAst, depth = 0): string[] {
       return block(r.kind.toUpperCase(), r.of.flatMap((q) => ruleLines(q, depth + 1)));
     case "not":
       return block("NOT", ruleLines(r.of, depth + 1));
-    case "phase":
-      return [`PHASE:${[r.unit !== undefined ? `UNIT=${id(r.unit)}` : "", r.body !== undefined ? `BODY=${id(r.body)}` : "", `FROM=${num(r.from)}`, `TO=${num(r.to)}`].filter(Boolean).join(";")}`];
+    case "phase": {
+      // a named phase (§16 D6) or the bounds, never both: the parser reads exactly one of the two forms
+      const named = r.name !== undefined;
+      if (named === ((r as { from?: unknown }).from !== undefined || (r as { to?: unknown }).to !== undefined)) throw new RangeError("a phase rule has a NAME or FROM and TO, exactly one of the two");
+      const bounds = named ? [`NAME=${esc(r.name)}`] : [`FROM=${num(r.from)}`, `TO=${num(r.to)}`];
+      return [`PHASE:${[r.unit !== undefined ? `UNIT=${id(r.unit)}` : "", r.body !== undefined ? `BODY=${id(r.body)}` : "", ...bounds].filter(Boolean).join(";")}`];
+    }
     case "dayIn":
       return [`DAYIN:UNIT=${id(r.unit)};FROM=${num(r.from)};TO=${num(r.to)}`];
     case "index":
@@ -833,9 +838,15 @@ function node(it: { line: Line } | { block: Component }): RuleAst {
   const l = it.line;
   switch (l.key) {
     case "PHASE": {
-      const q = params(l, ["UNIT", "BODY", "FROM", "TO"]);
-      const [u, b] = [q.get("UNIT"), q.get("BODY")];
-      return { kind: "phase", ...(u !== undefined ? { unit: toId(u, l) } : {}), ...(b !== undefined ? { body: toId(b, l) } : {}), from: toNum(need(q.get("FROM"), "FROM", l), l.no), to: toNum(need(q.get("TO"), "TO", l), l.no) };
+      const q = params(l, ["UNIT", "BODY", "FROM", "TO", "NAME"]);
+      const [u, b, n] = [q.get("UNIT"), q.get("BODY"), q.get("NAME")];
+      const where = { ...(u !== undefined ? { unit: toId(u, l) } : {}), ...(b !== undefined ? { body: toId(b, l) } : {}) };
+      if (n !== undefined) {
+        // a named phase (§16 D6): NAME instead of FROM and TO
+        if (q.get("FROM") !== undefined || q.get("TO") !== undefined) throw new SeshatSyntaxError("PHASE has NAME or FROM and TO, not both", l.no);
+        return { kind: "phase", ...where, name: unesc(n, l.no) };
+      }
+      return { kind: "phase", ...where, from: toNum(need(q.get("FROM"), "FROM", l), l.no), to: toNum(need(q.get("TO"), "TO", l), l.no) };
     }
     case "DAYIN": {
       const q = params(l, ["UNIT", "FROM", "TO"]);

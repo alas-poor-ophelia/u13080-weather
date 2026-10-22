@@ -20,7 +20,7 @@ import { stageReach } from "./start";
 import { Body } from "./body";
 import { checkFormats } from "./format";
 import { gcd } from "./rational";
-import { crossingOrigin, crossingProblem, resolve } from "./resolve";
+import { crossingOrigin, crossingProblem, phaseNameProblem, resolve } from "./resolve";
 import type { By, RuleAst } from "./rule";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
@@ -740,6 +740,8 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
       case "not":
         return walk(r.of, `${at}.not`, depth + 1);
       case "phase":
+        // a named phase that resolved is plain bounds by now; one still named could not resolve, and says why (§16 D6, P3)
+        if (r.name !== undefined) return void errors.push(`${at}: ${phaseNameProblem(r, new Map((ast.bodies ?? []).filter(isObj).map((b) => [b.id, b])))}`);
         if ((r.unit === undefined) === (r.body === undefined)) errors.push(`${at}: phase names exactly one of unit and body`);
         if (r.body !== undefined && !(ast.bodies ?? []).some((b) => b.id === r.body)) errors.push(`${at}: no body ${show(r.body)}`);
         if (r.unit !== undefined) unit(r.unit, at, false);

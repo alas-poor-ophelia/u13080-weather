@@ -15,6 +15,7 @@
  * longer than COUNT_WORK_MAX days throw rather than run unbounded.
  */
 import type { Engine } from "./engine";
+import { resolveRule } from "./resolve";
 import { evaluate, type By, type DayView, type EvalOptions, type Recur, type RuleAst } from "./rule";
 import { checkRule, SETPOS_PERIOD_MAX } from "./validate";
 
@@ -56,7 +57,9 @@ export class EngineDays {
   constructor(readonly engine: Engine) {}
 
   /** The rule, checked against this calendar's units: a missing reference throws. */
-  bind(rule: RuleAst): RuleAst {
+  bind(stored: RuleAst): RuleAst {
+    // a named phase reads the calendar's marks (§16 D6): bound resolved, as the calendar's own rules are
+    const rule = resolveRule(stored, this.engine.ast);
     const errors = checkRule(rule, this.engine.ast);
     if (errors.length) throw new RangeError(`rule does not fit calendar "${this.engine.ast.name}": ${errors.join("; ")}`);
     return rule;

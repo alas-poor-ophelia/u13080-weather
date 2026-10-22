@@ -311,6 +311,22 @@ export function followersOf(ast: CalendarAst, id: string): string[] {
   return ast.units.filter((u) => crossingsOf(u).some((c) => c.body?.id === id)).map((u) => u.id);
 }
 
+/** Each body phase the calendar's named rules read by name (`PHASE:BODY=;NAME=`), with the ids of the rules naming it, in declaration order. */
+export function namedPhasesOf(ast: CalendarAst): Array<{ readonly body: string; readonly name: string; readonly rules: string[] }> {
+  const out: Array<{ body: string; name: string; rules: string[] }> = [];
+  const walk = (r: RuleAst, id: string): void => {
+    if (r.kind === "all" || r.kind === "any") r.of.forEach((q) => walk(q, id));
+    else if (r.kind === "not") walk(r.of, id);
+    else if (r.kind === "phase" && r.name !== undefined && r.body !== undefined) {
+      const at = out.find((x) => x.body === r.body && x.name === r.name);
+      if (!at) out.push({ body: r.body, name: r.name, rules: [id] });
+      else if (!at.rules.includes(id)) at.rules.push(id);
+    }
+  };
+  for (const d of ast.rules ?? []) walk(d.rule, d.id);
+  return out;
+}
+
 const ratio = (r: Rational): number => r.n / r.d;
 const sameRational = (a: Rational, b: Rational): boolean => a.n === b.n && a.d === b.d;
 
@@ -377,6 +393,15 @@ function writeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
     if (!b.moon || kept.has(b.id)) continue;
     const units = followersOf(ast, b.id);
     if (units.length) throw new FormError(`The moon "${b.moon.name}" cannot be removed or renamed here: the ${units.map((u) => `"${u}"`).join(" and the ")} ${units.length === 1 ? "unit follows" : "units follow"} it. Rename it in the Studio's moon window; to remove it, change ${units.length === 1 ? "that unit" : "those units"} first (Edit definition).`);
+  }
+  // a phase a rule names keeps its name while the rule does (§16.7 P3): renaming or removing it is refused
+  for (const ref of namedPhasesOf(ast)) {
+    const before = (ast.bodies ?? []).find((b) => b.id === ref.body);
+    if (!before?.moon?.phases?.some((p) => p.name === ref.name)) continue;
+    const after = v.find((m) => m.id === ref.body);
+    if (after?.phases?.some((p) => p.name === ref.name)) continue;
+    const rules = ref.rules;
+    throw new FormError(`The phase "${ref.name}" of the moon "${before.moon.name}" cannot be renamed or removed: the ${rules.map((r) => `"${r}"`).join(" and the ")} ${rules.length === 1 ? "rule names" : "rules name"} it. Change ${rules.length === 1 ? "that rule" : "those rules"} first (Edit definition).`);
   }
   const shifted = new Set<string>();
   for (const m of v) {

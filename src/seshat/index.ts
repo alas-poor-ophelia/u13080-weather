@@ -29,7 +29,7 @@ export { checkFormats, compileFormat, formatDay, isParseable, parseDay, type Com
 export { seasonAtPhase, seasonIn, type SeasonMark } from "./seasons";
 export { definitionContent } from "./content";
 export { translate } from "./translate";
-export { crossingOrigin, epochEditK, resolve, resolveCrossing, translateWrap } from "./resolve";
+export { crossingOrigin, epochEditK, phaseSpan, resolve, resolveCrossing, resolveRule, translateWrap } from "./resolve";
 export { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
 export { approximate, frac, fromNumber, gcd, rational, toNumber, type Rational } from "./rational";
 

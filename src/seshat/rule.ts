@@ -24,7 +24,9 @@ export type RuleAst =
   | { readonly kind: "any"; readonly of: readonly RuleAst[] }
   | { readonly kind: "not"; readonly of: RuleAst }
   /** exactly one of unit / body */
-  | { readonly kind: "phase"; readonly unit?: string; readonly body?: string; readonly from: number; readonly to: number }
+  | { readonly kind: "phase"; readonly unit?: string; readonly body?: string; readonly from: number; readonly to: number; readonly name?: undefined }
+  /** a body's named phase (§16 D6): stored form, resolved to the FROM/TO form above before evaluation and hashing */
+  | { readonly kind: "phase"; readonly unit?: string; readonly body?: string; readonly name: string; readonly from?: undefined; readonly to?: undefined }
   | { readonly kind: "dayIn"; readonly unit: string; readonly from: number; readonly to: number }
   | { readonly kind: "index"; readonly unit: string; readonly from?: number; readonly to?: number }
   | { readonly kind: "tag"; readonly tag: string }
@@ -167,6 +169,8 @@ export function evaluate(r: RuleAst, view: DayView, opts: EvalOptions): boolean 
       return v === undefined ? undefined : !v;
     }
     case "phase": {
+      // a named phase is resolved before evaluation; one that reaches here unresolved matches nothing
+      if (r.from === undefined) return false;
       const x = r.body !== undefined ? view.bodyPhase(r.body) : view.unitPhase(r.unit!);
       return x === undefined ? false : inPhase(x, r.from, r.to);
     }

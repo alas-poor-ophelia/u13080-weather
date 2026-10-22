@@ -121,6 +121,8 @@ function fuzzAst(seed: number): CalendarAst {
   const node = (depth: number): RuleAst => {
     const leaves: Array<() => RuleAst> = [
       () => ({ kind: "phase", ...opt("unit", r.maybe(id)), ...opt("body", r.maybe(id)), from: float(), to: float() }),
+      // a named phase (§16 D6), unvalidated: the parser takes UNIT and a missing BODY as it takes them with bounds
+      () => ({ kind: "phase", ...opt("unit", r.maybe(id)), ...opt("body", r.maybe(id)), name: text() }),
       () => ({ kind: "dayIn", unit: id(), from: float(), to: float() }),
       () => ({ kind: "index", unit: id(), ...opt("from", r.maybe(int)), ...opt("to", r.maybe(int)) }),
       () => ({ kind: "tag", tag: text() }),
@@ -192,6 +194,7 @@ describe("Seshat text: grammar fuzz", () => {
         if (typeof o.kind === "string") mark(`kind ${o.kind}`);
         if (key === "labels" && Object.keys(o).length === 0) mark("empty label");
         if (o.kind === "phase") mark(o.unit !== undefined && o.body !== undefined ? "phase both" : o.unit !== undefined ? "phase unit" : o.body !== undefined ? "phase body" : "phase neither");
+        if (o.kind === "phase" && o.name !== undefined) mark("phase name");
         if (key === "crossing" && o.index !== undefined) mark("crossing index");
         if (key === "crossing" && o.body !== undefined) mark("crossing body");
         if (key === "crossing" && o.start !== undefined) mark("crossing start");
@@ -204,7 +207,7 @@ describe("Seshat text: grammar fuzz", () => {
       }
     };
     for (let seed = 1; seed <= 10_000; seed++) walk(fuzzAst(seed));
-    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] marks", "[] phases", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "crossing index", "crossing body", "crossing start", "body k and offset", "rule depth 3+"];
+    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] marks", "[] phases", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "phase name", "crossing index", "crossing body", "crossing start", "body k and offset", "rule depth 3+"];
     for (const k of want) expect([k, (seen.get(k) ?? 0) >= 20]).toEqual([k, true]);
   });
 });
