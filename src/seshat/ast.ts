@@ -23,18 +23,54 @@ export interface GearTerm {
 /**
  * A crossing base (§2.3.1–2.3.2) in its normalized form: crossing 0 falls at
  * instant `at` on this unit's civil day line (meridian and day start folded in
- * once), and one more every `period` days. This is what is hashed; authoring
- * forms (a body, a mark, a day offset) compile to it.
+ * once), and one more every `period` days. Authoring forms compile to it: a
+ * body reference (§16, P4) resolves to `period` and `at` before validation,
+ * compilation and hashing (resolve.ts).
  */
-export interface CrossingAst {
-  readonly period: Rational;
-  readonly at: Rational;
+export type CrossingAst = LiteralCrossingAst | BodyCrossingAst;
+
+interface CrossingCommon {
   /**
    * Read the crossing at a derived index instead of k (§2.3.1): crossing
    * number floor((k·a + c) / L). Hebrew reads the molad at the months elapsed
    * before year k, floor((235k + 1) / 19).
    */
   readonly index?: { readonly a: number; readonly c: number; readonly L: number };
+  /**
+   * R1 (§16.1): the occurrence starts on the first day that begins at or after
+   * the crossing instant (ceil), not the day holding it (floor, the default
+   * `contains`, stored as absent). Resolves to `at + (L − 1)/L` (§16.4).
+   */
+  readonly start?: "after";
+}
+
+/** A crossing written as numbers: `CROSSING:<period>@<at>`. */
+export interface LiteralCrossingAst extends CrossingCommon {
+  readonly period: Rational;
+  readonly at: Rational;
+  readonly body?: never;
+}
+
+/** A crossing that follows a body (§16, D1): `CROSSING:BODY=<id>;MARK=…`. Resolved once, at load. */
+export interface BodyCrossingAst extends CrossingCommon {
+  readonly body: BodyRef;
+  readonly period?: never;
+  readonly at?: never;
+}
+
+/**
+ * A reference to a body (§16.3, §16.7 P1): crossing k falls when the body's
+ * phase passes `mark`, at `(mark − E)·P + offset + k·P` with the body's period
+ * P and epoch E, renumbered by `k`. Defaults (offset 0, k 0) are absent.
+ */
+export interface BodyRef {
+  readonly id: string;
+  /** the body's phase at the crossing, in [0, 1) */
+  readonly mark: Rational;
+  /** a day shift of every crossing (a sunset day start); absent is 0 */
+  readonly offset?: Rational;
+  /** the crossing numbering shift, so moving the body's epoch keeps occurrence numbers (P1); absent is 0 */
+  readonly k?: number;
 }
 
 /**

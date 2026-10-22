@@ -22,7 +22,7 @@
  */
 import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
-import { bodyFor, DAY_LIMIT, definitionContent, Engine, formatDay, parse, parseDay, print, seasonAtPhase, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem } from "../../seshat";
+import { bodyFor, DAY_LIMIT, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
@@ -58,7 +58,7 @@ export function worldProblems(ast: CalendarAst): Problem[] {
     if (n.count !== undefined) errors.push({ message: `${at}: a world calendar's rules cannot use COUNT`, rule });
     if (n.setpos !== undefined) {
       const f = n.freq === "day" ? undefined : units.get(n.freq ?? "");
-      const constant = n.freq === "day" || (f?.kind === "cycle" && f.crossing === undefined && !f.gears?.length && !f.stages?.length && !f.ledger?.length && f.length <= WORLD_SETPOS_PERIOD_MAX);
+      const constant = n.freq === "day" || (f?.kind === "cycle" && isPlainConstant(f) && f.length <= WORLD_SETPOS_PERIOD_MAX);
       if (!constant) errors.push({ message: `${at}: a world calendar's BYSETPOS needs a constant period of at most ${WORLD_SETPOS_PERIOD_MAX} days`, rule });
     }
   };
@@ -273,8 +273,8 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     const dayOfYear = dayOrdinal - year.start;
     const yearPhase = dayOfYear / year.length;
     const tags: string[] = [];
-    // the year's phase, as the engine's seasonAt reads it (checkWorldCalendar keeps seasons on the year)
-    const season = this.ast?.seasons ? seasonAtPhase(this.ast.seasons.marks, yearPhase) : null;
+    // the engine's own season resolver over the year (checkWorldCalendar keeps seasons on the year), past ±DAY_LIMIT too
+    const season = e.ast.seasons ? seasonIn(e.ast.seasons, year, dayOrdinal) : null;
     if (season) tags.push(`season:${season}`);
     tags.push(...this.dayTags(e, year.tagDay));
     return {

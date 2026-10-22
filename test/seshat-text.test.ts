@@ -89,7 +89,11 @@ function fuzzAst(seed: number): CalendarAst {
   const gearTerms = () => r.listOf(() => ({ gear: id(), add: int() }));
   const stageRule = () => (r.next() < 0.5 ? { add: int(), residue: { mod: int(), ...opt("offset", r.maybe(int)), in: Array.from({ length: r.int(0, 3) }, int) } } : { add: int(), length: { at: int(), is: int() } });
   const stages = () => r.listOf(() => ({ rules: Array.from({ length: r.int(0, 3) }, stageRule) }));
-  const base = () => (r.next() < 0.5 ? { anchor: int(), length: int() } : { crossing: { period: rat(), at: rat(), ...opt("index", r.maybe(() => ({ a: int(), c: int(), L: int() }))) } });
+  // P4 (§16.3): a crossing may follow a body, and either form may start after its instant; defaults (K=0, OFFSET=0, contains) are absent
+  const nonzero = (x: number) => (x === 0 ? 1 : x);
+  const bodyRef = () => ({ id: id(), mark: rat(), ...opt("offset", r.maybe(() => { const x = rat(); return x.n === 0 ? { n: 1, d: 1 } : x; })), ...opt("k", r.maybe(() => nonzero(int()))) });
+  const crossingOf = () => ({ ...(r.next() < 0.5 ? { period: rat(), at: rat() } : { body: bodyRef() }), ...opt("start", r.maybe(() => "after" as const)), ...opt("index", r.maybe(() => ({ a: int(), c: int(), L: int() }))) });
+  const base = () => (r.next() < 0.5 ? { anchor: int(), length: int() } : { crossing: crossingOf() });
   const rule = () => ({ ...base(), ...opt("gears", gearTerms()), ...opt("stages", stages()) });
   const label = () => r.pick([{}, { name: text() }, { tags: tagsOf() ?? [] }, { name: text(), tags: tagsOf() ?? [] }]);
   const ledger = () =>
@@ -189,6 +193,9 @@ describe("Seshat text: grammar fuzz", () => {
         if (key === "labels" && Object.keys(o).length === 0) mark("empty label");
         if (o.kind === "phase") mark(o.unit !== undefined && o.body !== undefined ? "phase both" : o.unit !== undefined ? "phase unit" : o.body !== undefined ? "phase body" : "phase neither");
         if (key === "crossing" && o.index !== undefined) mark("crossing index");
+        if (key === "crossing" && o.body !== undefined) mark("crossing body");
+        if (key === "crossing" && o.start !== undefined) mark("crossing start");
+        if (key === "body" && o.k !== undefined && o.offset !== undefined) mark("body k and offset");
         if ((o.kind === "all" || o.kind === "any" || o.kind === "not") && depth >= 2) mark("rule depth 3+");
         for (const [k, v] of Object.entries(o)) {
           leaf(v, k);
@@ -197,7 +204,7 @@ describe("Seshat text: grammar fuzz", () => {
       }
     };
     for (let seed = 1; seed <= 10_000; seed++) walk(fuzzAst(seed));
-    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] marks", "[] phases", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "crossing index", "rule depth 3+"];
+    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] marks", "[] phases", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "crossing index", "crossing body", "crossing start", "body k and offset", "rule depth 3+"];
     for (const k of want) expect([k, (seen.get(k) ?? 0) >= 20]).toEqual([k, true]);
   });
 });

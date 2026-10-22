@@ -22,7 +22,8 @@
  * A definition is described by its own structure (definitionSummary), not
  * by a fixed sentence: "years of 365 or 366 days · 12 months · 7-day weeks".
  */
-import { Engine, type CalendarAst, type SlotsUnitAst } from "../seshat";
+import { baseKind, Engine, type CalendarAst, type SlotsUnitAst } from "../seshat";
+import { followOf } from "./time/form";
 
 export type CalendarAction = "change" | "edit" | "undo";
 
@@ -156,6 +157,10 @@ export function definitionSummary(ast: CalendarAst, aroundDay = 0): string {
   const y0 = e?.occurrenceAt("year", aroundDay)?.index ?? 0;
   const years = Array.from({ length: 2 * SAMPLE_YEARS + 1 }, (_, k) => y0 - SAMPLE_YEARS + k);
   if (e) tryPart(() => `years of ${spread(years.map((i) => e.length("year", i)))} days`);
+  // a year that follows a body says which (§16): "years follow Moon"
+  const year = ast.units.find((u) => u.id === "year");
+  const yf = year?.kind === "cycle" ? followOf(ast, year) : null;
+  if (yf) parts.push(`years follow ${yf.body}`);
   // units whose parent is the year: how many there are in a year (slots of length 0 do not count), and days in none
   const slotUnits = ast.units.filter((u): u is SlotsUnitAst => u.kind === "slots");
   for (const u of slotUnits.filter((x) => x.in === "year")) {
@@ -191,7 +196,9 @@ export function definitionSummary(ast: CalendarAst, aroundDay = 0): string {
   for (const u of ast.units) {
     if (u.kind !== "cycle" || u.id === "year") continue;
     tryPart(() => {
-      if ("crossing" in u && u.crossing) return plural(u.id, 2);
+      const f = followOf(ast, u);
+      if (f) return `${plural(u.id, 2)} follow ${f.body}`;
+      if (baseKind(u) !== "constant") return plural(u.id, 2);
       const len = (u as { length: number }).length;
       if (len === 1 && u.labels?.length) return `${u.labels.length} ${u.id} names`;
       return `${len}-day ${plural(u.id, 2)}`;

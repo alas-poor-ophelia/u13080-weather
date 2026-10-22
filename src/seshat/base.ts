@@ -17,12 +17,30 @@ export interface LinearBase {
   readonly L: number;
 }
 
-/** The base in integers. Assumes a validated unit (safe-integer rationals, positive period). */
+/** The base in integers. Assumes a validated, resolved unit (safe-integer rationals, positive period; resolve.ts). */
 export function linearBase(u: CycleRule): LinearBase {
   if (!u.crossing) return { a: u.length, c: u.anchor, L: 1 };
-  const { period: p, at } = u.crossing;
+  const x = u.crossing;
+  if (x.body !== undefined) throw new RangeError(`a crossing following body "${x.body.id}" must be resolved before it is read (resolve.ts)`);
+  const { period: p, at } = x;
   const L = lcm(p.d, at.d);
-  return { a: p.n * (L / p.d), c: at.n * (L / at.d), L };
+  // START=after (§16.4): ceil((k·a + c)/L) = floor((k·a + c + L − 1)/L); the resolve pass folds it into `at`
+  return { a: p.n * (L / p.d), c: at.n * (L / at.d) + (x.start === "after" ? L - 1 : 0), L };
+}
+
+/** Which base a start rule has (§16.7 P5): the one exhaustive test for "is this unit constant". Reads stored or resolved ASTs. */
+export function baseKind(u: CycleRule): "constant" | "crossing" | "body" {
+  const x = u.crossing;
+  if (x === undefined) return "constant";
+  return x.body !== undefined ? "body" : "crossing";
+}
+
+/**
+ * A cycle with a plain constant base: no crossing (literal or body), no gear
+ * terms, no stages, no ledger. Its occurrences all have `length` days.
+ */
+export function isPlainConstant(u: CycleRule & { readonly ledger?: readonly unknown[] }): u is CycleRule & { readonly anchor: number; readonly length: number } {
+  return baseKind(u) === "constant" && !u.gears?.length && !u.stages?.length && !u.ledger?.length;
 }
 
 /** Day on which occurrence k of the base starts. */

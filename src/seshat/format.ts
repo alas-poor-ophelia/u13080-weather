@@ -24,6 +24,7 @@
  * a day only when formatting it gives `text` back exactly.
  */
 import type { CalendarAst, FormatAst, SlotsUnitAst, UnitAst } from "./ast";
+import { isPlainConstant } from "./base";
 import { DAY_LIMIT } from "./day";
 import type { Engine } from "./engine";
 
@@ -98,7 +99,7 @@ function namesAreCoordinates(u: SlotsUnitAst): boolean {
 
 /** Every occurrence of `u` the pattern can serve is one day long (filler patterns serve only filler slots). */
 function oneDay(u: UnitAst, fillerOnly: boolean): boolean {
-  if (u.kind === "cycle") return u.crossing === undefined && u.length === 1 && !u.gears?.length && !u.stages?.length && !u.ledger?.length;
+  if (u.kind === "cycle") return isPlainConstant(u) && u.length === 1;
   const slots = fillerOnly ? u.slots.filter((s) => s.filler) : u.slots;
   // the longest a slot can be: its length plus every gear that could add to it (Shieldmeet: 0 + 1)
   return slots.length > 0 && slots.every((s) => typeof s.length === "number" && s.length + (s.gears ?? []).reduce((a, g) => a + Math.max(0, g.add), 0) <= 1);

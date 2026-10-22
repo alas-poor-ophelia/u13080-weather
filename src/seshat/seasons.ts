@@ -22,3 +22,14 @@ export function seasonAtPhase(seasons: readonly SeasonMark[], phase: number): st
   for (const x of s) if (phase >= x.from) cur = x;
   return cur.name;
 }
+
+/**
+ * The one season resolver (§16.7 P6): the engine's `seasonAt` and the
+ * adapter's `toContext` both read seasons through it. `o` is the occurrence of
+ * the seasons unit holding `day` (for the adapter, the year, also past
+ * ±DAY_LIMIT). Fraction marks only for now, with the float comparison
+ * byte-identical to before: (day − start) / length against each `from`.
+ */
+export function seasonIn(seasons: { readonly marks: readonly SeasonMark[] }, o: { readonly index: number; readonly start: number; readonly length: number }, day: number): string | null {
+  return seasonAtPhase(seasons.marks, (day - o.start) / o.length);
+}

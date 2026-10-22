@@ -10,7 +10,7 @@
  * Engine.round. The ledger (C6) is checked for shape and order (V7), then for
  * continuity on the compiled starts. Labels (C5) are checked for shape.
  */
-import type { CalendarAst, CycleRule, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
+import type { BodyAst, CalendarAst, CycleRule, LiteralCrossingAst, CycleUnitAst, GearTerm, SlotsUnitAst, StageAst, UnitAst } from "./ast";
 import { DAY_LIMIT } from "./day";
 import { baseLengths, linearBase } from "./base";
 import { gearMatcher, gearPeriod, lcm, mod, type GearAst } from "./gear";
@@ -20,6 +20,7 @@ import { stageReach } from "./start";
 import { Body } from "./body";
 import { checkFormats } from "./format";
 import { gcd } from "./rational";
+import { crossingOrigin, crossingProblem, resolve } from "./resolve";
 import type { By, RuleAst } from "./rule";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
@@ -99,7 +100,10 @@ export function validate(ast: CalendarAst): string[] {
 }
 
 /** `validate` with each problem's location: the same messages, in the same order. */
-export function problems(ast: CalendarAst): Problem[] {
+export function problems(stored: CalendarAst): Problem[] {
+  // every check runs on resolved numbers (§16.2 D1); a crossing that cannot resolve stays as stored and reports here
+  const ast = resolve(stored);
+  const bodyMap = new Map((Array.isArray(ast.bodies) ? ast.bodies : []).filter((b): b is BodyAst => isObj(b)).map((b) => [b.id, b] as const));
   const errors: string[] = [];
   const locs: Array<Where | undefined> = [];
   /** the problems pushed since `n` that have no location yet are about `where` */
@@ -208,7 +212,7 @@ export function problems(ast: CalendarAst): Problem[] {
         const rf = (msg: string) => fail(u.id, `${where}: ${msg}`);
         // the most gear terms and stages can take off an occurrence
         const loss = checkTerms(u.id, where, rule.gears, u.id) - checkStages(rule.stages, rf);
-        const shortest = checkBase(rule, loss, rf);
+        const shortest = checkBase(rule, loss, rf, bodyMap);
         if (shortest !== null && shortest + loss < 1) rf(`an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
       };
       checkRule(u, at);
@@ -324,7 +328,7 @@ export function problems(ast: CalendarAst): Problem[] {
  * the unit's gear terms can take off an occurrence. Returns the shortest base
  * occurrence, or null when the base is unusable.
  */
-function checkBase(u: CycleRule, loss: number, fail: (msg: string) => void): number | null {
+function checkBase(u: CycleRule, loss: number, fail: (msg: string) => void, bodies: ReadonlyMap<string, BodyAst>): number | null {
   const n0 = u as { anchor?: unknown; length?: unknown; crossing?: unknown };
   if (u.crossing == null) {
     if (n0.anchor === undefined || n0.length === undefined) return fail("needs a base: an anchor and a length, or a crossing (V8)"), null;
@@ -334,13 +338,26 @@ function checkBase(u: CycleRule, loss: number, fail: (msg: string) => void): num
     return ok ? u.length : null;
   }
   if (n0.anchor !== undefined || n0.length !== undefined) return fail("has both a crossing and an anchor or length; a unit has one base (V8)"), null;
+  // still a body reference or a start mode after the resolve pass: it could not resolve
+  const unresolved = n0.crossing as { body?: unknown; start?: unknown } | null;
+  if (typeof unresolved === "object" && unresolved !== null && (unresolved.body !== undefined || unresolved.start !== undefined)) {
+    return fail(crossingProblem(u.crossing, bodies) ?? "crossing could not resolve"), null;
+  }
   const x = n0.crossing as { period?: unknown; at?: unknown } | null;
   const isRational = (r: unknown): r is { n: number; d: number } => typeof r === "object" && r !== null && isInt((r as { n: unknown }).n) && isInt((r as { d: unknown }).d);
   if (typeof x !== "object" || x === null || !isRational(x.period) || !isRational(x.at)) return fail("crossing needs a period and an instant, each a rational { n, d } of safe integers"), null;
-  const { period, at } = u.crossing;
+  const { period, at } = u.crossing as LiteralCrossingAst;
+  // a resolved body reference names its body in V5 and V8 messages (§16.4)
+  const origin = crossingOrigin(u.crossing);
+  const after = origin?.after ? ";START=after" : "";
+  const named = origin?.body !== undefined
+    ? `crossing following body "${origin.body}"${after} (period ${period.n}/${period.d}, instant ${at.n}/${at.d})`
+    : origin?.after?.at
+      ? `crossing ${period.n}/${period.d} at ${origin.after.at.n}/${origin.after.at.d};START=after (instant ${at.n}/${at.d})`
+      : `crossing ${period.n}/${period.d} at ${at.n}/${at.d}`;
   if (period.d <= 0 || at.d <= 0 || gcd(period.n, period.d) !== 1 || gcd(at.n, at.d) !== 1) return fail("crossing period and instant must be rationals n/d in lowest terms with d > 0"), null;
-  if (period.n < period.d) return fail(`crossing period ${period.n}/${period.d} is shorter than one day (V8)`), null;
-  if (Math.abs(at.n / at.d) > DAY_LIMIT) return fail(`crossing instant ${at.n}/${at.d} is outside ±${DAY_LIMIT}`), null;
+  if (period.n < period.d) return fail(`${origin ? `${named}: ` : ""}crossing period ${period.n}/${period.d} is shorter than one day (V8)`), null;
+  if (Math.abs(at.n / at.d) > DAY_LIMIT) return fail(`${origin ? `${named}: ` : ""}crossing instant ${at.n}/${at.d} is outside ±${DAY_LIMIT}`), null;
   const index = (n0.crossing as { index?: unknown }).index as { a?: unknown; c?: unknown; L?: unknown } | undefined;
   if (index !== undefined && (typeof index !== "object" || index === null || !isInt(index.a) || !isInt(index.c) || !isInt(index.L) || (index.a as number) < 1 || (index.L as number) < 1)) {
     return fail("crossing index must be { a, c, L } of safe integers with a ≥ 1 and L ≥ 1 (the crossing number floor((k·a + c)/L))"), null;
@@ -356,7 +373,7 @@ function checkBase(u: CycleRule, loss: number, fail: (msg: string) => void): num
   const kMax = Math.ceil((3 * DAY_LIMIT) / Math.max(1, shortest + loss)) + 2;
   const mMax = idx ? Math.ceil((kMax * idx.a + Math.abs(idx.c)) / idx.L) + 1 : kMax;
   const fits = Math.abs(c) + (DAY_LIMIT + 1) * L < LINEAR_MAX && Math.abs(c) + mMax * a < LINEAR_MAX && isInt(c) && (!idx || kMax * idx.a + Math.abs(idx.c) < LINEAR_MAX);
-  if (!fits) return fail(`crossing ${period.n}/${period.d} at ${at.n}/${at.d} is too fine for exact integer days within ±${DAY_LIMIT} (V5): use a coarser period or instant`), null;
+  if (!fits) return fail(`${named} is too fine for exact integer days within ±${DAY_LIMIT} (V5): use a coarser period or instant`), null;
   return shortest;
 }
 

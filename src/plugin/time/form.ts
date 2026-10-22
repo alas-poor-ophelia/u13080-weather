@@ -18,7 +18,7 @@
  * the year `text` and passes through every year edit.
  */
 import { canonicalJson } from "../../core/profile";
-import type { BodyAst, CalendarAst, CycleUnitAst, DayLabelAst, GearAst, GearTerm, LedgerEntry, Rational, RuleAst, SlotsUnitAst, UnitAst } from "../../seshat";
+import { baseKind, epochEditK, toNumber, type BodyAst, type CalendarAst, type CrossingAst, type CycleRule, type CycleUnitAst, type DayLabelAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SlotsUnitAst, type UnitAst } from "../../seshat";
 
 export type Part<T> = { readonly kind: "form"; readonly value: T } | { readonly kind: "text"; readonly why: string };
 
@@ -128,7 +128,12 @@ function yearUnit(ast: CalendarAst): CycleUnitAst | undefined {
 function readYear(ast: CalendarAst): YearForm | string {
   const u = yearUnit(ast);
   if (!u) return "this calendar has no year";
-  if (u.crossing !== undefined) return "this year follows a sky crossing (the moon or the sun), not a count of days";
+  const kind = baseKind(u);
+  if (kind === "body") {
+    const f = followOf(ast, u);
+    return f ? `the year follows ${f.body} (${f.mark})` : "the year follows a body in the sky, not a count of days";
+  }
+  if (kind === "crossing" || u.crossing !== undefined) return "this year follows a sky crossing (the moon or the sun), not a count of days";
   if (u.stages?.length) return "this year's start is moved by rules";
   if (u.labels !== undefined) return "this calendar names its years";
   if (!onlyKeys(u, ["id", "kind", "number", "anchor", "length", "gears", "ledger"])) return "this year carries settings the simple fields do not show";
@@ -223,7 +228,7 @@ function writeMonths(ast: CalendarAst, v: readonly MonthForm[] | null): Calendar
 type Week = { days: CycleUnitAst; week: CycleUnitAst } | null;
 
 function plainCycle(u: UnitAst, extra: readonly string[] = []): u is CycleUnitAst {
-  return u.kind === "cycle" && u.crossing === undefined && onlyKeys(u, ["id", "kind", "number", "anchor", "length", ...extra]);
+  return u.kind === "cycle" && baseKind(u) === "constant" && onlyKeys(u, ["id", "kind", "number", "anchor", "length", ...extra]);
 }
 
 function findWeek(ast: CalendarAst): Week | string {
@@ -292,8 +297,100 @@ function readMoons(ast: CalendarAst): readonly MoonForm[] {
   return (ast.bodies ?? []).flatMap((b) => (b.moon ? [{ id: b.id, name: b.moon.name, period: b.period, epoch: b.epoch, ...(b.moon.phases !== undefined ? { phases: b.moon.phases } : {}) }] : []));
 }
 
-/** Moons replace the moon bodies slot for slot, so bodies that are not moons keep their places (and a no-op keeps the order). */
+// ---- units that follow a body (§16, P4)
+
+/** Every crossing a unit starts by: its own and each ledger switch's. */
+function crossingsOf(u: UnitAst): CrossingAst[] {
+  if (u.kind !== "cycle") return [];
+  const own = u.crossing ? [u.crossing] : [];
+  return [...own, ...(u.ledger ?? []).flatMap((e) => (e.kind === "switch" && e.rule.crossing ? [e.rule.crossing] : []))];
+}
+
+/** The ids of the units that follow body `id` (by their own base or a ledger switch), in declaration order. */
+export function followersOf(ast: CalendarAst, id: string): string[] {
+  return ast.units.filter((u) => crossingsOf(u).some((c) => c.body?.id === id)).map((u) => u.id);
+}
+
+const ratio = (r: Rational): number => r.n / r.d;
+const sameRational = (a: Rational, b: Rational): boolean => a.n === b.n && a.d === b.d;
+
+/**
+ * How a body-driven start rule reads in words, or null when it does not follow
+ * a body: the body by its moon name, the mark by the phase named exactly there
+ * ("New phase"), else as "phase 0.25"; `after` for START=after.
+ */
+export function followOf(ast: CalendarAst, u: CycleRule): { readonly body: string; readonly mark: string; readonly after: boolean; readonly offset: number } | null {
+  const ref = u.crossing?.body;
+  if (!ref) return null;
+  const b = (ast.bodies ?? []).find((x) => x.id === ref.id);
+  const at = ratio(ref.mark);
+  const named = b?.moon?.phases?.find((p) => p.at === at)?.name;
+  return {
+    body: b?.moon?.name ?? `body "${ref.id}"`,
+    mark: named !== undefined ? `${named} phase` : `phase ${Number(at.toFixed(6))}`,
+    after: u.crossing?.start === "after",
+    offset: ref.offset ? ratio(ref.offset) : 0,
+  };
+}
+
+/** "Each year begins on the day Moon reaches its New phase" (or "the first day after"), or null when the unit does not follow a body. */
+export function followSentence(ast: CalendarAst, unitId: string): string | null {
+  const u = ast.units.find((x) => x.id === unitId);
+  const f = u?.kind === "cycle" ? followOf(ast, u) : null;
+  if (!f) return null;
+  const mark = f.mark.startsWith("phase ") ? f.mark : `its ${f.mark}`;
+  const shift = f.offset ? `, moved by ${Number(f.offset.toFixed(6))} day${Math.abs(f.offset) === 1 ? "" : "s"}` : "";
+  return `Each ${unitId} begins on ${f.after ? "the first day after" : "the day"} ${f.body} reaches ${mark}${shift}`;
+}
+
+/** Each unit following `id` with its K moved by `dk` (§16.7 P1); `ast` itself when dk is 0 or nothing follows. */
+function shiftK(ast: CalendarAst, id: string, dk: number): CalendarAst {
+  if (dk === 0) return ast;
+  const move = (c: CrossingAst): CrossingAst => {
+    if (c.body?.id !== id) return c;
+    const { k: k0, ...ref } = c.body;
+    const k = (k0 ?? 0) + dk;
+    return { ...c, body: { ...ref, ...(k !== 0 ? { k } : {}) } } as CrossingAst;
+  };
+  const units = ast.units.map((u): UnitAst => {
+    if (u.kind !== "cycle" || !crossingsOf(u).some((c) => c.body?.id === id)) return u;
+    const ledger = u.ledger?.map((e) => (e.kind === "switch" && e.rule.crossing ? { ...e, rule: { ...e.rule, crossing: move(e.rule.crossing) } } : e));
+    return { ...u, ...(u.crossing ? { crossing: move(u.crossing) } : {}), ...(ledger ? { ledger } : {}) } as UnitAst;
+  });
+  return { ...ast, units };
+}
+
+/**
+ * Moons replace the moon bodies slot for slot, so bodies that are not moons keep their places (and a no-op keeps the order).
+ *
+ * Bodies are matched by id, not by slot: removing a moon a unit follows is
+ * refused, naming the units (§16 D2; FormError, so the caller's draft or
+ * setting stays as it was). A moon whose epoch changes and whose period does
+ * not moves the K of every unit following it by epochEditK, so occurrence
+ * numbering never changes (§16.7 P1). When the period changes too, K is left
+ * alone: the crossings land somewhere new anyway, and the Save dialog's blast
+ * radius reports what moved.
+ */
 function writeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
+  const kept = new Set(v.flatMap((m) => (m.id === undefined ? [] : [m.id])));
+  for (const b of ast.bodies ?? []) {
+    if (!b.moon || kept.has(b.id)) continue;
+    const units = followersOf(ast, b.id);
+    if (units.length) throw new FormError(`The moon "${b.moon.name}" cannot be removed or renamed here: the ${units.map((u) => `"${u}"`).join(" and the ")} ${units.length === 1 ? "unit follows" : "units follow"} it. Rename it in the Studio's moon window; to remove it, change ${units.length === 1 ? "that unit" : "those units"} first (Edit definition).`);
+  }
+  const shifted = new Set<string>();
+  for (const m of v) {
+    const b = m.id === undefined ? undefined : (ast.bodies ?? []).find((x) => x.id === m.id);
+    // the same period as the user sees it: an epoch edit can come back with the period re-derived from its
+    // decimal (the Studio's too-fine fallback), and numbering must still hold; once per body
+    if (!b || shifted.has(b.id) || toNumber(b.period) !== toNumber(m.period) || sameRational(b.epoch, m.epoch)) continue;
+    shifted.add(b.id);
+    ast = shiftK(ast, b.id, epochEditK(b.epoch, m.epoch));
+  }
+  return placeMoons(ast, v);
+}
+
+function placeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
   // ids the list itself names are reserved before a new moon is named
   const taken = new Set([...ids(ast), ...v.flatMap((m) => (m.id === undefined ? [] : [m.id]))]);
   const body = (m: MoonForm): BodyAst => ({

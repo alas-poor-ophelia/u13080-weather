@@ -24,7 +24,7 @@ import { Notice } from "obsidian";
 import { canonicalJson } from "../../../core/profile";
 import { YEAR_LENGTH_MAX } from "../../../core/modifiers";
 import type { LeapTerm, MonthForm, YearForm } from "../../../plugin/time/form";
-import { compile, recognise, type CalendarForm, type LedgerForm } from "../../../plugin/time/form";
+import { compile, followSentence, recognise, type CalendarForm, type LedgerForm } from "../../../plugin/time/form";
 import { prepareDefinition } from "../../../plugin/time/seshat";
 import { print, type LedgerEntry } from "../../../seshat";
 import { DefinitionModal, OptInModal } from "../../../plugin/calendar-modals";
@@ -66,6 +66,15 @@ function sourceOf(ctx: SurfaceContext, state: StudioState): Source {
 function storedForm(ctx: SurfaceContext): CalendarForm | null {
   const ast = ctx.plugin.calendars.seshat?.definition() ?? null;
   return ast ? recognise(ast) : null;
+}
+
+/** A text year in words: "Each year begins on the day Moon reaches its New phase (354 to 355 days, around today)" for a year that follows a body, else its range. */
+function yearText(ctx: SurfaceContext): string | null {
+  const ast = ctx.plugin.calendars.seshat?.definition() ?? null;
+  const follows = ast ? followSentence(ast, "year") : null;
+  const range = yearRange(ctx);
+  if (!follows) return range;
+  return range ? `${follows} (${range}).` : `${follows}.`;
 }
 
 /** "353 to 385 days around today": the year lengths a text year has, sampled 200 years either side of today. */
@@ -255,7 +264,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
 
     const y = form.year;
     if (!y) {
-      asText(panel, "year.text", yearRange(ctx), why("year"));
+      asText(panel, "year.text", yearText(ctx), why("year"));
       return;
     }
     const row = panel.createDiv({ cls: "wadjet-studio-calendar-row" });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { baseIndexAt, baseLengths, baseStart, DAY_LIMIT, Engine, FRENCH_REPUBLICAN, FRENCH_REPUBLICAN_EQUINOX, linearBase, validate, type CalendarAst, type CrossingCycleAst } from "../src/seshat";
+import { baseIndexAt, baseLengths, baseStart, DAY_LIMIT, Engine, FRENCH_REPUBLICAN, FRENCH_REPUBLICAN_EQUINOX, linearBase, validate, type CalendarAst, type CrossingCycleAst, type LiteralCrossingAst } from "../src/seshat";
 
 const DAY_MS = 86_400_000;
 
@@ -13,7 +13,7 @@ const crossing = (n: number, d: number, an: number, ad: number): CrossingCycleAs
 
 /** The reference: crossing k at exactly (at + k·period), floored with BigInt, so no float or rounding is involved. */
 function bigStart(u: CrossingCycleAst, k: number): number {
-  const { period: p, at } = u.crossing;
+  const { period: p, at } = u.crossing as LiteralCrossingAst;
   const num = BigInt(at.n) * BigInt(p.d) + BigInt(k) * BigInt(p.n) * BigInt(at.d);
   const den = BigInt(at.d) * BigInt(p.d);
   const q = num / den;

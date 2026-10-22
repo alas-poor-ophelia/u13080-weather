@@ -7,7 +7,9 @@
 import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { Body } from "./body";
 import { DAY_LIMIT } from "./day";
-import { seasonAtPhase } from "./seasons";
+import { seasonIn } from "./seasons";
+import { resolve } from "./resolve";
+import { isPlainConstant } from "./base";
 import { EngineDays } from "./engine-view";
 import { gearMatcher, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
@@ -35,9 +37,14 @@ export class Engine {
   /** rules over this calendar (§3.5); the named rules (VRULE) are bound through it */
   readonly days: EngineDays;
 
-  constructor(readonly ast: CalendarAst) {
-    const errors = validate(ast);
-    if (errors.length) throw new RangeError(`calendar "${ast.name}" is invalid: ${errors.join("; ")}`);
+  /** the resolved calendar the engine runs (resolve.ts): body references and start modes as numbers; print the stored one */
+  readonly ast: CalendarAst;
+
+  constructor(stored: CalendarAst) {
+    const errors = validate(stored);
+    if (errors.length) throw new RangeError(`calendar "${stored.name}" is invalid: ${errors.join("; ")}`);
+    const ast = resolve(stored);
+    this.ast = ast;
     for (const g of ast.gears) {
       this.gears.set(g.id, g);
       this.matchers.set(g.id, gearMatcher(g));
@@ -125,8 +132,7 @@ export class Engine {
   seasonAt(day: number): string | null {
     const s = this.ast.seasons;
     if (!s) return null;
-    const o = this.occurrenceAt(s.unit, day)!;
-    return seasonAtPhase(s.marks, (day - o.start) / o.length);
+    return seasonIn(s, this.occurrenceAt(s.unit, day)!, day);
   }
 
   /** The moons on `day`, in declaration order: the bodies with a moon facet, each with its exact phase. */
@@ -288,7 +294,7 @@ export class Engine {
     let p = 1;
     for (const id of ids) {
       const u = this.units.get(id);
-      if (u?.kind !== "cycle" || u.crossing || u.gears?.length || u.stages?.length || u.ledger?.length) throw new RangeError(`"${id}" is not a constant cycle; its labels have no fixed period`);
+      if (u?.kind !== "cycle" || !isPlainConstant(u)) throw new RangeError(`"${id}" is not a constant cycle; its labels have no fixed period`);
       p = lcm(p, u.length * (u.labels?.length || 1));
       if (!Number.isSafeInteger(p)) throw new RangeError(`the round of ${ids.join(", ")} is past the safe integers`);
     }

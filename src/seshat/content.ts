@@ -17,9 +17,16 @@
  * name), season names (they are the season tags).
  */
 import type { CalendarAst } from "./ast";
+import { resolve } from "./resolve";
 
-/** The hashed view of a definition: a plain JSON value, deterministic for a given AST. */
-export function definitionContent(ast: CalendarAst): unknown {
+/**
+ * The hashed view of a definition: a plain JSON value, deterministic for a
+ * given AST. It hashes the resolved AST (§16.7 P4): a body reference and a
+ * start mode hash as the numbers they resolve to, so equal behaviour hashes
+ * equal. A crossing that cannot resolve hashes as stored (its world faults).
+ */
+export function definitionContent(stored: CalendarAst): unknown {
+  const ast = resolve(stored);
   return prune({
     ...ast,
     name: undefined,

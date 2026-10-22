@@ -151,6 +151,34 @@ function dayRatText(x: Rational): string {
   }
   return `D${num(q)}+${num(r)}/${num(x.d)}`;
 }
+/** A body mark: a terminating decimal when the rational is one (1/4 is 0.25), else n/d. Exact both ways. */
+function markText(r: Rational): string {
+  const t = ratText(r);
+  let d = BigInt(r.d);
+  let [twos, fives] = [0, 0];
+  while (d % 2n === 0n) [d, twos] = [d / 2n, twos + 1];
+  while (d % 5n === 0n) [d, fives] = [d / 5n, fives + 1];
+  if (r.d === 1 || d !== 1n) return t;
+  const places = Math.max(twos, fives);
+  const scaled = BigInt(r.n) * (10n ** BigInt(places) / BigInt(r.d));
+  const neg = scaled < 0n;
+  const digits = (neg ? -scaled : scaled).toString().padStart(places + 1, "0");
+  return `${neg ? "-" : ""}${digits.slice(0, -places)}.${digits.slice(-places)}`;
+}
+function toMark(s: string, line: number): Rational {
+  if (s.includes("/") || !s.includes(".")) return toRat(s, line);
+  const m = /^(-?)(\d+)\.(\d+)$/.exec(s);
+  if (!m) throw new SeshatSyntaxError(`"${s}" is not a mark (a decimal or n/d)`, line);
+  let n = BigInt(m[2]! + m[3]!) * (m[1] ? -1n : 1n);
+  let d = 10n ** BigInt(m[3]!.length);
+  let [a, b] = [n < 0n ? -n : n, d];
+  while (b) [a, b] = [b, a % b];
+  if (a > 1n) [n, d] = [n / a, d / a];
+  const SAFE_BIG = BigInt(Number.MAX_SAFE_INTEGER);
+  if (n > SAFE_BIG || n < -SAFE_BIG || d > SAFE_BIG) throw new SeshatSyntaxError(`"${s}" is past the safe integers`, line);
+  return { n: Number(n), d: Number(d) };
+}
+
 function toDayRat(s: string, line: number): Rational {
   const m = /^D(-?\d+)(?:\+(\d+)\/(\d+))?$/.exec(s);
   if (!m) throw new SeshatSyntaxError(`"${s}" is not a day position (D<n> or D<n>+<r>/<d>)`, line);
@@ -253,9 +281,19 @@ function baseLines(r: CycleRule): string[] {
   const out: string[] = [];
   if (r.crossing !== undefined) {
     const c = r.crossing;
-    fields(c, "a crossing", "period", "at", "index");
+    if (c.start !== undefined && c.start !== "after") throw new RangeError(`a crossing's start ${JSON.stringify(c.start)} has no text form (after, or absent for contains)`);
     if (c.index) fields(c.index, "a crossing index", "a", "c", "L");
-    out.push(`CROSSING:${ratText(c.period)}@${dayRatText(c.at)}${c.index ? `;INDEX=${num(c.index.a)}/${num(c.index.c)}/${num(c.index.L)}` : ""}`);
+    const tail = `${c.start ? ";START=after" : ""}${c.index ? `;INDEX=${num(c.index.a)}/${num(c.index.c)}/${num(c.index.L)}` : ""}`;
+    if (c.body !== undefined) {
+      fields(c, "a crossing", "body", "start", "index");
+      const b = c.body;
+      fields(b, "a body reference", "id", "mark", "offset", "k");
+      if (b.k !== undefined && !Number.isSafeInteger(b.k)) throw new RangeError(`K ${b.k} is not a safe integer`);
+      out.push(`CROSSING:BODY=${id(b.id)};MARK=${markText(b.mark)}${b.offset && b.offset.n !== 0 ? `;OFFSET=${ratText(b.offset)}` : ""}${b.k ? `;K=${num(b.k)}` : ""}${tail}`);
+    } else {
+      fields(c, "a crossing", "period", "at", "start", "index");
+      out.push(`CROSSING:${ratText(c.period)}@${dayRatText(c.at)}${tail}`);
+    }
   } else out.push(`ANCHOR:${day(r.anchor)}`, `LENGTH:${num(r.length)}`);
   out.push(...gearTermLines(r.gears));
   if (r.stages?.length === 0) out.push("STAGES:");
@@ -617,9 +655,11 @@ function cycleRule(p: Props, c: Component): CycleRule {
   const layers = { ...(gears.length || gearsMarked ? { gears } : {}), ...(stages.length || stagesMarked ? { stages } : {}) };
   if (cross) {
     if (p.one("ANCHOR") || p.one("LENGTH")) throw new SeshatSyntaxError("a base is CROSSING or ANCHOR + LENGTH, not both", cross.no);
-    const q = params(cross, ["INDEX"]);
-    const at = cut(need(q.pos, "<period>@<at>", cross), "@");
-    if (!at) throw new SeshatSyntaxError("CROSSING is <period>@<at>", cross.no);
+    const q = params(cross, ["BODY", "MARK", "OFFSET", "K", "START", "INDEX"]);
+    const st = q.get("START");
+    if (st !== undefined && st !== "after" && st !== "contains") throw new SeshatSyntaxError(`START is after or contains, not "${st}"`, cross.no);
+    // defaults normalise to absent (§16.7 P4): START=contains, OFFSET=0, K=0
+    const start = st === "after" ? { start: "after" as const } : {};
     const ix = q.get("INDEX");
     let index: { a: number; c: number; L: number } | undefined;
     if (ix !== undefined) {
@@ -627,7 +667,22 @@ function cycleRule(p: Props, c: Component): CycleRule {
       if (parts.length !== 3) throw new SeshatSyntaxError("INDEX is <a>/<c>/<L>", cross.no);
       index = { a: toNum(parts[0]!, cross.no), c: toNum(parts[1]!, cross.no), L: toNum(parts[2]!, cross.no) };
     }
-    return { crossing: { period: toRat(at[0], cross.no), at: toDayRat(at[1], cross.no), ...(index ? { index } : {}) }, ...layers };
+    const bodyId = q.get("BODY");
+    if (bodyId !== undefined) {
+      if (q.pos !== undefined) throw new SeshatSyntaxError("CROSSING is <period>@<at> or BODY=<id>;MARK=<mark>, not both", cross.no);
+      const mark = toMark(need(q.get("MARK"), "MARK", cross), cross.no);
+      const o = q.get("OFFSET");
+      const offset = o === undefined ? undefined : toRat(o, cross.no);
+      const kt = q.get("K");
+      const k = kt === undefined ? undefined : toNum(kt, cross.no);
+      if (k !== undefined && !Number.isSafeInteger(k)) throw new SeshatSyntaxError(`K "${kt}" is not a whole number`, cross.no);
+      const body = { id: toId(bodyId, cross), mark, ...(offset && offset.n !== 0 ? { offset } : {}), ...(k ? { k } : {}) };
+      return { crossing: { body, ...start, ...(index ? { index } : {}) }, ...layers };
+    }
+    for (const key of ["MARK", "OFFSET", "K"]) if (q.get(key) !== undefined) throw new SeshatSyntaxError(`CROSSING has ${key} only with BODY`, cross.no);
+    const at = cut(need(q.pos, "<period>@<at>", cross), "@");
+    if (!at) throw new SeshatSyntaxError("CROSSING is <period>@<at>", cross.no);
+    return { crossing: { period: toRat(at[0], cross.no), at: toDayRat(at[1], cross.no), ...start, ...(index ? { index } : {}) }, ...layers };
   }
   const [a, len] = [p.one("ANCHOR"), p.one("LENGTH")];
   if (!a || !len) throw new SeshatSyntaxError("a cycle needs CROSSING, or ANCHOR and LENGTH", c.no);
