@@ -33,7 +33,7 @@ import type { CalendarSource, DraftMoon, FormDraft, WorldDraft } from "./state";
 
 export type CalendarDraft = WorldDraft["calendar"];
 
-const FORM_PARTS = ["name", "year", "months", "week"] as const;
+const FORM_PARTS = ["name", "year", "months", "week", "ledger"] as const;
 
 /** The draft calendar a definition opens as: its season marks as stored, its moons in declaration order with their body ids, and the parts the form reads as fields. */
 export function calendarOfDefinition(ast: CalendarAst): CalendarDraft {

@@ -19,7 +19,7 @@
 import type { Override } from "../../core/report";
 import type { Era, ZoneProfile } from "../../core/types";
 import type { DevicePreset, InternalCalendarConfig, RegimePreset } from "../../plugin/settings";
-import type { MonthForm, YearForm } from "../../plugin/time/form";
+import type { LedgerForm, MonthForm, YearForm } from "../../plugin/time/form";
 
 /** The world-scoped slice of settings: everything a world edit touches (`world · N zones`). */
 export interface WorldDraft {
@@ -91,6 +91,8 @@ export interface FormDraft {
   year?: YearForm;
   months?: readonly MonthForm[] | null;
   week?: readonly string[] | null;
+  /** the ledger: one-off corrections, marked days and skipped days (§15.5) */
+  ledger?: LedgerForm;
 }
 
 /** The world draft's calendar: seasons and moons as every window reads them, and the definition's other fields. */

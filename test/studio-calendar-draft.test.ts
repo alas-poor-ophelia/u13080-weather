@@ -135,7 +135,7 @@ describe("stale is per part (§15.9 S5)", () => {
 
 describe("the form's parts save through the one merge", () => {
   test("the draft carries the parts that are fields, and only those", () => {
-    expect(Object.keys(BASE.form!).sort()).toEqual(["months", "name", "week", "year"]);
+    expect(Object.keys(BASE.form!).sort()).toEqual(["ledger", "months", "name", "week", "year"]);
     const hebrew = calendarOfDefinition(HEBREW);
     expect(hebrew.form).not.toHaveProperty("year");
   });

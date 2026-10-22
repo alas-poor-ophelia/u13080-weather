@@ -22,6 +22,9 @@ import { NO_CALENDAR_CODE, World } from "../src/plugin/world";
 import { zoneFromPreset } from "../src/plugin/zones";
 import { PRESETS } from "../src/generated/presets";
 import { GREGORIAN, parse, print, type CalendarAst } from "../src/seshat";
+import { calendarOfDefinition, mergeCalendar, type CalendarDraft } from "../src/studio/model/definition";
+import { SeshatCalendar } from "../src/plugin/time/seshat";
+import { blastRadius, describeBlast } from "../src/plugin/time/blast";
 
 const fjord = PRESETS.find((p) => p.id === "fjord-coast")!;
 const SEASONS = [
@@ -349,5 +352,64 @@ describe("the current day is shared", () => {
     expect(r.settings.currentDayOrdinal).toBe(777);
     expect(r.world.now()!.dayOrdinal).toBe(777);
     expect(r.count("time-changed")).toBe(1);
+  });
+});
+
+/**
+ * P3c acceptance (bead wadjet-01k.4, docs/SESHAT-v0.md §15.5): a ledger edit,
+ * made through the Studio's merge, fires profiles-changed all:true exactly
+ * once on Save, and the Save dialog's first affected day is the first day a
+ * day-by-day comparison of the two calendars finds.
+ */
+describe("a ledger edit (P3c acceptance)", () => {
+  const ledgerEdit = (stored: string, edit: (l: NonNullable<NonNullable<CalendarDraft["form"]>["ledger"]>) => NonNullable<NonNullable<CalendarDraft["form"]>["ledger"]>): string => {
+    const base = calendarOfDefinition(parse(stored));
+    const draft: CalendarDraft = { ...structuredClone(base), form: { ...base.form, ledger: edit(base.form!.ledger!) } };
+    const m = mergeCalendar(stored, base, draft);
+    if (m.kind !== "write") throw new Error(`expected a write, got ${JSON.stringify(m)}`);
+    return m.text;
+  };
+  const firstByHand = (a: SeshatCalendar, b: SeshatCalendar, from: number, to: number): number | null => {
+    for (let d = from; d <= to; d++) if (JSON.stringify([a.toContext(d), a.yearOfDay(d)]) !== JSON.stringify([b.toContext(d), b.yearOfDay(d)])) return d;
+    return null;
+  };
+
+  test("a marked day: one profiles-changed all:true on Save; the first affected day is that day", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    const stored = r.settings.calendar.definition as string;
+    const text = ledgerEdit(stored, (l) => ({ ...l, days: [...l.days, { day: 1000, name: "Coronation", tags: ["coronation"] }] }));
+    const before = new SeshatCalendar(stored, () => 0);
+    const after = new SeshatCalendar(text, () => 0);
+    const blast = await blastRadius(before, after, 0, { spells: false, years: 5 });
+    expect(blast.first).toBe(1000);
+    expect(blast.first).toBe(firstByHand(before, after, blast.from, blast.to));
+    expect(describeBlast(blast, (d) => after.format(d), 5)).toContain(`from ${after.format(1000)} through`);
+    r.clear();
+    await r.calendars.saveDefinition(text);
+    expect(r.count("profiles-changed")).toBe(1);
+    expect(all(r)).toBe(true);
+    expect(r.world.timeAt(1000).tags).toContain("coronation");
+  });
+
+  test("a year's start moved by a pin: the first affected day is the start of the year before it (§3: from − 1)", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    const stored = r.settings.calendar.definition as string;
+    // Gregorian day 0 is 1970-01-01 (year index 1970); 1973 starts on day 1096; pin it one day later
+    const before = new SeshatCalendar(stored, () => 0);
+    expect(before.yearStart(1973)).toBe(1096);
+    const text = ledgerEdit(stored, (l) => ({ ...l, units: { ...l.units, year: [...(l.units.year ?? []), { kind: "starts", from: 1973, startsOn: 1097 }] } }));
+    const after = new SeshatCalendar(text, () => 0);
+    expect(after.yearStart(1973)).toBe(1097);
+    const blast = await blastRadius(before, after, 0, { spells: false, years: 5 });
+    // 1972 gets one day longer, and every day of a year carries its length and its phase in it: 1972 starts on day 730
+    expect(before.yearStart(1972)).toBe(730);
+    expect(blast.first).toBe(730);
+    expect(blast.first).toBe(firstByHand(before, after, blast.from, blast.to));
+    r.clear();
+    await r.calendars.saveDefinition(text);
+    expect(r.count("profiles-changed")).toBe(1);
+    expect(all(r)).toBe(true);
   });
 });

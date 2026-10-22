@@ -22,7 +22,7 @@ const ALL: Array<[string, CalendarAst]> = [
   ...WORLD_PRESETS.map((p) => [`preset ${p.id}`, p.ast] as [string, CalendarAst]),
   ...Object.entries(SESHAT_FIXTURES).map(([k, a]) => [`fixture ${k}`, a] as [string, CalendarAst]),
 ];
-const PARTS = ["name", "year", "months", "week", "seasons", "moons"] as const;
+const PARTS = ["name", "year", "months", "week", "seasons", "moons", "ledger"] as const;
 const hash = (ast: CalendarAst): string => new SeshatCalendar(print(ast), () => 0).configHash();
 const formOf = <K extends (typeof PARTS)[number]>(f: CalendarForm, k: K) => {
   const p = f[k];

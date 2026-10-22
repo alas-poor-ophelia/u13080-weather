@@ -3,7 +3,7 @@
  * definition can be edited through, read part by part (R1). Pure: no Obsidian
  * imports; the settings tab and the Studio both use it.
  *
- * - `recognise` reads each part (name, year, months, week, seasons, moons). A
+ * - `recognise` reads each part (name, year, months, week, seasons, moons, ledger). A
  *   part is `form` only when writing its value back gives the same AST, field
  *   for field; anything else is `text`, with a reason in on-screen terms.
  * - `compile` merges edited parts into the stored AST and passes every other
@@ -18,7 +18,7 @@
  * the year `text` and passes through every year edit.
  */
 import { canonicalJson } from "../../core/profile";
-import type { BodyAst, CalendarAst, CycleUnitAst, GearAst, GearTerm, Rational, SlotsUnitAst, UnitAst } from "../../seshat";
+import type { BodyAst, CalendarAst, CycleUnitAst, DayLabelAst, GearAst, GearTerm, LedgerEntry, Rational, RuleAst, SlotsUnitAst, UnitAst } from "../../seshat";
 
 export type Part<T> = { readonly kind: "form"; readonly value: T } | { readonly kind: "text"; readonly why: string };
 
@@ -62,6 +62,7 @@ export interface CalendarForm {
   readonly week: Part<readonly string[] | null>;
   readonly seasons: Part<readonly SeasonForm[]>;
   readonly moons: Part<readonly MoonForm[]>;
+  readonly ledger: Part<LedgerForm>;
   /** ids of units no part covers: they pass through every edit */
   readonly others: readonly string[];
 }
@@ -72,8 +73,25 @@ export interface FormEdits {
   readonly week?: readonly string[] | null;
   readonly seasons?: readonly SeasonForm[];
   readonly moons?: readonly MoonForm[];
+  readonly ledger?: LedgerForm;
 }
 type PartName = keyof FormEdits;
+
+/**
+ * The ledger (Q5, §15.5, §15.9 S2): the calendar's one-off corrections, as
+ * the AST already holds them. Pins, slot overrides and switches stay on the
+ * cycle unit they correct; a marked day is a day label (RDATE); a skipped
+ * day of a named rule is the rule's exclusion list (EXDATE: `all[base, not
+ * dates[...]]`, one sorted list).
+ */
+export interface LedgerForm {
+  /** each cycle unit's ledger entries, by unit id (units without entries are absent) */
+  readonly units: Readonly<Record<string, readonly LedgerEntry[]>>;
+  /** marked days */
+  readonly days: readonly DayLabelAst[];
+  /** days each named rule skips, by rule id (rules that skip none are absent) */
+  readonly skips: Readonly<Record<string, readonly number[]>>;
+}
 
 /** An edit to a part the form cannot express: the caller offered a field it should have shown as text. */
 export class FormError extends Error {}
@@ -296,6 +314,58 @@ function writeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
   return bodies.length || ast.bodies?.length === 0 ? { ...rest, bodies } : rest;
 }
 
+// ---- the ledger
+
+/** A rule in the exclusion form: its base and the days it skips; any other rule skips none. */
+function skipsOf(rule: RuleAst): { base: RuleAst; days: readonly number[] } {
+  if (rule.kind === "all" && rule.of.length === 2) {
+    const [base, last] = rule.of;
+    if (last?.kind === "not" && last.of.kind === "dates") return { base: base!, days: last.of.days };
+  }
+  return { base: rule, days: [] };
+}
+
+function readLedger(ast: CalendarAst): LedgerForm {
+  const units: Record<string, readonly LedgerEntry[]> = {};
+  for (const u of ast.units) if (u.kind === "cycle" && u.ledger?.length) units[u.id] = u.ledger;
+  const skips: Record<string, readonly number[]> = {};
+  for (const r of ast.rules ?? []) {
+    const d = skipsOf(r.rule).days;
+    if (d.length) skips[r.id] = d;
+  }
+  return { units, days: ast.days ?? [], skips };
+}
+
+/**
+ * Write the ledger. A unit's entries replace its ledger (none: the field
+ * goes); a rule whose skips are the ones it stores keeps its stored form, any
+ * other is written in the one exclusion form (sorted, no repeats), or as its
+ * base alone when it skips none.
+ */
+function writeLedger(ast: CalendarAst, v: LedgerForm): CalendarAst {
+  const units = ast.units.map((u) => {
+    if (u.kind !== "cycle") return u;
+    const entries = v.units[u.id];
+    if (entries?.length) return { ...u, ledger: entries };
+    if (u.ledger === undefined) return u;
+    const { ledger: _l, ...rest } = u;
+    return (u.ledger.length === 0 ? u : rest);
+  });
+  const rules = ast.rules?.map((r) => {
+    const { base, days } = skipsOf(r.rule);
+    const want = v.skips[r.id] ?? [];
+    if (same(want, days)) return r;
+    const sorted = [...new Set(want)].sort((a, b) => a - b);
+    const rule: RuleAst = sorted.length ? { kind: "all", of: [base, { kind: "not", of: { kind: "dates", days: sorted } }] } : base;
+    return { ...r, rule };
+  });
+  const out: CalendarAst = { ...ast, units, ...(rules ? { rules } : {}) };
+  // marked days: as given; none drops the field, unless it is stored empty
+  if (v.days.length || ast.days?.length === 0) return { ...out, days: v.days };
+  const { days: _d, ...rest } = out;
+  return rest;
+}
+
 // ---- recognise and compile
 
 const PARTS: { [K in PartName]: { read: (ast: CalendarAst) => FormEdits[K] | string; write: (ast: CalendarAst, v: NonNullable<FormEdits[K]> | null) => CalendarAst } } = {
@@ -305,6 +375,7 @@ const PARTS: { [K in PartName]: { read: (ast: CalendarAst) => FormEdits[K] | str
   week: { read: readWeek, write: (ast, v) => writeWeek(ast, v) },
   seasons: { read: readSeasons, write: (ast, v) => writeSeasons(ast, v as readonly SeasonForm[]) },
   moons: { read: readMoons, write: (ast, v) => writeMoons(ast, v as readonly MoonForm[]) },
+  ledger: { read: readLedger, write: (ast, v) => writeLedger(ast, v as LedgerForm) },
 };
 
 function part<K extends PartName>(ast: CalendarAst, k: K): Part<NonNullable<FormEdits[K]> | Extract<FormEdits[K], null>> {
@@ -329,6 +400,7 @@ export function recognise(ast: CalendarAst): CalendarForm {
     week: part(ast, "week"),
     seasons: part(ast, "seasons"),
     moons: part(ast, "moons"),
+    ledger: part(ast, "ledger"),
     others: ast.units.filter((u) => !covered.has(u.id)).map((u) => u.id),
   };
 }
@@ -346,7 +418,7 @@ function checkLeap(y: YearForm): void {
 
 /**
  * Merge edited parts into `ast`, in the order name, year, months, week,
- * seasons, moons. An edit of `undefined` is no edit; `null` removes the months
+ * seasons, moons, ledger. An edit of `undefined` is no edit; `null` removes the months
  * or the week. Throws FormError when an edited part is `text` in `ast`, or
  * when the edit would leave the part no longer readable as fields (a new week
  * beside another cycle of the same length). No edits: `ast` itself.
