@@ -66,7 +66,7 @@ describe("the search", () => {
     const before = cal(PLAIN);
     const after = cal(feastOn(400));
     const r = await blastRadius(before, after, 100, { spells: false, years: 3 });
-    expect(r).toMatchObject({ first: 400, last: 400, everyDay: false });
+    expect(r).toMatchObject({ first: 400, last: 400, everyDay: false, yearsMoved: false });
     expect(bruteForce(before, after, r.from, r.to)).toEqual({ first: 400, last: 400 });
     expect(describeBlast(r, (d) => `day ${d}`, 3)).toBe(`Weather may change in every zone from day 400 through day ${400 + BLAST_CARRY}.`);
   });
@@ -78,6 +78,7 @@ describe("the search", () => {
     const brute = bruteForce(before, after, r.from, r.to);
     expect({ first: r.first, last: r.last }).toEqual(brute);
     expect(r.first).toBe(r.from);
+    expect(r.yearsMoved).toBe(true);
     expect(describeBlast(r, String, 2)).toBe("Weather may change in every zone on every day within 2 years of today.");
   });
 
@@ -92,7 +93,7 @@ describe("the search", () => {
   });
 
   test("the window ends: a difference running to its end reads 'onward'", () => {
-    const r: BlastRadius = { from: 0, to: 1000, first: 300, last: 1000, everyDay: false };
+    const r: BlastRadius = { from: 0, to: 1000, first: 300, last: 1000, everyDay: false, yearsMoved: false };
     expect(describeBlast(r, (d) => `day ${d}`)).toBe("Weather may change in every zone from day 300 onward.");
   });
 

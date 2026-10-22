@@ -43,14 +43,16 @@ export interface BlastRadius {
   readonly last: number | null;
   /** the year holding day 0 reads differently and the world has spell modifiers: every day may change */
   readonly everyDay: boolean;
+  /** some day in the window falls in a different year, or at a different place in its year: year starts moved */
+  readonly yearsMoved: boolean;
 }
 
-/** Same day, same reading: the year fields first, then the whole context. */
-function sameDay(a: BlastCalendar, b: BlastCalendar, d: number): boolean {
+/** How a day reads in the two calendars: the year fields first, then the whole context. */
+function compareDay(a: BlastCalendar, b: BlastCalendar, d: number): "same" | "year" | "context" {
   const ya = a.yearOfDay(d);
   const yb = b.yearOfDay(d);
-  if (ya?.year !== yb?.year || ya?.start !== yb?.start || ya?.length !== yb?.length) return false;
-  return canonicalJson(a.toContext(d)) === canonicalJson(b.toContext(d));
+  if (ya?.year !== yb?.year || ya?.start !== yb?.start || ya?.length !== yb?.length) return "year";
+  return canonicalJson(a.toContext(d)) === canonicalJson(b.toContext(d)) ? "same" : "context";
 }
 
 /**
@@ -73,11 +75,14 @@ export async function blastRadius(
   const to = today + years * L;
   let first: number | null = null;
   let last: number | null = null;
+  let yearsMoved = false;
   let n = 0;
   for (let d = from; d <= to; d++) {
-    if (!sameDay(before, after, d)) {
+    const c = compareDay(before, after, d);
+    if (c !== "same") {
       first ??= d;
       last = d;
+      if (c === "year") yearsMoved = true;
     }
     if (++n % chunk === 0) await tick();
   }
@@ -87,11 +92,11 @@ export async function blastRadius(
     const y0 = Math.max(before.yearOfDay(0)?.length ?? 0, after.yearOfDay(0)?.length ?? 0);
     const start = Math.min(before.yearOfDay(0)?.start ?? 0, after.yearOfDay(0)?.start ?? 0);
     for (let d = start; d < start + y0 && !everyDay; d++) {
-      if (!sameDay(before, after, d)) everyDay = true;
+      if (compareDay(before, after, d) !== "same") everyDay = true;
       if (++n % chunk === 0) await tick();
     }
   }
-  return { from, to, first, last, everyDay };
+  return { from, to, first, last, everyDay, yearsMoved };
 }
 
 /**

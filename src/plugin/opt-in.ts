@@ -61,7 +61,7 @@ export interface OptInPlan {
 }
 
 /** How `day` reads in a stored definition, as the adapter writes it; null when it cannot. */
-function todayText(text: string, day: number): string | null {
+export function todayText(text: string, day: number): string | null {
   try {
     const a = new SeshatCalendar(text, () => day);
     return a.fault ? null : a.format(day);
@@ -71,6 +71,25 @@ function todayText(text: string, day: number): string | null {
 }
 
 const errorOf = (r: { error: string; line?: number }) => (r.line === undefined ? r.error : `Line ${r.line}: ${r.error}`);
+
+/**
+ * Move a definition so that `today` reads as the date `at` (written as the
+ * calendar writes dates, or a bare day number): parse `at` against the
+ * definition, then translate it by the difference. Used by Change calendar…
+ * and by the Save dialog when a change moves year starts (§15.1 R7).
+ */
+export function anchorToday(ast: CalendarAst, today: number, at: string): { ast: CalendarAst; shift: number } | { error: string } {
+  const date = at.trim();
+  if (date === "") return { error: "Write the date today should read, or keep day numbers." };
+  const base = print(ast);
+  const day = /^-?\d+$/.test(date) ? Number(date) : new SeshatCalendar(base, () => today).parse(date);
+  if (day === null) {
+    const now = todayText(base, today);
+    return { error: `"${date}" is not a date in this calendar.${now === null ? "" : ` Write it as today reads (${now}).`}` };
+  }
+  const shift = today - day;
+  return { ast: translate(ast, shift), shift };
+}
 
 /**
  * The definition a choice makes, or why it cannot run. Never throws.
@@ -115,16 +134,9 @@ function build(choice: OptInChoice, cfg: InternalCalendarConfig, today: number):
 
   let shift = 0;
   if (choice.anchor !== undefined) {
-    const at = choice.anchor.trim();
-    if (at === "") return { error: "Write the date today should read, or keep day numbers." };
-    const base = print(ast);
-    const day = /^-?\d+$/.test(at) ? Number(at) : new SeshatCalendar(base, () => today).parse(at);
-    if (day === null) {
-      const now = todayText(base, today);
-      return { error: `"${at}" is not a date in this calendar.${now === null ? "" : ` Write it as today reads (${now}).`}` };
-    }
-    shift = today - day;
-    ast = translate(ast, shift);
+    const a = anchorToday(ast, today, choice.anchor);
+    if ("error" in a) return a;
+    ({ ast, shift } = a);
   }
 
   if (src.kind !== "internal" && choice.carry) {

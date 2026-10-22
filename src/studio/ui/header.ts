@@ -45,6 +45,7 @@ import { zoneForSave } from "../model/json-view";
 import { calendarOfDefinition, planCalendarSave } from "../model/definition";
 import { parse as parseDefinition } from "../../seshat";
 import { confirmRewrite } from "./rewrite-confirm-modal";
+import { confirmCalendarChange } from "../../plugin/calendar-modals";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
 import { panBy, presetWindow, width, worldBounds, zoomAt, zoomLabel, type Window, type ZoomBounds, type ZoomPreset } from "../model/zoom";
@@ -385,6 +386,17 @@ export function createHeaderSurface(): Surface {
         return;
       }
     }
+    // a definition change goes through the Save dialog: which days' weather it can reach, and, when it moves
+    // year starts, whether day numbers are kept or today is anchored (§15.1 R6, R7). Cancel saves nothing.
+    let text = plan.kind === "definition" ? plan.text : null;
+    if (plan.kind === "definition" && typeof stored === "string") {
+      text = await confirmCalendarChange(c.plugin.app, c.plugin, stored, plan.text);
+      if (text === null) return;
+      if (settings.calendar.definition !== stored) {
+        new Notice("Not saved: the calendar definition changed while the dialog was open. Save again to merge into it.");
+        return;
+      }
+    }
     for (const id of dirtyIds) {
       const draft = state.zones[id];
       if (draft === undefined) continue;
@@ -406,12 +418,12 @@ export function createHeaderSurface(): Surface {
     settings.regimePresets = structuredClone(state.world.regimePresets);
     settings.overrides = structuredClone(state.world.overrides);
     // saveDefinition saves every field above with it, then swaps the running calendar only once the write landed
-    if (plan.kind === "definition") await c.plugin.calendars.saveDefinition(plan.text);
+    if (text !== null) await c.plugin.calendars.saveDefinition(text);
     else await c.plugin.saveAndRebuild();
     // On a Seshat world the draft takes the stored calendar's own numbers (a new moon's cycle as its exact
     // rational reads back), so the next save compares against exactly what is on disk; a draft from another
     // source takes the calendar the world runs now.
-    if (plan.kind === "definition") reseed(calendarOfDefinition(parseDefinition(plan.text)), false);
+    if (text !== null) reseed(calendarOfDefinition(parseDefinition(text)), false);
     else if (plan.kind === "none" && plan.reseed) reseed(plan.reseed, false);
     // `markSaved` first, so the repaint lands on `Saved ✓` directly
     // instead of flashing `Save ●` on its way there.
