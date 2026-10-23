@@ -104,11 +104,11 @@ export class InternalCalendar implements TimeAdapter {
     };
   }
 
-  /** "Y-D" (year, day-of-year 1-based) or a bare integer dayOrdinal. */
+  /** "Y-D" (year, day-of-year 1-based), the format() text ("Year Y, day D", season tag optional), or a bare integer dayOrdinal. */
   parse(text: string): number | null {
     const t = text.trim();
     if (/^-?\d+$/.test(t)) return Number(t);
-    const m = t.match(/^(-?\d+)-(\d+)$/);
+    const m = t.match(/^(-?\d+)-(\d+)$/) ?? t.match(/^Year (-?\d+), day (\d+)(?: \([^)]*\))?$/);
     if (!m) return null;
     const year = Number(m[1]);
     const doy = Number(m[2]);

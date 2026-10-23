@@ -15,6 +15,7 @@ import type { Era, Geography, Orographic, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import { openStudio } from "../studio/ui/open";
+import { dayFieldText, parseDayField, validateDayField, type DayText } from "./current-day";
 import { calendarSummary } from "./calendar-summary";
 import { displayChoices, displayControlValue, displaySetting, showDisplayRow } from "./date-display";
 import { renameMoonReferences } from "../studio/model/moon-rename";
@@ -131,8 +132,8 @@ export class WadjetSettingTab extends PluginSettingTab {
           },
           {
             name: "Current day",
-            desc: onSeshat() ? `Day number on the calendar definition's day line. Now: ${this.plugin.displayDay(s.currentDayOrdinal)}.` : `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
-            control: { type: "number", key: "currentDayOrdinal", step: 1, validate: (v) => (!Number.isSafeInteger(v) ? "Whole days only." : Math.abs(v) > MAX_DAY_ORDINAL ? `Between ${withMinus(-MAX_DAY_ORDINAL)} and ${MAX_DAY_ORDINAL} only.` : undefined) },
+            desc: onSeshat() ? `A date on the calendar definition's day line, or a day number. Now: ${this.plugin.displayDay(s.currentDayOrdinal)}.` : `A date as "Year ${s.calendar.epochYear}, day 1" (or ${s.calendar.epochYear}-1), or a day number counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
+            control: { type: "text", key: "currentDayOrdinal", validate: (v) => validateDayField(this.dayCalendar(), v) },
           },
           {
             name: "Date display",
@@ -379,6 +380,12 @@ export class WadjetSettingTab extends PluginSettingTab {
     }
   }
 
+  /** The calendar the Current day field reads and writes dates in: the definition's on a definition world, else the internal one. */
+  private dayCalendar(): DayText {
+    const seshat = this.plugin.calendars.seshat;
+    return this.plugin.onDefinition() && seshat ? seshat : this.plugin.internalCalendar;
+  }
+
   // --- control bindings ----------------------------------------------------
   override getControlValue(key: string): unknown {
     const s = this.plugin.settings;
@@ -386,8 +393,9 @@ export class WadjetSettingTab extends PluginSettingTab {
       case "worldSeed":
       case "units":
       case "activeTimeAdapter":
-      case "currentDayOrdinal":
         return s[key];
+      case "currentDayOrdinal":
+        return dayFieldText(this.dayCalendar(), s.currentDayOrdinal);
       case "calendar.yearLength":
         return s.calendar.yearLength;
       case "calendar.display":
@@ -425,9 +433,9 @@ export class WadjetSettingTab extends PluginSettingTab {
         }
         return;
       case "currentDayOrdinal": {
-        // The row validates whole days; anything else is left as it was.
-        const d = Number(value);
-        if (!Number.isSafeInteger(d) || Math.abs(d) > MAX_DAY_ORDINAL) return;
+        // The row validates a date or a whole day; anything else is left as it was.
+        const d = parseDayField(this.dayCalendar(), String(value));
+        if (d === null || Math.abs(d) > MAX_DAY_ORDINAL) return;
         return this.plugin.setInternalDay(d);
       }
       case "calendar.display": {

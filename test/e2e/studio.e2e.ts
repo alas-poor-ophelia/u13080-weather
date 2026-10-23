@@ -9927,8 +9927,30 @@ async function passAnyConfirm(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Drop the Studio's unsaved world draft (the seasons-window steps leave one) and let the leaf adopt the stored
+ * settings, so a calendar opted into afterwards is the one the Studio shows. The UI has no discard control: a
+ * dirty draft is deliberately kept by `refreshFromSettings`, so the draft is put back to its saved copy first.
+ */
+async function discardStudioWorldDraft(): Promise<void> {
+  await withApp(
+    ob.page,
+    (app, type: string) => {
+      const view = app.workspace.getLeavesOfType(type)[0]?.view;
+      if (!view) return;
+      view.store.update((s: any) => {
+        s.world = structuredClone(s.saved.world);
+      });
+      view.refreshFromSettings();
+    },
+    VIEW_TYPE,
+  );
+  await nextFrame();
+}
+
 describe("climate studio · calendar definition", () => {
   test("step 90: on a Gregorian definition, Exceptions → Name a single day, then Save goes through the Save calendar changes dialog and stores the day", async () => {
+    await discardStudioWorldDraft();
     // Move the fixture world onto a definition the way Change calendar does.
     await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
     const today: number = await withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.currentDayOrdinal);
@@ -9982,6 +10004,7 @@ describe("climate studio · dated seasons", () => {
   test("step 91: seasons on dates show, inside the Calendar window's Seasons tab, that the ribbon is read-only and why", async () => {
     const dated = GREGORIAN_TEXT.replace("\nBEGIN:VGEAR", "\nBEGIN:VSEASONS\nUNIT:year\nMARK:Spring=month:3.20\nMARK:Autumn=month:9.22\nEND:VSEASONS\n\nBEGIN:VGEAR");
     expect(dated).toContain("MARK:Spring=month:3.20");
+    await discardStudioWorldDraft();
     await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), dated);
     try {
       await revealStudio();

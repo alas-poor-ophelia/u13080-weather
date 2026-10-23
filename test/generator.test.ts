@@ -160,7 +160,7 @@ describe("generator: fidelity to the preset (neutral regime, 40 years)", () => {
     }
     const meanSpell = spells.reduce((a, b) => a + b, 0) / spells.length;
     expect(Math.abs(meanSpell - 1 / (1 - ww / wn)) / meanSpell).toBeLessThan(0.03);
-  });
+  }, 30_000); // 200 simulated years: ~6 s under a full run, past the 5 s default (wadjet-rhe)
 
   test("temperature residual has unit variance and the configured lag-1 autocorrelation", () => {
     const g = new Generator(cfgFor(frozen, { regimes: NEUTRAL, seed: "ar1" }));
