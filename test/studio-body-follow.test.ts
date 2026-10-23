@@ -38,7 +38,7 @@ describe("D2: a moon a unit follows cannot be removed", () => {
     const moons = recognise(ast).moons;
     if (moons.kind !== "form") throw new Error("moons should be a form part");
     expect(() => compile(ast, { moons: moons.value.filter((m) => m.id !== "luna") })).toThrow(FormError);
-    expect(() => compile(ast, { moons: moons.value.filter((m) => m.id !== "luna") })).toThrow(/The moon "Luna" cannot be removed or renamed here: the "lunation" unit follows it/);
+    expect(() => compile(ast, { moons: moons.value.filter((m) => m.id !== "luna") })).toThrow(/The moon "Luna" cannot be removed: the "lunation" unit follows it\. Change that unit first \(Edit definition\)\. To rename the moon, change only its name\./);
     // a moon nobody follows still goes
     expect(compile(ast, { moons: moons.value.filter((m) => m.id !== "ember") }).bodies!.map((b) => b.id)).toEqual(["luna"]);
   });

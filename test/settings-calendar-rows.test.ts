@@ -95,11 +95,24 @@ describe("definitionRowEdit", () => {
     expect(hash(print(out))).toBe(hash(stored));
   });
 
-  test("moons: a rename is a new body by name (fresh id, bodyFor's rational); the other moon keeps its body", () => {
+  test("moons: a line that changed only its name renames the body (same id, exact rational) and reports the rename (bead wadjet-zoy)", () => {
     const stored = print(MOONY);
     const rows = definitionRows(parse(stored));
     if (rows.moons.kind !== "edit") throw new Error("moons should be editable");
-    const out = parse(written(definitionRowEdit(stored, "moons", rows.moons.value.replace("Luna,", "Selene,"))));
+    const edit = definitionRowEdit(stored, "moons", rows.moons.value.replace("Luna,", "Selene,"));
+    expect("renames" in edit && [...edit.renames]).toEqual([["Luna", "Selene"]]);
+    const out = parse(written(edit));
+    expect(out.bodies!.map((b) => [b.id, b.period, b.epoch])).toEqual(MOONY.bodies!.map((b) => [b.id, b.period, b.epoch]));
+    expect(out.bodies![0]!.moon!.name).toBe("Selene");
+  });
+
+  test("moons: a line that changed its name and more is a new body by name (fresh id, bodyFor's rational); the other moon keeps its body", () => {
+    const stored = print(MOONY);
+    const rows = definitionRows(parse(stored));
+    if (rows.moons.kind !== "edit") throw new Error("moons should be editable");
+    const edit = definitionRowEdit(stored, "moons", rows.moons.value.replace("Luna,", "Selene,").replace("Full@0.5", "Full@0.4"));
+    expect("renames" in edit && edit.renames.size).toBe(0);
+    const out = parse(written(edit));
     const selene = out.bodies!.find((b) => b.moon?.name === "Selene")!;
     expect(selene.id).not.toBe("luna");
     expect(out.bodies!.some((b) => b.id === "luna")).toBe(false);

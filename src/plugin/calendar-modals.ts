@@ -249,7 +249,8 @@ export class DefinitionModal extends Modal {
               final = chosen;
             }
             try {
-              await this.plugin.calendars.saveDefinition(final);
+              // a VBODY that kept its UID and changed its MOON name is a rename: its references follow in this save (bead wadjet-zoy)
+              await this.plugin.calendars.saveDefinition(final, { renames: "byUid" });
             } catch (e) {
               return void error.setText(`Not saved: ${e instanceof Error ? e.message : String(e)}`);
             }

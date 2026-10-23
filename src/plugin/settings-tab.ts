@@ -348,7 +348,8 @@ export class WadjetSettingTab extends PluginSettingTab {
     try {
       const chosen = await confirmCalendarChange(this.app, this.plugin, stored, edit.text);
       if (chosen === null) return;
-      await this.plugin.calendars.saveDefinition(chosen);
+      // a moon this row renamed keeps its body, and its references follow in the same save (bead wadjet-zoy)
+      await this.plugin.calendars.saveDefinition(chosen, { renames: edit.renames });
     } catch (e) {
       new Notice(`The calendar was not saved: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

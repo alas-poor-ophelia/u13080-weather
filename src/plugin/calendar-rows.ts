@@ -10,7 +10,8 @@
 import { YEAR_LENGTH_MAX } from "../core/modifiers";
 import { parse, type CalendarAst } from "../seshat";
 import { calendarOfDefinition, mergeCalendar, type CalendarDraft } from "../studio/model/definition";
-import { badMoonsLine, badSeasonsLine, parseMoonsText, parseSeasonsText, serialiseMoonsText, serialiseSeasonsText } from "./calendar-text";
+import type { MoonRenames } from "../studio/model/moon-rename";
+import { badMoonsLine, badSeasonsLine, moonRowRenames, parseMoonsText, parseSeasonsText, serialiseMoonsText, serialiseSeasonsText } from "./calendar-text";
 import { recognise, type YearForm } from "./time/form";
 
 export type DefinitionRowKey = "year" | "moons" | "seasons";
@@ -53,14 +54,20 @@ export function badYearLength(v: number): string | undefined {
   return Number.isInteger(v) && v >= 1 && v <= YEAR_LENGTH_MAX ? undefined : `Between 1 and ${YEAR_LENGTH_MAX.toLocaleString("en")} days.`;
 }
 
-export type DefinitionRowEdit = { readonly text: string } | { readonly error: string } | { readonly unchanged: true };
+/** `renames`: the moons the edit renamed (old name → new name), whose references the save renames with it (bead wadjet-zoy). */
+export type DefinitionRowEdit = { readonly text: string; readonly renames: MoonRenames } | { readonly error: string } | { readonly unchanged: true };
 
 /**
  * The definition text one row's edit makes, merged into the stored text.
- * Moons read from the text carry no body ids: each takes the id of the stored
- * moon with the same name, so an unchanged moon keeps its body and exact
- * rational (and the calendar its hash). A renamed moon matches no stored name,
- * so it is a new body (bodyFor's rational, a fresh id) and the old one goes.
+ * Moons read from the text carry no body ids. A line that renames its moon by
+ * the legacy row's rule (moonRowRenames: the row keeps its count and order and
+ * the line differs from the stored moon in its name alone) keeps that body's
+ * id, so a unit following it and a rule naming its phases keep working, and
+ * the edit reports the rename so the save renames the moon's references with
+ * it (bead wadjet-zoy). Every other line takes the id of the stored moon with
+ * the same name, so an unchanged moon keeps its body and exact rational (and
+ * the calendar its hash); a line matching neither is a new body (bodyFor's
+ * rational, a fresh id) and a stored moon no line keeps goes.
  * An empty Seasons text removes the seasons field.
  * @param stored the stored definition text (it runs)
  * @param row the row edited
@@ -75,6 +82,7 @@ export function definitionRowEdit(stored: string, row: DefinitionRowKey, value: 
   }
   const base = calendarOfDefinition(ast);
   let draft: CalendarDraft;
+  let renames: MoonRenames = new Map();
   if (row === "year") {
     const len = Number(value);
     const bad = badYearLength(len);
@@ -87,8 +95,13 @@ export function definitionRowEdit(stored: string, row: DefinitionRowKey, value: 
     const text = String(value);
     const bad = badMoonsLine(text);
     if (bad) return { error: bad };
-    const moons = parseMoonsText(text).map((m) => {
-      const id = base.moons.find((b) => b.name === m.name)?.id;
+    const parsed = parseMoonsText(text);
+    renames = moonRowRenames(base.moons, parsed);
+    const renamedAt = (i: number) => renames.get(base.moons[i]?.name ?? "") === parsed[i]!.name;
+    // a renamed body's id is its own line's; no other line may take it by name
+    const taken = new Set(parsed.flatMap((_, i) => (renamedAt(i) ? [base.moons[i]!.id] : [])));
+    const moons = parsed.map((m, i) => {
+      const id = renamedAt(i) ? base.moons[i]!.id : base.moons.find((b) => b.name === m.name && !taken.has(b.id))?.id;
       return id === undefined ? m : { id, ...m };
     });
     draft = { ...base, moons };
@@ -103,10 +116,11 @@ export function definitionRowEdit(stored: string, row: DefinitionRowKey, value: 
     case "unchanged":
       return { unchanged: true };
     case "error":
-      return { error: `Not a calendar that runs: ${m.message}.` };
+      // a refused edit (a FormError) is already a sentence that says what to do; anything else is the checker's words
+      return { error: /[.!?]$/.test(m.message) ? m.message : `Not a calendar that runs: ${m.message}.` };
     case "stale":
       return { error: "The calendar definition changed while you edited it. Close and reopen settings to see it." };
     case "write":
-      return m.text === stored ? { unchanged: true } : { text: m.text };
+      return m.text === stored ? { unchanged: true } : { text: m.text, renames };
   }
 }

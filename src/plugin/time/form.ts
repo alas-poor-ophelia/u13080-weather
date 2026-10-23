@@ -421,7 +421,7 @@ function writeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
   for (const b of ast.bodies ?? []) {
     if (!b.moon || kept.has(b.id)) continue;
     const units = followersOf(ast, b.id);
-    if (units.length) throw new FormError(`The moon "${b.moon.name}" cannot be removed or renamed here: the ${units.map((u) => `"${u}"`).join(" and the ")} ${units.length === 1 ? "unit follows" : "units follow"} it. Rename it in the Studio's moon window; to remove it, change ${units.length === 1 ? "that unit" : "those units"} first (Edit definition).`);
+    if (units.length) throw new FormError(`The moon "${b.moon.name}" cannot be removed: the ${units.map((u) => `"${u}"`).join(" and the ")} ${units.length === 1 ? "unit follows" : "units follow"} it. Change ${units.length === 1 ? "that unit" : "those units"} first (Edit definition). To rename the moon, change only its name.`);
   }
   // a phase a rule names keeps its name while the rule does (§16.7 P3): renaming or removing it is refused
   for (const ref of namedPhasesOf(ast)) {

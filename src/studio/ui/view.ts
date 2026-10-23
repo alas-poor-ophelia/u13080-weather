@@ -47,6 +47,7 @@ import { createPlaylistRegistry, createPlaylistSurface } from "./playlist";
 import { createRowsSurface } from "./rows-surface";
 import type { Surface, SurfaceContext } from "./surfaces";
 import { createWindowManager, type WindowManager } from "./windows";
+import { renameMoonsInDrafts, type MoonRenames } from "../model/moon-rename";
 
 export const VIEW_TYPE = "wadjet-studio";
 
@@ -413,5 +414,17 @@ export class StudioView extends ItemView {
       }
       if (s.view.zoneId !== null && !(s.view.zoneId in s.zones)) s.view.zoneId = null;
     });
+  }
+
+  /**
+   * Moons were renamed outside the studio (the settings Moons row, Edit
+   * definition, Undo the last calendar change; bead wadjet-zoy), and settings
+   * renamed their references in the same save. Called before that save's
+   * refresh, while every draft still carries the old names: every draft and
+   * every history step renames them too, so a dirty draft saved later does not
+   * write an old name back. Clean drafts then take the stored zones as usual.
+   */
+  followExternalMoonRenames(renames: MoonRenames): void {
+    if (renames.size > 0) this.store.amend((d) => renameMoonsInDrafts(d, renames));
   }
 }

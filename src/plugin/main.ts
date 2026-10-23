@@ -120,6 +120,9 @@ export default class WadjetPlugin extends Plugin {
         this.refreshSettingsTab();
       },
       syncActiveSubscription: () => this.controller.syncActiveSubscription(),
+      moonsRenamed: (renames) => {
+        for (const leaf of this.app.workspace.getLeavesOfType(STUDIO_VIEW_TYPE)) if (leaf.view instanceof StudioView) leaf.view.followExternalMoonRenames(renames);
+      },
     });
     const fault = this.calendars.fault();
     // a stored definition the world has left changes no weather: it is shown in settings, not announced
