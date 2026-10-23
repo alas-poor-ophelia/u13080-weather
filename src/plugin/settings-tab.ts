@@ -47,7 +47,12 @@ export class WadjetSettingTab extends PluginSettingTab {
   }
 
   private saveAndRefresh(rebuild: boolean): void {
-    void (rebuild ? this.plugin.saveAndRebuild() : this.plugin.saveSettings()).then(() => this.update());
+    // a refused save (a new world that yielded to synced settings, wadjet-1ou) has already said why in a Notice;
+    // the edit stays in this session only, and nothing reaches data.json
+    void (rebuild ? this.plugin.saveAndRebuild() : this.plugin.saveSettings()).then(
+      () => this.update(),
+      (e: unknown) => console.warn("U+13080 Weather: settings not saved:", e),
+    );
   }
 
   override getSettingDefinitions(): SettingDefinitionItem[] {

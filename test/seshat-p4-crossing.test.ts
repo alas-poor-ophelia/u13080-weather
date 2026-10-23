@@ -23,7 +23,7 @@ function legacyDerived(): CalendarAst {
 }
 function newWorld(): string {
   const s = migrateSettings(null);
-  startNewWorld(s);
+  startNewWorld(s, "Test vault");
   return s.calendar.definition as string;
 }
 

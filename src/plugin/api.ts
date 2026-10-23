@@ -213,9 +213,10 @@ export class ApiController {
   /**
    * Move the active calendar to `target()` (computed inside the queue, so
    * back-to-back advances add up). A target outside ±MAX_DAY_ORDINAL rejects
-   * with RangeError.
+   * with RangeError. `around` wraps the adapter's setNow (the plugin's own
+   * commands mark their day write as the user's).
    */
-  private moveTo(target: () => number | null): Promise<boolean> {
+  moveTo(target: () => number | null, around: (f: () => Promise<void>) => Promise<void> = (f) => f()): Promise<boolean> {
     return this.enqueue(async () => {
       if (this.dead) return false;
       const adapter = this.host.time.active;
@@ -224,7 +225,7 @@ export class ApiController {
       if (day === null) return false;
       assertDayInRange(day, "The target day");
       try {
-        await adapter.setNow(day);
+        await around(() => Promise.resolve(adapter.setNow?.(day)));
       } catch (e) {
         console.error(`U+13080 Weather: time adapter "${adapter.id}" failed to set the current day.`, e);
         return false;

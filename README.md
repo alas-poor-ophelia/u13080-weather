@@ -370,8 +370,13 @@ as fractions of the year, moons, edited in Settings. It runs exactly as it alway
 calendar… can move it to a definition (its own days, seasons and moons, as a definition), and offers
 the way back; a world that started on a definition is not offered the legacy calendar.
 
-A new world is one with no settings file at all. On a new device with Obsidian Sync, let Sync
-deliver the plugin's settings before enabling the plugin: until it does, the plugin sees a new world.
+A new world is one with no settings file at all. It is saved only when you change something
+yourself (another plugin or a script moving the day changes it in memory, and that change is saved
+with yours), and its seed comes from the vault's name, so an unsaved new world shows the same
+weather on every start, and on devices whose vault has the same name. Before that first save the
+plugin reads the disk again; if Obsidian Sync has delivered the plugin's settings by then, it saves
+nothing and asks you to reload Obsidian to use them. A synced copy that arrives while that first
+save is being written is detected and reported, not prevented: reload to use the synced copy.
 
 A world on a definition needs this version of the plugin or later; an older one would quietly run
 it on the legacy calendar's settings again. It is a calendar, not an almanac: it does not compute

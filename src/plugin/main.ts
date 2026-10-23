@@ -11,7 +11,7 @@ import type { StudioSettingsLike } from "../studio/model/state";
 import { blockRepaintOn, parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
-import { SaveQueue, setAndSave } from "./persist";
+import { CONFLICT_NOTICE, FirstSave, SaveQueue, setAndSave, YIELD_NOTICE } from "./persist";
 import { renderCard, renderError, renderLine, renderProse, renderTable, renderValue } from "./render";
 import { convertReport, reportField } from "../core/units";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettings } from "./settings";
@@ -51,9 +51,27 @@ export default class WadjetPlugin extends Plugin {
   private dead = false;
   /** the internal calendar's configHash at the last rebuild, to tell a calendar edit from any other save */
   private internalHash = "";
+  /**
+   * A new world (no data.json) is not saved at startup; its first save re-reads the disk and steps aside
+   * if synced settings have arrived (bead wadjet-1ou). Its Notice shows once and stays until dismissed.
+   */
+  private readonly firstSave = new FirstSave(
+    () => this.loadData(),
+    (reason) => {
+      const text = reason === "conflict" ? CONFLICT_NOTICE : YIELD_NOTICE;
+      console.warn(`U+13080 Weather: ${text}`);
+      new Notice(text, 0);
+    },
+  );
+  /**
+   * True while a time change the user asked for (the settings tab's day, the advance commands) runs inside
+   * the API's time queue, so its save is the user's; any other day write (another plugin or a script calling
+   * setNow/advance) is automatic, and a new world does not write it until the user saves (bead wadjet-1ou).
+   */
+  private userTime = false;
   /** Every saveData goes through here: one write at a time, each writing the settings as they are when it starts. */
   private readonly saves = new SaveQueue(
-    (data) => this.saveData(data),
+    this.firstSave.guard((data) => this.saveData(data)),
     () => this.settings,
     () => !this.dead,
   );
@@ -63,8 +81,13 @@ export default class WadjetPlugin extends Plugin {
     if (this.dead) return;
     const repairs: string[] = [];
     this.settings = migrateSettings(loaded, (msg) => repairs.push(msg));
-    // no data.json at all: a new world, on a plain calendar definition (§15.6); a data.json missing a field never is
-    if (loaded === null || loaded === undefined) startNewWorld(this.settings);
+    // no data.json at all: a new world, on a plain calendar definition (§15.6); a data.json missing a field never is.
+    // It is not saved here: on a fresh device Sync may not have delivered data.json yet (bead wadjet-1ou).
+    const fresh = loaded === null || loaded === undefined;
+    if (fresh) {
+      startNewWorld(this.settings, this.app.vault.getName());
+      this.firstSave.startNew();
+    }
     if (repairs.length) {
       // the repaired settings are saved below, so these messages are where the old values survive: show them and log them
       for (const msg of repairs) console.warn(`U+13080 Weather: ${msg}`);
@@ -137,10 +160,20 @@ export default class WadjetPlugin extends Plugin {
       new Notice(`The weather generator was updated (${this.settings.generatorVersion} → ${GENERATOR_VERSION}). Only the current generator ships, so past weather may differ from what you saw before. Pinned days are kept. You can acknowledge the change in settings.`, 10000);
     }
 
-    await this.saveSettings(); // persist a freshly generated seed
+    // persist repairs and migrations; a new world waits for its first change (bead wadjet-1ou)
+    if (!fresh) await this.saveSettings();
     if (this.dead) return;
     this.controller.markReady();
     this.app.workspace.trigger("wadjet:ready");
+  }
+
+  /**
+   * data.json changed on disk from outside (Sync). A new world that has not saved steps aside for it
+   * (bead wadjet-1ou); a saved world keeps what it has in memory, as before.
+   */
+  override onExternalSettingsChange(): void {
+    if (this.dead) return;
+    this.firstSave.external();
   }
 
   override onunload(): void {
@@ -154,10 +187,25 @@ export default class WadjetPlugin extends Plugin {
     return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}) };
   }
 
-  /** Save settings to data.json (serialised with every other save); does nothing once the plugin is unloaded. */
-  async saveSettings(): Promise<void> {
+  /**
+   * Save settings to data.json (serialised with every other save); does nothing once the plugin is unloaded.
+   * Rejects, writing nothing, once a new world has yielded to synced settings (bead wadjet-1ou).
+   * `automatic`: the change did not come from the user (another plugin or a script through the API); while
+   * the world is new such a save resolves without writing, and the change is written by the user's first save.
+   */
+  async saveSettings(opts: { automatic?: boolean } = {}): Promise<void> {
     if (this.dead) return;
-    await this.saves.save();
+    await this.saves.save(opts);
+  }
+
+  /** Run a time step (already inside the API's time queue) as the user's own, so its day write is user-initiated. */
+  private async asUser<T>(f: () => Promise<T>): Promise<T> {
+    this.userTime = true;
+    try {
+      return await f();
+    } finally {
+      this.userTime = false;
+    }
   }
 
   /** Save and push the new state into the world (rebuilds generators lazily). */
@@ -179,14 +227,17 @@ export default class WadjetPlugin extends Plugin {
    * The internal calendar's writer: store the day and save. Runs inside the API's time queue.
    * A failed save puts the previous day back and rethrows, so the calendar tells no subscriber,
    * `setNow`/`advance` resolve false, and no time-changed fires.
+   * Automatic unless the user's own time step is running (`userTime`): a new world keeps an API caller's
+   * day in memory and writes it with the user's first save (bead wadjet-1ou).
    */
   private async writeCurrentDay(d: number): Promise<void> {
     if (this.dead) throw new Error("U+13080 Weather is unloaded.");
+    const automatic = !this.userTime;
     await setAndSave(
       () => this.settings.currentDayOrdinal,
       (v) => (this.settings.currentDayOrdinal = v),
       d,
-      () => this.saveSettings(),
+      () => this.saveSettings({ automatic }),
     );
     if (this.dead) return;
     this.refreshSettingsTab();
@@ -201,7 +252,8 @@ export default class WadjetPlugin extends Plugin {
     return this.controller.enqueue(async () => {
       if (this.dead) return;
       const seshat = this.calendars.seshat;
-      await (seshat && this.time.active === seshat ? seshat : this.internalCalendar).setNow(d);
+      const adapter = seshat && this.time.active === seshat ? seshat : this.internalCalendar;
+      await this.asUser(() => adapter.setNow(d));
     });
   }
 
@@ -328,7 +380,14 @@ export default class WadjetPlugin extends Plugin {
   // --- commands --------------------------------------------------------------
   private registerCommands(): void {
     const step = async (n: number) => {
-      const moved = await this.api.advance(n);
+      // the user's command: the same step as api.advance, but its day write is the user's (bead wadjet-1ou)
+      const moved = await this.controller.moveTo(
+        () => {
+          const now = this.world.now();
+          return now ? now.dayOrdinal + n : null;
+        },
+        (f) => this.asUser(f),
+      );
       if (!moved) return void new Notice("The active calendar can't be changed from here.");
       const now = this.world.now();
       if (now) new Notice(this.api.format(now.dayOrdinal));

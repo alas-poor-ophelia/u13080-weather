@@ -10,11 +10,12 @@
  *   WADJET_E2E_VAULT="C:\path\to\vault" bun run test:e2e
  *   WADJET_E2E_VISIBLE=1 ...                       # watch it happen
  */
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { MODIFIER_EXAMPLES } from "../../src/plugin/modifier-examples";
+import { vaultSeed } from "../../src/plugin/new-world";
 import { installPlugin, launchObsidian, PLUGIN_DIR, VAULT, withApp, type Obsidian } from "./obsidian";
 
 const NOTE = "Wadjet Smoke.md";
@@ -43,6 +44,14 @@ async function enableWadjet(): Promise<{ ok: boolean; readyEvent: boolean; ready
     const w = window as unknown as { Wadjet: { ready: boolean; version: string; generatorVersion: string }; __wadjetReady: boolean };
     return { ok: true, readyEvent: w.__wadjetReady, ready: w.Wadjet.ready, version: w.Wadjet.version, generatorVersion: w.Wadjet.generatorVersion };
   }).then((r) => ({ ...r, ok }));
+}
+
+/** The running plugin's world: its seed, current day, the vault's name and the first-save state (bead wadjet-1ou). */
+async function liveWorld(): Promise<{ seed: string; day: number; vault: string; state: string }> {
+  return withApp(ob.page, (app) => {
+    const p = app.plugins.plugins.wadjet as unknown as { settings: { worldSeed: string; currentDayOrdinal: number }; firstSave: { current: string } };
+    return { seed: p.settings.worldSeed, day: p.settings.currentDayOrdinal, vault: app.vault.getName(), state: p.firstSave.current };
+  });
 }
 
 /** Open (or re-focus) the Wadjet settings tab and bind `sw` to the settings window. */
@@ -142,7 +151,7 @@ async function allNotices(): Promise<string[]> {
 
 beforeAll(async () => {
   installPlugin();
-  // Start from a world with no data.json so the seed is freshly generated.
+  // Start from a world with no data.json: a new world, derived from the vault's name and not saved until a change.
   rmSync(DATA_JSON, { force: true });
   for (const n of SCRATCH_NOTES) rmSync(path.join(VAULT, n), { force: true });
   ob = await launchObsidian();
@@ -161,10 +170,84 @@ describe("smoke walk", () => {
     expect(r.ok).toBe(true);
     expect(r.ready).toBe(true);
     expect(r.readyEvent).toBe(true);
-    expect(existsSync(DATA_JSON)).toBe(true);
-    const seed = (JSON.parse(readFileSync(DATA_JSON, "utf8")) as { worldSeed: string }).worldSeed;
-    expect(seed).toMatch(/^[0-9a-f]{16}$/);
-    note(`fresh seed persisted: ${seed}`);
+    // bead wadjet-1ou: a new world is not saved at startup (Sync may not have delivered data.json yet)
+    expect(existsSync(DATA_JSON)).toBe(false);
+    const live = await liveWorld();
+    expect(live.seed).toBe(vaultSeed(live.vault));
+    expect(live.seed).toMatch(/^[0-9a-f]{16}$/);
+    expect(live.state).toBe("new");
+    // no data.json is not a damaged one: nothing to repair, so no repair Notice
+    expect((await allNotices()).filter((t) => t.includes("repaired"))).toEqual([]);
+    note(`new world not saved at startup; seed ${live.seed} from the vault name "${live.vault}"`);
+  });
+
+  test("Sync race (bead wadjet-1ou): data.json arriving before the first change is never saved over; a reload starts the same new world", async () => {
+    // the same vault starts the same unsaved world: same seed after a reload, still nothing on disk
+    await enableWadjet();
+    expect(existsSync(DATA_JSON)).toBe(false);
+    const again = await liveWorld();
+    expect(again.seed).toBe(vaultSeed(again.vault));
+    expect(again.state).toBe("new");
+
+    // another plugin or a script moves the day at startup: applied in memory, not written (the first write is the user's)
+    const day = again.day;
+    const errorsBefore = ob.errors.length;
+    const setNow = (d: number) => withApp(ob.page, (_app, n) => (window as unknown as { Wadjet: { setNow: (n: number) => Promise<boolean> } }).Wadjet.setNow(n), d);
+    expect(await setNow(day + 7)).toBe(true);
+    expect(existsSync(DATA_JSON)).toBe(false);
+    expect(await liveWorld()).toMatchObject({ state: "new", day: day + 7 });
+
+    // Sync delivers the real world while the new one is running and unsaved
+    const synced = JSON.stringify({ worldSeed: "feedfacefeedface", zones: [], overrides: [], currentDayOrdinal: 42 }, null, 2);
+    writeFileSync(DATA_JSON, synced);
+    // the user's first save re-reads the disk (or the host has already reported the change): refused, nothing written
+    const refused = await withApp(ob.page, (app) =>
+      (app.plugins.plugins.wadjet as unknown as { saveSettings: () => Promise<void> }).saveSettings().then(
+        () => "saved",
+        (e: Error) => e.message,
+      ),
+    );
+    expect(refused).toContain("did not save");
+    expect((await liveWorld()).state).toBe("yielded");
+    expect(readFileSync(DATA_JSON, "utf8")).toBe(synced);
+    const shown = (await allNotices()).filter((t) => t.includes("synced settings"));
+    expect(shown).toEqual([
+      "Wadjet found this vault's synced settings after starting a new world here, so it did not save over them. Reload Obsidian (or turn the plugin off and on) to use the synced world.",
+    ]);
+    await ob.page.waitForTimeout(250);
+    expect(ob.errors.slice(errorsBefore)).toEqual([]);
+    note(`setNow at startup kept in memory, nothing written; synced data.json then arrived: the user's save refused, file untouched, one Notice`);
+
+    // back to the walk's new world: dismiss the Notice, take the file away, reload the plugin
+    for (const w of ob.app.windows()) if (!w.isClosed()) await w.locator(".notice").evaluateAll((els) => els.forEach((e) => e.remove()));
+    rmSync(DATA_JSON, { force: true });
+    await ob.page.waitForTimeout(1500); // let any watcher event for the removal land on the old instance
+    await enableWadjet();
+    const fresh = await liveWorld();
+    expect(fresh.state).toBe("new");
+    expect(fresh.seed).toBe(vaultSeed(fresh.vault));
+  });
+
+  test("an API setNow at startup writes nothing; the user's first change writes the world with that day (bead wadjet-1ou)", async () => {
+    const live = await liveWorld();
+    const setNow = (d: number) => withApp(ob.page, (_app, n) => (window as unknown as { Wadjet: { setNow: (n: number) => Promise<boolean> } }).Wadjet.setNow(n), d);
+    // automatic: another plugin or a script moving the day
+    expect(await setNow(live.day - 1)).toBe(true);
+    await ob.page.waitForTimeout(250);
+    expect(existsSync(DATA_JSON)).toBe(false);
+    expect(await liveWorld()).toMatchObject({ state: "new", day: live.day - 1 });
+    // the user's command steps from the day setNow left, and its save is the world's first write
+    await withApp(ob.page, (app) => void (app as unknown as { commands: { executeCommandById: (id: string) => boolean } }).commands.executeCommandById("wadjet:next-day"));
+    await expect.poll(() => existsSync(DATA_JSON), { timeout: 5_000 }).toBe(true);
+    await expect.poll(async () => (await liveWorld()).state, { timeout: 5_000 }).toBe("saved");
+    const saved = JSON.parse(readFileSync(DATA_JSON, "utf8")) as { worldSeed: string; currentDayOrdinal: number };
+    expect(saved.worldSeed).toBe(vaultSeed(live.vault));
+    expect(saved.currentDayOrdinal).toBe(live.day);
+    // once saved, an automatic day write goes to disk as before
+    expect(await setNow(live.day + 1)).toBe(true);
+    expect((JSON.parse(readFileSync(DATA_JSON, "utf8")) as { currentDayOrdinal: number }).currentDayOrdinal).toBe(live.day + 1);
+    expect(await setNow(live.day)).toBe(true);
+    note(`setNow(${live.day - 1}) at startup wrote nothing; next-day then saved the world at day ${saved.currentDayOrdinal}, seed ${saved.worldSeed}; a later setNow wrote`);
   });
 
   test("settings tab renders (declarative 1.13 API, own window)", async () => {
