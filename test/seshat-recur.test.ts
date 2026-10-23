@@ -180,7 +180,8 @@ describe("named rules (VRULE) and binding", () => {
     expect(bad({ kind: "recur", freq: "year", setpos: [] })[0]).toContain("non-empty");
     expect(bad({ kind: "recur", freq: "year", by: "month" } as unknown as RuleAst)[0]).toContain("by must be a list");
     const tagged: CalendarAst = { ...GREGORIAN, rules: [{ id: "x", rule: { kind: "dates", days: [0] }, tags: ["holiday:x"] }] };
-    expect(checkRule({ kind: "tag", tag: "holiday:x" }, tagged)[0]).toContain("set only by a named rule");
+    // P4 step 4a (§16 D8): a tag only named rules set is readable now; a cycle is the calendar's check (seshat-p4-rule-tags.test.ts)
+    expect(checkRule({ kind: "tag", tag: "holiday:x" }, tagged)).toEqual([]);
     expect(validate({ ...GREGORIAN, rules: [{ id: "year", rule: { kind: "dates", days: [1] } }] })).toContain('id "year" is declared more than once');
     expect(() => new Engine(GREGORIAN).days.bind({ kind: "recur", freq: "fortnight" })).toThrow(RangeError);
   });

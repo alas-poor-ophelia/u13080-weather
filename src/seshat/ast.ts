@@ -209,8 +209,9 @@ export interface DayLabelAst extends LabelAst {
 
 /**
  * A named rule (VRULE, docs/SESHAT-v0.md §3): every day it matches carries its
- * tags (a holiday). Rules read unit and day tags, never other rules' tags, so
- * no rule can depend on itself. A BYSETPOS over a variable-length period past
+ * tags (a holiday). A rule may read a tag only named rules set (docs/SESHAT-v0.md
+ * §16 D8): those reads must not form a cycle, which the validator refuses; a tag a
+ * unit, slot, day label or season also sets is read from those alone (§16.7 P2). A BYSETPOS over a variable-length period past
  * 400 days, or a COUNT walk past 10⁶ days, passes validation and throws when
  * the rule runs, and then tagsAt throws for that day.
  */

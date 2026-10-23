@@ -18,7 +18,7 @@
  * the year `text` and passes through every year edit.
  */
 import { canonicalJson } from "../../core/profile";
-import { baseKind, epochEditK, seasonsUseDates, toNumber, type SeasonMark, type BodyAst, type CalendarAst, type CrossingAst, type CycleRule, type CycleUnitAst, type DayLabelAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SlotsUnitAst, type UnitAst } from "../../seshat";
+import { baseKind, childrenOf, epochEditK, seasonsUseDates, toNumber, type SeasonMark, type BodyAst, type CalendarAst, type CrossingAst, type CycleRule, type CycleUnitAst, type DayLabelAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SlotsUnitAst, type UnitAst } from "../../seshat";
 
 export type Part<T> = { readonly kind: "form"; readonly value: T } | { readonly kind: "text"; readonly why: string };
 
@@ -345,9 +345,8 @@ export function followersOf(ast: CalendarAst, id: string): string[] {
 export function namedPhasesOf(ast: CalendarAst): Array<{ readonly body: string; readonly name: string; readonly rules: string[] }> {
   const out: Array<{ body: string; name: string; rules: string[] }> = [];
   const walk = (r: RuleAst, id: string): void => {
-    if (r.kind === "all" || r.kind === "any") r.of.forEach((q) => walk(q, id));
-    else if (r.kind === "not") walk(r.of, id);
-    else if (r.kind === "phase" && r.name !== undefined && r.body !== undefined) {
+    childrenOf(r).forEach((q) => walk(q, id)); // every node, whatever its kind (§16.7 P5)
+    if (r.kind === "phase" && r.name !== undefined && r.body !== undefined) {
       const at = out.find((x) => x.body === r.body && x.name === r.name);
       if (!at) out.push({ body: r.body, name: r.name, rules: [id] });
       else if (!at.rules.includes(id)) at.rules.push(id);

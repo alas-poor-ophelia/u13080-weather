@@ -23,7 +23,7 @@ import type { SeasonMarkAst } from "./seasons";
 import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, FormatAst, SeasonsAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
 import type { GearAst } from "./gear";
 import { gcd, type Rational } from "./rational";
-import type { By, RuleAst } from "./rule";
+import { unreachableRule, type By, type RuleAst } from "./rule";
 import { RULE_DEPTH_MAX } from "./validate";
 
 export const ID = /^[a-z][a-z0-9-]*$/;
@@ -463,8 +463,11 @@ export function ruleLines(r: RuleAst, depth = 0): string[] {
       if (r.until !== undefined) p.push(`UNTIL=${day(r.until)}`);
       return [`RRULE:${p.join(";")}`];
     }
-    default:
+    case "host":
+    case "throw":
       throw new RangeError(`a "${r.kind}" rule has no text form (it belongs to Wadjet, not to a calendar)`);
+    default:
+      return unreachableRule(r); // §16.7 P5: a new kind needs a text form
   }
 }
 

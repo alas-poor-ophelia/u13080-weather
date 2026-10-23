@@ -21,7 +21,7 @@ import { Body } from "./body";
 import { checkFormats } from "./format";
 import { gcd } from "./rational";
 import { crossingOrigin, crossingProblem, phaseNameProblem, resolve } from "./resolve";
-import type { By, RuleAst } from "./rule";
+import { tagsRead, type By, type RuleAst } from "./rule";
 
 /** Largest gear period checked residue by residue; a bigger one is refused rather than sampled. */
 const GEAR_PERIOD_MAX = 100_000;
@@ -338,6 +338,11 @@ export function problems(stored: CalendarAst): Problem[] {
     if (r.tags !== undefined) checkLabel({ tags: r.tags }, `rule "${r.id}"`, (msg) => errors.push(msg));
     errors.push(...checkRule(r.rule, ast, `rule "${r.id}"`));
     own(n, { rule: r.id });
+  }
+  for (const c of ruleCycles(ast)) {
+    const n = errors.length;
+    errors.push(`rules read each other's tags in a cycle: ${c.map((id) => `"${id}"`).join(" → ")}`);
+    own(n, { rule: c[0]! });
   }
   return errors.map((message, i) => ({ message, ...locs[i] }));
 }
@@ -730,6 +735,62 @@ function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], ge
 }
 
 /**
+ * The tags only named rules set (§16 D8, §16.7 P2), each with the indices of
+ * the rules setting it in declaration order. A tag a unit label, a slot, a day
+ * label or a season mark (`season:<name>`) also sets is not here: a rule reads
+ * it base-only, exactly as before rules could read rules.
+ */
+export function ruleTagSetters(ast: CalendarAst): Map<string, number[]> {
+  const base = new Set<string>();
+  for (const u of Array.isArray(ast.units) ? ast.units : []) {
+    if (!isObj(u)) continue;
+    const labels: unknown = u.kind === "cycle" ? u.labels : u.slots;
+    for (const l of Array.isArray(labels) ? (labels as unknown[]) : []) if (isObj(l) && Array.isArray(l.tags)) for (const t of l.tags as unknown[]) base.add(t as string);
+  }
+  for (const d of Array.isArray(ast.days) ? ast.days : []) if (isObj(d) && Array.isArray(d.tags)) for (const t of d.tags as unknown[]) base.add(t as string);
+  for (const m of Array.isArray(ast.seasons?.marks) ? ast.seasons.marks : []) if (isObj(m) && typeof m.name === "string") base.add(`season:${m.name}`);
+  const out = new Map<string, number[]>();
+  for (const [i, r] of (Array.isArray(ast.rules) ? ast.rules : []).entries()) {
+    if (!isObj(r) || !Array.isArray(r.tags)) continue;
+    for (const t of r.tags as unknown[]) {
+      if (typeof t !== "string" || base.has(t)) continue;
+      const at = out.get(t);
+      if (!at) out.set(t, [i]);
+      else if (at[at.length - 1] !== i) at.push(i);
+    }
+  }
+  return out;
+}
+
+/**
+ * Named rules that depend on themselves through tags (§16 D8): rule A depends
+ * on B when A reads a tag only named rules set and B sets it. Each cycle as
+ * the rule ids along it, first id repeated at the end (`a → b → a`; a rule
+ * reading its own tag is `a → a`). One cycle per back edge of a depth-first
+ * walk in declaration order, so every cyclic calendar reports at least one.
+ */
+export function ruleCycles(ast: CalendarAst): string[][] {
+  const rules: NonNullable<CalendarAst["rules"]> = Array.isArray(ast.rules) ? ast.rules : [];
+  const setters = ruleTagSetters(ast);
+  const deps = rules.map((r) => (isObj(r) ? [...new Set(tagsRead(r.rule).flatMap((t) => setters.get(t) ?? []))] : []));
+  const state = new Array<0 | 1 | 2>(rules.length).fill(0); // 0 unseen, 1 on the path, 2 done
+  const path: number[] = [];
+  const cycles: string[][] = [];
+  const visit = (i: number): void => {
+    state[i] = 1;
+    path.push(i);
+    for (const j of deps[i]!) {
+      if (state[j] === 1) cycles.push([...path.slice(path.indexOf(j)), j].map((k) => String(rules[k]!.id)));
+      else if (state[j] === 0) visit(j);
+    }
+    path.pop();
+    state[i] = 2;
+  };
+  for (let i = 0; i < rules.length; i++) if (state[i] === 0) visit(i);
+  return cycles;
+}
+
+/**
  * A rule's references and shape against one calendar (§3.3, §3.5). Used for
  * the calendar's named rules and by EngineDays.bind for any other rule. A
  * calendar rule has no host leaves (regime and chance belong to Wadjet).
@@ -738,10 +799,6 @@ function checkSlotSums(u: SlotsUnitAst, chain: UnitAst[], involved: string[], ge
 export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): string[] {
   const errors: string[] = [];
   const units = new Map(ast.units.map((u) => [u.id, u]));
-  const own = new Set([...ast.units.flatMap((u) => (u.kind === "cycle" ? (u.labels ?? []) : u.slots)).flatMap((l) => l.tags ?? []), ...(ast.days ?? []).flatMap((d) => d.tags ?? [])]);
-  // a rule reads the day's season as season:<name> (§16.7 P6), whoever else sets that tag
-  for (const m of Array.isArray(ast.seasons?.marks) ? ast.seasons.marks : []) if (isObj(m) && typeof m.name === "string") own.add(`season:${m.name}`);
-  const ruleTags = new Set((ast.rules ?? []).flatMap((x) => x.tags ?? []).filter((t) => !own.has(t)));
   const unit = (id: unknown, at: string, allowDay: boolean): boolean => {
     if (allowDay && id === "day") return true;
     if (typeof id === "string" && units.has(id)) return true;
@@ -780,9 +837,9 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
         if ((r.from !== undefined && !num(r.from)) || (r.to !== undefined && !num(r.to))) errors.push(`${at}: index bounds must be numbers`);
         return;
       case "tag":
+        // a tag set only by named rules reads those rules (§16 D8); any other tag reads the base tags only (§16.7 P2).
+        // Cycles between named rules are the calendar's check (ruleCycles), not one rule's.
         if (typeof r.tag !== "string" || !r.tag) errors.push(`${at}: a tag is a non-empty string`);
-        // rules read unit and day tags only (no rule depends on another), so a named rule's tag is never seen
-        else if (ruleTags.has(r.tag)) errors.push(`${at}: tag "${r.tag}" is set only by a named rule, and rules never see those`);
         return;
       case "dates":
         return ints(r.days, `${at}: dates`, false);
@@ -790,8 +847,13 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
         return checkRecur(r, at);
       case "host":
         return void errors.push(`${at}: a calendar rule cannot read "${r.key}" (Wadjet's, not the calendar's)`);
-      default:
-        return void errors.push(`${at}: unknown rule kind ${show((r as { kind?: unknown }).kind)}`);
+      case "throw":
+        return void errors.push(`${at}: a rule that could not be compiled`);
+      default: {
+        // exhaustive over RuleAst (§16.7 P5); untyped input can still carry any kind
+        const unknown: never = r;
+        return void errors.push(`${at}: unknown rule kind ${show((unknown as { kind?: unknown }).kind)}`);
+      }
     }
   };
   const checkRecur = (r: Extract<RuleAst, { kind: "recur" }>, at: string): void => {

@@ -213,8 +213,17 @@ function ruleTree(r: RuleAst, bodies: ReadonlyMap<string, BodyAst>, depth = 0): 
       // the resolved node drops the name: equal spans hash equal, and a moved boundary moves the hash
       return { kind: "phase", body: r.body!, from: span.from, to: span.to };
     }
-    default:
+    case "dayIn":
+    case "index":
+    case "tag":
+    case "dates":
+    case "recur":
+    case "host":
+    case "throw":
       return r;
+    default:
+      // untyped input can carry an unknown kind: left as stored, the validator names it (§16.7 P5: a new kind with children recurses here)
+      return ((x: never) => x)(r);
   }
 }
 

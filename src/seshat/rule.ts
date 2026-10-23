@@ -193,5 +193,58 @@ export function evaluate(r: RuleAst, view: DayView, opts: EvalOptions): boolean 
       return opts.host(r.key, r.arg);
     case "throw":
       throw r.error;
+    default:
+      return unreachableRule(r);
   }
+}
+
+/**
+ * A node's direct sub-rules, for every kind (§16.7 P5): the walkers that only
+ * need to reach every node (dependencies, world checks, named phases) go
+ * through this one exhaustive switch, so a new kind cannot be missed.
+ */
+export function ruleChildren(r: RuleAst): readonly RuleAst[] {
+  switch (r.kind) {
+    case "all":
+    case "any":
+      return Array.isArray(r.of) ? (r.of as readonly RuleAst[]) : [];
+    case "not":
+      return [r.of];
+    case "phase":
+    case "dayIn":
+    case "index":
+    case "tag":
+    case "dates":
+    case "recur":
+    case "host":
+    case "throw":
+      return [];
+    default:
+      return unreachableRule(r);
+  }
+}
+
+/** The rule kinds this build knows: the lenient walkers below skip anything else. */
+const RULE_KINDS: ReadonlySet<string> = new Set(["all", "any", "not", "phase", "dayIn", "index", "tag", "dates", "recur", "host", "throw"]);
+
+/**
+ * A node's children for walkers that must not throw on untyped input (the validator, the world checks):
+ * an unknown kind has none here, and checkRule is what names it.
+ */
+export function childrenOf(r: unknown): readonly RuleAst[] {
+  if (typeof r !== "object" || r === null || !RULE_KINDS.has((r as { kind?: unknown }).kind as string)) return [];
+  return ruleChildren(r as RuleAst);
+}
+
+/** Every TAG a rule reads, in walk order (repeats kept). */
+export function tagsRead(r: RuleAst, depth = 0): string[] {
+  // depth guard: the validator reports deep nesting; a stored tree is never cyclic
+  if (typeof r !== "object" || r === null || depth > 256) return [];
+  if (r.kind === "tag") return typeof r.tag === "string" ? [r.tag] : [];
+  return childrenOf(r).flatMap((q) => tagsRead(q, depth + 1));
+}
+
+/** The compile-time exhaustiveness check of a switch over RuleAst kinds; at run time an unknown kind (untyped input) throws. */
+export function unreachableRule(r: never): never {
+  throw new RangeError(`unknown rule kind ${JSON.stringify((r as { kind?: unknown } | null)?.kind)}`);
 }

@@ -25,7 +25,7 @@ import type { CalendarAst, CrossingAst, CycleRule, LedgerEntry, StageAst, UnitAs
 import type { BodyAst } from "./ast";
 import type { Rational } from "./rational";
 import { translateWrap } from "./resolve";
-import type { RuleAst } from "./rule";
+import { unreachableRule, type RuleAst } from "./rule";
 
 const mod = (a: number, n: number) => ((a % n) + n) % n;
 
@@ -128,8 +128,15 @@ function ruleAst(r: RuleAst, k: number): RuleAst {
       // the index of the day unit is the day number itself
       if (r.unit !== "day") return r;
       return { ...r, ...(r.from !== undefined ? { from: r.from + k } : {}), ...(r.to !== undefined ? { to: r.to + k } : {}) };
-    default:
+    // read only the day's place in units, a body's phase, its tags, or nothing of the day: they move with the calendar as they are
+    case "phase":
+    case "dayIn":
+    case "tag":
+    case "host":
+    case "throw":
       return r;
+    default:
+      return unreachableRule(r); // §16.7 P5: a new kind must say how it moves
   }
 }
 

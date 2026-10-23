@@ -4,8 +4,11 @@
  *
  * Unit references are checked when a rule is bound (`EngineDays.bind`): on
  * a calendar, a reference to a unit or body it lacks is an error, never a
- * silent false. Rules read a day's unit and day tags, never the tags of
- * named rules (VRULE), so no rule can depend on itself.
+ * silent false. A rule reads a tag only named rules set by evaluating those
+ * rules for the day (§16 D8), lazily, each named rule at most once per day
+ * through a bounded memo keyed by rule index and day (§16.7 P8); every other
+ * tag it reads base-only (unit and day labels, the season), exactly as before
+ * rules could read rules (§16.7 P2). The validator refuses cycles.
  *
  * `recur` costs O(1) per day for the period and the `label`/`day` filters.
  * `nth` on a unit not nested by declaration lists the period's occurrences
@@ -14,10 +17,11 @@
  * A `setpos` period longer than SETPOS_PERIOD_MAX days and a `count` walk
  * longer than COUNT_WORK_MAX days throw rather than run unbounded.
  */
+import { DAY_LIMIT } from "./day";
 import type { Engine } from "./engine";
 import { resolveRule } from "./resolve";
 import { evaluate, type By, type DayView, type EvalOptions, type Recur, type RuleAst } from "./rule";
-import { checkRule, SETPOS_PERIOD_MAX } from "./validate";
+import { checkRule, ruleTagSetters, SETPOS_PERIOD_MAX } from "./validate";
 
 export { SETPOS_PERIOD_MAX };
 
@@ -31,6 +35,21 @@ interface Occurrence {
 }
 
 const NO_HOST: EvalOptions = { host: () => undefined };
+
+// A COUNT rule's work budget is spent along the walk, so once it is exceeded a day still in the memo keeps
+// its value while a day evaluated afresh throws: for such a rule, tagsAt depends on what was asked before.
+// World calendars refuse COUNT, so weather never sees this; library callers can.
+/** Days whose base tags and named-rule outcomes the engine keeps (§16.7 P8); past this the oldest day goes first. */
+export const RULE_MEMO_DAYS = 4096;
+
+/** A named rule's outcome on one day: held or not, threw, or being evaluated (a cycle, which the validator refuses). */
+type Outcome = boolean | { readonly error: unknown } | "pending";
+
+interface DayMemo {
+  base?: readonly string[];
+  /** by named-rule index (the resolved calendar's `rules`), never by AST node (H-1574) */
+  readonly rules: Array<Outcome | undefined>;
+}
 
 /** Index of x in an ascending array, or -1. */
 function find(xs: readonly number[], x: number): number {
@@ -54,7 +73,74 @@ export class EngineDays {
   /** `work` is the days walked so far, over every call: past COUNT_WORK_MAX the rule throws on every later call too */
   private readonly counted = new WeakMap<object, { next: number; total: number; work: number; before: Map<number, number> }>();
 
-  constructor(readonly engine: Engine) {}
+  /** day → that day's base tags and named-rule outcomes, oldest day first */
+  private readonly memo = new Map<number, DayMemo>();
+  /** tag set only by named rules → their indices (§16.7 P2); any other tag reads base-only */
+  private readonly setters: ReadonlyMap<string, readonly number[]>;
+
+  constructor(readonly engine: Engine) {
+    this.setters = ruleTagSetters(engine.ast);
+  }
+
+  private dayMemo(day: number): DayMemo {
+    let m = this.memo.get(day);
+    if (m) return m;
+    if (this.memo.size >= RULE_MEMO_DAYS) this.memo.delete(this.memo.keys().next().value!);
+    this.memo.set(day, (m = { rules: [] }));
+    return m;
+  }
+
+  /** The day's unit and day-label tags (Engine.baseTagsAt), computed once per day. Read-only: it is the memo. */
+  baseTags(day: number): readonly string[] {
+    const m = this.dayMemo(day);
+    return (m.base ??= this.engine.baseTagsAt(day));
+  }
+
+  /**
+   * Does named rule `i` (an index into the resolved calendar's rules) hold on
+   * `day`? Evaluated at most once per day: a rule that threw rethrows the
+   * same error from the memo.
+   */
+  named(i: number, day: number): boolean {
+    const m = this.dayMemo(day);
+    const s = m.rules[i];
+    if (s === true || s === false) return s;
+    const r = this.engine.ast.rules![i]!;
+    if (s === "pending") throw new RangeError(`rule "${r.id}" reads its own tags on day ${day}`); // unreachable: the validator refuses cycles
+    if (s !== undefined) throw s.error;
+    m.rules[i] = "pending";
+    try {
+      const v = this.holds(r.rule, day);
+      m.rules[i] = v;
+      return v;
+    } catch (error) {
+      m.rules[i] = { error };
+      throw error;
+    }
+  }
+
+  /** The named rules that alone set `tag`, or undefined when a rule reads it base-only. */
+  settersOf(tag: string): readonly number[] | undefined {
+    return this.setters.get(tag);
+  }
+
+  /**
+   * Does a tag only named rules set hold on `day`: does one of `setters` hold?
+   * When none holds and one threw, the read throws (naming the failed rule),
+   * so the reading rule fails too and loses its tags (§16.4 Rule order).
+   */
+  ruleTag(tag: string, setters: readonly number[], day: number): boolean {
+    let failed: { i: number; error: unknown } | undefined;
+    for (const i of setters) {
+      try {
+        if (this.named(i, day)) return true;
+      } catch (error) {
+        failed ??= { i, error };
+      }
+    }
+    if (failed) throw new Error(`reads tag "${tag}", set by rule "${this.engine.ast.rules![failed.i]!.id}", which failed on day ${day}`, { cause: failed.error });
+    return false;
+  }
 
   /** The rule, checked against this calendar's units: a missing reference throws. */
   bind(stored: RuleAst): RuleAst {
@@ -223,11 +309,16 @@ class EngineView implements DayView {
   }
 
   hasTag(tag: string): boolean {
-    const e = this.days.engine;
+    // past the day line no tag holds: the adapter folds a day onto the line before it reads tags (§16.7 P7)
+    if (!(Math.abs(this.day) <= DAY_LIMIT)) return false;
+    // a tag only named rules set reads them (§16 D8); every other tag reads base-only (§16.7 P2)
+    const setters = this.days.settersOf(tag);
+    if (setters) return this.days.ruleTag(tag, setters, this.day);
+    if (this.days.baseTags(this.day).includes(tag)) return true;
     // a rule reads the day's resolved season as season:<name> too (§16.7 P6); tagsAt's output is unchanged.
     // That season is the calendar's own, unflipped (northern) one: a southern zone flips only its season:
     // tag (flipSeasonTags), so a calendar rule's tags hold on the same days in every zone.
-    return e.baseTagsAt(this.day).includes(tag) || (tag.startsWith("season:") && e.seasonAt(this.day) === tag.slice(7));
+    return tag.startsWith("season:") && this.days.engine.seasonAt(this.day) === tag.slice(7);
   }
 
   recur(r: Recur): boolean {

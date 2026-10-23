@@ -273,22 +273,25 @@ export class Engine {
     return s.name === undefined && s.tags === undefined ? null : { ...(s.name !== undefined && { name: s.name }), ...(s.tags && { tags: s.tags }) };
   }
 
-  /** Every tag `day` carries: unit by unit in declaration order, then day labels, then named rules (tags are hashed; names are not). */
   /**
-   * Every tag on `day`. Without `onError`, a rule that throws makes this throw;
-   * with it, that rule's tags are left out, the others kept, and `onError`
-   * hears the rule's id and error.
+   * Every tag `day` carries: unit by unit in declaration order, then day
+   * labels, then named rules in declaration order (tags are hashed; names are
+   * not). Each named rule is evaluated at most once per day (EngineDays.named),
+   * also when other rules read its tags. Without `onError`, a rule that throws
+   * makes this throw; with it, that rule's tags are left out, and so are the
+   * tags of every rule that reads them, the others kept, and `onError` hears
+   * each failed rule's id and error.
    */
   tagsAt(day: number, onError?: (ruleId: string, error: unknown) => void): string[] {
-    const tags = this.baseTagsAt(day);
-    for (const r of this.ast.rules ?? []) {
+    const tags = [...this.days.baseTags(day)];
+    for (const [i, r] of (this.ast.rules ?? []).entries()) {
       if (!r.tags?.length) continue;
       if (!onError) {
-        if (this.days.holds(r.rule, day)) tags.push(...r.tags);
+        if (this.days.named(i, day)) tags.push(...r.tags);
         continue;
       }
       try {
-        if (this.days.holds(r.rule, day)) tags.push(...r.tags);
+        if (this.days.named(i, day)) tags.push(...r.tags);
       } catch (e) {
         onError(r.id, e);
       }
@@ -296,7 +299,7 @@ export class Engine {
     return tags;
   }
 
-  /** The tags of units and day labels only: what a rule reads, so that no named rule can depend on itself. */
+  /** The tags of units and day labels only: what a rule reads of any tag a unit or day label also sets (§16.7 P2). */
   baseTagsAt(day: number): string[] {
     const tags: string[] = [];
     for (const u of this.ast.units) tags.push(...(this.labelAt(u.id, day)?.tags ?? []));

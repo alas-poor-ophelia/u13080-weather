@@ -22,7 +22,7 @@
  */
 import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
-import { bodyFor, DAY_LIMIT, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, seasonsUseDates, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem, type SeasonMark } from "../../seshat";
+import { bodyFor, childrenOf, DAY_LIMIT, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, seasonsUseDates, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem, type RuleAst, type SeasonMark } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
@@ -48,12 +48,12 @@ export function worldProblems(ast: CalendarAst): Problem[] {
   if (ast.seasons && ast.seasons.unit !== "year") errors.push({ message: `a world calendar's seasons run over its year, not "${ast.seasons.unit}"` });
   if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push({ message: `a world calendar has at most ${WORLD_RULES_MAX} named rules` });
   const units = new Map(ast.units.map((u) => [u.id, u]));
-  const walk = (r: unknown, at: string, rule: string): void => {
+  const walk = (r: RuleAst, at: string, rule: string): void => {
     if (typeof r !== "object" || r === null) return;
-    const n = r as { kind?: string; of?: unknown; count?: number; setpos?: unknown; freq?: string };
-    if (n.kind === "all" || n.kind === "any") for (const q of (n.of as unknown[]) ?? []) walk(q, at, rule);
-    if (n.kind === "not") walk(n.of, at, rule);
-    if (n.kind !== "recur") return;
+    // every node, whatever its kind (§16.7 P5): ruleChildren is the one exhaustive switch
+    for (const q of childrenOf(r)) walk(q, at, rule);
+    if (r.kind !== "recur") return;
+    const n = r;
     // a COUNT walks every period from its anchor; on a weather path that is a walk per day
     if (n.count !== undefined) errors.push({ message: `${at}: a world calendar's rules cannot use COUNT`, rule });
     if (n.setpos !== undefined) {
