@@ -358,6 +358,13 @@ definition is saved through one dialog that says which days' weather it can chan
 moves where years start, asks whether to keep day numbers. *Undo the last calendar change*
 (Settings → Calendar) puts the previous calendar back, one step: undoing again redoes it.
 
+In the text, a definition can also tie its calendar to its sky and to itself: a month or year can follow
+a moon (`CROSSING:BODY=moon-1;MARK=0`, starting on the day of the new moon or the first day after it);
+seasons can start on dates (`MARK:Spring=month:3.20`); a rule can name a moon phase (`NAME=Full`), read
+another rule's tag, look at the day before (`SHIFT`) or find the first day after another
+(`FIRST`, enough for the first full moon after the equinox, and Easter). Removing a moon or phase a
+calendar depends on is refused.
+
 A world made before calendar definitions runs on the **legacy calendar**: one year length, seasons
 as fractions of the year, moons, edited in Settings. It runs exactly as it always did. Change
 calendar… can move it to a definition (its own days, seasons and moons, as a definition), and offers
