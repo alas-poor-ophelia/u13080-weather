@@ -9,7 +9,7 @@ import type WadjetPlugin from "./main";
 import { prepareDefinition, SeshatCalendar } from "./time/seshat";
 import { buildOptIn, WORLD_PRESETS, type OptInChoice } from "./opt-in";
 import { blastRadius, describeBlast } from "./time/blast";
-import { planChange, worldHasSpells, type ChangePlan } from "./calendar-change";
+import { planChange, worldHasSpells, yearKeyedNote, type ChangePlan } from "./calendar-change";
 
 /** Validation for the calendar definition: the first error (with its line when known), or nothing. */
 export function badDefinition(text: string): string | undefined {
@@ -88,7 +88,14 @@ export class OptInModal extends Modal {
       );
     const dayRow = new Setting(contentEl)
       .setName("Day numbers")
-      .setDesc("Today, pinned days and overrides are stored as day numbers. Keep them, and they fall on new dates; or anchor today to a date, and the calendar moves so today reads as that date.")
+      .setDesc(
+        [
+          "Today, pinned days and overrides are stored as day numbers. Keep them, and they fall on new dates; or anchor today to a date, and the calendar moves so today reads as that date.",
+          yearKeyedNote(this.plugin.settings.eras, this.plugin.settings.zones),
+        ]
+          .filter(Boolean)
+          .join(" "),
+      )
       .addDropdown((d) =>
         d
           .addOptions({ keep: "Keep day numbers", anchor: "Anchor today to a date" })
@@ -298,7 +305,14 @@ class CalendarChangeModal extends Modal {
     let plan: ChangePlan | null = null;
     const dayRow = new Setting(contentEl)
       .setName("Day numbers")
-      .setDesc("This change moves where years start. Today, pinned days and overrides are stored as day numbers. Keep them, and they fall on new dates; or anchor today to a date, and the calendar moves so today reads as that date.")
+      .setDesc(
+        [
+          "This change moves where years start. Today, pinned days and overrides are stored as day numbers. Keep them, and they fall on new dates; or anchor today to a date, and the calendar moves so today reads as that date.",
+          yearKeyedNote(this.plugin.settings.eras, this.plugin.settings.zones),
+        ]
+          .filter(Boolean)
+          .join(" "),
+      )
       .addDropdown((d: DropdownComponent) =>
         d
           .addOptions({ keep: "Keep day numbers", anchor: "Anchor today to a date" })
