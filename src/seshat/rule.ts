@@ -13,6 +13,8 @@
  *   - a view value that is undefined (no such unit, body or field) is a
  *     definite false, never unknown. Unknown only comes from a host leaf or
  *     from the unknownTag hook.
+ *   - shift and first read other days through the view's `at` (§16.3, §16.7 P7):
+ *     a day off the line reads false; a view without `at` refuses them.
  */
 import { wrap } from "./phase";
 import { DEFAULT_YEAR_LENGTH, yearOf } from "./year";
@@ -32,6 +34,13 @@ export type RuleAst =
   | { readonly kind: "tag"; readonly tag: string }
   | { readonly kind: "dates"; readonly days: readonly number[] }
   | ({ readonly kind: "recur" } & Recur)
+  /** holds on day d when `of` holds on d − days (§16.3; days = 1 is "the day after"); read off the day line, false */
+  | { readonly kind: "shift"; readonly days: number; readonly of: RuleAst }
+  /**
+   * the first day matching `of` on or after an anchor day (`after`), within `within` days (§16.4, §16.7 P7):
+   * d holds when `of` holds on d and, scanning back j = 0 … within, an anchor comes before any earlier match
+   */
+  | { readonly kind: "first"; readonly within: number; readonly after: RuleAst; readonly of: RuleAst }
   /** answered by the caller (Wadjet's regime and chance), never by Seshat */
   | { readonly kind: "host"; readonly key: HostKey; readonly arg: string | number }
   /** a stored shape that could not be compiled: evaluating it rethrows the error */
@@ -79,6 +88,12 @@ export interface DayView {
   hasTag(tag: string): boolean;
   /** absent: the view knows no calendar units, and every recurrence is false */
   recur?(r: Recur): boolean;
+  /**
+   * Another day of the same calendar (SHIFT and FIRST read it, §16.3), or undefined when `day` is off the
+   * view's day line (every read there is false, §16.7 P7). Absent: the view has no other days, and a rule
+   * holding SHIFT or FIRST is refused when it binds (TimeView.bind) and throws if evaluated anyway.
+   */
+  at?(day: number): DayView | undefined;
 }
 
 export interface EvalOptions {
@@ -111,6 +126,16 @@ export class TimeView implements DayView {
     readonly day: number,
     private readonly extra?: readonly string[],
   ) {}
+
+  /**
+   * The rule, checked for this view (§3.2, §16.7 P5): a TimeView has no other days, so a rule reading
+   * one (SHIFT, FIRST) is refused here, never evaluated to a silent false.
+   */
+  static bind(rule: RuleAst): RuleAst {
+    const other = readsOtherDays(rule);
+    if (other) throw new RangeError(`a ${other.toUpperCase()} rule reads other days, which a Wadjet day view does not have; it runs only on a calendar engine`);
+    return rule;
+  }
 
   /** The same day with more tags on top. */
   withTags(extra: readonly string[]): TimeView {
@@ -191,11 +216,63 @@ export function evaluate(r: RuleAst, view: DayView, opts: EvalOptions): boolean 
       return view.recur ? view.recur(r) : false;
     case "host":
       return opts.host(r.key, r.arg);
+    case "shift": {
+      const v = other(view, r.kind, view.day - r.days);
+      return v ? evaluate(r.of, v, opts) : false;
+    }
+    case "first":
+      return first(r, view, opts);
     case "throw":
       throw r.error;
     default:
       return unreachableRule(r);
   }
+}
+
+/** Day `day` of the view's calendar, or undefined off its line; a view with no other days throws (TimeView.bind refuses first). */
+function other(view: DayView, kind: string, day: number): DayView | undefined {
+  if (!view.at) throw new RangeError(`a ${kind.toUpperCase()} rule reads other days, which this day view does not have`);
+  return view.at(day);
+}
+
+/**
+ * FIRST on day d (§16.7 P7) as the Kleene chain
+ * match(d) ∧ (anchor(d) ∨ (¬match(d−1) ∧ (anchor(d−1) ∨ … (anchor(d−W) ∨ false)))),
+ * read lazily from d backwards, so a decided answer stops the scan; a day off the line reads false.
+ * Iterative, so a scan costs no stack: the chain so far is a function f of its unread tail X, read
+ * once, kept as f(true) and f(false); for a read-once formula Kleene f(unknown) is their meet
+ * (equal: that value; else unknown). Appending `t ∧ X` or `t ∨ X` substitutes into f.
+ */
+function first(r: Extract<RuleAst, { kind: "first" }>, view: DayView, opts: EvalOptions): boolean | undefined {
+  // refused up front: an answer decided on day d alone would otherwise come back without the check (Parallax, 4b)
+  if (!view.at) throw new RangeError(`a ${r.kind.toUpperCase()} rule reads other days, which this day view does not have`);
+  type K = boolean | undefined;
+  let [hi, lo]: [K, K] = [true, false];
+  const f = (v: K): K => (v === true ? hi : v === false ? lo : hi === lo ? hi : undefined);
+  const on = (node: RuleAst, x: number): K => {
+    const v = x === view.day ? view : other(view, r.kind, x);
+    return v ? evaluate(node, v, opts) : false;
+  };
+  hi = f(on(r.of, view.day)); // match(d) ∧ X
+  for (let j = 0; hi !== lo; j++) {
+    lo = f(on(r.after, view.day - j)); // anchor(d − j) ∨ X
+    if (hi === lo || j >= r.within) break;
+    const m = on(r.of, view.day - j - 1); // ¬match(d − j − 1) ∧ X
+    hi = f(m === undefined ? undefined : !m);
+  }
+  // decided (f(true) = f(false)), or the scan ended: the tail is false
+  return lo;
+}
+
+/** The first SHIFT or FIRST in a rule (a node reading other days), or undefined. */
+export function readsOtherDays(r: RuleAst, depth = 0): "shift" | "first" | undefined {
+  if (typeof r !== "object" || r === null || depth > 256) return undefined;
+  if (r.kind === "shift" || r.kind === "first") return r.kind;
+  for (const q of childrenOf(r)) {
+    const k = readsOtherDays(q, depth + 1);
+    if (k) return k;
+  }
+  return undefined;
 }
 
 /**
@@ -209,7 +286,10 @@ export function ruleChildren(r: RuleAst): readonly RuleAst[] {
     case "any":
       return Array.isArray(r.of) ? (r.of as readonly RuleAst[]) : [];
     case "not":
+    case "shift":
       return [r.of];
+    case "first":
+      return [r.after, r.of];
     case "phase":
     case "dayIn":
     case "index":
@@ -225,7 +305,7 @@ export function ruleChildren(r: RuleAst): readonly RuleAst[] {
 }
 
 /** The rule kinds this build knows: the lenient walkers below skip anything else. */
-const RULE_KINDS: ReadonlySet<string> = new Set(["all", "any", "not", "phase", "dayIn", "index", "tag", "dates", "recur", "host", "throw"]);
+const RULE_KINDS: ReadonlySet<string> = new Set(["all", "any", "not", "shift", "first", "phase", "dayIn", "index", "tag", "dates", "recur", "host", "throw"]);
 
 /**
  * A node's children for walkers that must not throw on untyped input (the validator, the world checks):

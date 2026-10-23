@@ -10,7 +10,7 @@ export { baseIndexAt, baseKind, baseLengths, baseStart, isPlainConstant, linearB
 export { DAY_LIMIT } from "./day";
 export { gearBelow, gearDensity, gearDeviation, gearMatches, gearPeriod, type GearAst } from "./gear";
 export { Engine, type Position } from "./engine";
-export { checkRule, problems, ruleCycles, ruleTagSetters, validate, type Problem } from "./validate";
+export { checkRule, FIRST_WITHIN_MAX, problems, ruleCycles, ruleTagSetters, SHIFT_DAYS_MAX, validate, type Problem } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
 export { COPTIC, ETHIOPIAN } from "./calendars/ethiopian";
@@ -22,7 +22,7 @@ export { BALINESE } from "./calendars/balinese";
 export { ROMAN } from "./calendars/roman";
 export { BAHAI } from "./calendars/bahai";
 export { wrap } from "./phase";
-export { childrenOf, evaluate, inPhase, ruleChildren, tagsRead, TimeView, unreachableRule, type By, type DayView, type EvalOptions, type HostKey, type Recur, type RuleAst, type TimeLike } from "./rule";
+export { childrenOf, evaluate, inPhase, readsOtherDays, ruleChildren, tagsRead, TimeView, unreachableRule, type By, type DayView, type EvalOptions, type HostKey, type Recur, type RuleAst, type TimeLike } from "./rule";
 export { COUNT_WORK_MAX, EngineDays, RULE_MEMO_DAYS, SETPOS_PERIOD_MAX } from "./engine-view";
 export { ID, parse, print, SeshatSyntaxError } from "./text";
 export { checkFormats, compileFormat, formatDay, isParseable, parseDay, type CompiledFormat } from "./format";

@@ -116,7 +116,11 @@ function ruleAst(r: RuleAst, k: number): RuleAst {
     case "any":
       return { ...r, of: r.of.map((q) => ruleAst(q, k)) };
     case "not":
+    case "shift":
+      // a SHIFT's DAYS and a FIRST's WITHIN are distances between days, which a translation keeps (§16.7 P5)
       return { ...r, of: ruleAst(r.of, k) };
+    case "first":
+      return { ...r, after: ruleAst(r.after, k), of: ruleAst(r.of, k) };
     case "dates":
       return { ...r, days: r.days.map((d) => d + k) };
     case "recur": {

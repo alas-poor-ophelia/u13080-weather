@@ -279,6 +279,34 @@ describe("evaluation cost (§16.7 P8)", () => {
     const ms = performance.now() - t0;
     expect(ms).toBeLessThan(1000);
   });
+
+  // step 4b (§16.7 P8): the caps allow WORLD_RULES_MAX rules, no FIRST inside a FIRST, a summed reach of 400 per path
+  const shift = (days: number, of: RuleAst): RuleAst => ({ kind: "shift", days, of });
+  const first = (within: number, after: RuleAst, of: RuleAst): RuleAst => ({ kind: "first", within, after, of });
+  const SPARSE: RuleAst = { kind: "recur", freq: "day", by: [{ unit: "month", day: [1] }, { unit: "weekday", label: ["Monday"] }] };
+  const reachWorld = (): CalendarAst => {
+    const half = WORLD_RULES_MAX / 2;
+    // a chain: each link reaches 12 (FIRST 6 over SHIFT 6 of the link below), 31 links over a bottom SHIFT 16: 388
+    const links = Array.from({ length: half }, (_, i) => ({
+      id: `c${i}`,
+      tags: [`c${i}`],
+      rule: i === 0 ? shift(16, SATURDAY) : first(6, shift(6, tag(`c${i - 1}`)), { kind: "any", of: [tag(`c${i - 1}`), shift(-6, reader(`c${i - 1}`))] }),
+    }));
+    // independent rules, each a full 400: a FIRST 200 whose match is rare (its scans run the whole window), over SHIFTs 200
+    const wide = Array.from({ length: half }, (_, i) => ({ id: `w${i}`, tags: [`w${i}`], rule: first(200, shift(200 - i, SPARSE), shift(i + 1, { kind: "any", of: [SPARSE, tag("c0")] })) }));
+    return { ...chain(0), rules: [...wide, ...links].reverse() };
+  };
+
+  test(`budget: the worst world under the SHIFT/FIRST caps (${WORLD_RULES_MAX} rules, reach 400, chains), toContext over 2000 days within 3000 ms (measured 430 ms alone, 750 to 830 ms in its file, 1070 ms in the full suite)`, () => {
+    const text = print(reachWorld());
+    expect(checkWorldCalendar(parse(text))).toEqual([]);
+    const a = new SeshatCalendar(text, () => 0);
+    const t0 = performance.now();
+    for (let d = 10_000; d < 12_000; d++) a.toContext(d);
+    const ms = performance.now() - t0;
+    console.log(`step 4b budget: ${ms.toFixed(0)} ms`);
+    expect(ms).toBeLessThan(3000);
+  });
 });
 
 describe("reads past the day line and the walkers (§16.7 P5)", () => {
@@ -295,7 +323,10 @@ describe("reads past the day line and the walkers (§16.7 P5)", () => {
     expect(ruleChildren({ kind: "not", of: SATURDAY })).toEqual([SATURDAY]);
     expect(ruleChildren({ kind: "all", of: [SATURDAY, tag("x")] })).toEqual([SATURDAY, tag("x")]);
     expect(ruleChildren(tag("x"))).toEqual([]);
-    expect(() => ruleChildren({ kind: "shift" } as unknown as RuleAst)).toThrow(/unknown rule kind "shift"/);
+    // step 4b: SHIFT and FIRST are kinds now, with their children
+    expect(ruleChildren({ kind: "shift", days: 1, of: SATURDAY })).toEqual([SATURDAY]);
+    expect(ruleChildren({ kind: "first", within: 3, after: tag("x"), of: SATURDAY })).toEqual([tag("x"), SATURDAY]);
+    expect(() => ruleChildren({ kind: "sideways" } as unknown as RuleAst)).toThrow(/unknown rule kind "sideways"/);
     // the world check reaches a COUNT however deep
     const deep: CalendarAst = { ...GREGORIAN, rules: [{ id: "d", tags: ["d"], rule: { kind: "not", of: { kind: "any", of: [tag("x"), { kind: "all", of: [{ kind: "recur", freq: "day", anchor: 0, count: 3 }] }] } } }] };
     expect(checkWorldCalendar(deep).some((m) => m.includes("COUNT"))).toBe(true);

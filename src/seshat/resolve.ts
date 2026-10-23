@@ -203,9 +203,15 @@ function ruleTree(r: RuleAst, bodies: ReadonlyMap<string, BodyAst>, depth = 0): 
       const of = stored.map((q) => ruleTree(q, bodies, depth + 1));
       return of.some((q, i) => q !== stored[i]) ? { ...r, of } : r;
     }
-    case "not": {
+    case "not":
+    case "shift": {
       const of = ruleTree(r.of, bodies, depth + 1);
       return of === r.of ? r : { ...r, of };
+    }
+    case "first": {
+      // 'the first full moon after the equinox': the match is a named phase, resolved like any other
+      const [after, of] = [ruleTree(r.after, bodies, depth + 1), ruleTree(r.of, bodies, depth + 1)];
+      return after === r.after && of === r.of ? r : { ...r, after, of };
     }
     case "phase": {
       if (r.name === undefined || phaseNameProblem(r, bodies) !== null) return r;

@@ -418,6 +418,8 @@ const NODE_FIELDS: Record<string, readonly string[]> = {
   all: ["kind", "of"],
   any: ["kind", "of"],
   not: ["kind", "of"],
+  shift: ["kind", "days", "of"],
+  first: ["kind", "within", "after", "of"],
   phase: ["kind", "unit", "body", "from", "to", "name"],
   dayIn: ["kind", "unit", "from", "to"],
   index: ["kind", "unit", "from", "to"],
@@ -437,6 +439,10 @@ export function ruleLines(r: RuleAst, depth = 0): string[] {
       return block(r.kind.toUpperCase(), r.of.flatMap((q) => ruleLines(q, depth + 1)));
     case "not":
       return block("NOT", ruleLines(r.of, depth + 1));
+    case "shift":
+      return block("SHIFT", [`DAYS:${num(r.days)}`, ...ruleLines(r.of, depth + 1)]);
+    case "first":
+      return block("FIRST", [`WITHIN:${num(r.within)}`, ...block("AFTER", ruleLines(r.after, depth + 1)), ...ruleLines(r.of, depth + 1)]);
     case "phase": {
       // a named phase (§16 D6) or the bounds, never both: the parser reads exactly one of the two forms
       const named = r.name !== undefined;
@@ -883,7 +889,7 @@ function dayLabel(l: Line): DayLabelAst {
 }
 
 const NODE_LINES = ["PHASE", "DAYIN", "INDEX", "TAG", "DATES", "RRULE"];
-const NODE_BLOCKS = ["ALL", "ANY", "NOT"];
+const NODE_BLOCKS = ["ALL", "ANY", "NOT", "SHIFT", "FIRST"];
 
 function ruleDef(c: Component): RuleDefAst {
   const p = new Props(c, ["UID", "TAGS", ...NODE_LINES], NODE_BLOCKS);
@@ -896,8 +902,24 @@ function ruleDef(c: Component): RuleDefAst {
 function node(it: { line: Line } | { block: Component }): RuleAst {
   if ("block" in it) {
     const c = it.block;
-    const p = new Props(c, NODE_LINES, NODE_BLOCKS);
+    // SHIFT: DAYS and one node; FIRST: WITHIN, an AFTER block holding the anchor node, and the match node (§16.3)
+    const own = c.type === "SHIFT" ? ["DAYS"] : c.type === "FIRST" ? ["WITHIN"] : [];
+    const p = new Props(c, [...own, ...NODE_LINES], c.type === "FIRST" ? [...NODE_BLOCKS, "AFTER"] : NODE_BLOCKS);
     const kids = p.seq(NODE_LINES, NODE_BLOCKS).map(node);
+    if (c.type === "SHIFT") {
+      if (kids.length !== 1) throw new SeshatSyntaxError("SHIFT holds exactly one rule", c.no);
+      const d = p.req("DAYS");
+      return { kind: "shift", days: toNum(d.value, d.no), of: kids[0]! };
+    }
+    if (c.type === "FIRST") {
+      if (kids.length !== 1) throw new SeshatSyntaxError("FIRST holds exactly one rule besides its AFTER block", c.no);
+      const w = p.req("WITHIN");
+      const after = p.blocks("AFTER");
+      if (after.length !== 1) throw new SeshatSyntaxError(`FIRST needs exactly one AFTER block`, after[1]?.no ?? c.no);
+      const a = new Props(after[0]!, NODE_LINES, NODE_BLOCKS).seq(NODE_LINES, NODE_BLOCKS).map(node);
+      if (a.length !== 1) throw new SeshatSyntaxError("AFTER holds exactly one rule", after[0]!.no);
+      return { kind: "first", within: toNum(w.value, w.no), after: a[0]!, of: kids[0]! };
+    }
     if (c.type === "NOT") {
       if (kids.length !== 1) throw new SeshatSyntaxError("NOT holds exactly one rule", c.no);
       return { kind: "not", of: kids[0]! };

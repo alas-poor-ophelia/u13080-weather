@@ -71,7 +71,8 @@ interface Compiled {
 function compileModifier(m: Modifier): Compiled {
   const w = m.when;
   if (!w) return { m };
-  const rule = compilePredicate(w);
+  // bound to the TimeView it runs on (§3.2): a rule reading other days (SHIFT, FIRST) is refused here, never a silent false
+  const rule = TimeView.bind(compilePredicate(w));
   return "moon" in w ? { m, rule, carrier: w.moon.name } : { m, rule };
 }
 

@@ -47,6 +47,10 @@ const PIN_MAX = 100_000;
 const SWITCH_MAX = 1_000;
 /** Deepest all/any/not nesting in a rule: the text parser refuses blocks nested past NESTING_MAX (200). */
 export const RULE_DEPTH_MAX = 64;
+/** Largest |DAYS| of a SHIFT (§16.4). */
+export const SHIFT_DAYS_MAX = 400;
+/** Largest WITHIN of a FIRST (§16.4). */
+export const FIRST_WITHIN_MAX = 400;
 
 
 const isInt = (x: unknown): boolean => Number.isSafeInteger(x);
@@ -820,6 +824,14 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
         return (r.of as readonly RuleAst[]).forEach((q, i) => walk(q, `${at}.${r.kind}[${i}]`, depth + 1));
       case "not":
         return walk(r.of, `${at}.not`, depth + 1);
+      case "shift":
+        // DAYS 0 would be the node itself: refused as pointless, so a SHIFT always reads another day
+        if (!isInt(r.days) || r.days === 0 || Math.abs(r.days) > SHIFT_DAYS_MAX) errors.push(`${at}: SHIFT DAYS must be a whole number of days, not 0, at most ${SHIFT_DAYS_MAX} either way`);
+        return walk(r.of, `${at}.shift`, depth + 1);
+      case "first":
+        if (!isInt(r.within) || r.within < 1 || r.within > FIRST_WITHIN_MAX) errors.push(`${at}: FIRST WITHIN must be a whole number from 1 to ${FIRST_WITHIN_MAX}`);
+        walk(r.after, `${at}.first.after`, depth + 1);
+        return walk(r.of, `${at}.first`, depth + 1);
       case "phase":
         // a named phase that resolved is plain bounds by now; one still named could not resolve, and says why (§16 D6, P3)
         if (r.name !== undefined) return void errors.push(`${at}: ${phaseNameProblem(r, new Map((ast.bodies ?? []).filter(isObj).map((b) => [b.id, b])))}`);

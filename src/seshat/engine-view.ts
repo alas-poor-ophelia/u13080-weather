@@ -39,6 +39,10 @@ const NO_HOST: EvalOptions = { host: () => undefined };
 // A COUNT rule's work budget is spent along the walk, so once it is exceeded a day still in the memo keeps
 // its value while a day evaluated afresh throws: for such a rule, tagsAt depends on what was asked before.
 // World calendars refuse COUNT, so weather never sees this; library callers can.
+// SHIFT and FIRST read other days, so a rule that throws on one day takes the tags of every reader whose
+// reach covers that day, not only its own day's. The memo is least-recently-used; the world caps keep a
+// calendar's reach at 400 days, far inside it, while a library caller's long chains may outrun it, which
+// costs time (outcomes are recomputed), never correctness.
 /** Days whose base tags and named-rule outcomes the engine keeps (§16.7 P8); past this the oldest day goes first. */
 export const RULE_MEMO_DAYS = 4096;
 
@@ -84,7 +88,12 @@ export class EngineDays {
 
   private dayMemo(day: number): DayMemo {
     let m = this.memo.get(day);
-    if (m) return m;
+    if (m) {
+      // least-recently-used: a read moves the day to the back of the eviction order
+      this.memo.delete(day);
+      this.memo.set(day, m);
+      return m;
+    }
     if (this.memo.size >= RULE_MEMO_DAYS) this.memo.delete(this.memo.keys().next().value!);
     this.memo.set(day, (m = { rules: [] }));
     return m;
@@ -323,5 +332,15 @@ class EngineView implements DayView {
 
   recur(r: Recur): boolean {
     return this.days.recur(r, this.day);
+  }
+
+  /**
+   * Another day for SHIFT and FIRST (§16.3): its tags go through the same per-day memo (base tags once per
+   * day, each named rule at most once per day), so a FIRST's scan re-reads no rule. Off the line: undefined (false).
+   * The adapter folds days beyond the line onto a tag day (yearAt); a SHIFT or FIRST there reads the folded day's
+   * neighbours on the line, which can differ from the folded neighbours by the edge years' length difference.
+   */
+  at(day: number): DayView | undefined {
+    return Math.abs(day) <= DAY_LIMIT ? new EngineView(this.days, day) : undefined;
   }
 }

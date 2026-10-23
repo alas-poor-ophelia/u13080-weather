@@ -22,7 +22,7 @@
  */
 import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
-import { bodyFor, childrenOf, DAY_LIMIT, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, seasonsUseDates, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem, type RuleAst, type SeasonMark } from "../../seshat";
+import { bodyFor, childrenOf, DAY_LIMIT, ruleTagSetters, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, seasonsUseDates, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem, type RuleAst, type SeasonMark } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
@@ -31,6 +31,8 @@ import { assertDayInRange, assertInteger } from "../world";
 export const SESHAT_ADAPTER_VERSION = "seshat-adapter/1";
 /** Named rules a world calendar may carry (each is evaluated for every day the generator reads). */
 export const WORLD_RULES_MAX = 64;
+/** The summed reach of SHIFT days and FIRST windows along any path of a world rule, through the rules it reads (§16.7 P8). */
+export const WORLD_RULE_REACH_MAX = 400;
 /** BYSETPOS scans a whole period per day: a world calendar keeps it to constant periods this short. */
 const WORLD_SETPOS_PERIOD_MAX = 400;
 
@@ -48,10 +50,12 @@ export function worldProblems(ast: CalendarAst): Problem[] {
   if (ast.seasons && ast.seasons.unit !== "year") errors.push({ message: `a world calendar's seasons run over its year, not "${ast.seasons.unit}"` });
   if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push({ message: `a world calendar has at most ${WORLD_RULES_MAX} named rules` });
   const units = new Map(ast.units.map((u) => [u.id, u]));
-  const walk = (r: RuleAst, at: string, rule: string): void => {
-    if (typeof r !== "object" || r === null) return;
+  const walk = (r: RuleAst, at: string, rule: string, inFirst = false, depth = 0): void => {
+    if (typeof r !== "object" || r === null || depth > 256) return;
+    // a FIRST scans up to WITHIN days of its nodes: one inside another multiplies the scans (§16.7 P8)
+    if (r.kind === "first" && inFirst) errors.push({ message: `${at}: a world calendar's rules cannot hold a FIRST inside a FIRST`, rule });
     // every node, whatever its kind (§16.7 P5): ruleChildren is the one exhaustive switch
-    for (const q of childrenOf(r)) walk(q, at, rule);
+    for (const q of childrenOf(r)) walk(q, at, rule, inFirst || r.kind === "first", depth + 1);
     if (r.kind !== "recur") return;
     const n = r;
     // a COUNT walks every period from its anchor; on a weather path that is a walk per day
@@ -63,7 +67,41 @@ export function worldProblems(ast: CalendarAst): Problem[] {
     }
   };
   for (const r of ast.rules ?? []) walk(r.rule, `rule "${r.id}"`, r.id);
+  const reaches = ruleReaches(ast);
+  for (const [i, r] of (ast.rules ?? []).entries()) {
+    const n = reaches[i]!;
+    if (n > WORLD_RULE_REACH_MAX) errors.push({ message: `rule "${r.id}": a world calendar's rule reaches ${n} days through SHIFT and FIRST (with the rules it reads); the limit is ${WORLD_RULE_REACH_MAX}`, rule: r.id });
+  }
   return errors;
+}
+
+/**
+ * Each named rule's reach (§16.7 P8): the most days, summed along one path, that its SHIFTs (|DAYS|) and
+ * FIRSTs (WITHIN) carry a read away from the day, following a tag only named rules set into those rules.
+ * A rule on a cycle (the validator refuses those) counts its own reach once.
+ */
+export function ruleReaches(ast: CalendarAst): number[] {
+  const rules: NonNullable<CalendarAst["rules"]> = Array.isArray(ast.rules) ? ast.rules : [];
+  const setters = ruleTagSetters(ast);
+  const memo: Array<number | "pending" | undefined> = [];
+  const ofRule = (i: number): number => {
+    const m = memo[i];
+    if (typeof m === "number") return m;
+    if (m === "pending") return 0; // a cycle: refused by the validator, counted once here
+    memo[i] = "pending";
+    const r = rules[i];
+    const n = typeof r === "object" && r !== null ? reach(r.rule, 0) : 0;
+    return (memo[i] = n);
+  };
+  const reach = (r: RuleAst, depth: number): number => {
+    if (typeof r !== "object" || r === null || depth > 256) return 0;
+    const below = Math.max(0, ...childrenOf(r).map((q) => reach(q, depth + 1)));
+    if (r.kind === "shift") return (typeof r.days === "number" ? Math.abs(r.days) : 0) + below;
+    if (r.kind === "first") return (typeof r.within === "number" ? r.within : 0) + below;
+    if (r.kind === "tag") return Math.max(0, ...(setters.get(r.tag) ?? []).map(ofRule));
+    return below;
+  };
+  return rules.map((_, i) => ofRule(i));
 }
 
 /**
@@ -101,7 +139,8 @@ export function definitionFromLegacy(cfg: InternalCalendarConfig): { ast: Calend
  * it: years of the edge year's length counted on from the edge year's start
  * (so the index only grows and the day of the year runs on by one), and the
  * same day of the year in the edge year, or the year next to it on the line
- * when the edge year itself crosses the line.
+ * when the edge year itself crosses the line. Rules that read other days (SHIFT,
+ * FIRST) read the tag day's neighbours on the line: approximate out there.
  */
 export function yearAt(e: Engine, day: number): { index: number; start: number; length: number; tagDay: number } {
   if (Math.abs(day) <= DAY_LIMIT) {
