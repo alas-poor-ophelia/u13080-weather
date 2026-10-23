@@ -18,6 +18,14 @@
  * not reach a single day is format-only: `format` uses it, `parse` refuses
  * it rather than guess (the Calendar Round repeats every 18,980 days).
  *
+ * Placeholders (§16.4, §16.7 P9) are their own token kind, `{@…}`, which no
+ * unit id can spell: `{@season}` the day's season, `{@phase:<body>}` the
+ * body's named phase on the day, `{@name}` the day's RDATE name and then the
+ * display names of the named rules that hold on it, joined with ", ". Each is
+ * empty when there is nothing to print, and never throws (a failing rule or a
+ * day past the line adds nothing). A pattern holding one is format-only, and
+ * the default pattern and "filler" may hold none (R2): they stay typeable.
+ *
  * `format(engine, day)` uses the pattern named "default" (else the first),
  * or "filler" for a day in a filler slot of the default pattern's units.
  * `parse(engine, text)` resolves each parseable pattern top-down and accepts
@@ -27,6 +35,7 @@ import type { CalendarAst, FormatAst, SlotsUnitAst, UnitAst } from "./ast";
 import { isPlainConstant } from "./base";
 import { DAY_LIMIT } from "./day";
 import type { Engine } from "./engine";
+import { inPhase } from "./rule";
 
 type Field = "num" | "name" | "day" | "day0";
 
@@ -36,7 +45,12 @@ interface Token {
   readonly field: Field;
   readonly pad: number;
 }
-type Part = string | Token;
+/** A placeholder (§16.4): text read from the day's season, a body's named phase, or its names. */
+type Placeholder = { readonly placeholder: "season" | "name" } | { readonly placeholder: "phase"; readonly body: string };
+type Part = string | Token | Placeholder;
+const isToken = (p: Part): p is Token => typeof p !== "string" && "unit" in p;
+const isPlaceholder = (p: Part): p is Placeholder => typeof p !== "string" && "placeholder" in p;
+const PLACEHOLDERS = "{@season}, {@phase:<body>}, {@name}";
 
 /** A compiled pattern: its parts, and the coordinate chain from a top cycle down (null when format-only). */
 export interface CompiledFormat {
@@ -72,7 +86,20 @@ function tokenize(pattern: string): { parts: Part[]; errors: string[] } {
       errors.push(`"{" at ${i} is never closed`);
       break;
     }
-    const [unit, ...fields] = pattern.slice(i + 1, end).split(":");
+    const inner = pattern.slice(i + 1, end);
+    if (inner.startsWith("@")) {
+      const [kind, ...args] = inner.slice(1).split(":");
+      const ph: Placeholder | null = (kind === "season" || kind === "name") && args.length === 0 ? { placeholder: kind } : kind === "phase" && args.length === 1 && args[0] ? { placeholder: "phase", body: args[0] } : null;
+      if (!ph) errors.push(kind === "phase" ? `{${inner}} is not a phase placeholder (write {@phase:<body id>})` : `unknown placeholder {${inner}} (the placeholders are ${PLACEHOLDERS})`);
+      else {
+        if (lit) parts.push(lit);
+        lit = "";
+        parts.push(ph);
+      }
+      i = end;
+      continue;
+    }
+    const [unit, ...fields] = inner.split(":");
     let field: Field = "num";
     let pad = 0;
     for (const f of fields) {
@@ -109,8 +136,10 @@ function oneDay(u: UnitAst, fillerOnly: boolean): boolean {
 export function compileFormat(f: FormatAst, ast: CalendarAst): { compiled: CompiledFormat | null; errors: string[] } {
   const { parts, errors } = tokenize(f.pattern);
   const units = new Map(ast.units.map((u) => [u.id, u]));
-  const tokens = parts.filter((p): p is Token => typeof p !== "string");
+  const tokens = parts.filter(isToken);
   for (const t of tokens) if (!units.has(t.unit)) errors.push(`no unit "${t.unit}"`);
+  const bodies = new Set((ast.bodies ?? []).map((b) => b.id));
+  for (const p of parts) if (isPlaceholder(p) && p.placeholder === "phase" && !bodies.has(p.body)) errors.push(`{@phase:${p.body}} names no declared body "${p.body}"`);
   if (errors.length) return { compiled: null, errors: errors.map((e) => `format "${f.name}": ${e}`) };
 
   // coordinate levels: a number, or a slot name that names exactly one slot
@@ -156,7 +185,9 @@ export function compileFormat(f: FormatAst, ast: CalendarAst): { compiled: Compi
     if (!covered) chain = null;
   }
   // two tokens with nothing between them cannot be told apart ("20261019" splits more than one way)
-  for (let i = 0; i + 1 < parts.length; i++) if (typeof parts[i] !== "string" && typeof parts[i + 1] !== "string") chain = null;
+  for (let i = 0; i + 1 < parts.length; i++) if (isToken(parts[i]!) && isToken(parts[i + 1]!)) chain = null;
+  // a placeholder's text is not a coordinate and may be empty: a pattern holding one is format-only (§16.7 P9)
+  if (parts.some(isPlaceholder)) chain = null;
   return { compiled: { name: f.name, parts, chain, dayToken }, errors: [] };
 }
 
@@ -169,6 +200,13 @@ export function checkFormats(ast: CalendarAst): string[] {
     if (typeof f.name !== "string" || !f.name) errors.push("a format needs a name");
     if (typeof f.pattern !== "string") errors.push(`format "${f.name}": the pattern is not a string`);
     else errors.push(...compileFormat(f, ast).errors);
+  }
+  // R2: the automatic spelling (the default, else the first, and "filler") stays one a date can be typed in
+  const def = (ast.formats ?? []).find((f) => f.name === "default") ?? ast.formats?.[0];
+  for (const f of new Set([def, ...(ast.formats ?? []).filter((x) => x.name === "filler")])) {
+    if (!f || typeof f.pattern !== "string" || !tokenize(f.pattern).parts.some(isPlaceholder)) continue;
+    const role = f.name === "filler" ? `the "filler" format` : f.name === "default" ? "the default format" : `the default format (the first, as none is named "default")`;
+    errors.push(`format "${f.name}": a placeholder (${PLACEHOLDERS}) cannot be in ${role}, which must stay one a date can be typed in; put it in another format`);
   }
   // a display number past 2^40 would print digits that are not the occurrence's
   for (const u of ast.units) if (u.number !== undefined && (!Number.isSafeInteger(u.number) || Math.abs(u.number) > DISPLAY_MAX)) errors.push(`unit "${u.id}": number ${String(u.number)} is not a whole number within ±2^40`);
@@ -218,6 +256,10 @@ function render(engine: Engine, f: CompiledFormat, day: number): string {
       out += p;
       continue;
     }
+    if (isPlaceholder(p)) {
+      out += placeholderText(engine, p, day);
+      continue;
+    }
     if (p.field === "name") {
       out += engine.labelAt(p.unit, day)?.name ?? "";
       continue;
@@ -230,9 +272,40 @@ function render(engine: Engine, f: CompiledFormat, day: number): string {
   return out;
 }
 
+/** A placeholder's text on `day`; empty when there is nothing to print or it cannot be read (it never throws). */
+function placeholderText(engine: Engine, p: Placeholder, day: number): string {
+  try {
+    if (p.placeholder === "season") return engine.seasonAt(day) ?? "";
+    if (p.placeholder === "phase") return phaseName(engine, p.body, day);
+  } catch {
+    return ""; // past the day line
+  }
+  const names: string[] = [];
+  for (const d of engine.ast.days ?? []) if (d.day === day && d.name) names.push(d.name);
+  for (const [i, r] of (engine.ast.rules ?? []).entries()) {
+    if (!r.name) continue;
+    try {
+      if (engine.days.named(i, day)) names.push(r.name);
+    } catch {
+      // a failing rule adds nothing; the adapter reports rule failures where it reads tags
+    }
+  }
+  return names.join(", ");
+}
+
+/** The body's named phase holding its phase on `day` (the span from a mark to the next, wrapping; §16 D6); "" without phases. */
+function phaseName(engine: Engine, body: string, day: number): string {
+  const marks = [...(engine.ast.bodies?.find((b) => b.id === body)?.moon?.phases ?? [])].sort((a, b) => a.at - b.at);
+  if (marks.length === 0) return "";
+  if (marks.length === 1) return marks[0]!.name;
+  const x = engine.bodyPhase(body, day);
+  if (x === undefined) return "";
+  return marks.find((m, i) => inPhase(x, m.at, marks[(i + 1) % marks.length]!.at))?.name ?? "";
+}
+
 /** Is `day` in a filler slot of any unit the pattern's chain (or tokens) reads? */
 function inFiller(engine: Engine, f: CompiledFormat, day: number): boolean {
-  const ids = new Set([...(f.chain ?? []), ...f.parts.flatMap((p) => (typeof p === "string" ? [] : [p.unit]))]);
+  const ids = new Set([...(f.chain ?? []), ...f.parts.filter(isToken).map((p) => p.unit)]);
   for (const id of ids) {
     const u = engine.ast.units.find((x) => x.id === id)!;
     if (u.kind !== "slots") continue;
@@ -266,8 +339,8 @@ function namesOf(engine: Engine, unit: string): string[] {
 /** Resolve text under one pattern to a candidate day, or null. Values must be safe integers. */
 function resolve(engine: Engine, f: CompiledFormat, text: string): number | null {
   if (!f.chain) return null;
-  const tokens = f.parts.filter((p): p is Token => typeof p !== "string");
-  const re = new RegExp(`^${f.parts.map((p) => (typeof p === "string" ? escapeRe(p) : p.field === "name" ? `(${namesOf(engine, p.unit).map(escapeRe).join("|")})` : "(-?\\d+)")).join("")}$`, "u");
+  const tokens = f.parts.filter(isToken);
+  const re = new RegExp(`^${f.parts.map((p) => (typeof p === "string" ? escapeRe(p) : !isToken(p) ? "" : p.field === "name" ? `(${namesOf(engine, p.unit).map(escapeRe).join("|")})` : "(-?\\d+)")).join("")}$`, "u");
   const m = re.exec(text);
   if (!m) return null;
   const value = (t: Token): number | string => (t.field === "name" ? m[tokens.indexOf(t) + 1]! : Number(m[tokens.indexOf(t) + 1]));

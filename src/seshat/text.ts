@@ -410,8 +410,8 @@ function dayLine(d: DayLabelAst): string {
 }
 
 function ruleDefLines(r: RuleDefAst): string[] {
-  fields(r, `rule "${r.id}"`, "id", "rule", "tags");
-  return [`UID:${id(r.id)}`, ...(r.tags !== undefined ? [tags(r.tags)] : []), ...ruleLines(r.rule)];
+  fields(r, `rule "${r.id}"`, "id", "rule", "tags", "name");
+  return [`UID:${id(r.id)}`, ...(r.name !== undefined ? [`NAME:${esc(r.name)}`] : []), ...(r.tags !== undefined ? [tags(r.tags)] : []), ...ruleLines(r.rule)];
 }
 
 const NODE_FIELDS: Record<string, readonly string[]> = {
@@ -892,11 +892,11 @@ const NODE_LINES = ["PHASE", "DAYIN", "INDEX", "TAG", "DATES", "RRULE"];
 const NODE_BLOCKS = ["ALL", "ANY", "NOT", "SHIFT", "FIRST"];
 
 function ruleDef(c: Component): RuleDefAst {
-  const p = new Props(c, ["UID", "TAGS", ...NODE_LINES], NODE_BLOCKS);
-  const [u, t] = [p.req("UID"), p.one("TAGS")];
+  const p = new Props(c, ["UID", "NAME", "TAGS", ...NODE_LINES], NODE_BLOCKS);
+  const [u, n, t] = [p.req("UID"), p.one("NAME"), p.one("TAGS")];
   const nodes = p.seq(NODE_LINES, NODE_BLOCKS);
   if (nodes.length !== 1) throw new SeshatSyntaxError("a VRULE holds exactly one rule", c.no);
-  return { id: toId(u.value, u), ...(t ? { tags: texts(t.value, t) } : {}), rule: node(nodes[0]!) };
+  return { id: toId(u.value, u), ...(n ? { name: unesc(n.value, n.no) } : {}), ...(t ? { tags: texts(t.value, t) } : {}), rule: node(nodes[0]!) };
 }
 
 function node(it: { line: Line } | { block: Component }): RuleAst {

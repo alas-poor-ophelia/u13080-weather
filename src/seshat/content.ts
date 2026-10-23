@@ -10,7 +10,8 @@
  *     text change that leaves the hash alone, §13.11 M1);
  *   - `number` on every unit but `year` (only the year's number reaches
  *     `TimeContext.year`, which eras attach by);
- *   - named rules' `id`s (nothing references a rule by id);
+ *   - named rules' `id`s (nothing references a rule by id) and display
+ *     `name`s (only a format's `{@name}` prints them, §16.4);
  *   - a moon's `phases` (phase names are display, as on the legacy calendar).
  * Kept although they look like labels: slot and label `name`s (a recurrence
  * filter matches by name, BYLABEL), moon names (predicates match moons by
@@ -38,7 +39,7 @@ export function definitionContent(stored: CalendarAst): unknown {
     name: undefined,
     formats: undefined,
     units: ast.units.map((u) => (u.id === "year" ? u : { ...u, number: undefined })),
-    rules: ast.rules?.map((r) => ({ ...r, id: undefined })),
+    rules: ast.rules?.map((r) => ({ ...r, id: undefined, name: undefined })),
     bodies: ast.bodies?.map((b) => (b.moon ? { ...b, moon: { ...b.moon, phases: undefined } } : b)),
     seasonTags: readsSeasonTags(ast) ? true : undefined,
   });

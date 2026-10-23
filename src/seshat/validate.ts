@@ -339,7 +339,7 @@ export function problems(stored: CalendarAst): Problem[] {
   errors.push(...checkFormats(ast));
   for (const r of ast.rules ?? []) {
     const n = errors.length;
-    if (r.tags !== undefined) checkLabel({ tags: r.tags }, `rule "${r.id}"`, (msg) => errors.push(msg));
+    if (r.tags !== undefined || r.name !== undefined) checkLabel({ name: r.name, tags: r.tags }, `rule "${r.id}"`, (msg) => errors.push(msg));
     errors.push(...checkRule(r.rule, ast, `rule "${r.id}"`));
     own(n, { rule: r.id });
   }

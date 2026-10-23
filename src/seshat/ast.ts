@@ -219,6 +219,8 @@ export interface RuleDefAst {
   readonly id: string;
   readonly rule: RuleAst;
   readonly tags?: readonly string[];
+  /** display name (§16.4 Placeholders): what a format's `{@name}` prints on a day the rule holds; not hashed */
+  readonly name?: string;
 }
 
 /**
