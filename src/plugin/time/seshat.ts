@@ -393,6 +393,16 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     return `Year ${c.year}, day ${(c.dayOfYear ?? 0) + 1}${season ? ` (${season})` : ""}`;
   }
 
+  /**
+   * The day in the named format (bead wadjet-01k.18, the Date display setting): for read-only readouts only,
+   * never parsed. Throws when the definition does not declare it; callers fall back to format().
+   */
+  formatNamed(dayOrdinal: number, name: string): string {
+    const e = this.engine;
+    if (!e) return this.format(dayOrdinal);
+    return formatDay(e, dayOrdinal, name);
+  }
+
   /** A bare day number, or a day in the definition's parseable formats; without formats, "year-day" as the internal calendar reads it. */
   parse(text: string): number | null {
     const t = text.trim();

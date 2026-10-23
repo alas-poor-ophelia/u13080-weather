@@ -16,6 +16,7 @@ import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import { openStudio } from "../studio/ui/open";
 import { calendarSummary } from "./calendar-summary";
+import { displayChoices, displayControlValue, displaySetting, showDisplayRow } from "./date-display";
 import { renameMoonReferences } from "../studio/model/moon-rename";
 import { badMoonsLine, badSeasonsLine, moonRowRenames, parseMoonsText, parseSeasonsText, serialiseMoonsText, serialiseSeasonsText } from "./calendar-text";
 import { badYearLength, definitionRowEdit, definitionRows, MOONS_DESC, SEASONS_DESC, type DefinitionRow, type DefinitionRowKey, type DefinitionRows } from "./calendar-rows";
@@ -69,6 +70,9 @@ export class WadjetSettingTab extends PluginSettingTab {
     const row = this.calendarRow();
     // Days in a year, Moons and Seasons on a world that runs a definition (§15.2): bound to the stored definition
     const def = this.definitionRows();
+    // the Date display choices (bead wadjet-01k.18): only on a definition with more than one format
+    const shownAst = onSeshat() ? (this.plugin.calendars.seshat?.definition() ?? null) : null;
+    const displayOptions = Object.fromEntries((shownAst ? displayChoices(shownAst) : []).map((c) => [c.value, c.label]));
 
     return [
       {
@@ -127,8 +131,14 @@ export class WadjetSettingTab extends PluginSettingTab {
           },
           {
             name: "Current day",
-            desc: onSeshat() ? `Day number on the calendar definition's day line. Now: ${this.plugin.formatDay(s.currentDayOrdinal)}.` : `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
+            desc: onSeshat() ? `Day number on the calendar definition's day line. Now: ${this.plugin.displayDay(s.currentDayOrdinal)}.` : `Day number, counted from the first day of year ${s.calendar.epochYear}. Now: ${cal.format(s.currentDayOrdinal)}.`,
             control: { type: "number", key: "currentDayOrdinal", step: 1, validate: (v) => (!Number.isSafeInteger(v) ? "Whole days only." : Math.abs(v) > MAX_DAY_ORDINAL ? `Between ${withMinus(-MAX_DAY_ORDINAL)} and ${MAX_DAY_ORDINAL} only.` : undefined) },
+          },
+          {
+            name: "Date display",
+            desc: "Which of the definition's formats shows dates in weather blocks, command messages, inserted lines, the current day and pinned days. Typed dates, the Studio and the API keep the default. A block's own format: line wins for that block.",
+            visible: () => onSeshat() && showDisplayRow(shownAst),
+            control: { type: "dropdown", key: "calendar.display", options: displayOptions },
           },
           {
             name: "Days in a year",
@@ -230,7 +240,7 @@ export class WadjetSettingTab extends PluginSettingTab {
   private pinRow(o: Override): SettingGroupItem {
     const zone = this.plugin.settings.zones.find((z) => z.id === o.zoneId);
     return {
-      name: `${zone?.name ?? o.zoneId} · ${this.plugin.formatDay(o.dayOrdinal)}`,
+      name: `${zone?.name ?? o.zoneId} · ${this.plugin.displayDay(o.dayOrdinal)}`,
       desc: summarisePatch(o.patch, this.plugin.settings.units),
       render: (setting) => {
         setting.addButton((b) => b.setButtonText("Edit").onClick(() => new PinModal(this.app, this.plugin, o, () => this.update()).open()));
@@ -380,6 +390,9 @@ export class WadjetSettingTab extends PluginSettingTab {
         return s[key];
       case "calendar.yearLength":
         return s.calendar.yearLength;
+      case "calendar.display":
+        // a name the definition no longer declares shows (and reads) as the default
+        return displayControlValue(this.plugin.onDefinition() ? (this.plugin.calendars.seshat?.definition() ?? null) : null, s.calendar.display);
       case "moons":
         return serialiseMoonsText(s.calendar.moons);
       case "seasons":
@@ -416,6 +429,19 @@ export class WadjetSettingTab extends PluginSettingTab {
         const d = Number(value);
         if (!Number.isSafeInteger(d) || Math.abs(d) > MAX_DAY_ORDINAL) return;
         return this.plugin.setInternalDay(d);
+      }
+      case "calendar.display": {
+        // display only: not hashed, no rebuild; rendered blocks and this tab's readouts follow
+        const name = displaySetting(this.plugin.onDefinition() ? (this.plugin.calendars.seshat?.definition() ?? null) : null, String(value));
+        if (name !== undefined) s.calendar.display = name;
+        else delete s.calendar.display;
+        try {
+          await this.plugin.saveSettings();
+        } finally {
+          this.plugin.emitDisplayChanged();
+          this.update(); // the Current day line and the Pinned days list show the new format
+        }
+        return;
       }
       case "calendar.yearLength":
         s.calendar.yearLength = Number(value);
@@ -589,7 +615,8 @@ class PinModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     const s = this.plugin.settings;
-    const fmt = (d: number) => this.plugin.formatDay(d);
+    // read-only readouts beside the day number the user types (bead wadjet-01k.18)
+    const fmt = (d: number) => this.plugin.displayDay(d);
     const isNew = this.existing === null;
     this.setTitle(isNew ? "Pin a day" : "Edit pinned day");
 

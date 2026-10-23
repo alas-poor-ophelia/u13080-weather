@@ -71,6 +71,11 @@ export interface CalendarSettings extends InternalCalendarConfig {
   origin?: "definition";
   /** the definition and adapter before the last calendar change, for one undo (§15.9 S6) */
   previous?: PreviousCalendar;
+  /**
+   * Date display (bead wadjet-01k.18): the definition's format that read-only date readouts use; absent is
+   * the default format. A name the definition no longer declares reads as the default. Not hashed.
+   */
+  display?: string;
 }
 
 export interface PreviousCalendar {
@@ -231,11 +236,11 @@ export function migrateSettings(raw: unknown, warn: (msg: string) => void = () =
   const moons = sanitizeMoons(calendar.moons, warn);
   const yearLength = sanitizeYearLength(calendar.yearLength, warn);
   const epochYear = sanitizeEpochYear(calendar.epochYear, warn);
-  const { origin, previous, ...rest } = calendar;
+  const { origin, previous, display, ...rest } = calendar;
   const s: WadjetSettings = {
     ...DEFAULT_SETTINGS,
     ...r,
-    calendar: { ...rest, yearLength, epochYear, moons, ...sanitizeOrigin(origin, warn), ...sanitizePrevious(previous, warn) },
+    calendar: { ...rest, yearLength, epochYear, moons, ...sanitizeOrigin(origin, warn), ...sanitizePrevious(previous, warn), ...(typeof display === "string" && display ? { display } : {}) },
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],

@@ -9,6 +9,7 @@ import { Calendars } from "./calendars";
 import { calendarOfDefinition } from "../studio/model/definition";
 import type { StudioSettingsLike } from "../studio/model/state";
 import { blockRepaintOn, parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
+import { displayFormat, displayWith } from "./date-display";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
 import { CONFLICT_NOTICE, FirstSave, readExternal, SaveQueue, setAndSave, YIELD_NOTICE } from "./persist";
@@ -49,6 +50,8 @@ export default class WadjetPlugin extends Plugin {
    * and a late save from this one would overwrite it.
    */
   private dead = false;
+  /** what follows the Date display setting (rendered codeblocks); plugin-internal, not an API event */
+  private readonly displayListeners = new Set<() => void>();
   /** the internal calendar's configHash at the last rebuild, to tell a calendar edit from any other save */
   private internalHash = "";
   /**
@@ -206,11 +209,13 @@ export default class WadjetPlugin extends Plugin {
       for (const msg of repairs) console.warn(`U+13080 Weather: ${msg}`);
       new Notice(`Wadjet repaired its calendar settings: ${repairs.join(" ")}`, 15000);
     }
+    const display = this.settings.calendar.display;
     this.calendars.follow(() => {
       this.settings = next;
       this.internalCalendar.update(next.calendar);
     });
     this.internalHash = this.internalCalendar.configHash();
+    if (next.calendar.display !== display) this.emitDisplayChanged();
     this.refreshSettingsTab();
   }
 
@@ -321,6 +326,46 @@ export default class WadjetPlugin extends Plugin {
     return seshat && this.time.active === seshat ? seshat.format(d) : this.internalCalendar.format(d);
   }
 
+  /** Whether the world runs its stored calendar definition (the Date display setting applies only there). */
+  onDefinition(): boolean {
+    const seshat = this.calendars.seshat;
+    return !!seshat && this.time.active === seshat;
+  }
+
+  /**
+   * A day for a READ-only readout (bead wadjet-01k.18): the Date display setting's format on a definition
+   * world, or `override` (a codeblock's `format:`) when the definition declares it; formatDay everywhere
+   * else (legacy worlds, other plugins' calendars), and for a named format that is gone or throws.
+   * Never for a date that is typed or parsed, stored, or returned by the API: those use formatDay.
+   */
+  displayDay(d: number, override?: string): string {
+    const seshat = this.calendars.seshat;
+    const ast = seshat && this.time.active === seshat ? seshat.definition() : null;
+    if (!seshat || !ast) return this.formatDay(d);
+    return displayWith(
+      displayFormat(ast, this.settings.calendar.display, override),
+      (name) => seshat.formatNamed(d, name),
+      () => seshat.format(d),
+    );
+  }
+
+  /** Listen for a Date display change (a settings save, or a synced data.json); returns the unsubscribe. */
+  onDisplayChanged(fn: () => void): () => void {
+    this.displayListeners.add(fn);
+    return () => void this.displayListeners.delete(fn);
+  }
+
+  /** Tell rendered readouts the Date display changed. */
+  emitDisplayChanged(): void {
+    for (const fn of [...this.displayListeners]) {
+      try {
+        fn();
+      } catch (e) {
+        console.error("U+13080 Weather: a date display listener threw.", e);
+      }
+    }
+  }
+
   /**
    * Re-read the settings tab's definitions — commands, and the studio's Save,
    * change state it displays.
@@ -371,7 +416,8 @@ export default class WadjetPlugin extends Plugin {
       renderError(el, error ?? "bad date");
       return zoneId;
     }
-    const label = (d: number) => adapter?.format?.(d) ?? `day ${d}`;
+    // a definition world labels days in the Date display format (or the block's format:); other calendars as they write them
+    const label = (d: number) => (this.onDefinition() ? this.displayDay(d, spec.format) : (adapter?.format?.(d) ?? `day ${d}`));
     try {
       const u = spec.units ?? this.settings.units;
       if (spec.style === "table") {
@@ -428,7 +474,7 @@ export default class WadjetPlugin extends Plugin {
       );
       if (!moved) return void new Notice("The active calendar can't be changed from here.");
       const now = this.world.now();
-      if (now) new Notice(this.api.format(now.dayOrdinal));
+      if (now) new Notice(this.onDefinition() ? this.displayDay(now.dayOrdinal) : this.api.format(now.dayOrdinal));
     };
     this.addCommand({ id: "next-day", name: "Advance the calendar one day", callback: () => void step(1) });
     this.addCommand({ id: "prev-day", name: "Rewind the calendar one day", callback: () => void step(-1) });
@@ -441,7 +487,7 @@ export default class WadjetPlugin extends Plugin {
         const now = this.world.now();
         if (!zone || !now) return void new Notice("Add a zone and set the current day first.");
         const r = this.world.getReport(zone.id, { dayOrdinal: now.dayOrdinal });
-        editor.replaceSelection(`${this.formatDay(now.dayOrdinal)} — ${this.world.describe(r, "short")}\n`);
+        editor.replaceSelection(`${this.displayDay(now.dayOrdinal)} — ${this.world.describe(r, "short")}\n`);
       },
     });
 
@@ -466,7 +512,7 @@ export default class WadjetPlugin extends Plugin {
         this.settings.overrides.push({ zoneId: zone.id, dayOrdinal: now.dayOrdinal, patch: { temperature: { ...r.temperature }, precipitation: { type: r.precipitation.type, amountMm: r.precipitation.amountMm }, wind: { ...r.wind }, note: "pinned" } });
         await this.saveAndRebuild();
         this.refreshSettingsTab();
-        new Notice(`Pinned ${zone.name} on ${this.formatDay(now.dayOrdinal)}.`);
+        new Notice(`Pinned ${zone.name} on ${this.displayDay(now.dayOrdinal)}.`);
       },
     });
 
@@ -513,6 +559,8 @@ class BlockWatcher extends MarkdownRenderChild {
     if (!this.plugin.controller.unloaded) {
       this.register(this.plugin.api.on("time-changed", () => this.rerender()));
       this.register(this.plugin.api.on("adapters-changed", () => this.rerender()));
+      // its date label follows the Date display setting (bead wadjet-01k.18)
+      this.register(this.plugin.onDisplayChanged(() => this.rerender()));
       this.register(
         this.plugin.api.on("profiles-changed", (p) => {
           if (blockRepaintOn("profiles-changed", p, this.shown)) this.rerender();

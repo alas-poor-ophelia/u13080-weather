@@ -10004,3 +10004,71 @@ describe("climate studio · dated seasons", () => {
     }
   });
 });
+
+describe("calendar definition · Date display", () => {
+  test("step 92: Date display set to a format with {@season} relabels a codeblock; another block's format: default keeps the short date (bead wadjet-01k.18)", async () => {
+    const LONG = "FORMAT:long={weekday\\:name} {month\\:day} {month\\:name} {year}";
+    expect(GREGORIAN_TEXT).toContain(LONG);
+    const text = GREGORIAN_TEXT.replace(LONG, `${LONG}\\, {@season}`).replace("\nBEGIN:VGEAR", "\nBEGIN:VSEASONS\nUNIT:year\nMARK:Spring=month:3.20\nMARK:Autumn=month:9.22\nEND:VSEASONS\n\nBEGIN:VGEAR");
+    await withApp(ob.page, (app, t: string) => app.plugins.plugins.wadjet.calendars.optIn(t, { replaceStored: true }), text);
+    const notes = ["Wadjet Date Display A.md", "Wadjet Date Display B.md"];
+    const open = (p: string, md: string) =>
+      withApp(
+        ob.page,
+        async (app, a: { p: string; md: string }) => {
+          let f = app.vault.getAbstractFileByPath(a.p);
+          if (f) await app.vault.modify(f, a.md);
+          else f = await app.vault.create(a.p, a.md);
+          await app.workspace.getLeaf(false).openFile(f, { state: { mode: "preview" } });
+        },
+        { p, md },
+      );
+    const lineText = async () => {
+      const el = ob.page.locator(".workspace-leaf.mod-active .markdown-preview-view .wadjet-line").first();
+      await el.waitFor({ state: "attached", timeout: 10_000 });
+      return ((await el.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    };
+    try {
+      const { long, short } = await withApp(ob.page, (app) => {
+        const p = app.plugins.plugins.wadjet;
+        const d = p.settings.currentDayOrdinal;
+        return { long: p.calendars.seshat.formatNamed(d, "long") as string, short: p.calendars.seshat.format(d) as string };
+      });
+      expect(long).toMatch(/, (Spring|Autumn)$/);
+      // the row shows on this definition (two formats) and offers both, default first
+      await openWadjetSettings();
+      const row = sw.locator('.vertical-tab-content .setting-item:has(> .setting-item-info > .setting-item-name:text-is("Date display"))');
+      await row.waitFor({ state: "visible", timeout: 10_000 });
+      expect(await row.locator("select:not(.is-measuring) option").allTextContents()).toEqual(["default", "long"]);
+      await row.locator("select:not(.is-measuring)").selectOption("long");
+      await expect.poll(() => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.display ?? null) as string | null, { timeout: 10_000 }).toBe("long");
+      const currentDay = sw.locator('.vertical-tab-content .setting-item:has(> .setting-item-info > .setting-item-name:text-is("Current day")) .setting-item-description');
+      await expect.poll(async () => (await currentDay.textContent()) ?? "", { timeout: 5_000 }).toContain(long);
+      await withApp(ob.page, (app) => app.setting.close());
+
+      await open(notes[0]!, `\`\`\`wadjet\nzone: ${zone.id}\nstyle: line\n\`\`\``);
+      const a = await lineText();
+      expect(a).toContain(`${long}:`);
+      await open(notes[1]!, `\`\`\`wadjet\nzone: ${zone.id}\nstyle: line\nformat: default\n\`\`\``);
+      const b = await lineText();
+      expect(b).toContain(`${short}:`);
+      expect(b).not.toContain(long);
+      console.log(`  · Date display long: "${a.slice(0, 70)}"; format: default: "${b.slice(0, 50)}"`);
+    } finally {
+      await withApp(
+        ob.page,
+        async (app, paths: string[]) => {
+          for (const p of paths) {
+            const f = app.vault.getAbstractFileByPath(p);
+            if (f) await app.vault.delete(f);
+          }
+          const plugin = app.plugins.plugins.wadjet;
+          delete plugin.settings.calendar.display;
+          await plugin.saveSettings();
+          await plugin.calendars.setActive("internal");
+        },
+        notes,
+      );
+    }
+  });
+});

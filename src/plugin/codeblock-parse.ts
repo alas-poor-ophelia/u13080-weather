@@ -9,6 +9,8 @@
  *   field: precipitation.amount   (value only; a ConvertedReport leaf)
  *   units: metric | imperial      (optional; default is the setting)
  *   interpret: my-system.mood     (optional; interpreter ids, comma list)
+ *   format: long                  (optional; the definition format for this block's date labels,
+ *                                  overriding the Date display setting; an unknown name falls back to it)
  */
 import { isReportField, type ReportField, type Units } from "../core/units";
 
@@ -22,6 +24,8 @@ export interface CodeblockSpec {
   units?: Units;
   /** interpreter ids whose result is shown under the card/line/prose */
   interpret?: string[];
+  /** a calendar definition format name for the date labels (bead wadjet-01k.18); checked when rendering, never an error */
+  format?: string;
   errors: string[];
 }
 
@@ -76,6 +80,10 @@ export function parseCodeblock(source: string): CodeblockSpec {
         else spec.interpret = ids;
         break;
       }
+      case "format":
+        // quiet: an empty or unknown name falls back to the Date display setting when the block renders
+        if (val) spec.format = val;
+        break;
       default:
         spec.errors.push(`unknown key "${key}"`);
     }

@@ -76,6 +76,7 @@ style: card                # card | line | prose | table | value
 range: 7                   # table only: days from `date`
 field: precipitation.amount   # value only: which number (or word) to show
 units: imperial            # optional; otherwise the setting
+format: long               # optional; a calendar definition's format for this block's dates
 ```
 ````
 
@@ -91,7 +92,10 @@ units: imperial            # optional; otherwise the setting
 
 Day numbers count from the first day of year 1 (which is day 0). Dates like `3-14` are
 *year-day* in a plain calendar (a new world's, or the legacy calendar): year 3, the 14th day. A
-world on a calendar with months writes its own dates. Units (metric or imperial) are a setting.
+world on a calendar with months writes its own dates. When its definition has more than one format,
+*Settings → Calendar → Date display* picks the one blocks, command messages and the settings lists show
+dates in (typed dates keep the default), and a block's `format:` line overrides it for that block; a
+name the definition does not have falls back quietly. Units (metric or imperial) are a setting.
 
 ## Commands
 
