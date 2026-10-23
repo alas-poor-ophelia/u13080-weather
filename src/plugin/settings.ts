@@ -9,6 +9,7 @@ import type { Override } from "../core/report";
 import type { DescriptorBands } from "../core/report";
 import type { Era, ModifierOp, Predicate, Regime, SpellSpec, ZoneProfile } from "../core/types";
 import { GENERATOR_VERSION } from "../core/version";
+import { keptRepair } from "./keep";
 
 export interface MoonConfig {
   name: string;
@@ -103,6 +104,13 @@ export interface WadjetSettings {
   devicePresets?: DevicePreset[];
   /** studio regime presets (saved state sets), SPEC §3.4 */
   regimePresets?: RegimePreset[];
+  /**
+   * Kept weather (SESHAT-v0 §17.2): days kept from the previous generator at an upgrade, by (zone, day).
+   * Typed unknown and stored as it was found, like calendar.definition: what Wadjet cannot read is carried
+   * through every save and not used. Read it with keep.ts readKept; change it only through keep.ts's helpers,
+   * which replace the value (never edit it in place) and keep the unreadable entries.
+   */
+  frozen: unknown;
 }
 
 export const DEFAULT_SETTINGS: WadjetSettings = {
@@ -123,6 +131,7 @@ export const DEFAULT_SETTINGS: WadjetSettings = {
   units: "metric",
   devicePresets: [],
   regimePresets: [],
+  frozen: [],
 };
 
 /** A seed that is random once and then fixed forever for this world. */
@@ -246,7 +255,11 @@ export function migrateSettings(raw: unknown, warn: (msg: string) => void = () =
     overrides: Array.isArray(r.overrides) ? r.overrides : [],
     devicePresets: Array.isArray(r.devicePresets) ? r.devicePresets : [],
     regimePresets: Array.isArray(r.regimePresets) ? r.regimePresets : [],
+    // never rewritten here: a later shape or one bad entry arriving through Sync must survive the save after load
+    frozen: r.frozen === undefined ? [] : r.frozen,
   };
+  const kept = keptRepair(s.frozen);
+  if (kept !== null) warn(kept);
   if (!s.worldSeed) s.worldSeed = freshSeed();
   if (!s.generatorVersion) s.generatorVersion = GENERATOR_VERSION;
   return s;

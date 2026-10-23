@@ -23,6 +23,7 @@ import { badMoonsLine, badSeasonsLine, moonRowRenames, parseMoonsText, parseSeas
 import { badYearLength, definitionRowEdit, definitionRows, MOONS_DESC, SEASONS_DESC, type DefinitionRow, type DefinitionRowKey, type DefinitionRows } from "./calendar-rows";
 import type WadjetPlugin from "./main";
 import { generatedPatch } from "./pins";
+import { dropKeptZone } from "./keep";
 import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
@@ -191,7 +192,9 @@ export class WadjetSettingTab extends PluginSettingTab {
         emptyState: "No zones yet. A zone is a climate; notes and map locations point at a zone.",
         addItem: { name: "Add zone", action: () => new AddZoneModal(this.app, this.plugin, () => this.update()).open() },
         onDelete: (index) => {
-          s.zones.splice(index, 1);
+          const [gone] = s.zones.splice(index, 1);
+          // a deleted zone's kept weather goes with it (SESHAT-v0 §17.4 Q3)
+          if (gone) s.frozen = dropKeptZone(s.frozen, gone.id);
           this.saveAndRefresh(true);
         },
         items: s.zones.map((z) => this.zoneRow(z)),
@@ -603,6 +606,8 @@ export class AddZoneModal extends Modal {
           const geography: Geography = scaleSwing ? { ...geo, continentality } : geo;
           const result = byGeography ? zoneFromGeography(name.trim(), geography, PRESETS, ids) : zoneFromPreset({ name: name.trim(), preset: MAIN_PRESETS.find((p) => p.id === presetId)!, existingIds: ids });
           s.zones.push(result.zone);
+          // a reused id starts with no history: stale kept weather under it is dropped (§17.5 item 10)
+          s.frozen = dropKeptZone(s.frozen, result.zone.id);
           await this.plugin.saveAndRebuild();
           new Notice(result.provenance, 8000);
           this.close();

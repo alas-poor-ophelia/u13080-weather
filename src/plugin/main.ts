@@ -19,7 +19,8 @@ import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettin
 import { WadjetSettingTab } from "./settings-tab";
 import { TimeRegistry } from "./time/adapter";
 import { InternalCalendar } from "./time/internal";
-import { World } from "./world";
+import { World, type WorldState } from "./world";
+import { worldStateOf } from "./keep";
 import { startNewWorld } from "./new-world";
 
 export type { WadjetAPI } from "./api";
@@ -234,9 +235,8 @@ export default class WadjetPlugin extends Plugin {
     return modeFor(this.settings.generatorVersion);
   }
 
-  private worldState() {
-    const s = this.settings;
-    return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}), generatorMode: this.generatorMode() };
+  private worldState(): WorldState {
+    return worldStateOf(this.settings, this.generatorMode());
   }
 
   /**

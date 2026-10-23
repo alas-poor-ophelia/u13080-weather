@@ -216,6 +216,8 @@ export function rollYear(i: AuditionInput, cache?: Map<string, AuditionYear>): A
   for (let d = firstDay, n = 0; n < maxDays; d++, n++) {
     const time = timeOf(d);
     if (yearOf(time) !== i.year) break;
+    // Kept weather (settings.frozen, SESHAT-v0 §17.5 item 5) is ignored here on purpose: the audition is the
+    // zone as drafted, in the world's generator mode; only World.getReport/getRange read kept days.
     const record = generator.day(d);
     const report = buildReport(record, i.zone.id, { seed: genSeed, generatorVersion: generatorVersionOf(mode), provenance: { profileHash: profHash, calendarHash }, overrides: overrideMap });
     const dayOfYear = time.dayOfYear ?? d - firstDay;

@@ -6,7 +6,7 @@
  * the seed, or the calendar config changes. Also owns the zone-resolver chain
  * and the event listeners the public API exposes.
  */
-import type { Generator } from "../core/generator";
+import type { DailyRecord, Generator } from "../core/generator";
 import { createGenerator, profileHash, validateProfile, type ValidationIssue } from "../core/profile";
 import { buildReport, describe, overrideKey, type DescriptorBands, type Override, type OverridePatch, type WeatherReport } from "../core/report";
 import { calendarHashOf, eraModifiers, erasHash, withEraTags } from "../core/eras";
@@ -15,6 +15,8 @@ import { generatorVersionOf, type GeneratorMode } from "../core/version";
 import { makePayload, type PayloadArgs, type WadjetEvent, type WadjetEventPayloads } from "./events";
 import { adapterFault, type TimeAdapter, type TimeContext, type TimeRegistry } from "./time/adapter";
 import { codedError } from "./interpreters";
+import { hash32 } from "../core/rng";
+import type { FrozenDay } from "./keep";
 
 /** World's error when no calendar can make weather: none is registered, or the active one is faulted. */
 export const NO_CALENDAR_CODE = "wadjet-no-calendar";
@@ -44,6 +46,12 @@ export interface WorldState {
   bands?: DescriptorBands;
   /** which generator the world runs (SESHAT-v0 §17.2; modeFor(settings.generatorVersion)); absent = "current" */
   generatorMode?: GeneratorMode;
+  /**
+   * kept weather (SESHAT-v0 §17.2): a kept (zone, day) reports its stored record and provenance instead of
+   * generating; entries of a zone not in `zones` are ignored. Replace the list to change it, never edit it in
+   * place: the World re-indexes it when the list (or its length) changes, and zone keys carry a hash per zone.
+   */
+  frozen?: readonly FrozenDay[];
 }
 
 /** Throw a TypeError unless `v` is a safe integer (|v| <= 2^53 - 1). */
@@ -72,10 +80,13 @@ export function dayTimeFn(adapter: TimeAdapter, eras: readonly Era[], flip: bool
   return seasons.length ? (d) => flipSeasonTags(withEraTags(eras, adapter.toContext(d)), seasons) as TimeContext : (d) => withEraTags(eras, adapter.toContext(d));
 }
 
-/** Everything about one zone that changes what it reports (seed, eras and bands are the global key). */
-function zoneKey(zone: ZoneProfile, overrides: readonly Override[]): string {
+/**
+ * Everything about one zone that changes what it reports (seed, eras and bands are the global key). Kept days
+ * enter as `kept`, the zone's kept-day fingerprint (a count and hash), never by value.
+ */
+function zoneKey(zone: ZoneProfile, overrides: readonly Override[], kept: string): string {
   const own = overrides.filter((o) => o.zoneId === zone.id).sort((a, b) => a.dayOrdinal - b.dayOrdinal);
-  return `${profileHash(zone)}|${zone.flipSeasons === true ? "flip" : ""}|${zone.name}|${JSON.stringify(own)}`;
+  return `${profileHash(zone)}|${zone.flipSeasons === true ? "flip" : ""}|${zone.name}|${JSON.stringify(own)}${kept}`;
 }
 
 type Listener = (payload: never) => void;
@@ -89,6 +100,16 @@ interface Keys {
 export class World {
   private generators = new Map<string, { key: string; generator: Generator; hash: string }>();
   private overrideMap = new Map<string, OverridePatch>();
+  /** kept days by overrideKey(zone, day), indexed once per store change */
+  private keptMap = new Map<string, FrozenDay>();
+  /**
+   * per zone with kept days, a fingerprint of them (count and a hash of their JSON, computed once per new list):
+   * zone keys carry it, so a store change fires profiles-changed for exactly the zones whose kept days changed,
+   * and a synced copy with the same content fires nothing
+   */
+  private keptZones = new Map<string, string>();
+  /** the store last indexed, and how long it was: a new list or length is re-indexed */
+  private keptSeen: { list: readonly FrozenDay[] | undefined; length: number } = { list: undefined, length: 0 };
   private resolvers: ZoneResolver[] = [];
   private listeners = new Map<WadjetEvent, Set<Listener>>();
   /** What the last setState saw, for the profiles-changed diff. The settings UI mutates state objects in place, so the previous state object can't be diffed; its keys can. */
@@ -107,6 +128,7 @@ export class World {
     readonly time: TimeRegistry,
   ) {
     this.indexOverrides();
+    this.indexKept();
     this.keys = this.snapshotKeys();
     // an adapter registering or leaving can change the active calendar: re-key, or the next edit is misread
     this.time.onChange(() => this.rekeyCalendar());
@@ -140,6 +162,7 @@ export class World {
   setState(s: WorldState): void {
     this.state = s;
     this.indexOverrides();
+    this.indexKept();
     const prev = this.keys;
     const next = this.snapshotKeys();
     this.keys = next;
@@ -164,6 +187,25 @@ export class World {
   private indexOverrides(): void {
     this.overrideMap = new Map(this.state.overrides.map((o) => [overrideKey(o.zoneId, o.dayOrdinal), o.patch]));
   }
+  private indexKept(): void {
+    const list = this.state.frozen;
+    const length = list?.length ?? 0;
+    if (list === this.keptSeen.list && length === this.keptSeen.length) return;
+    this.keptSeen = { list, length };
+    this.keptMap = new Map((list ?? []).map((f) => [overrideKey(f.zoneId, f.dayOrdinal), f]));
+    const byZone = new Map<string, FrozenDay[]>();
+    for (const f of this.keptMap.values()) byZone.set(f.zoneId, [...(byZone.get(f.zoneId) ?? []), f]);
+    this.keptZones = new Map(
+      [...byZone].map(([id, days]) => {
+        const json = JSON.stringify(days.sort((a, b) => a.dayOrdinal - b.dayOrdinal));
+        return [id, `${days.length}:${hash32(json, 0x4b455054).toString(16)}:${json.length}`];
+      }),
+    );
+  }
+  /** The kept day for (zone, day), if the store has one. */
+  private kept(zoneId: string, dayOrdinal: number): FrozenDay | undefined {
+    return this.keptZones.has(zoneId) ? this.keptMap.get(overrideKey(zoneId, dayOrdinal)) : undefined;
+  }
   private snapshotKeys(): Keys {
     const eras = this.state.eras ?? [];
     // the mode is shared: a mode change (an Upgrade, a synced downgrade) moves every zone's weather
@@ -177,7 +219,7 @@ export class World {
         console.error(`U+13080 Weather: time adapter "${active.id}" configHash() threw.`, e);
       }
     }
-    return { shared, zones: new Map(this.state.zones.map((z) => [z.id, zoneKey(z, this.state.overrides)])), calendar };
+    return { shared, zones: new Map(this.state.zones.map((z) => [z.id, zoneKey(z, this.state.overrides, this.keptZones.has(z.id) ? `|kept:${this.keptZones.get(z.id)!}` : "")])), calendar };
   }
 
   // --- zones ------------------------------------------------------------
@@ -262,8 +304,11 @@ export class World {
       if (t.hour < 0 || t.hour >= 24) throw new RangeError(`hour must be in [0, 24) (got ${t.hour}).`);
     }
     const { generator, hash } = this.generator(zoneId);
-    const rec = generator.day(t.dayOrdinal);
-    return buildReport(rec, zoneId, { seed: this.state.seed, generatorVersion: this.generatorVersion, provenance: { profileHash: hash, calendarHash: this.calendarHash() }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }, t.hour);
+    const kept = this.kept(zoneId, t.dayOrdinal);
+    const rec = kept?.record ?? generator.day(t.dayOrdinal);
+    const version = kept?.provenance.generatorVersion ?? this.generatorVersion;
+    const cal = kept?.provenance.calendarHash ?? this.calendarHash();
+    return buildReport(rec, zoneId, { seed: this.state.seed, generatorVersion: version, provenance: { profileHash: kept?.provenance.profileHash ?? hash, calendarHash: cal }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }, t.hour);
   }
 
   /** Daily reports for [fromDay, toDay], inclusive. Integer bounds, fromDay <= toDay, at most MAX_RANGE_DAYS days. */
@@ -275,7 +320,25 @@ export class World {
     const { generator, hash } = this.generator(zoneId);
     const cal = this.calendarHash();
     const version = this.generatorVersion;
-    return generator.range(fromDay, toDay).map((rec) => buildReport(rec, zoneId, { seed: this.state.seed, generatorVersion: version, provenance: { profileHash: hash, calendarHash: cal }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }));
+    const bands = this.state.bands ? { bands: this.state.bands } : {};
+    return generator.range(fromDay, toDay).map((generated) => {
+      const kept = this.kept(zoneId, generated.dayOrdinal);
+      const rec = kept?.record ?? generated;
+      const provenance = { profileHash: kept?.provenance.profileHash ?? hash, calendarHash: kept?.provenance.calendarHash ?? cal };
+      return buildReport(rec, zoneId, { seed: this.state.seed, generatorVersion: kept?.provenance.generatorVersion ?? version, provenance, ...bands, overrides: this.overrideMap });
+    });
+  }
+
+  /**
+   * The generator's own records for [fromDay, toDay] (kept days and pins aside), for the kept-weather scan
+   * (keep.ts). Same bounds as getRange. The records are the generator's cached ones: read, never change them.
+   */
+  generatedRecords(zoneId: string, fromDay: number, toDay: number): readonly DailyRecord[] {
+    assertInteger(fromDay, "fromDay");
+    assertInteger(toDay, "toDay");
+    if (fromDay > toDay) throw new RangeError(`fromDay (${fromDay}) is after toDay (${toDay}).`);
+    if (toDay - fromDay + 1 > MAX_RANGE_DAYS) throw new RangeError(`A range covers at most ${MAX_RANGE_DAYS} days (asked for ${toDay - fromDay + 1}).`);
+    return this.generator(zoneId).generator.range(fromDay, toDay);
   }
 
   now(): TimeContext | null {
