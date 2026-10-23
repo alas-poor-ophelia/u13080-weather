@@ -9977,3 +9977,30 @@ describe("climate studio · calendar definition", () => {
     }
   });
 });
+
+describe("climate studio · dated seasons", () => {
+  test("step 91: seasons on dates show, inside the Calendar window's Seasons tab, that the ribbon is read-only and why", async () => {
+    const dated = GREGORIAN_TEXT.replace("\nBEGIN:VGEAR", "\nBEGIN:VSEASONS\nUNIT:year\nMARK:Spring=month:3.20\nMARK:Autumn=month:9.22\nEND:VSEASONS\n\nBEGIN:VGEAR");
+    expect(dated).toContain("MARK:Spring=month:3.20");
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), dated);
+    try {
+      await revealStudio();
+      await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("calendar"), VIEW_TYPE);
+      await nextFrame();
+      const win = ob.page.locator(".wadjet-studio-window", { has: ob.page.locator(".wadjet-studio-calendar") }).first();
+      await win.locator('.wadjet-studio-calendar-tabs .wadjet-studio-segment[data-value="seasons"]').click();
+      await nextFrame();
+      const notice = win.locator(".wadjet-studio-seasons-notice");
+      expect(await notice.isVisible()).toBe(true);
+      expect(await notice.textContent()).toContain("Read-only: these seasons start on dates");
+      expect(await win.locator(".wadjet-studio-seasons-notice-button").isVisible()).toBe(true);
+      expect(await win.locator(".wadjet-studio-seasons.is-readonly").count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-seasons-split").isVisible()).toBe(false);
+      console.log(`  · dated seasons: notice "${((await notice.textContent()) ?? "").slice(0, 60)}…", ribbon read-only`);
+    } finally {
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("calendar"), VIEW_TYPE);
+      await nextFrame();
+    }
+  });
+});

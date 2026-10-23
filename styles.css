@@ -3687,6 +3687,42 @@
 .wadjet-studio-seasons-split.is-hidden {
   display: none;
 }
+/* read-only seasons (dated marks, a plugin calendar): the ribbon is a picture, and says so */
+.wadjet-studio-seasons.is-readonly .wadjet-studio-seasons-bar {
+  filter: saturate(0.35);
+  opacity: 0.75;
+  outline: 1px dashed var(--wadjet-studio-text-dim);
+  outline-offset: 2px;
+}
+.wadjet-studio-seasons.is-readonly .wadjet-studio-seasons-bar,
+.wadjet-studio-seasons.is-readonly .wadjet-studio-seasons-segment,
+.wadjet-studio-seasons.is-readonly .wadjet-studio-seasons-flag,
+.wadjet-studio-seasons.is-readonly .wadjet-studio-seasons-segment-label {
+  cursor: default;
+}
+.wadjet-studio-seasons.is-readonly .wadjet-studio-seasons-flag {
+  opacity: 0.35;
+}
+.wadjet-studio-seasons-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--wadjet-studio-gold);
+  background: var(--background-secondary);
+  font-size: var(--wadjet-studio-fs-body);
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-seasons-notice.is-hidden {
+  display: none;
+}
+.wadjet-studio-seasons-notice-text {
+  flex: 1 1 auto;
+}
+.wadjet-studio-seasons-notice-button {
+  flex: 0 0 auto;
+}
 .wadjet-studio-seasons-editlink {
   margin-top: 8px;
   font-size: var(--wadjet-studio-fs-body);

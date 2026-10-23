@@ -49,6 +49,7 @@ import { beginDrag, markDragTarget } from "../pointer";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 import { confirmWorldEdit } from "../world-confirm-modal";
+import { DefinitionModal } from "../../../plugin/calendar-modals";
 
 /** The id this window is registered and opened under (SPEC §3.4). */
 export const SEASONS_WINDOW = "seasons";
@@ -160,6 +161,12 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
   const caption = body.createDiv({ cls: "wadjet-studio-seasons-caption", attr: { "data-hint": seasonsHint("seasons.world") } });
   caption.createSpan({ cls: "wadjet-studio-seasons-caption-text", text: "Seasons" });
   caption.createSpan({ cls: "wadjet-studio-seasons-caption-tail", text: "· each stamps tag season:name" });
+
+  // why the ribbon cannot be edited, in the body itself: hosted as the Calendar window's tab, the head chip is not shown
+  const notice = body.createDiv({ cls: "wadjet-studio-seasons-notice is-hidden" });
+  const noticeText = notice.createSpan({ cls: "wadjet-studio-seasons-notice-text" });
+  const noticeButton = notice.createEl("button", { cls: "wadjet-studio-seasons-notice-button", text: "Edit as text", attr: { "data-hint": seasonsHint("seasons.editHint") } });
+  noticeButton.addEventListener("click", () => new DefinitionModal(ctx.plugin.app, ctx.plugin, () => {}).open());
 
   const list = body.createDiv({ cls: "wadjet-studio-seasons-list" });
   const rowsEl = list.createDiv({ cls: "wadjet-studio-seasons-rows" });
@@ -439,6 +446,13 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
     const view = calendarView(ctx, state);
 
     sourceChip.update({ label: view.readOnly ? `${view.label} · read-only` : view.label });
+    body.toggleClass("is-readonly", view.readOnly);
+    const dated = view.readOnly && seasonsUseDates(ctx.plugin.calendars.seshat?.definition()?.seasons ?? { marks: [] });
+    notice.toggleClass("is-hidden", !dated);
+    if (dated)
+      noticeText.setText(
+        "Read-only: these seasons start on dates, so their lengths change from year to year. The ribbon shows where they fall in one year, approximately. Change them in the calendar's text.",
+      );
 
     renderBar(view);
 
