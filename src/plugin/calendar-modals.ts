@@ -10,6 +10,7 @@ import { prepareDefinition, SeshatCalendar } from "./time/seshat";
 import { buildOptIn, WORLD_PRESETS, type OptInChoice } from "./opt-in";
 import { blastRadius, describeBlast } from "./time/blast";
 import { planChange, worldHasSpells, yearKeyedNote, type ChangePlan } from "./calendar-change";
+import { askKeptOnCalendarChange, keptToggleRow, renderUpgradeFirst } from "./upgrade-modals";
 
 /** Validation for the calendar definition: the first error (with its line when known), or nothing. */
 export function badDefinition(text: string): string | undefined {
@@ -36,6 +37,14 @@ export class OptInModal extends Modal {
     const { contentEl } = this;
     const s = this.plugin.settings;
     this.setTitle("Change calendar");
+    // the previous generator never runs on a definition (SESHAT-v0 §17.5 item 9): upgrade first, then this dialog again
+    if (this.plugin.generatorMode() === "previous") {
+      renderUpgradeFirst(this, this.plugin, () => {
+        this.onDone();
+        new OptInModal(this.app, this.plugin, this.onDone).open();
+      });
+      return;
+    }
     const stored = typeof s.calendar.definition === "string" ? s.calendar.definition : null;
     // a stored definition (kept from an earlier opt-out, or faulted and kept byte for byte) is where to start:
     // anything else replaces it, and that is asked for below
@@ -120,6 +129,9 @@ export class OptInModal extends Modal {
           refresh();
         }),
       );
+    // kept weather is bound to the old calendar's seasons and moons (§17.5 item 8)
+    let removeKept = false;
+    keptToggleRow(contentEl, this.plugin, (v) => (removeKept = v));
     const preview = contentEl.createEl("p");
     const problem = contentEl.createEl("p", { cls: "mod-warning" });
     contentEl.createEl("p", {
@@ -140,7 +152,7 @@ export class OptInModal extends Modal {
               busy = true;
               b.setDisabled(true);
               try {
-                await this.plugin.setActiveTimeAdapter("internal");
+                await this.plugin.calendars.setActive("internal", { removeKept });
               } catch (e) {
                 busy = false;
                 b.setDisabled(false);
@@ -156,7 +168,7 @@ export class OptInModal extends Modal {
             busy = true;
             b.setDisabled(true);
             try {
-              await this.plugin.calendars.optIn(r.text, { replaceStored: replace });
+              await this.plugin.calendars.optIn(r.text, { replaceStored: replace, removeKept });
             } catch (e) {
               busy = false;
               b.setDisabled(false);
@@ -250,14 +262,22 @@ export class DefinitionModal extends Modal {
             if (bad) return void error.setText(bad);
             // a stored calendar that runs is compared with the edit, and the Save dialog asks (§15.1 R6, R7)
             let final = text;
+            let removeKept = false;
             if (typeof stored === "string" && !this.plugin.calendars.fault()) {
               const chosen = await confirmCalendarChange(this.app, this.plugin, stored, text);
               if (chosen === null) return;
-              final = chosen;
+              final = chosen.text;
+              removeKept = chosen.removeKept;
+            } else if (this.plugin.onDefinition()) {
+              // no Save dialog (a stored text that cannot run) on the calendar the world runs: kept weather is still
+              // asked about; a stored definition the world does not run changes no weather, so nothing is asked
+              const kept = await askKeptOnCalendarChange(this.app, this.plugin);
+              if (kept === null) return;
+              removeKept = kept.removeKept === true;
             }
             try {
               // a VBODY that kept its UID and changed its MOON name is a rename: its references follow in this save (bead wadjet-zoy)
-              await this.plugin.calendars.saveDefinition(final, { renames: "byUid" });
+              await this.plugin.calendars.saveDefinition(final, { renames: "byUid", removeKept });
             } catch (e) {
               return void error.setText(`Not saved: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -288,7 +308,7 @@ class CalendarChangeModal extends Modal {
     private readonly plugin: WadjetPlugin,
     private readonly before: string,
     private readonly after: string,
-    private readonly done: (text: string | null) => void,
+    private readonly done: (choice: CalendarChangeChoice | null) => void,
   ) {
     super(app);
   }
@@ -296,6 +316,7 @@ class CalendarChangeModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     this.setTitle("Save calendar changes?");
+    let removeKept = false;
     const today = this.plugin.settings.currentDayOrdinal;
     const spells = worldHasSpells(this.plugin.settings.zones);
     const sentence = contentEl.createEl("p", { text: "Comparing the two calendars…" });
@@ -328,6 +349,9 @@ class CalendarChangeModal extends Modal {
         void recompute();
       }),
     );
+    // kept weather stays on its day numbers, like pins; it can go with this change (§17.5 item 8). Only when the
+    // definition is the calendar the world runs: an edit to a stored one it has left changes no weather
+    if (this.plugin.onDefinition()) keptToggleRow(contentEl, this.plugin, (v) => (removeKept = v));
     const preview = contentEl.createEl("p");
     const problem = contentEl.createEl("p", { cls: "mod-warning" });
     let save: ButtonComponent | null = null;
@@ -339,7 +363,7 @@ class CalendarChangeModal extends Modal {
           .setCta()
           .setDisabled(true)
           .onClick(() => {
-            if (plan) this.settle(plan.text);
+            if (plan) this.settle({ text: plan.text, removeKept });
           });
       });
 
@@ -377,11 +401,11 @@ class CalendarChangeModal extends Modal {
     void recompute();
   }
 
-  private settle(text: string | null): void {
+  private settle(choice: CalendarChangeChoice | null): void {
     this.settled = true;
     this.version++;
     this.close();
-    this.done(text);
+    this.done(choice);
   }
 
   override onClose(): void {
@@ -391,12 +415,19 @@ class CalendarChangeModal extends Modal {
   }
 }
 
+/** What the Save dialog settled on: the text to store, and whether the kept weather goes with the change. */
+export interface CalendarChangeChoice {
+  text: string;
+  removeKept: boolean;
+}
+
 /**
  * The Save dialog for a definition change: the text to store (day numbers
- * kept, or today anchored), or null when the change is cancelled.
+ * kept, or today anchored) and the kept weather choice, or null when the
+ * change is cancelled.
  * @param before the stored definition (it runs)
  * @param after the changed definition, as the editor made it
  */
-export function confirmCalendarChange(app: App, plugin: WadjetPlugin, before: string, after: string): Promise<string | null> {
+export function confirmCalendarChange(app: App, plugin: WadjetPlugin, before: string, after: string): Promise<CalendarChangeChoice | null> {
   return new Promise((resolve) => new CalendarChangeModal(app, plugin, before, after, resolve).open());
 }

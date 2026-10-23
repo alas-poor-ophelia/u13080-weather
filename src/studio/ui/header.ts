@@ -47,6 +47,8 @@ import { followMoonRenames, moonRenames } from "../model/moon-rename";
 import { parse as parseDefinition } from "../../seshat";
 import { confirmRewrite } from "./rewrite-confirm-modal";
 import { confirmCalendarChange } from "../../plugin/calendar-modals";
+import { askKeptOnCalendarChange, dropKeptIn } from "../../plugin/upgrade-modals";
+import { legacyCalendarMoved } from "../../plugin/upgrade";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
 import { goToWindow, parseGoTo } from "../model/date-nav";
@@ -421,13 +423,22 @@ export function createHeaderSurface(): Surface {
     // a definition change goes through the Save dialog: which days' weather it can reach, and, when it moves
     // year starts, whether day numbers are kept or today is anchored (§15.1 R6, R7). Cancel saves nothing.
     let text = plan.kind === "definition" ? plan.text : null;
+    // kept weather stays on its day numbers under a changed calendar, or goes with the change (SESHAT-v0 §17.5 item 8)
+    let removeKept = false;
     if (plan.kind === "definition" && typeof stored === "string") {
-      text = await confirmCalendarChange(c.plugin.app, c.plugin, stored, plan.text);
-      if (text === null) return;
+      const chosen = await confirmCalendarChange(c.plugin.app, c.plugin, stored, plan.text);
+      if (chosen === null) return;
+      text = chosen.text;
+      removeKept = chosen.removeKept;
       if (settings.calendar.definition !== stored) {
         new Notice("Not saved: the calendar definition changed while the dialog was open. Save again to merge into it.");
         return;
       }
+    } else if (plan.kind === "legacy" && legacyCalendarMoved(settings.calendar, state.world.calendar)) {
+      // the legacy calendar's seasons and moons have no Save dialog: a world with kept weather is asked here
+      const kept = await askKeptOnCalendarChange(c.plugin.app, c.plugin);
+      if (kept === null) return;
+      removeKept = kept.removeKept === true;
     }
     // a moon renamed in the draft (same body id; same position on the legacy calendar) carries every reference to
     // its old name, in every zone and device preset, in this same save (bead wadjet-noy); the history's drafts
@@ -460,8 +471,17 @@ export function createHeaderSurface(): Surface {
     settings.regimePresets = structuredClone(state.world.regimePresets);
     settings.overrides = structuredClone(state.world.overrides);
     // saveDefinition saves every field above with it, then swaps the running calendar only once the write landed
-    if (text !== null) await c.plugin.calendars.saveDefinition(text);
-    else await c.plugin.saveAndRebuild();
+    if (text !== null) await c.plugin.calendars.saveDefinition(text, removeKept ? { removeKept: true } : {});
+    else {
+      // the kept weather goes in this same save, and comes back if it fails (commit() reports the failure)
+      const undrop = removeKept ? dropKeptIn(settings) : () => undefined;
+      try {
+        await c.plugin.saveAndRebuild();
+      } catch (e) {
+        undrop();
+        throw e;
+      }
+    }
     // On a Seshat world the draft takes the stored calendar's own numbers (a new moon's cycle as its exact
     // rational reads back), so the next save compares against exactly what is on disk; a draft from another
     // source takes the calendar the world runs now.

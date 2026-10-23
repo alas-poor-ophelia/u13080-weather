@@ -12,7 +12,7 @@ import type { Override, OverridePatch } from "../core/report";
 import { withMinus } from "../core/report";
 import type { PrecipType } from "../core/generator";
 import type { Era, Geography, Orographic, ZoneProfile } from "../core/types";
-import { GENERATOR_VERSION, modeFor, PREVIOUS_GENERATOR_VERSION } from "../core/version";
+import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import { openStudio } from "../studio/ui/open";
 import { dayFieldText, parseDayField, validateDayField, type DayText } from "./current-day";
@@ -23,12 +23,14 @@ import { badMoonsLine, badSeasonsLine, moonRowRenames, parseMoonsText, parseSeas
 import { badYearLength, definitionRowEdit, definitionRows, MOONS_DESC, SEASONS_DESC, type DefinitionRow, type DefinitionRowKey, type DefinitionRows } from "./calendar-rows";
 import type WadjetPlugin from "./main";
 import { generatedPatch } from "./pins";
-import { dropKeptZone } from "./keep";
+import { dropKeptZone, keptSpan } from "./keep";
+import { keptChangedNote, keptRowDesc, legacyCalendarKey, PREVIOUS_GENERATOR_DESC } from "./upgrade";
+import { askKeptOnCalendarChange, confirmRemoveKept, dropKeptIn, keptCount, openUpgradeFirst, UpgradeModal } from "./upgrade-modals";
 import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
 import { MAX_DAY_ORDINAL } from "./world";
-import { SESHAT_ID } from "./calendars";
+import { SESHAT_ID, type KeptChoice } from "./calendars";
 import { confirmCalendarChange, DefinitionModal, OptInModal } from "./calendar-modals";
 import { calendarRow, definitionSummary, type CalendarRow } from "./calendar-row";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
@@ -48,6 +50,60 @@ export class WadjetSettingTab extends PluginSettingTab {
     private plugin: WadjetPlugin,
   ) {
     super(app, plugin);
+  }
+
+  /** the legacy calendar rows' kept weather offer on screen, and the calendar it was made for */
+  private keptNotice: Notice | null = null;
+  private keptOfferedFor: string | null = null;
+
+  /**
+   * After a legacy calendar row's edit on a world with kept weather (SESHAT-v0 §17.5 item 8): offer to remove it,
+   * in a Notice that stays until dismissed. Those rows commit as they are typed in, so a dialog would interrupt the
+   * typing; one Notice stands while it is on screen, and once dismissed the next change offers again. An edit that
+   * moves nothing kept weather depends on (a moon renamed, a phase label) offers nothing. `before`: legacyCalendarKey
+   * of the calendar before the edit.
+   */
+  private offerKeptRemoval(before: string): void {
+    const count = keptCount(this.plugin);
+    const key = legacyCalendarKey(this.plugin.settings.calendar);
+    if (count === 0 || key === before || key === this.keptOfferedFor) return;
+    if (this.keptNotice?.containerEl.isConnected) return;
+    this.keptOfferedFor = key;
+    const notice = new Notice(
+      createFragment((f) => {
+        f.appendText(`${keptChangedNote(count)} `);
+        f.createEl("button", { text: "Remove kept weather" }).addEventListener("click", () => {
+          notice.hide();
+          void this.removeKept();
+        });
+      }),
+      0,
+    );
+    this.keptNotice = notice;
+  }
+
+  /** Remove kept weather, after asking; a failed save puts it back. */
+  private async removeKept(): Promise<void> {
+    const count = keptCount(this.plugin);
+    if (count === 0 || !(await confirmRemoveKept(this.app, count))) return;
+    const undrop = dropKeptIn(this.plugin.settings);
+    try {
+      await this.plugin.saveAndRebuild();
+    } catch (e) {
+      undrop();
+      new Notice(`The kept weather was not removed: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    } finally {
+      this.update();
+    }
+    new Notice("The kept weather was removed.");
+  }
+
+  /** A calendar change without a dialog of its own: kept weather asked about first; null when cancelled (the rows show the stored values again). */
+  private async keptChoice(): Promise<KeptChoice | null> {
+    const choice = await askKeptOnCalendarChange(this.app, this.plugin);
+    if (choice === null) this.update();
+    return choice;
   }
 
   private saveAndRefresh(rebuild: boolean): void {
@@ -75,6 +131,7 @@ export class WadjetSettingTab extends PluginSettingTab {
     // the Date display choices (bead wadjet-01k.18): only on a definition with more than one format
     const shownAst = onSeshat() ? (this.plugin.calendars.seshat?.definition() ?? null) : null;
     const displayOptions = Object.fromEntries((shownAst ? displayChoices(shownAst) : []).map((c) => [c.value, c.label]));
+    const kept = keptSpan(s);
 
     return [
       {
@@ -89,14 +146,22 @@ export class WadjetSettingTab extends PluginSettingTab {
           {
             name: "Generator",
             desc:
-              modeFor(s.generatorVersion) === "previous"
-                ? `This world runs the previous weather generator (${PREVIOUS_GENERATOR_VERSION}), so its weather is unchanged.`
+              this.plugin.generatorMode() === "previous"
+                ? PREVIOUS_GENERATOR_DESC
                 : `This world last accepted ${s.generatorVersion}. The plugin now runs ${GENERATOR_VERSION}. Only the current generator ships, so past weather may already differ from before. Pinned days are kept.`,
             visible: () => generatorMismatch(this.plugin.settings),
             render: (setting) => {
               // a world on the previous generator is moved by Upgrade (wadjet-9lc step 3), never by Acknowledge: stamping the
-              // version here would switch its weather to the current generator at the next load, with no way to keep days
-              if (modeFor(this.plugin.settings.generatorVersion) === "previous") return;
+              // version here would switch its weather to the current generator at once, with no way to keep days
+              if (this.plugin.generatorMode() === "previous") {
+                setting.addButton((b) =>
+                  b
+                    .setButtonText("Upgrade…")
+                    .setCta()
+                    .onClick(() => new UpgradeModal(this.app, this.plugin, () => this.update()).open()),
+                );
+                return;
+              }
               setting.addButton((b) =>
                 b
                   .setButtonText("Acknowledge")
@@ -106,6 +171,20 @@ export class WadjetSettingTab extends PluginSettingTab {
                     new Notice("Generator change acknowledged.");
                     this.saveAndRefresh(false);
                   }),
+              );
+            },
+          },
+          {
+            // the previous generator's days kept by an upgrade (SESHAT-v0 §17.2); not pins, so not in Pinned days
+            name: "Kept weather",
+            desc: kept ? keptRowDesc(kept, (d) => this.plugin.displayDay(d)) : "",
+            visible: () => keptSpan(this.plugin.settings) !== null,
+            render: (setting) => {
+              setting.addButton((b) =>
+                b
+                  .setButtonText("Remove")
+                  .setDestructive()
+                  .onClick(() => void this.removeKept()),
               );
             },
           },
@@ -369,7 +448,7 @@ export class WadjetSettingTab extends PluginSettingTab {
       const chosen = await confirmCalendarChange(this.app, this.plugin, stored, edit.text);
       if (chosen === null) return;
       // a moon this row renamed keeps its body, and its references follow in the same save (bead wadjet-zoy)
-      await this.plugin.calendars.saveDefinition(chosen, { renames: edit.renames });
+      await this.plugin.calendars.saveDefinition(chosen.text, { renames: edit.renames, removeKept: chosen.removeKept });
     } catch (e) {
       new Notice(`The calendar was not saved: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -379,8 +458,14 @@ export class WadjetSettingTab extends PluginSettingTab {
 
   /** "Undo the last calendar change" (bead wadjet-24p): the definition and the active calendar go back to what they were. */
   private async undoCalendarChange(): Promise<void> {
+    // back onto a definition: a world on the previous generator is upgraded first (SESHAT-v0 §17.5 item 9)
+    if (this.plugin.settings.calendar.previous?.activeTimeAdapter === SESHAT_ID && this.plugin.generatorMode() === "previous") {
+      return openUpgradeFirst(this.app, this.plugin, "Undo the last calendar change", () => this.update());
+    }
+    const choice = await this.keptChoice();
+    if (choice === null) return;
     try {
-      await this.plugin.calendars.undo();
+      await this.plugin.calendars.undo(choice);
       new Notice("The last calendar change was undone. Undo it again to redo it.");
     } catch (e) {
       new Notice(`The calendar change could not be undone: ${e instanceof Error ? e.message : String(e)}`);
@@ -433,8 +518,15 @@ export class WadjetSettingTab extends PluginSettingTab {
         this.update(); // pin summaries are shown in the chosen units
         return;
       case "activeTimeAdapter":
+        // onto the stored definition: a world on the previous generator is upgraded first (SESHAT-v0 §17.5 item 9)
+        if (String(value) === SESHAT_ID && this.plugin.generatorMode() === "previous") {
+          this.update(); // the chooser shows the stored choice again
+          return openUpgradeFirst(this.app, this.plugin, "Change calendar", () => this.update());
+        }
         try {
-          await this.plugin.setActiveTimeAdapter(String(value));
+          const choice = String(value) === s.activeTimeAdapter ? {} : await this.keptChoice();
+          if (choice === null) return;
+          await this.plugin.calendars.setActive(String(value), choice);
         } catch (e) {
           new Notice(`The calendar source could not be saved, so it was left as it was: ${e instanceof Error ? e.message : String(e)}`);
         } finally {
@@ -460,22 +552,30 @@ export class WadjetSettingTab extends PluginSettingTab {
         }
         return;
       }
-      case "calendar.yearLength":
+      case "calendar.yearLength": {
+        const before = legacyCalendarKey(s.calendar);
         s.calendar.yearLength = Number(value);
-        return this.plugin.saveAndRebuild();
+        await this.plugin.saveAndRebuild();
+        return this.offerKeptRemoval(before);
+      }
       case "moons": {
         // a line that changed only its name renames that moon, and every reference to it follows in this save
         // (bead wadjet-noy); see moonRowRenames for the rule
+        const before = legacyCalendarKey(s.calendar);
         const moons = parseMoonsText(String(value));
         const renamed = renameMoonReferences(s, moonRowRenames(s.calendar.moons, moons));
         s.zones = renamed.zones;
         if (renamed.devicePresets !== undefined) s.devicePresets = renamed.devicePresets;
         s.calendar.moons = moons;
-        return this.plugin.saveAndRebuild();
+        await this.plugin.saveAndRebuild();
+        return this.offerKeptRemoval(before);
       }
-      case "seasons":
+      case "seasons": {
+        const before = legacyCalendarKey(s.calendar);
         s.calendar.seasons = parseSeasonsText(String(value));
-        return this.plugin.saveAndRebuild();
+        await this.plugin.saveAndRebuild();
+        return this.offerKeptRemoval(before);
+      }
       case "eras": {
         const text = String(value).trim();
         if (badEras(text)) return; // the row shows the error; the stored timeline stands

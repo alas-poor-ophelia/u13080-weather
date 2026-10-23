@@ -3,7 +3,7 @@ import type { StudioStash } from "../studio/model/stash";
 import { openStudioFromCommand } from "../studio/ui/open";
 import { StudioView, VIEW_TYPE as STUDIO_VIEW_TYPE } from "../studio/ui/view";
 import type { WeatherReport } from "../core/report";
-import { GENERATOR_VERSION, modeFor, type GeneratorMode } from "../core/version";
+import { GENERATOR_VERSION, type GeneratorMode } from "../core/version";
 import { ApiController, type WadjetAPI } from "./api";
 import { Calendars } from "./calendars";
 import { calendarOfDefinition } from "../studio/model/definition";
@@ -22,10 +22,12 @@ import { InternalCalendar } from "./time/internal";
 import { World, type WorldState } from "./world";
 import { worldStateOf } from "./keep";
 import { startNewWorld } from "./new-world";
+import { PREVIOUS_LOAD_NOTICE, syncRevertNotice, worldMode } from "./upgrade";
 
 export type { WadjetAPI } from "./api";
 
-type WindowWithWadjet = Window & { Wadjet?: WadjetAPI };
+/** `__wadjetPreviousNotice`: the previous-generator load Notice has shown in this window's session (§17.5 item 11). */
+type WindowWithWadjet = Window & { Wadjet?: WadjetAPI; __wadjetPreviousNotice?: boolean };
 
 export default class WadjetPlugin extends Plugin {
   override settings: WadjetSettings = DEFAULT_SETTINGS;
@@ -116,7 +118,10 @@ export default class WadjetPlugin extends Plugin {
       save: () => this.saveSettings(),
       writeDay: (d) => this.writeCurrentDay(d),
       rebuild: () => {
-        if (!this.dead) this.world.setState(this.worldState());
+        if (this.dead) return;
+        // leaving a definition can move the mode (a 0.0.3 world back on the built-in calendar, SESHAT-v0 §17.5 item 9)
+        this.internalCalendar.update(this.settings.calendar, this.generatorMode());
+        this.world.setState(this.worldState());
       },
       emitTimeChanged: () => this.controller.emitTimeChanged(),
       emitAdaptersChanged: () => {
@@ -165,7 +170,12 @@ export default class WadjetPlugin extends Plugin {
     this.registerCommands();
 
     if (this.generatorMode() === "previous") {
-      new Notice(`Wadjet has a new weather generator (${GENERATOR_VERSION}). This world keeps the old one (${this.settings.generatorVersion}), so its weather stays as you saw it.`, 10000);
+      // once per session: turning the plugin off and on again does not repeat it (SESHAT-v0 §17.5 item 11)
+      const w = window as WindowWithWadjet;
+      if (!w.__wadjetPreviousNotice) {
+        w.__wadjetPreviousNotice = true;
+        new Notice(PREVIOUS_LOAD_NOTICE, 15000);
+      }
     } else if (generatorMismatch(this.settings)) {
       new Notice(`The weather generator was updated (${this.settings.generatorVersion} → ${GENERATOR_VERSION}). Only the current generator ships, so past weather may differ from what you saw before. Pinned days are kept. You can acknowledge the change in settings.`, 10000);
     }
@@ -214,12 +224,17 @@ export default class WadjetPlugin extends Plugin {
       new Notice(`Wadjet repaired its calendar settings: ${repairs.join(" ")}`, 15000);
     }
     const display = this.settings.calendar.display;
+    const before = { generatorVersion: this.settings.generatorVersion, activeTimeAdapter: this.settings.activeTimeAdapter, calendar: { definition: this.settings.calendar.definition } };
     this.calendars.follow(() => {
       this.settings = next;
       // the mode, the internal calendar and the world move together (SESHAT-v0 §17.5 item 7); rebuild() follows
       this.internalCalendar.update(next.calendar, this.generatorMode());
     });
     this.internalHash = this.internalCalendar.configHash();
+    // an older device pressed Acknowledge on this world (§17.5 item 7): its kept weather stays, Upgrade is offered again;
+    // on a calendar definition it keeps the current generator (§17.5 item 9), and the Notice says so
+    const reverted = syncRevertNotice(before, this.settings);
+    if (reverted !== null) new Notice(reverted, 15000);
     if (next.calendar.display !== display) this.emitDisplayChanged();
     this.refreshSettingsTab();
   }
@@ -230,9 +245,12 @@ export default class WadjetPlugin extends Plugin {
     delete (window as WindowWithWadjet).Wadjet;
   }
 
-  /** The generator this world runs, from the version it last accepted (SESHAT-v0 §17.2). */
-  private generatorMode(): GeneratorMode {
-    return modeFor(this.settings.generatorVersion);
+  /**
+   * The generator this world runs, from the version it last accepted (SESHAT-v0 §17.2), and never the previous one
+   * over a calendar definition (§17.5 item 9): see worldMode.
+   */
+  generatorMode(): GeneratorMode {
+    return worldMode(this.settings);
   }
 
   private worldState(): WorldState {

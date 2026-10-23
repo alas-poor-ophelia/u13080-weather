@@ -492,3 +492,76 @@ describe("undo the last calendar change", () => {
     expect(r.settings.calendar.definition).toBe(TEXT);
   });
 });
+
+describe("the previous generator and kept weather (SESHAT-v0 §17.5 items 8, 9; bead wadjet-9lc step 3)", () => {
+  const KEPT = [{ zoneId: "greywold", dayOrdinal: 5, record: {}, provenance: {} }];
+
+  test("a world on the previous generator never moves onto a definition: opt-in, the chooser and undo refuse, changing nothing", async () => {
+    const r = rig({ generatorVersion: "wadjet-gen/0.0.3" });
+    expect(await rejection(r.calendars.optIn(TEXT))).toBeInstanceOf(DefinitionError);
+    expect(r.settings.activeTimeAdapter).toBe("internal");
+    expect(r.settings.calendar.definition).toBeUndefined();
+    expect(r.saves).toEqual([]);
+
+    // a definition stored while the world was current, then a synced downgrade: the chooser and undo refuse too
+    const c = rig();
+    await c.calendars.optIn(TEXT);
+    await c.calendars.setActive("internal");
+    c.settings.generatorVersion = "wadjet-gen/0.0.3";
+    const saves = c.saves.length;
+    const err = await rejection(c.calendars.setActive(SESHAT_ID));
+    expect(err).toBeInstanceOf(DefinitionError);
+    expect((err as Error).message).toContain("Upgrade the generator first");
+    expect(await rejection(c.calendars.undo())).toBeInstanceOf(DefinitionError);
+    expect(c.settings.activeTimeAdapter).toBe("internal");
+    expect(c.saves.length).toBe(saves);
+    // leaving a definition is not refused
+    c.settings.generatorVersion = "wadjet-gen/0.0.4";
+    await c.calendars.setActive(SESHAT_ID);
+    c.settings.generatorVersion = "wadjet-gen/0.0.3";
+    await c.calendars.setActive("internal");
+    expect(c.settings.activeTimeAdapter).toBe("internal");
+  });
+
+  test("removeKept empties the kept weather in the change's own save; a failed save puts it back", async () => {
+    const r = rig({ frozen: KEPT });
+    r.failNextSave();
+    expect(await rejection(r.calendars.optIn(TEXT, { removeKept: true }))).toBeDefined();
+    expect(r.settings.frozen).toEqual(KEPT);
+    await r.calendars.optIn(TEXT, { removeKept: true });
+    expect(r.settings.frozen).toEqual([]);
+    expect((r.saves.at(-1) as { frozen: unknown }).frozen).toEqual([]);
+
+    const k = rig({ frozen: KEPT });
+    await k.calendars.optIn(TEXT); // kept by default
+    expect(k.settings.frozen).toEqual(KEPT);
+    await k.calendars.saveDefinition(TEXT.replace("Luna", "Selene"), { removeKept: true });
+    expect(k.settings.frozen).toEqual([]);
+
+    for (const step of [(x: Rig) => x.calendars.setActive("internal", { removeKept: true }), (x: Rig) => x.calendars.undo({ removeKept: true })]) {
+      const u = rig();
+      await u.calendars.optIn(TEXT);
+      u.settings.frozen = KEPT;
+      u.failNextSave();
+      expect(await rejection(step(u))).toBeDefined();
+      expect(u.settings.frozen).toEqual(KEPT);
+      await step(u);
+      expect(u.settings.frozen).toEqual([]);
+    }
+  });
+});
+
+describe("a 0.0.3 stamp on a world that runs a definition (a synced revert, SESHAT-v0 §17.5 items 7, 9)", () => {
+  test("it runs the current generator: definition edits are not refused; leaving the definition brings the previous back, and the way back is refused", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    r.settings.generatorVersion = "wadjet-gen/0.0.3"; // what the synced data.json says
+    await r.calendars.saveDefinition(TEXT.replace("Luna", "Selene"));
+    await r.calendars.optIn(TEXT); // on seshat: an edit
+    expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
+    await r.calendars.setActive("internal");
+    const err = await rejection(r.calendars.setActive(SESHAT_ID));
+    expect((err as Error).message).toContain("Upgrade the generator first");
+    expect(r.settings.activeTimeAdapter).toBe("internal");
+  });
+});
