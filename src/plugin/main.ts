@@ -11,7 +11,7 @@ import type { StudioSettingsLike } from "../studio/model/state";
 import { blockRepaintOn, parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { frontmatterResolver } from "./frontmatter-resolver";
 import { formatInterpretation } from "./interpreters";
-import { CONFLICT_NOTICE, FirstSave, SaveQueue, setAndSave, YIELD_NOTICE } from "./persist";
+import { CONFLICT_NOTICE, FirstSave, readExternal, SaveQueue, setAndSave, YIELD_NOTICE } from "./persist";
 import { renderCard, renderError, renderLine, renderProse, renderTable, renderValue } from "./render";
 import { convertReport, reportField } from "../core/units";
 import { DEFAULT_SETTINGS, generatorMismatch, migrateSettings, type WadjetSettings } from "./settings";
@@ -87,7 +87,7 @@ export default class WadjetPlugin extends Plugin {
     if (fresh) {
       startNewWorld(this.settings, this.app.vault.getName());
       this.firstSave.startNew();
-    }
+    } else this.firstSave.noteDisk(loaded);
     if (repairs.length) {
       // the repaired settings are saved below, so these messages are where the old values survive: show them and log them
       for (const msg of repairs) console.warn(`U+13080 Weather: ${msg}`);
@@ -172,11 +172,46 @@ export default class WadjetPlugin extends Plugin {
 
   /**
    * data.json changed on disk from outside (Sync). A new world that has not saved steps aside for it
-   * (bead wadjet-1ou); a saved world keeps what it has in memory, as before.
+   * (bead wadjet-1ou); a saved world reloads it in place (bead wadjet-7md), writing nothing.
    */
-  override onExternalSettingsChange(): void {
+  override async onExternalSettingsChange(): Promise<void> {
     if (this.dead) return;
     this.firstSave.external();
+    // still loading (onload reads data.json itself and saves it), or a new world that has stepped aside
+    if (!this.controller || this.firstSave.current === "yielded") return;
+    // Obsidian awaits this, then updates the settings tab itself
+    try {
+      await this.followExternal();
+    } catch (e) {
+      console.error("U+13080 Weather: following a changed data.json failed.", e);
+    }
+  }
+
+  /**
+   * Adopt an outside data.json on a saved world (bead wadjet-7md): after any queued or running write has
+   * settled, re-read it; an echo of Wadjet's own write, a failed read or a non-object is ignored. Otherwise
+   * it is migrated (repairs are shown, not saved: nothing is written in response to an outside change) and
+   * replaces the settings, and everything that follows settings is told as after a local save. Open Studios
+   * follow through profiles-changed / adapters-changed: clean drafts take the new file, dirty ones keep
+   * their edits and their Save's stale check catches a conflict.
+   */
+  private async followExternal(): Promise<void> {
+    const found = await readExternal({ read: () => this.loadData(), queue: this.saves, first: this.firstSave, alive: () => !this.dead });
+    // a new world that has not finished its first write is not following anything yet
+    if (found === null || this.dead || this.firstSave.current !== "saved") return;
+    const repairs: string[] = [];
+    const next = migrateSettings(found, (msg) => repairs.push(msg));
+    this.firstSave.noteDisk(found);
+    if (repairs.length) {
+      for (const msg of repairs) console.warn(`U+13080 Weather: ${msg}`);
+      new Notice(`Wadjet repaired its calendar settings: ${repairs.join(" ")}`, 15000);
+    }
+    this.calendars.follow(() => {
+      this.settings = next;
+      this.internalCalendar.update(next.calendar);
+    });
+    this.internalHash = this.internalCalendar.configHash();
+    this.refreshSettingsTab();
   }
 
   override onunload(): void {

@@ -590,6 +590,45 @@ describe("smoke walk", () => {
     note("duplicate pin refused inline");
   });
 
+  test("Sync delivers a changed data.json to a saved world: settings and the settings tab follow, nothing is written back, the next change keeps it (bead wadjet-7md)", async () => {
+    await openWadjetSettings();
+    type Stored = { worldSeed: string; currentDayOrdinal: number; zones: Array<{ name: string }> };
+    const before = JSON.parse(readFileSync(DATA_JSON, "utf8")) as Stored;
+    const synced: Stored = { ...before, worldSeed: "0ddba11c0ddba11c", zones: before.zones.map((z, i) => (i === 0 ? { ...z, name: `${z.name} (synced)` } : z)) };
+    const text = JSON.stringify(synced, null, 2);
+    // Obsidian routes a data.json change only to a plugin in enabledPlugins (community-plugins.json);
+    // the walk enables Wadjet without saving it there, so add it for this step and take it back after
+    const added = await withApp(ob.page, (app) => {
+      const set = (app.plugins as unknown as { enabledPlugins: Set<string> }).enabledPlugins;
+      const had = set.has("wadjet");
+      set.add("wadjet");
+      return !had;
+    });
+    try {
+      writeFileSync(DATA_JSON, text);
+      await expect.poll(async () => (await liveWorld()).seed, { timeout: 10_000 }).toBe(synced.worldSeed);
+      const live = await withApp(ob.page, (app) => {
+        const p = app.plugins.plugins.wadjet as unknown as { settings: Stored; world: { seed: string } };
+        return { zone: p.settings.zones[0]!.name, worldSeed: p.world.seed };
+      });
+      expect(live).toEqual({ zone: synced.zones[0]!.name, worldSeed: synced.worldSeed });
+      await expect.poll(() => row("World seed").locator("input").inputValue(), { timeout: 5_000 }).toBe(synced.worldSeed);
+      await expect.poll(() => listRows("Zones").locator(".setting-item-name").allTextContents(), { timeout: 5_000 }).toContain(synced.zones[0]!.name);
+      // following the change writes nothing
+      await ob.page.waitForTimeout(500);
+      expect(readFileSync(DATA_JSON, "utf8")).toBe(text);
+      // the user's next change writes the synced copy plus that change, not the stale copy
+      await withApp(ob.page, (app) => void (app as unknown as { commands: { executeCommandById: (id: string) => boolean } }).commands.executeCommandById("wadjet:next-day"));
+      await expect.poll(() => (JSON.parse(readFileSync(DATA_JSON, "utf8")) as Stored).currentDayOrdinal, { timeout: 5_000 }).toBe(synced.currentDayOrdinal + 1);
+      const after = JSON.parse(readFileSync(DATA_JSON, "utf8")) as Stored;
+      expect(after.worldSeed).toBe(synced.worldSeed);
+      expect(after.zones[0]!.name).toBe(synced.zones[0]!.name);
+    } finally {
+      if (added) await withApp(ob.page, (app) => void (app.plugins as unknown as { enabledPlugins: Set<string> }).enabledPlugins.delete("wadjet"));
+    }
+    note(`synced data.json (seed ${synced.worldSeed}, zone "${synced.zones[0]!.name}") followed in memory and in settings, not written back; next-day kept it`);
+  });
+
   test("no uncaught errors in the vault window", () => {
     const mine = ob.errors.filter((e) => /wadjet/i.test(e));
     if (ob.errors.length) note(`window errors (all): ${ob.errors.length}; wadjet-related: ${mine.length}`);

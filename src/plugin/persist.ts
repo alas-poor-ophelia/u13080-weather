@@ -18,6 +18,8 @@ export class SaveQueue {
   private pending: Promise<void> | null = null;
   /** true while every call sharing `pending` was automatic */
   private pendingAutomatic = true;
+  /** writes queued or running */
+  private open = 0;
 
   /**
    * @param write the host's saveData; `automatic` is true when no user-initiated call shares the write
@@ -38,6 +40,7 @@ export class SaveQueue {
       return this.pending;
     }
     this.pendingAutomatic = automatic;
+    this.open++;
     const p = this.tail.then(async () => {
       this.pending = null;
       const auto = this.pendingAutomatic;
@@ -46,10 +49,20 @@ export class SaveQueue {
     });
     this.pending = p;
     this.tail = p.then(
-      () => undefined,
-      () => undefined,
+      () => void this.open--,
+      () => void this.open--,
     );
     return p;
+  }
+
+  /** True while a write is queued or running. */
+  get busy(): boolean {
+    return this.open > 0;
+  }
+
+  /** Resolves once no write is queued or running (bead wadjet-7md); never rejects. */
+  async settled(): Promise<void> {
+    while (this.open > 0) await this.tail;
   }
 }
 
@@ -134,6 +147,12 @@ export class FirstSave {
   private state: "saved" | "new" | "yielded" = "saved";
   /** true while a write that began in the `new` state is running: an outside change then is most likely that write */
   private writing = false;
+  /**
+   * What data.json holds as far as Wadjet knows (canonical JSON): what it loaded, its last successful write, or
+   * the last outside copy it adopted; null when unknown. An outside change that reads back as this is an echo
+   * of Wadjet's own write (bead wadjet-7md).
+   */
+  private known: string | null = null;
 
   /**
    * @param read the host's loadData: what is on disk now
@@ -146,6 +165,16 @@ export class FirstSave {
 
   get current(): "saved" | "new" | "yielded" {
     return this.state;
+  }
+
+  /** Whether `data` (as read from data.json) is what Wadjet last loaded, wrote or adopted. */
+  isKnown(data: unknown): boolean {
+    return this.known !== null && canonicalJson(data) === this.known;
+  }
+
+  /** data.json was read (at load) or an outside copy adopted: it holds `data` now. */
+  noteDisk(data: unknown): void {
+    this.known = canonicalJson(data);
   }
 
   /** The world started with no data.json. */
@@ -166,9 +195,13 @@ export class FirstSave {
         if (found !== null && found !== undefined) this.yieldNow("synced");
       }
       if (this.state === "yielded") throw new Error(YIELD_ERROR);
-      if (this.state !== "new") return write(data);
       // what is written, taken now: `data` is the live settings object, which may change while the write runs
       const sent = canonicalJson(data);
+      if (this.state !== "new") {
+        await write(data);
+        this.known = sent;
+        return;
+      }
       this.writing = true;
       try {
         await write(data);
@@ -183,6 +216,7 @@ export class FirstSave {
           throw new Error(CONFLICT_ERROR);
         }
         this.state = "saved";
+        this.known = sent;
       } finally {
         this.writing = false;
       }
@@ -198,5 +232,35 @@ export class FirstSave {
     if (this.state !== "new") return;
     this.state = "yielded";
     this.onYield(reason);
+  }
+}
+
+/**
+ * data.json changed from outside on a saved world (bead wadjet-7md): what to adopt, or null to keep the
+ * settings in memory. Waits for any queued or running write first and reads after it, so a stale outside
+ * copy never lands over a newer local write; a write queued while reading means read again. Null when the
+ * read fails or is not an object (a partial Sync write: another change event follows), when it is what
+ * Wadjet last loaded, wrote or adopted (its own write echoing), or when `alive` turns false.
+ */
+export async function readExternal(deps: { read: () => Promise<unknown>; queue: SaveQueue; first: FirstSave; alive: () => boolean; log?: (msg: string, e?: unknown) => void }): Promise<Record<string, unknown> | null> {
+  const log = deps.log ?? ((msg: string, e?: unknown) => console.warn(`U+13080 Weather: ${msg}`, ...(e === undefined ? [] : [e])));
+  for (;;) {
+    await deps.queue.settled();
+    if (!deps.alive()) return null;
+    let found: unknown;
+    try {
+      found = await deps.read();
+    } catch (e) {
+      log("data.json changed but could not be read; keeping the settings in memory.", e);
+      return null;
+    }
+    if (!deps.alive()) return null;
+    if (deps.queue.busy) continue;
+    if (found === null || typeof found !== "object" || Array.isArray(found)) {
+      log("data.json changed but does not hold settings; keeping the settings in memory.");
+      return null;
+    }
+    if (deps.first.isKnown(found)) return null;
+    return found as Record<string, unknown>;
   }
 }
