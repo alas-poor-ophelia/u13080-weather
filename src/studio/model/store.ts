@@ -52,6 +52,14 @@ export interface Store {
   worldDirty(): boolean;
   /** The drafts became the saved copy. Undo history survives a save. */
   markSaved(): void;
+  /**
+   * Rewrite the live drafts AND every draft the undo and redo stacks hold,
+   * taking no undo step: for an edit that follows from another one already in
+   * history (a moon rename's references, bead wadjet-noy), so undoing that
+   * step and redoing it carry the follow-up with them. `fn` sees each draft
+   * on its own and decides what applies there.
+   */
+  amend(fn: (drafts: { zones: Record<string, ZoneProfile>; world: WorldDraft }) => void): void;
   /** Point the view at another zone. Every zone keeps its own draft. */
   setZone(zoneId: string): void;
 }
@@ -73,7 +81,7 @@ interface HistoryEntry {
  * seeds `profileHash` uses, plus the length, so a collision needs three
  * coincidences at once. Only ever compared against another draft hash.
  */
-function draftsHash(s: StudioState): string {
+function draftsHash(s: Pick<StudioState, "zones" | "world">): string {
   const j = canonicalJson({ zones: s.zones, world: s.world });
   return `${hash32(j, 0x57414a45).toString(16)}${hash32(j, 0x54454a49).toString(16)}:${j.length.toString(16)}`;
 }
@@ -192,6 +200,20 @@ export function createStore(initial: StudioState, schedule: (flush: () => void) 
     },
 
     worldDirty: () => canonicalJson(state.world) !== canonicalJson(state.saved.world),
+
+    amend(fn) {
+      snapshot(); // anything left open by a drag becomes its own step first
+      const rewrite = (e: HistoryEntry): HistoryEntry => {
+        fn(e.drafts);
+        return { drafts: e.drafts, hash: draftsHash(e.drafts) };
+      };
+      undoStack.splice(0, undoStack.length, ...undoStack.map(rewrite));
+      redoStack.splice(0, redoStack.length, ...redoStack.map(rewrite));
+      fn(state);
+      baseline = cloneDrafts(state);
+      baselineHash = draftsHash(state);
+      notify();
+    },
 
     markSaved() {
       state.saved = structuredClone({ zones: state.zones, world: state.world });

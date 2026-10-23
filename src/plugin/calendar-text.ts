@@ -3,6 +3,7 @@
  * Kept out of settings-tab.ts (which imports "obsidian") so they can be unit
  * tested directly.
  */
+import { rowMoonRenames } from "../studio/model/moon-rename";
 import type { MoonConfig } from "./settings";
 
 /** "name@at" phase token → a phase, or null if malformed. */
@@ -44,6 +45,17 @@ export function serialiseMoonsText(moons: MoonConfig[]): string {
       return m.phases?.length ? `${base}, ${m.phases.map((p) => `${p.name}@${p.at}`).join(", ")}` : base;
     })
     .join("\n");
+}
+
+/**
+ * The legacy Moons row's renames (bead wadjet-noy): only when the row keeps
+ * its count and order, a line whose text differs from the stored moon's line
+ * in the name alone renames that moon (its references follow). A line that
+ * changed anything else, a reordered row, or one with a line more or fewer is
+ * a delete and a create, as it always was.
+ */
+export function moonRowRenames(stored: readonly MoonConfig[], next: readonly MoonConfig[]): Map<string, string> {
+  return rowMoonRenames(stored, next, (a, b) => serialiseMoonsText([a]) === serialiseMoonsText([b]));
 }
 
 /** Validation for the Moons textarea: the first bad line, or nothing. Checks the base fields and any phase tokens (ascending, [0,1), unique names). */

@@ -16,7 +16,8 @@ import { GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import { openStudio } from "../studio/ui/open";
 import { calendarSummary } from "./calendar-summary";
-import { badMoonsLine, badSeasonsLine, parseMoonsText, parseSeasonsText, serialiseMoonsText, serialiseSeasonsText } from "./calendar-text";
+import { renameMoonReferences } from "../studio/model/moon-rename";
+import { badMoonsLine, badSeasonsLine, moonRowRenames, parseMoonsText, parseSeasonsText, serialiseMoonsText, serialiseSeasonsText } from "./calendar-text";
 import { badYearLength, definitionRowEdit, definitionRows, MOONS_DESC, SEASONS_DESC, type DefinitionRow, type DefinitionRowKey, type DefinitionRows } from "./calendar-rows";
 import type WadjetPlugin from "./main";
 import { generatedPatch } from "./pins";
@@ -418,9 +419,16 @@ export class WadjetSettingTab extends PluginSettingTab {
       case "calendar.yearLength":
         s.calendar.yearLength = Number(value);
         return this.plugin.saveAndRebuild();
-      case "moons":
-        s.calendar.moons = parseMoonsText(String(value));
+      case "moons": {
+        // a line that changed only its name renames that moon, and every reference to it follows in this save
+        // (bead wadjet-noy); see moonRowRenames for the rule
+        const moons = parseMoonsText(String(value));
+        const renamed = renameMoonReferences(s, moonRowRenames(s.calendar.moons, moons));
+        s.zones = renamed.zones;
+        if (renamed.devicePresets !== undefined) s.devicePresets = renamed.devicePresets;
+        s.calendar.moons = moons;
         return this.plugin.saveAndRebuild();
+      }
       case "seasons":
         s.calendar.seasons = parseSeasonsText(String(value));
         return this.plugin.saveAndRebuild();

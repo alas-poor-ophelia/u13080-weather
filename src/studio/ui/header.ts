@@ -43,6 +43,7 @@ import { flipHint, flipState, straddlesEquator } from "../model/hemisphere";
 import { hintAttr } from "../model/hints";
 import { zoneForSave } from "../model/json-view";
 import { calendarOfDefinition, planCalendarSave } from "../model/definition";
+import { followMoonRenames, moonRenames } from "../model/moon-rename";
 import { parse as parseDefinition } from "../../seshat";
 import { confirmRewrite } from "./rewrite-confirm-modal";
 import { confirmCalendarChange } from "../../plugin/calendar-modals";
@@ -356,7 +357,7 @@ export function createHeaderSurface(): Surface {
   }
 
   /** The save itself; `commit` owns the busy flag, so every way out of here (a refusal, a throw) ends it. */
-  async function save(c: SurfaceContext, state: StudioState, dirtyIds: ReadonlySet<string>, worldWasDirty: boolean, dirtyNames: string[]): Promise<void> {
+  async function save(c: SurfaceContext, state: StudioState, dirtyIds: ReadonlySet<string>, worldWasDirty: boolean, dirtyNames: readonly string[]): Promise<void> {
     const settings = c.plugin.settings;
     // The calendar goes where the draft's calendar came from, or nowhere: a definition's edits merge into the
     // stored text, the internal calendar's into its fields, and a draft from another source is refused.
@@ -396,6 +397,16 @@ export function createHeaderSurface(): Surface {
         new Notice("Not saved: the calendar definition changed while the dialog was open. Save again to merge into it.");
         return;
       }
+    }
+    // a moon renamed in the draft (same body id; same position on the legacy calendar) carries every reference to
+    // its old name, in every zone and device preset, in this same save (bead wadjet-noy); the history's drafts
+    // follow too, so undo takes the moon and its references back together
+    const base = state.calendarBase ?? state.saved.world.calendar;
+    const renames = moonRenames(base.moons, state.world.calendar.moons);
+    if (renames.size > 0) {
+      c.store.amend(followMoonRenames(base.moons, renames));
+      dirtyIds = c.store.dirtyZones();
+      dirtyNames = [...dirtyIds].map((id) => state.zones[id]?.name ?? id);
     }
     for (const id of dirtyIds) {
       const draft = state.zones[id];
