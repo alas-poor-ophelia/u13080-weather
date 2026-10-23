@@ -28,7 +28,7 @@ import { CASCADE_ORIGIN, cascadePosition, defaultPosition } from "../model/clamp
 import type { StudioState } from "../model/state";
 import { issuesByUnit, issuesFor, type StudioIssue } from "../model/validation";
 import type { ZoneProfile } from "../../core/types";
-import type { SurfaceContext } from "./surfaces";
+import { calendarTags, type SurfaceContext } from "./surfaces";
 
 /** What a builder returns: the chrome, the body, and four pull-based readouts. */
 export interface WindowBuild {
@@ -183,7 +183,7 @@ export function createWindowManager(): WindowManager {
     const readOnlyCalendar = description?.readOnly ?? false;
     const seasons = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
     const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
-    return issuesByUnit(issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar }));
+    return issuesByUnit(issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags: calendarTags(c, state) }));
   }
 
   function paint(id: string, entry: OpenWindow, byUnit: ReadonlyMap<string, StudioIssue[]>): void {

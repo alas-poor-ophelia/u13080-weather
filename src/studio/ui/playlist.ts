@@ -64,7 +64,7 @@ import { playlistHint } from "../model/hints-playlist";
 import type { LaneGeometry } from "../model/lanes";
 import type { StudioState } from "../model/state";
 import { addRow, createRowRegistry, removeRow, sortedRows, type RowRegistry } from "../model/row-registry";
-import { clampWindow, morph, panByWheel, wheelZoomFactor, worldBounds, zoomAt, type Window, type ZoomBounds } from "../model/zoom";
+import { centreOn, morph, panByWheel, settleOnYears, wheelZoomFactor, worldBounds, zoomAt, type Window, type ZoomBounds } from "../model/zoom";
 import { createDayCard, type DayCardComponent } from "./day-card";
 import { AXIS_WIDTH, createRow, LABEL_WIDTH, type Row } from "./layout";
 import { EDGE_PX_MOUSE } from "./pointer";
@@ -172,6 +172,9 @@ export const CHANNELS = [
 /** Lane width to assume before the leaf has been laid out (clientWidth 0). */
 const FALLBACK_LANE_WIDTH = 800;
 
+/** How long the wheel must be still before the window settles on whole years. */
+const SETTLE_MS = 250;
+
 // ---------------------------------------------------------------------------
 // The surface
 // ---------------------------------------------------------------------------
@@ -200,11 +203,32 @@ export function createPlaylistSurface(): Surface {
     // no calendar (or one with no usable year) is no jump, as before
     const years = c.years();
     if (years === null) return;
-    const w = c.store.get().view.window;
-    const half = (w.b - w.a) / 2;
     // the middle of the day (the constant seam: epoch + (d + 0.5) / L, as it was)
-    const centre = years.dayMid(dayOrdinal);
-    setWindow(clampWindow({ a: centre - half, b: centre + half }, bounds()));
+    setWindow(centreOn(c.store.get().view.window, years.dayMid(dayOrdinal), bounds()));
+  }
+
+  /**
+   * Bring a wheel zoom or a ruler drag to rest on whole years (bead
+   * wadjet-n1z, model/zoom.ts settleOnYears): a window a year wide or wider
+   * lands with both edges on year starts; narrower ones stay put. The wheel
+   * settles once it has been still for SETTLE_MS, a drag on release.
+   */
+  let settleTimer: number | null = null;
+  function cancelSettle(): void {
+    if (settleTimer !== null) window.clearTimeout(settleTimer);
+    settleTimer = null;
+  }
+  function settle(): void {
+    cancelSettle();
+    const c = ctx;
+    if (c === null) return;
+    const w = c.store.get().view.window;
+    const next = settleOnYears(w, bounds());
+    if (next !== w) setWindow(next);
+  }
+  function settleSoon(): void {
+    cancelSettle();
+    settleTimer = window.setTimeout(settle, SETTLE_MS);
   }
 
   /** Persist a window move: view state, no history, then the layout save. */
@@ -282,10 +306,12 @@ export function createPlaylistSurface(): Surface {
     if (ev.shiftKey || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
       const delta = ev.deltaX !== 0 ? ev.deltaX : ev.deltaY;
       setWindow(panByWheel(w, delta, bounds()));
+      settleSoon();
       return;
     }
     const frac = (ev.clientX - rect.left) / rect.width;
     setWindow(zoomAt(w, frac, wheelZoomFactor(ev.deltaY), bounds()));
+    settleSoon();
   }
 
   /** Mount every registered row that is not up yet, and put the stack in `order`. */
@@ -337,7 +363,7 @@ export function createPlaylistSurface(): Surface {
     mount(next) {
       ctx = next;
       next.shell.playlist.setAttr("data-hint", playlistHint("playlist.window"));
-      ruler = createRuler({ ctx: next, bounds, setWindow });
+      ruler = createRuler({ ctx: next, bounds, setWindow, settle });
 
       dayCard = createDayCard(next.shell.playlist, next, playlistHint("playlist.daycard", DAY_CARD_DETAIL), jumpToDay);
       // The prototype puts the card ABOVE the calendar ruler, at the top of
@@ -361,6 +387,7 @@ export function createPlaylistSurface(): Surface {
     },
 
     destroy() {
+      cancelSettle();
       ctx?.rows.live.delete(sync);
       for (const { row, host } of mounted.values()) {
         row.destroy();

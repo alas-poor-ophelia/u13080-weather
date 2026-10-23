@@ -49,9 +49,10 @@ import { confirmRewrite } from "./rewrite-confirm-modal";
 import { confirmCalendarChange } from "../../plugin/calendar-modals";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
+import { goToWindow, parseGoTo } from "../model/date-nav";
 import { panBy, presetWindow, width, worldBounds, zoomAt, zoomLabel, type Window, type ZoomBounds, type ZoomPreset } from "../model/zoom";
 import { createChip, createLed, createSegmented, type ChipComponent, type LedComponent, type SegmentedComponent } from "./components";
-import type { Surface, SurfaceContext } from "./surfaces";
+import { calendarTags, type Surface, type SurfaceContext } from "./surfaces";
 // The SRC chip's destination (SPEC law 2: reached from the thing it
 // describes). The id is the Atlas window's own — `ui/atlas-surface.ts`
 // registers the builder under it — so the header only opens it.
@@ -187,6 +188,8 @@ export function createHeaderSurface(): Surface {
   let flipChip: ChipComponent | null = null;
 
   let readoutRange: HTMLElement | null = null;
+  let goToInput: HTMLInputElement | null = null;
+  let goToMessage: HTMLElement | null = null;
   let presets: SegmentedComponent | null = null;
   let jsonButton: HTMLElement | null = null;
   let saveButton: HTMLElement | null = null;
@@ -229,6 +232,33 @@ export function createHeaderSurface(): Surface {
     c.view.app.workspace.requestSaveLayout();
   }
 
+  /**
+   * The go-to box (bead wadjet-n1z): a date typed as the active calendar
+   * writes it (its own parse: a definition's formats, the internal calendar's
+   * `Year 3, day 12`), or a whole day number, moves the window onto that day,
+   * centred, its width kept. A date it cannot read says so beside the box.
+   */
+  function goTo(text: string): void {
+    const c = ctx;
+    if (c === null) return;
+    const active = c.plugin.time.active;
+    const parsed = parseGoTo(text, active?.parse ? (t) => active.parse!(t) : undefined);
+    if (!parsed.ok) return showGoToMessage(parsed.message);
+    const years = c.years();
+    if (years === null) return showGoToMessage("this calendar has no days to go to");
+    const next = goToWindow(currentWindow(), parsed.day, years, bounds());
+    if (next === null) return showGoToMessage("outside the Studio's timeline");
+    showGoToMessage("");
+    setWindow(next);
+  }
+
+  function showGoToMessage(message: string): void {
+    goToMessage?.setText(message);
+    goToMessage?.toggleClass("is-hidden", message === "");
+    goToInput?.toggleClass("is-invalid", message !== "");
+    goToInput?.setAttr("aria-invalid", message === "" ? "false" : "true");
+  }
+
   function currentWindow(): Window {
     return ctx?.store.get().view.window ?? { a: 0, b: 1 };
   }
@@ -249,10 +279,11 @@ export function createHeaderSurface(): Surface {
     // `studioRules`), so under one the description is the subject instead.
     const seasonList = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
     const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
-    const key = `${canonicalJson(zone)}|${canonicalJson(state.world.eras)}|${canonicalJson(seasonList)}|${canonicalJson(moons)}|${String(readOnlyCalendar)}`;
+    const tags = calendarTags(c, state);
+    const key = `${canonicalJson(zone)}|${canonicalJson(state.world.eras)}|${canonicalJson(seasonList)}|${canonicalJson(moons)}|${String(readOnlyCalendar)}|${canonicalJson(tags)}`;
     if (key === memoKey) return memo;
 
-    const issues = issuesFor({ zone, eras: state.world.eras, seasons: seasonList, moons, readOnlyCalendar });
+    const issues = issuesFor({ zone, eras: state.world.eras, seasons: seasonList, moons, readOnlyCalendar, tags });
     let koppen: KoppenResult | null = null;
     if (!validateProfile(zone).some((i) => i.level === "error")) {
       try {
@@ -588,6 +619,25 @@ export function createHeaderSurface(): Surface {
       const readout = shell.headerTools.createDiv({ cls: "wadjet-studio-header-readout", attr: { "data-hint": hintAttr("transport.readout") } });
       readoutRange = readout.createSpan({ cls: "wadjet-studio-header-readout-range" });
 
+      // Go to a date, typed in the calendar's own format (bead wadjet-n1z).
+      const goToBox = shell.headerTools.createDiv({ cls: "wadjet-studio-header-goto" });
+      const input = goToBox.createEl("input", {
+        cls: "wadjet-studio-header-goto-input wadjet-studio-num",
+        attr: { type: "text", placeholder: "Go to date", spellcheck: "false", "aria-label": "Go to a date, typed as the calendar writes it", "data-hint": hintAttr("transport.goto") },
+      });
+      goToInput = input;
+      goToMessage = goToBox.createSpan({ cls: "wadjet-studio-header-goto-msg is-hidden", attr: { role: "status" } });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          goTo(input.value);
+        } else if (ev.key === "Escape") {
+          input.value = "";
+          showGoToMessage("");
+        }
+      });
+      input.addEventListener("input", () => showGoToMessage(""));
+
       const transport = shell.headerTools.createDiv({ cls: "wadjet-studio-header-transport" });
       headerButton(transport, { text: "◀", label: "Pan back", hint: hintAttr("transport.back"), onClick: () => setWindow(panBy(currentWindow(), -width(currentWindow()) * PAN_FRACTION, bounds())) });
       headerButton(transport, { text: "▶", label: "Pan forward", hint: hintAttr("transport.forward"), onClick: () => setWindow(panBy(currentWindow(), width(currentWindow()) * PAN_FRACTION, bounds())) });
@@ -629,6 +679,8 @@ export function createHeaderSurface(): Surface {
       koppenLed = koppenChip = srcChip = flipLed = flipChip = null;
       presets = null;
       zoneButton = zoneName = koppenDesc = readoutRange = jsonButton = saveButton = null;
+      goToInput = null;
+      goToMessage = null;
       memoKey = "";
       memo = { koppen: null, issues: [] };
       saving = false;

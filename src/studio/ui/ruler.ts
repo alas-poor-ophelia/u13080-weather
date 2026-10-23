@@ -190,6 +190,8 @@ export interface RulerProps {
   bounds(): ZoomBounds;
   /** persist a pan through the store, exactly as the header does */
   setWindow(next: Window): void;
+  /** bring the window to rest on whole years once a drag is released (model/zoom.ts settleOnYears) */
+  settle?(): void;
 }
 
 export interface RulerComponent {
@@ -242,7 +244,10 @@ export function createRuler(props: RulerProps): RulerComponent {
       onMove: (_move, dx) => props.setWindow(panByDrag(start, dx, widthPx, props.bounds())),
       onEnd: (_end, dx, _dy, moved) => {
         cancelDrag = null;
-        if (moved) props.setWindow(panByDrag(start, dx, widthPx, props.bounds()));
+        if (moved) {
+          props.setWindow(panByDrag(start, dx, widthPx, props.bounds()));
+          props.settle?.();
+        }
       },
     });
   }

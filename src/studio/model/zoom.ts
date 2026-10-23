@@ -176,6 +176,29 @@ export function panByDrag(w: Window, dxPx: number, laneWidthPx: number, bounds: 
   return panBy(w, dt, bounds);
 }
 
+/** `w` slid so its centre is `centre`, its width kept, then clamped. */
+export function centreOn(w: Window, centre: number, bounds: ZoomBounds): Window {
+  const half = width(w) / 2;
+  return clampWindow({ a: centre - half, b: centre + half }, bounds);
+}
+
+/**
+ * Where a wheel zoom or a ruler drag comes to rest (bead wadjet-n1z): a
+ * window a year wide or wider settles on whole years, both edges on a year's
+ * first day, its width rounded to whole years and its centre kept as near as
+ * the rounding allows. A narrower window (days, months, a season) stays where
+ * the gesture left it. Whole axis positions are year starts on every seam
+ * (model/years.ts), so this holds on exact years too.
+ */
+export function settleOnYears(w: Window, bounds: ZoomBounds): Window {
+  const span = width(w);
+  if (span < 1 - EPSILON) return w;
+  const n = Math.max(1, Math.round(span));
+  const a = Math.round(centreOf(w) - n / 2);
+  const settled = clampWindow({ a, b: a + n }, bounds);
+  return Math.abs(settled.a - w.a) < EPSILON && Math.abs(settled.b - w.b) < EPSILON ? w : settled;
+}
+
 export type ZoomPreset = "day" | "month" | "season" | "year" | "era";
 
 function centreOf(w: Window): number {

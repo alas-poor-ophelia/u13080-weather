@@ -17,6 +17,7 @@
 import { validateEras } from "../../core/eras";
 import { validateProfile, type ValidationIssue } from "../../core/profile";
 import type { Era, ZoneProfile } from "../../core/types";
+import type { CalendarAst } from "../../seshat";
 import { channelOrNull } from "./compile";
 
 /** climate.<section> → channel; unknown sections fall back to sky so an issue is never dropped. */
@@ -49,6 +50,30 @@ export interface StudioIssuesInput {
   seasons: ReadonlyArray<{ name: string; from: number }>;
   moons: ReadonlyArray<{ name: string; phases?: ReadonlyArray<{ name: string; at: number }> }>;
   readOnlyCalendar: boolean;
+  /** a definition world's own tags (definitionTags): what a zone's `tag` predicates may name besides seasons, eras and moons */
+  tags?: readonly string[];
+}
+
+/**
+ * Every tag a calendar definition sets on its days (bead wadjet-io7): the
+ * labels' tags on cycle units, slot tags, day labels' tags and named rules'
+ * tags, in that order, each once. Empty with no definition (a legacy world,
+ * an opaque or third-party calendar). Read defensively: a definition that
+ * cannot run is still read for what it names.
+ */
+export function definitionTags(ast: CalendarAst | null | undefined): string[] {
+  if (!ast) return [];
+  const out = new Set<string>();
+  const add = (tags: readonly string[] | undefined) => {
+    if (Array.isArray(tags)) for (const t of tags) if (typeof t === "string" && t !== "") out.add(t);
+  };
+  for (const u of ast.units ?? []) {
+    if (u.kind === "slots") for (const s of u.slots ?? []) add(s.tags);
+    else for (const l of u.labels ?? []) add(l.tags);
+  }
+  for (const d of ast.days ?? []) add(d.tags);
+  for (const r of ast.rules ?? []) add(r.tags);
+  return [...out];
 }
 
 const MAX_SEASONS = 6;
@@ -171,7 +196,9 @@ export function studioRules(input: StudioIssuesInput): StudioIssue[] {
  * exactly, so such a literal never matches, though it reads the same. Stored
  * zones are never rewritten (docs/SESHAT-v0.md §13.11, ruled 2026-10-19); the
  * warning names the spelling to use. Covered: season, era and moon names in
- * `tag` and `moon` predicates and in gate sources.
+ * `tag` and `moon` predicates and in gate sources, and on a definition world
+ * the definition's own tags (`input.tags`: unit labels, slots, day labels,
+ * named rules; bead wadjet-io7).
  */
 export function nfcIssues(input: StudioIssuesInput): StudioIssue[] {
   const names = new Map<string, string>(); // NFC form -> the calendar's own spelling
@@ -184,6 +211,7 @@ export function nfcIssues(input: StudioIssuesInput): StudioIssue[] {
     add(m.name);
     add(`moon:${m.name}`);
   }
+  for (const t of input.tags ?? []) add(t);
   const out: StudioIssue[] = [];
   const check = (literal: string, path: string) => {
     const want = names.get(literal.normalize("NFC"));

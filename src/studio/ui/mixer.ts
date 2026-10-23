@@ -45,7 +45,7 @@ import type { StudioState } from "../model/state";
 import { issuesByUnit, issuesFor, ledLevel, unitKey, type StudioIssue } from "../model/validation";
 import { createLed, createRackUnit, type ChipProps, type GripPhase, type LedComponent, type LedLevel, type RackUnitComponent } from "./components";
 import { openInsertPicker } from "./insert-picker";
-import type { Surface, SurfaceContext } from "./surfaces";
+import { calendarTags, type Surface, type SurfaceContext } from "./surfaces";
 import { buildForcingsWindow, FORCINGS_WINDOW } from "./windows/forcings";
 import { buildRegimesWindow, REGIMES_WINDOW } from "./windows/regimes";
 import { confirmWorldEdit } from "./world-confirm-modal";
@@ -177,9 +177,10 @@ export function createMixerSurface(): Surface {
     const readOnlyCalendar = description?.readOnly ?? false;
     const seasons = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
     const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
-    const key = `${canonicalJson(zone)}|${canonicalJson(state.world.eras)}|${canonicalJson(seasons)}|${canonicalJson(moons)}|${String(readOnlyCalendar)}`;
+    const tags = calendarTags(c, state);
+    const key = `${canonicalJson(zone)}|${canonicalJson(state.world.eras)}|${canonicalJson(seasons)}|${canonicalJson(moons)}|${String(readOnlyCalendar)}|${canonicalJson(tags)}`;
     if (key === memoKey) return memo;
-    memo = { issues: issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar }) };
+    memo = { issues: issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags }) };
     memoKey = key;
     return memo;
   }

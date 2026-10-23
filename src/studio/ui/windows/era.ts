@@ -46,7 +46,7 @@ import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/vali
 import { needsWorldConfirm } from "../../model/world-confirm";
 import { clampWindow, worldBounds, type Window, type ZoomBounds } from "../../model/zoom";
 import { createChip, createKnob, createLed, type ChipComponent, type KnobComponent, type LedComponent } from "../components";
-import type { SurfaceContext } from "../surfaces";
+import { calendarTags, type SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 import { confirmWorldEdit } from "../world-confirm-modal";
 
@@ -363,7 +363,7 @@ export function buildEraWindow(name: string): WindowBuilder {
       const readOnlyCalendar = description?.readOnly ?? false;
       const seasons = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
       const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
-      const all = issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar });
+      const all = issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags: calendarTags(ctx, state) });
       const mine = unitKey({ kind: "era", name });
       return all.filter((i) => unitKey(i.unit) === mine);
     }

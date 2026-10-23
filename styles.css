@@ -495,6 +495,50 @@
   color: var(--wadjet-studio-readout);
   text-shadow: 0 0 7px rgba(255, 201, 120, 0.4);
 }
+/* The go-to box (bead wadjet-n1z): a recessed field in the readout's own
+   idiom, a date typed as the calendar writes it. Specificity (0,3,1) so it
+   outweighs Obsidian's `input[type="text"]` base rule without `!important`.
+   The message hangs below the box, so a refusal never widens the header. */
+.wadjet-studio-header-goto {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.wadjet-studio .wadjet-studio-header-goto input.wadjet-studio-header-goto-input {
+  width: 13ch;
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--wadjet-studio-fs-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-readout);
+  background: var(--wadjet-studio-bg);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.75);
+}
+.wadjet-studio .wadjet-studio-header-goto input.wadjet-studio-header-goto-input::placeholder {
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio .wadjet-studio-header-goto input.wadjet-studio-header-goto-input.is-invalid {
+  border-color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-header-goto-msg {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 2;
+  white-space: nowrap;
+  font-size: var(--wadjet-studio-fs-caption);
+  color: var(--wadjet-studio-gold);
+}
+.wadjet-studio-header-goto-msg.is-hidden {
+  display: none;
+}
+@container (max-width: 1300px) {
+  .wadjet-studio .wadjet-studio-header-goto input.wadjet-studio-header-goto-input {
+    width: 9ch;
+  }
+}
 /* Transport: one framed group of four cells with hairline dividers, never
    four separate buttons (the prototype's `◀ ▶ − ＋`). */
 .wadjet-studio-header-transport {
@@ -2674,6 +2718,15 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* The day as the calendar writes it (bead wadjet-n1z), above the eyebrow. */
+.wadjet-studio-daycard-title {
+  font-size: var(--wadjet-studio-fs-zone);
+  font-weight: 600;
+  color: var(--wadjet-studio-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* `DAY 36 · YEAR 1600 · THAW` */
 .wadjet-studio-daycard-date {

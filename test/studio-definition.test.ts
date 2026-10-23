@@ -17,7 +17,7 @@ import { calendarOfDefinition, mergeCalendar, planCalendarSave, type CalendarDra
 import { initialState, type StudioSettingsLike } from "../src/studio/model/state";
 import { createStore } from "../src/studio/model/store";
 import { applyStash, takeStash } from "../src/studio/model/stash";
-import { issuesFor, nfcIssues } from "../src/studio/model/validation";
+import { definitionTags, issuesFor, nfcIssues } from "../src/studio/model/validation";
 import { SeshatCalendar } from "../src/plugin/time/seshat";
 import { zoneFromPreset } from "../src/plugin/zones";
 import { PRESETS } from "../src/generated/presets";
@@ -286,5 +286,49 @@ describe("a zone literal that matches a calendar name only after NFC", () => {
   test("the calendar's own spelling, and an unrelated name, raise nothing", () => {
     expect(nfcIssues(input(zoneWith(`season:${composed}`, composed, `season:${composed}`)))).toEqual([]);
     expect(nfcIssues(input(zoneWith("season:Spring", "Other", "era:None")))).toEqual([]);
+  });
+});
+
+describe("the look-alike warning covers a definition's own tags (wadjet-io7)", () => {
+  const fjord = PRESETS.find((p) => p.id === "fjord-coast")!;
+  const composed = "f" + String.fromCharCode(0x00ea) + "te"; // "fête", one code point for ê
+  const decomposed = "fe" + String.fromCharCode(0x0302) + "te"; // e + combining circumflex
+  // every place a definition sets tags: a cycle unit's labels, slots, day labels, named rules
+  const ast = {
+    name: "Tagged",
+    gears: [],
+    units: [
+      { id: "week", kind: "cycle", labels: [{ name: "Mon", tags: ["market"] }, { name: "Tue" }] },
+      { id: "month", kind: "slots", in: "year", slots: [{ name: "Fest", length: 1, tags: ["harvest", "market"] }, { length: 30 }] },
+    ],
+    days: [{ day: 12, name: "Crowning", tags: ["crowning"] }],
+    rules: [{ id: "feast", rule: {}, tags: [composed] }],
+  } as unknown as CalendarAst;
+  const zoneWith = (tag: string): ZoneProfile => ({
+    ...zoneFromPreset({ name: "Greywold", preset: fjord, existingIds: new Set() }).zone,
+    modifiers: [{ id: "fair", when: { all: [{ tag }] }, mods: [], apply: [], tag: "fair" }],
+  });
+  const input = (zone: ZoneProfile, tags?: readonly string[]) => ({ zone, eras: [], seasons: [], moons: [], readOnlyCalendar: false, ...(tags ? { tags } : {}) });
+
+  test("definitionTags reads labels, slots, day labels and rules, each tag once", () => {
+    expect(definitionTags(ast)).toEqual(["market", "harvest", "crowning", composed]);
+    expect(definitionTags(null)).toEqual([]);
+    expect(definitionTags({ name: "x", gears: [], units: [] })).toEqual([]);
+  });
+
+  test("a tag predicate spelled with other code points warns on its device, naming the definition's spelling", () => {
+    const issues = nfcIssues(input(zoneWith(decomposed), definitionTags(ast)));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.path).toBe("modifiers[0].when.all[0].tag");
+    expect(issues[0]!.level).toBe("warning");
+    expect(issues[0]!.unit).toEqual({ kind: "device", id: "fair" });
+    expect(issues[0]!.message).toContain(`"${composed}"`);
+    expect(issuesFor(input(zoneWith(decomposed), definitionTags(ast))).filter((i) => i.message.includes("Unicode"))).toHaveLength(1);
+  });
+
+  test("the definition's own spelling, an unrelated tag, and a world without a definition raise nothing", () => {
+    expect(nfcIssues(input(zoneWith(composed), definitionTags(ast)))).toEqual([]);
+    expect(nfcIssues(input(zoneWith("market"), definitionTags(ast)))).toEqual([]);
+    expect(nfcIssues(input(zoneWith(decomposed)))).toEqual([]);
   });
 });

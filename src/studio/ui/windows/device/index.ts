@@ -61,7 +61,7 @@ import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../../model/v
 import { createChip, createKnob } from "../../components";
 import type { LedProps } from "../../components/led";
 import { PresetNameModal } from "../../preset-name-modal";
-import type { SurfaceContext } from "../../surfaces";
+import { calendarTags, type SurfaceContext } from "../../surfaces";
 import type { WindowBuilder } from "../../windows";
 import { buildApply } from "./apply";
 import { KIND_BADGE, PANEL_W, PANEL_W_SPELL, PANEL_W_TAG } from "./constants";
@@ -150,11 +150,12 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       const readOnlyCalendar = description?.readOnly ?? false;
       const seasons = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
       const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
-      const key = `${JSON.stringify(zone.modifiers)}|${JSON.stringify(state.world.eras)}|${JSON.stringify(seasons)}|${JSON.stringify(moons)}`;
+      const tags = calendarTags(ctx, state);
+      const key = `${JSON.stringify(zone.modifiers)}|${JSON.stringify(state.world.eras)}|${JSON.stringify(seasons)}|${JSON.stringify(moons)}|${JSON.stringify(tags)}`;
       if (key === issuesKey) return issuesMemo;
       const mine = unitKey({ kind: "device", id: modifierId });
       issuesKey = key;
-      issuesMemo = issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar }).filter((i) => unitKey(i.unit) === mine);
+      issuesMemo = issuesFor({ zone, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags }).filter((i) => unitKey(i.unit) === mine);
       return issuesMemo;
     }
 

@@ -46,6 +46,7 @@ export const HINTS: Record<string, Hint> = {
 
   // --- header · tools (SPEC §3.1) ---
   "transport.readout": ["window", "the span the playlist is showing"],
+  "transport.goto": ["go to date", "type a date as the calendar writes it, or a day number; Enter centres the window on it"],
   "transport.back": ["back", "pan a quarter window earlier"],
   "transport.forward": ["forward", "pan a quarter window later"],
   "transport.out": ["zoom out", "widen the window around its centre"],
@@ -71,6 +72,7 @@ export const HEADER_HINT_KEYS: readonly string[] = [
   "zone.src",
   "zone.flip",
   "transport.readout",
+  "transport.goto",
   "transport.back",
   "transport.forward",
   "transport.out",

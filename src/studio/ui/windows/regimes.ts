@@ -53,7 +53,7 @@ import { issuesByUnit, issuesFor, ledLevel, unitKey, type StudioIssue } from "..
 import { createKnob, createLed, type KnobComponent, type KnobPhase, type LedComponent } from "../components";
 import type { WindowPreset } from "../components/window";
 import { PresetNameModal } from "../preset-name-modal";
-import type { SurfaceContext } from "../surfaces";
+import { calendarTags, type SurfaceContext } from "../surfaces";
 import type { WindowBuild } from "../windows";
 
 /** The id the panel is opened under. The mixer's fixed strip opens it (SPEC §3.3). */
@@ -705,7 +705,7 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
     const readOnlyCalendar = description?.readOnly ?? false;
     const seasons = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
     const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
-    const all = issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar });
+    const all = issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags: calendarTags(ctx, state) });
     return issuesByUnit(all).get(unitKey({ kind: "regimes" })) ?? [];
   }
 

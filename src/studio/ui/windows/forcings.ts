@@ -44,7 +44,7 @@ import type { StudioState } from "../../model/state";
 import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
 import { presetWindow, worldBounds, type Window, type ZoomBounds } from "../../model/zoom";
 import { createKnob, type KnobComponent } from "../components";
-import type { SurfaceContext } from "../surfaces";
+import { calendarTags, type SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 
 /** The id the Forcings panel is opened under. */
@@ -276,7 +276,7 @@ export const buildForcingsWindow: WindowBuilder = (ctx: SurfaceContext): WindowB
     const seasons = readOnlyCalendar ? (description?.seasons ?? []) : state.world.calendar.seasons;
     const moons = readOnlyCalendar ? (description?.moons ?? []) : state.world.calendar.moons;
     const mine = unitKey({ kind: "forcings" });
-    return issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar }).filter((i) => unitKey(i.unit) === mine);
+    return issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags: calendarTags(ctx, state) }).filter((i) => unitKey(i.unit) === mine);
   }
 
   /**

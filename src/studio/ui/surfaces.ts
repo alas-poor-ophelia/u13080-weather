@@ -34,6 +34,7 @@ import type { Store } from "../model/store";
 import type { Shell } from "./layout";
 import type { PlaylistRow } from "./playlist";
 import type { StudioView } from "./view";
+import { definitionTags } from "../model/validation";
 import type { WindowManager } from "./windows";
 
 /** Everything a surface is allowed to reach. Built once by `StudioView.build()`. */
@@ -89,4 +90,14 @@ export interface Surface {
   render(state: StudioState): void;
   /** Remove every element and listener `mount` created. Must be idempotent. */
   destroy(): void;
+}
+
+/**
+ * The definition's own tags on a world that runs one (model/validation.ts
+ * definitionTags), for the look-alike warning (bead wadjet-io7); empty on a
+ * legacy world or another plugin's calendar.
+ */
+export function calendarTags(ctx: { plugin: WadjetPlugin }, state: StudioState): string[] {
+  if (state.calendarSource !== "seshat") return [];
+  return definitionTags(ctx.plugin.calendars.seshat?.definition() ?? null);
 }

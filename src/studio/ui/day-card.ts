@@ -27,6 +27,7 @@ import { yearOf } from "../../seshat/year";
 import { rollCached, type AuditionDay, type AuditionYear } from "../model/audition";
 import { conditionCode, conditionColour, conditionOf } from "../model/copy";
 import { format, yearLabel } from "../model/format";
+import { dayTitle } from "../model/date-nav";
 import { channelHint } from "../model/hints-channels";
 import { litShapePath, phaseTint } from "../model/moon-shape";
 import { openCycleFor } from "./windows/cycle";
@@ -190,6 +191,9 @@ export function createDayCard(parent: HTMLElement, ctx: SurfaceContext, hint: st
   const read = panel.createDiv({ cls: "wadjet-studio-daycard-read", attr: { "data-hint": channelHint("daycard.head") } });
   // `DAY 36 · YEAR 1600 · THAW`, redrawn as the window slides. The class stays
   // `-date`: it is the same line the walk reads, in the prototype's grammar.
+  // The day as the calendar writes it (bead wadjet-n1z): its default format,
+  // the one a date is typed in, so it reads like the go-to box takes it.
+  const titleEl = read.createDiv({ cls: "wadjet-studio-daycard-title" });
   const dateEl = read.createDiv({ cls: "wadjet-studio-daycard-date" });
   const hero = read.createDiv({ cls: "wadjet-studio-daycard-hero" });
   const tempEl = hero.createSpan({ cls: "wadjet-studio-daycard-temp wadjet-studio-num" });
@@ -280,6 +284,7 @@ export function createDayCard(parent: HTMLElement, ctx: SurfaceContext, hint: st
 
     if (day === null) {
       dateEl.setText("");
+      titleEl.setText("");
       pinEl.toggleClass("is-hidden", true);
       noteEl.toggleClass("is-hidden", true);
       clearChips();
@@ -287,6 +292,9 @@ export function createDayCard(parent: HTMLElement, ctx: SurfaceContext, hint: st
     }
 
     const r = day.report;
+    // the active calendar's own format (formatDay's on a definition or the internal calendar; a third-party calendar's own), as the header readout
+    const active = ctx.plugin.time.active;
+    titleEl.setText(dayTitle(day.dayOrdinal, active?.format ? (d) => active.format!(d) : (d) => ctx.plugin.formatDay(d)));
     dateEl.setText(dayEyebrow(day));
 
     const mean = format(r.temperature.mean, "temperature", units);

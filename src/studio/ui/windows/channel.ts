@@ -76,7 +76,7 @@ import { cycleColour, SEASON_CYCLE } from "../../model/palette";
 import type { StudioState } from "../../model/state";
 import { issuesFor, ledLevel, unitKey, type StudioIssue } from "../../model/validation";
 import { createChart, createChip, createKnob, type ChartComponent, type ChartSeries, type ChartTick, type ChipComponent, type KnobComponent } from "../components";
-import type { SurfaceContext } from "../surfaces";
+import { calendarTags, type SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 import { openCycleFor } from "./cycle";
 
@@ -1407,7 +1407,7 @@ export function buildChannelWindow(channel: Channel): WindowBuilder {
       const seasons = readOnlyCalendar ? (described?.seasons ?? []) : state.world.calendar.seasons;
       const moons = readOnlyCalendar ? (described?.moons ?? []) : state.world.calendar.moons;
       const mine = unitKey({ kind: "channel", channel });
-      return issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar }).filter((i) => unitKey(i.unit) === mine);
+      return issuesFor({ zone: z, eras: state.world.eras, seasons, moons, readOnlyCalendar, tags: calendarTags(ctx, state) }).filter((i) => unitKey(i.unit) === mine);
     }
 
     /**
