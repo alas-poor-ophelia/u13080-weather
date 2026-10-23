@@ -170,8 +170,11 @@ export class StudioView extends ItemView {
     this.navigation = false;
     // Undo/redo belong to the leaf, not to a surface: Obsidian pushes this
     // scope while the studio is the focused view and pops it when it is not,
-    // so Ctrl/Cmd+Z here never reaches an editor in another tab.
-    const scope = new Scope();
+    // so Ctrl/Cmd+Z here never reaches an editor in another tab. The app's
+    // scope is its PARENT: a bare `new Scope()` is pushed on its own, and every
+    // global hotkey (the palette, the switcher, settings) dies while the
+    // studio is focused, which is how it shipped until 2026-10-23.
+    const scope = new Scope(this.app.scope);
     scope.register(["Mod"], "z", (ev) => {
       ev.preventDefault();
       this.store.undo();
