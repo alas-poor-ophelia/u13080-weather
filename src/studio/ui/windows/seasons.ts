@@ -34,6 +34,7 @@
  * `segments()` output index always agree (`boundaries.ts`'s own contract for
  * callers — see its file doc).
  */
+import { seasonsUseDates } from "../../../seshat";
 import { DEFAULT_YEAR_LENGTH } from "../../../seshat/year";
 import { dayLabel, tabular } from "../../model/format";
 import { seasonsHint } from "../../model/hints-seasons";
@@ -91,11 +92,15 @@ interface CalendarView {
  */
 function calendarView(ctx: SurfaceContext, state: StudioState): CalendarView {
   const description = ctx.calendar();
-  const readOnly = description?.readOnly ?? false;
+  // seasons that start on dates draw read-only at their projection into one year (§16.7 P6): approximate, edited as text
+  const def = state.calendarSource === "seshat" ? (ctx.plugin.calendars.seshat?.definition() ?? null) : null;
+  const dated = !!def?.seasons && seasonsUseDates(def.seasons);
+  const readOnly = (description?.readOnly ?? false) || dated;
   const seasons = readOnly ? (description?.seasons ?? []) : state.world.calendar.seasons;
   const yearLength = description?.yearLength ?? DEFAULT_YEAR_LENGTH;
-  const label = readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
-  return { readOnly, label, seasons, yearLength, ...(description?.editHint !== undefined ? { editHint: description.editHint } : {}) };
+  const label = dated ? `${description?.readOnly ? description.label : "calendar definition"} · seasons on dates, approximate` : readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
+  const editHint = dated ? "the seasons start on dates: edit them in the calendar text (Edit as text)" : description?.editHint;
+  return { readOnly, label, seasons, yearLength, ...(editHint !== undefined ? { editHint } : {}) };
 }
 
 /**

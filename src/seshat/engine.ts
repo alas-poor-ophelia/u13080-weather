@@ -7,7 +7,7 @@
 import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { Body } from "./body";
 import { DAY_LIMIT } from "./day";
-import { seasonIn } from "./seasons";
+import { SeasonCalendar, seasonIn } from "./seasons";
 import { resolve } from "./resolve";
 import { isPlainConstant } from "./base";
 import { EngineDays } from "./engine-view";
@@ -132,7 +132,27 @@ export class Engine {
   seasonAt(day: number): string | null {
     const s = this.ast.seasons;
     if (!s) return null;
-    return seasonIn(s, this.occurrenceAt(s.unit, day)!, day);
+    return seasonIn(s, this.occurrenceAt(s.unit, day)!, day, this.seasonCalendar());
+  }
+
+  /**
+   * The seasons as phases of the seasons-unit occurrence holding day 0
+   * (§16.7 P6): what describe() and the Studio draw. Fractions as stored;
+   * date marks projected there (approximate in years of another length).
+   * Sorted by phase, ties in declaration order.
+   */
+  seasonProjection(): Array<{ name: string; from: number }> {
+    const s = this.ast.seasons;
+    if (!s) return [];
+    return this.seasonCalendar()!.project(this.occurrenceAt(s.unit, 0)!.index);
+  }
+
+  private seasonCal?: SeasonCalendar;
+  /** Date-mark resolution over the seasons unit, memoised per occurrence (§16.7 P6); null with no seasons. */
+  seasonCalendar(): SeasonCalendar | null {
+    const s = this.ast.seasons;
+    if (!s) return null;
+    return (this.seasonCal ??= new SeasonCalendar(s.marks, { length: (i) => this.length(s.unit, i), slotLengths: (u, i) => this.slotLengths(u, [i]) }));
   }
 
   /** The moons on `day`, in declaration order: the bodies with a moon facet, each with its exact phase. */

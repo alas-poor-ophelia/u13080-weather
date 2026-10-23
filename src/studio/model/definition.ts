@@ -26,7 +26,7 @@
  *   comments), so the Studio asks before the save removes them.
  */
 import { canonicalJson } from "../../core/profile";
-import { Body, bodyFor, parse, print, toNumber, type BodyAst, type CalendarAst } from "../../seshat";
+import { Body, bodyFor, Engine, parse, print, seasonsUseDates, toNumber, type BodyAst, type CalendarAst, type SeasonMark } from "../../seshat";
 import { prepareDefinition } from "../../plugin/time/seshat";
 import { compile, FormError, recognise, type FormEdits, type MoonForm } from "../../plugin/time/form";
 import type { CalendarSource, DraftMoon, FormDraft, WorldDraft } from "./state";
@@ -44,12 +44,28 @@ export function calendarOfDefinition(ast: CalendarAst): CalendarDraft {
     if (p.kind === "form") (form as Record<string, unknown>)[k] = p.value;
   }
   return {
-    seasons: (ast.seasons?.marks ?? []).map((m) => ({ name: m.name, from: m.from })),
+    seasons: draftSeasons(ast),
     moons: (ast.bodies ?? []).flatMap((b) =>
       b.moon ? [{ id: b.id, name: b.moon.name, cycleDays: toNumber(b.period), phaseAtEpoch: toNumber(b.epoch), ...(b.moon.phases ? { phases: b.moon.phases.map((p) => ({ name: p.name, at: p.at })) } : {}) }] : [],
     ),
     form,
   };
+}
+
+/**
+ * The seasons as the Studio draft holds them: fractions as stored; with any
+ * date mark, every mark projected into the year holding day 0 (§16.7 P6).
+ * The ribbon draws those read-only and a Save never writes them back: the
+ * form reads such seasons as text, so the stored date marks stay.
+ */
+function draftSeasons(ast: CalendarAst): Array<{ name: string; from: number }> {
+  if (!ast.seasons) return [];
+  if (!seasonsUseDates(ast.seasons)) return (ast.seasons.marks as readonly SeasonMark[]).map((m) => ({ name: m.name, from: m.from }));
+  try {
+    return new Engine(ast).seasonProjection();
+  } catch {
+    return []; // a definition that cannot run has nothing to draw
+  }
 }
 
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
@@ -162,6 +178,9 @@ function moonsOf(ast: CalendarAst, base: readonly DraftMoon[], draft: readonly D
  * @param base the calendar the draft was seeded from (or last saved as)
  * @param draft the draft calendar
  */
+/** mergeCalendar's refusal of a seasons edit on date marks (planCalendarSave says it plainly). */
+const DATED_SEASONS = "the seasons use dates; edit them as text";
+
 export function mergeCalendar(stored: string, base: CalendarDraft, draft: CalendarDraft): MergeResult {
   if (same(draft, base)) return { kind: "unchanged" };
   let ast: CalendarAst;
@@ -176,6 +195,7 @@ export function mergeCalendar(stored: string, base: CalendarDraft, draft: Calend
 
   const edits: { -readonly [K in keyof FormEdits]: FormEdits[K] } = {};
   for (const k of parts) {
+    if (k === "seasons" && ast.seasons && seasonsUseDates(ast.seasons)) return { kind: "error", message: DATED_SEASONS };
     if (k === "seasons") edits.seasons = draft.seasons.map((s) => ({ name: s.name, from: s.from }));
     else if (k === "moons") {
       const m = moonsOf(ast, base.moons, draft.moons);
@@ -227,6 +247,7 @@ export function planCalendarSave(current: { source: CalendarSource; calendar: Ca
     case "unchanged":
       return { kind: "none" };
     case "error":
+      if (m.message === DATED_SEASONS) return { kind: "refuse", message: `${DATED_SEASONS} (Edit definition).` };
       return { kind: "refuse", message: `the calendar edits do not make a calendar that runs (${m.message}).` };
     case "stale":
       return { kind: "refuse", message: "the calendar definition changed outside the studio while you edited the same part of it. The studio now shows the stored calendar; undo brings your edits back, and Save then applies them over it.", reseed: m.stored };

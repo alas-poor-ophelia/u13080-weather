@@ -12,7 +12,7 @@
  *   - errors: what the parser must refuse, with a line number.
  */
 import { describe, expect, test } from "bun:test";
-import { Engine, GREGORIAN, HEBREW, parse, print, SeshatSyntaxError, validate, type CalendarAst, type RuleAst, type UnitAst } from "../src/seshat";
+import { Engine, GREGORIAN, HEBREW, parse, print, SeshatSyntaxError, validate, type CalendarAst, type RuleAst, type SeasonMarkAst, type UnitAst } from "../src/seshat";
 import { SESHAT_FIXTURES } from "./fixtures/seshat/calendars";
 
 const DIR = new URL("./fixtures/seshat/", import.meta.url);
@@ -114,6 +114,8 @@ function fuzzAst(seed: number): CalendarAst {
     ...opt("gears", gearTerms()),
     ...opt("filler", r.maybe(() => r.next() < 0.5)),
   });
+  // §16 D7: a fraction, DAY:N, or <unit>:<slot>.<day> (the index stays small so index + a unit's NUMBER near 2^52 still prints)
+  const seasonMark = (): SeasonMarkAst => r.pick<() => SeasonMarkAst>([() => ({ name: text(), from: float() }), () => ({ name: text(), day: int() }), () => ({ name: text(), slot: { unit: id(), index: r.int(-1000, 1000), day: int() } })])();
   const unit = (): UnitAst =>
     r.next() < 0.5
       ? ({ id: id(), kind: "cycle", ...opt("number", r.maybe(int)), ...rule(), ...opt("labels", r.listOf(label, 4)), ...opt("ledger", ledger()) })
@@ -144,7 +146,7 @@ function fuzzAst(seed: number): CalendarAst {
   return {
     name: text(),
     ...opt("formats", r.listOf(() => ({ name: text(), pattern: `${text()}{${id()}}${text()}` }))),
-    ...opt("seasons", r.maybe(() => ({ unit: id(), marks: Array.from({ length: r.int(0, 3) }, () => ({ name: text(), from: float() })) }))),
+    ...opt("seasons", r.maybe(() => ({ unit: id(), marks: Array.from({ length: r.int(0, 3) }, seasonMark) }))),
     ...opt("bodies", r.listOf(() => ({ id: id(), period: rat(), epoch: rat(), ...opt("moon", r.maybe(() => ({ name: text(), ...opt("phases", r.listOf(() => ({ name: text(), at: float() }))) }))) }))),
     gears: Array.from({ length: r.int(0, 2) }, () => (r.next() < 0.5 ? { id: id(), on: id(), kind: "intervals" as const, terms: Array.from({ length: r.int(0, 3) }, () => ({ every: int(), ...opt("offset", r.maybe(int)), sign: r.pick([1, -1] as const) })) } : { id: id(), on: id(), kind: "positions" as const, period: int(), positions: Array.from({ length: r.int(0, 3) }, int), ...opt("offset", r.maybe(int)) })),
     units: Array.from({ length: r.int(0, 3) }, unit),
@@ -199,6 +201,7 @@ describe("Seshat text: grammar fuzz", () => {
         if (key === "crossing" && o.body !== undefined) mark("crossing body");
         if (key === "crossing" && o.start !== undefined) mark("crossing start");
         if (key === "body" && o.k !== undefined && o.offset !== undefined) mark("body k and offset");
+        if (key === "marks[]" || (key === "marks" && "name" in o)) mark("slot" in o ? "slot mark" : "day" in o ? "day mark" : "from" in o ? "fraction mark" : "other mark");
         if ((o.kind === "all" || o.kind === "any" || o.kind === "not") && depth >= 2) mark("rule depth 3+");
         for (const [k, v] of Object.entries(o)) {
           leaf(v, k);
@@ -207,7 +210,7 @@ describe("Seshat text: grammar fuzz", () => {
       }
     };
     for (let seed = 1; seed <= 10_000; seed++) walk(fuzzAst(seed));
-    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] marks", "[] phases", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "phase name", "crossing index", "crossing body", "crossing start", "body k and offset", "rule depth 3+"];
+    const want = ["kind cycle", "kind slots", "kind intervals", "kind positions", "kind switch", "kind starts", "kind all", "kind any", "kind not", "kind phase", "kind dayIn", "kind index", "kind tag", "kind dates", "kind recur", "[] tags", "[] labels", "[] ledger", "[] gears", "[] stages", "[] path", "[] lengths", "[] by", "[] setpos", "[] bodies", "[] days", "[] rules", "[] formats", "[] marks", "[] phases", "[] of", "empty label", "-0", "near 2^53", "lone surrogate", "empty string", "hostile name", "hostile tags[]", "hostile label[]", "hostile tag", "phase unit", "phase body", "phase both", "phase neither", "phase name", "crossing index", "crossing body", "crossing start", "body k and offset", "rule depth 3+", "slot mark", "day mark", "fraction mark"];
     for (const k of want) expect([k, (seen.get(k) ?? 0) >= 20]).toEqual([k, true]);
   });
 });

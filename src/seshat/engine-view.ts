@@ -223,7 +223,11 @@ class EngineView implements DayView {
   }
 
   hasTag(tag: string): boolean {
-    return this.days.engine.baseTagsAt(this.day).includes(tag);
+    const e = this.days.engine;
+    // a rule reads the day's resolved season as season:<name> too (§16.7 P6); tagsAt's output is unchanged.
+    // That season is the calendar's own, unflipped (northern) one: a southern zone flips only its season:
+    // tag (flipSeasonTags), so a calendar rule's tags hold on the same days in every zone.
+    return e.baseTagsAt(this.day).includes(tag) || (tag.startsWith("season:") && e.seasonAt(this.day) === tag.slice(7));
   }
 
   recur(r: Recur): boolean {

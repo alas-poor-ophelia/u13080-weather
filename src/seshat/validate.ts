@@ -125,11 +125,33 @@ export function problems(stored: CalendarAst): Problem[] {
       else if (typeof m[key] !== "number" || !Number.isFinite(m[key]) || (m[key]) < 0 || (m[key]) >= 1) errors.push(`${where}: mark "${m.name}" must be at a phase in [0, 1)`);
     }
   };
+  /** season marks (§16 D7): a fraction, DAY:N (N ≥ 1), or a day ≥ 1 of a declared, non-filler slot of a slot unit directly in the seasons unit */
+  const seasonMarks = (ms: unknown, seasonsUnit: UnitAst | undefined): void => {
+    if (!Array.isArray(ms)) return void errors.push(`seasons: marks must be a list`);
+    for (const [i, m] of (ms as unknown[]).entries()) {
+      if (!isObj(m) || typeof m.name !== "string" || !m.name) errors.push(`seasons: mark ${i + 1} needs a name`);
+      else if ("slot" in m) {
+        const at = `seasons: mark "${m.name}"`;
+        const sl = m.slot;
+        if (!isObj(sl) || typeof sl.unit !== "string") errors.push(`${at} needs a slot unit`);
+        else {
+          const su = units.get(sl.unit);
+          if (!su) errors.push(`${at}: no unit "${sl.unit}"`);
+          else if (su.kind !== "slots" || seasonsUnit === undefined || su.in !== seasonsUnit.id) errors.push(`${at}: "${su.id}" is not a slot unit directly in the seasons unit "${String(seasonsUnit?.id ?? (ast.seasons as { unit?: unknown }).unit)}"`);
+          else if (typeof sl.index !== "number" || !isInt(sl.index) || sl.index < 0 || sl.index >= su.slots.length) errors.push(`${at}: "${su.id}" has no slot ${typeof sl.index === "number" ? sl.index + (su.number ?? 1) : show(sl.index)}`);
+          else if (su.slots[sl.index]!.filler) errors.push(`${at}: slot ${sl.index + (su.number ?? 1)} of "${su.id}" is a filler slot; a season cannot start in one`);
+          if (typeof sl.day !== "number" || !isInt(sl.day) || sl.day < 1) errors.push(`${at}: the day in the slot must be a whole number from 1`);
+        }
+      } else if ("day" in m) {
+        if (typeof m.day !== "number" || !isInt(m.day) || m.day < 1) errors.push(`seasons: mark "${m.name}" must be on a whole day of the year from 1`);
+      } else if (typeof m.from !== "number" || !Number.isFinite(m.from) || m.from < 0 || m.from >= 1) errors.push(`seasons: mark "${m.name}" must be at a phase in [0, 1)`);
+    }
+  };
   if (ast.seasons !== undefined) {
     const u = units.get(ast.seasons.unit);
     if (!u) errors.push(`seasons: no unit "${String(ast.seasons.unit)}"`);
     else if (u.kind !== "cycle") errors.push(`seasons: "${u.id}" is a slot unit; seasons follow a cycle unit's phase`);
-    marks(ast.seasons.marks, "seasons");
+    seasonMarks(ast.seasons.marks, u);
   }
   // predicates match moons by name, so two moons of one name would be one moon to every rule
   const moonNames = (ast.bodies ?? []).flatMap((b) => (b.moon ? [b.moon.name] : []));
@@ -717,6 +739,8 @@ export function checkRule(rule: RuleAst, ast: CalendarAst, where = "rule"): stri
   const errors: string[] = [];
   const units = new Map(ast.units.map((u) => [u.id, u]));
   const own = new Set([...ast.units.flatMap((u) => (u.kind === "cycle" ? (u.labels ?? []) : u.slots)).flatMap((l) => l.tags ?? []), ...(ast.days ?? []).flatMap((d) => d.tags ?? [])]);
+  // a rule reads the day's season as season:<name> (§16.7 P6), whoever else sets that tag
+  for (const m of Array.isArray(ast.seasons?.marks) ? ast.seasons.marks : []) if (isObj(m) && typeof m.name === "string") own.add(`season:${m.name}`);
   const ruleTags = new Set((ast.rules ?? []).flatMap((x) => x.tags ?? []).filter((t) => !own.has(t)));
   const unit = (id: unknown, at: string, allowDay: boolean): boolean => {
     if (allowDay && id === "day") return true;

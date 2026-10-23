@@ -12,7 +12,7 @@
 import type { GearAst } from "./gear";
 import type { Rational } from "./rational";
 import type { RuleAst } from "./rule";
-import type { SeasonMark } from "./seasons";
+import type { SeasonMarkAst } from "./seasons";
 
 /** Add `add` days to a length when `gear` matches. */
 export interface GearTerm {
@@ -240,10 +240,10 @@ export interface MoonAst {
   readonly phases?: ReadonlyArray<{ readonly name: string; readonly at: number }>;
 }
 
-/** Seasons (§13.4): marks over the phase of one cycle unit, with the legacy calendar's rule (seasonAtPhase). */
+/** Seasons (§13.4): marks over the phase of one cycle unit, with the legacy calendar's rule (seasonAtPhase); a mark may be a date (§16 D7). */
 export interface SeasonsAst {
   readonly unit: string;
-  readonly marks: readonly SeasonMark[];
+  readonly marks: readonly SeasonMarkAst[];
 }
 
 /** A named format pattern (§4.2): "default" formats a day, "filler" a day in a filler slot. Display data. */

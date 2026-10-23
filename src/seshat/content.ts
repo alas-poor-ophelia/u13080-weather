@@ -15,6 +15,12 @@
  * Kept although they look like labels: slot and label `name`s (a recurrence
  * filter matches by name, BYLABEL), moon names (predicates match moons by
  * name), season names (they are the season tags).
+ *
+ * Added: `seasonTags: true` when the calendar has seasons and a rule reads a
+ * `season:<name>` tag that no label, slot or day sets. Such a rule matches the
+ * day's resolved season (§16.7 P6), where before it validated and always read
+ * false: the flag gives those definitions a new hash (weather caches refresh),
+ * and every other definition hashes exactly as before.
  */
 import type { CalendarAst } from "./ast";
 import { resolve } from "./resolve";
@@ -34,7 +40,22 @@ export function definitionContent(stored: CalendarAst): unknown {
     units: ast.units.map((u) => (u.id === "year" ? u : { ...u, number: undefined })),
     rules: ast.rules?.map((r) => ({ ...r, id: undefined })),
     bodies: ast.bodies?.map((b) => (b.moon ? { ...b, moon: { ...b.moon, phases: undefined } } : b)),
+    seasonTags: readsSeasonTags(ast) ? true : undefined,
   });
+}
+
+/** Whether some rule reads a `season:` tag that no unit label, slot or day sets (it reads the resolved season). */
+function readsSeasonTags(ast: CalendarAst): boolean {
+  if (!ast.seasons || !ast.rules?.length) return false;
+  const own = new Set([...ast.units.flatMap((u) => (u.kind === "cycle" ? (u.labels ?? []) : u.slots)).flatMap((l) => l.tags ?? []), ...(ast.days ?? []).flatMap((d) => d.tags ?? [])]);
+  const walk = (x: unknown): boolean => {
+    if (Array.isArray(x)) return x.some(walk);
+    if (typeof x !== "object" || x === null) return false;
+    const o = x as Record<string, unknown>;
+    if (o.kind === "tag" && typeof o.tag === "string" && o.tag.startsWith("season:") && !own.has(o.tag)) return true;
+    return Object.values(o).some(walk);
+  };
+  return walk(ast.rules.map((r) => r.rule));
 }
 
 /**

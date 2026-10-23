@@ -26,7 +26,7 @@ export { evaluate, inPhase, TimeView, type By, type DayView, type EvalOptions, t
 export { COUNT_WORK_MAX, EngineDays, SETPOS_PERIOD_MAX } from "./engine-view";
 export { ID, parse, print, SeshatSyntaxError } from "./text";
 export { checkFormats, compileFormat, formatDay, isParseable, parseDay, type CompiledFormat } from "./format";
-export { seasonAtPhase, seasonIn, type SeasonMark } from "./seasons";
+export { fractionBoundary, isDateMark, SeasonCalendar, seasonAtPhase, seasonIn, seasonsUseDates, type DateSeasonMark, type DaySeasonMark, type SeasonMark, type SeasonMarkAst, type SlotSeasonMark } from "./seasons";
 export { definitionContent } from "./content";
 export { translate } from "./translate";
 export { crossingOrigin, epochEditK, phaseSpan, resolve, resolveCrossing, resolveRule, translateWrap } from "./resolve";

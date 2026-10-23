@@ -110,7 +110,7 @@ describe("stale is per part (§15.9 S5)", () => {
     const draft = clone(BASE);
     draft.seasons[1]!.from = 0.6;
     const ast = written(mergeCalendar(outside, BASE, draft));
-    expect(ast.seasons!.marks[1]!.from).toBe(0.6);
+    expect((ast.seasons!.marks[1] as { from: number }).from).toBe(0.6);
     expect(ast.bodies![1]!.moon!.name).toBe("Cinder");
     // the studio edited the moons too: that part changed underneath, so it refuses and offers the stored calendar
     const both = clone(draft);

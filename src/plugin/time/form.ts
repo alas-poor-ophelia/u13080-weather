@@ -18,7 +18,7 @@
  * the year `text` and passes through every year edit.
  */
 import { canonicalJson } from "../../core/profile";
-import { baseKind, epochEditK, toNumber, type BodyAst, type CalendarAst, type CrossingAst, type CycleRule, type CycleUnitAst, type DayLabelAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SlotsUnitAst, type UnitAst } from "../../seshat";
+import { baseKind, epochEditK, seasonsUseDates, toNumber, type SeasonMark, type BodyAst, type CalendarAst, type CrossingAst, type CycleRule, type CycleUnitAst, type DayLabelAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SlotsUnitAst, type UnitAst } from "../../seshat";
 
 export type Part<T> = { readonly kind: "form"; readonly value: T } | { readonly kind: "text"; readonly why: string };
 
@@ -215,12 +215,40 @@ function readMonths(ast: CalendarAst): readonly MonthForm[] | null | string {
 
 function writeMonths(ast: CalendarAst, v: readonly MonthForm[] | null): CalendarAst {
   const m = monthUnit(ast) as SlotsUnitAst | null;
-  if (v === null) return m ? { ...ast, units: ast.units.filter((u) => u !== m) } : ast;
+  if (v === null) return m ? { ...remapSeasonSlots(ast, m, null), units: ast.units.filter((u) => u !== m) } : ast;
   const slots = v.map((s) => ({ name: s.name, length: s.length }));
-  if (m) return { ...ast, units: ast.units.map((u) => (u === m ? { ...m, slots } : u)) };
+  if (m) return { ...remapSeasonSlots(ast, m, slots), units: ast.units.map((u) => (u === m ? { ...m, slots } : u)) };
   const added: SlotsUnitAst = { id: freshId("month", ids(ast)), kind: "slots", in: "year", slots };
   const at = ast.units.findIndex((u) => u.id === "year") + 1;
   return { ...ast, units: [...ast.units.slice(0, at), added, ...ast.units.slice(at)] };
+}
+
+/**
+ * Season marks on a month (`month:3.21`) store the month's index (§16.7 P6), so
+ * a months edit would silently move them. A mark follows its month: when the
+ * edit only renames months in place (the count is unchanged and every changed
+ * name is new), indices stay; otherwise each mark moves to the index of its
+ * month's name. A mark whose month is gone (or the whole months unit, `next`
+ * null) refuses the edit, naming the season and the month.
+ */
+function remapSeasonSlots(ast: CalendarAst, m: SlotsUnitAst, next: ReadonlyArray<{ readonly name?: string | undefined }> | null): CalendarAst {
+  const s = ast.seasons;
+  if (!s || !s.marks.some((x) => "slot" in x && x.slot.unit === m.id)) return ast;
+  const before = m.slots.map((x) => x.name);
+  const after = next?.map((x) => x.name) ?? [];
+  const renamesOnly = next !== null && before.length === after.length && before.every((b, i) => b === after[i] || (!after.includes(b) && !before.includes(after[i])));
+  if (renamesOnly) return ast;
+  const marks = s.marks.map((x) => {
+    if (!("slot" in x) || x.slot.unit !== m.id) return x;
+    const name = before[x.slot.index];
+    const index = name === undefined ? -1 : after.indexOf(name);
+    if (index < 0) {
+      const month = name ?? `${m.id} ${x.slot.index + (m.number ?? 1)}`;
+      throw new FormError(`The season ${x.name} starts in ${month}; ${month} cannot be removed while a season starts in it. Change the season first (Edit definition).`);
+    }
+    return index === x.slot.index ? x : { ...x, slot: { ...x.slot, index } };
+  });
+  return { ...ast, seasons: { ...s, marks } };
 }
 
 // ---- the week: a one-day cycle naming the days, and a cycle of that many days aligned with it
@@ -276,7 +304,9 @@ function writeWeek(ast: CalendarAst, v: readonly string[] | null): CalendarAst {
 function readSeasons(ast: CalendarAst): readonly SeasonForm[] | string {
   if (ast.seasons === undefined) return [];
   if (ast.seasons.unit !== "year") return "the seasons follow something other than the year";
-  return ast.seasons.marks.map((m) => ({ name: m.name, from: m.from }));
+  // a Save through the form cannot turn a date mark into a fraction (§16.7 P6)
+  if (seasonsUseDates(ast.seasons)) return "the seasons use dates";
+  return (ast.seasons.marks as readonly SeasonMark[]).map((m) => ({ name: m.name, from: m.from }));
 }
 
 /**

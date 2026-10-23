@@ -66,7 +66,7 @@ describe("Save merges into a fresh parse of the stored text", () => {
     const draft = clone(BASE);
     draft.seasons[1]!.from = 0.3;
     const ast = written(mergeCalendar(TEXT, BASE, draft));
-    expect(ast.seasons!.marks[1]!.from).toBe(0.3);
+    expect((ast.seasons!.marks[1] as { from: number }).from).toBe(0.3);
     expect(ast.bodies).toEqual(DEF.bodies);
   });
 

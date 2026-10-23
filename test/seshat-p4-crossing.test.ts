@@ -114,7 +114,7 @@ describe("P4 step 0: one season resolver for the engine and the adapter", () => 
         if (Math.abs(d) <= DAY_LIMIT - 1000 && d % 7 === 0) {
           const i = e.indexAt("year", d);
           const y = { start: e.start("year", i), length: e.start("year", i + 1) - e.start("year", i) };
-          expect([name, d, e.seasonAt(d)]).toEqual([name, d, seasonAtPhase(ast.seasons?.marks ?? [], (d - y.start) / y.length)]);
+          expect([name, d, e.seasonAt(d)]).toEqual([name, d, seasonAtPhase((ast.seasons?.marks ?? []) as ReadonlyArray<{ name: string; from: number }>, (d - y.start) / y.length)]);
         }
         const tag = cal.toContext(d).tags?.find((t) => t.startsWith("season:")) ?? null;
         const want = Math.abs(d) <= DAY_LIMIT ? e.seasonAt(d) : null;

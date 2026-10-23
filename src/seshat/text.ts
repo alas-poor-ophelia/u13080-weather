@@ -19,6 +19,7 @@
  * refuses others. Host and throw rule leaves belong to Wadjet, not to a
  * calendar, and have no spelling.
  */
+import type { SeasonMarkAst } from "./seasons";
 import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, FormatAst, SeasonsAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
 import type { GearAst } from "./gear";
 import { gcd, type Rational } from "./rational";
@@ -229,7 +230,7 @@ export function print(ast: CalendarAst): string {
   if (ast.formats?.length === 0) head.push("FORMATS:");
   for (const f of ast.formats ?? []) head.push(`FORMAT:${esc(f.name)}=${esc(f.pattern)}`);
   const chunks: string[][] = [head];
-  if (ast.seasons) chunks.push(block("VSEASONS", [`UNIT:${id(ast.seasons.unit)}`, ...markLines(ast.seasons.marks, "MARK", "MARKS", "from")]));
+  if (ast.seasons) chunks.push(block("VSEASONS", [`UNIT:${id(ast.seasons.unit)}`, ...seasonLines(ast.seasons.marks, ast.units)]));
   for (const b of ast.bodies ?? []) chunks.push(block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`, ...(b.moon ? [`MOON:${esc(b.moon.name)}`, ...(b.moon.phases ? markLines(b.moon.phases, "PHASE", "PHASES", "at") : [])] : [])]));
   for (const g of ast.gears) chunks.push(block("VGEAR", gearLines(g)));
   for (const u of ast.units) chunks.push(block("VUNIT", unitLines(u)));
@@ -248,6 +249,35 @@ function markLines(marks: ReadonlyArray<{ readonly name: string } & Partial<Reco
     fields(m, `a ${key.toLowerCase()} mark`, "name", field);
     return `${key}:${esc(m.name)}=${num(m[field]!)}`;
   });
+}
+
+/**
+ * Season marks (§16.3 D7): a fraction prints as before (`MARK:Spring=0.25`);
+ * `DAY:80` is a day of the year, 1-based; `month:3.21` is day 21 of slot
+ * unit `month`'s slot printed 3, the stored 0-based index + the unit's NUMBER
+ * (default 1). A unit the calendar lacks prints with NUMBER 1.
+ */
+function seasonLines(marks: readonly SeasonMarkAst[], units: readonly UnitAst[]): string[] {
+  if (marks.length === 0) return ["MARKS:"];
+  return marks.map((m) => {
+    if (typeof m === "object" && m !== null && "slot" in m) {
+      fields(m, "a mark mark", "name", "slot");
+      fields(m.slot, `season mark "${m.name}"`, "unit", "index", "day");
+      const u = units.find((x) => x.id === m.slot.unit);
+      const base = u?.kind === "slots" ? (u.number ?? 1) : 1;
+      return `MARK:${esc(m.name)}=${id(m.slot.unit)}:${whole(m.slot.index + base)}.${whole(m.slot.day)}`;
+    }
+    if (typeof m === "object" && m !== null && "day" in m) {
+      fields(m, "a mark mark", "name", "day");
+      return `MARK:${esc(m.name)}=DAY:${whole(m.day)}`;
+    }
+    return markLines([m], "MARK", "MARKS", "from")[0]!;
+  });
+}
+/** A whole number as a date mark prints it: no exponent, no fraction, no -0. */
+function whole(x: number): string {
+  if (!Number.isSafeInteger(x) || Object.is(x, -0)) throw new RangeError(`a date mark needs whole numbers, not ${String(x)}`);
+  return String(x);
 }
 
 function toMarks<F extends "from" | "at">(p: Props, key: string, marker: string, field: F): Array<{ name: string } & Record<F, number>> | undefined {
@@ -591,13 +621,14 @@ export function parse(text: string): CalendarAst {
   const seasonBlocks = p.blocks("VSEASONS");
   if (seasonBlocks.length > 1) throw new SeshatSyntaxError("a calendar has one VSEASONS block", seasonBlocks[1]!.no);
   const seasons = seasonBlocks.length ? seasonsBlock(seasonBlocks[0]!) : undefined;
+  const units = p.blocks("VUNIT").map(unit);
   return {
     name: unesc(p.req("NAME").value, p.req("NAME").no),
     ...(formats.length || formatsMarked ? { formats } : {}),
-    ...(seasons ? { seasons } : {}),
+    ...(seasons ? { seasons: slotIndices(seasons, units) } : {}),
     ...(bodies.length || bodiesMarked ? { bodies } : {}),
     gears: p.blocks("VGEAR").map(gear),
-    units: p.blocks("VUNIT").map(unit),
+    units,
     ...(days.length || daysMarked ? { days } : {}),
     ...(rules.length || rulesMarked ? { rules } : {}),
   };
@@ -616,10 +647,45 @@ function body(c: Component): BodyAst {
   };
 }
 
+const DAY_MARK = /^DAY:(-?\d+)$/;
+const SLOT_MARK = /^([a-z][a-z0-9-]*):(-?\d+)\.(-?\d+)$/;
+/** VSEASONS; a slot mark's printed number becomes a 0-based index once the units are read (`slotIndices`). */
 function seasonsBlock(c: Component): SeasonsAst {
   const p = new Props(c, ["UNIT", "MARK", "MARKS"], []);
   const u = p.req("UNIT");
-  return { unit: toId(u.value, u), marks: toMarks(p, "MARK", "MARKS", "from") ?? [] };
+  const marked = p.marker("MARKS");
+  const lines = p.all("MARK");
+  if (marked && lines.length) throw new SeshatSyntaxError("MARKS: marks an empty list and stands alone", lines[0]!.no);
+  const marks = lines.map((l): SeasonMarkAst => {
+    const kv = cut(l.value, "=");
+    if (!kv) throw new SeshatSyntaxError("MARK is <name>=<from>, <name>=DAY:<n> or <name>=<unit>:<slot>.<day>", l.no);
+    const name = unesc(kv[0], l.no);
+    const d = DAY_MARK.exec(kv[1]);
+    if (d) return { name, day: wholeIn(d[1]!, l.no) };
+    const sm = SLOT_MARK.exec(kv[1]);
+    if (sm) return { name, slot: { unit: sm[1]!, index: wholeIn(sm[2]!, l.no), day: wholeIn(sm[3]!, l.no) } };
+    if (/^[A-Za-z]/.test(kv[1])) throw new SeshatSyntaxError(`"${kv[1]}" is not a season mark (a fraction, DAY:<n> or <unit>:<slot>.<day>)`, l.no);
+    return { name, from: toNum(kv[1], l.no) };
+  });
+  return { unit: toId(u.value, u), marks };
+}
+function wholeIn(s: string, line: number): number {
+  const x = Number(s);
+  if (!Number.isSafeInteger(x) || s === "-0") throw new SeshatSyntaxError(`"${s}" is not a whole number a date mark can hold`, line);
+  return x;
+}
+/** A parsed slot mark holds its printed number; the stored form is that number less the unit's NUMBER (default 1). */
+function slotIndices(seasons: SeasonsAst, units: readonly UnitAst[]): SeasonsAst {
+  if (!seasons.marks.some((m) => "slot" in m)) return seasons;
+  return {
+    ...seasons,
+    marks: seasons.marks.map((m) => {
+      if (!("slot" in m)) return m;
+      const u = units.find((x) => x.id === m.slot.unit);
+      const base = u?.kind === "slots" ? (u.number ?? 1) : 1;
+      return { name: m.name, slot: { unit: m.slot.unit, index: m.slot.index - base, day: m.slot.day } };
+    }),
+  };
 }
 
 function gear(c: Component): GearAst {

@@ -22,7 +22,7 @@
  */
 import { hash32 } from "../../core/rng";
 import { canonicalJson } from "../../core/profile";
-import { bodyFor, DAY_LIMIT, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem } from "../../seshat";
+import { bodyFor, DAY_LIMIT, isPlainConstant, definitionContent, Engine, formatDay, parse, parseDay, print, seasonIn, seasonsUseDates, SESHAT_VERSION, SeshatSyntaxError, toNumber, validate, problems, type BodyAst, type CalendarAst, type Problem, type SeasonMark } from "../../seshat";
 import type { InternalCalendarConfig } from "../settings";
 import { ADAPTER_FAULT, type CalendarDescription, type FaultReporting, type TimeAdapter, type TimeContext } from "./adapter";
 import { assertDayInRange, assertInteger } from "../world";
@@ -274,7 +274,8 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     const yearPhase = dayOfYear / year.length;
     const tags: string[] = [];
     // the engine's own season resolver over the year (checkWorldCalendar keeps seasons on the year), past ±DAY_LIMIT too
-    const season = e.ast.seasons ? seasonIn(e.ast.seasons, year, dayOrdinal) : null;
+    // date marks resolve in the year holding the folded tag day past ±DAY_LIMIT, as the tags do (§16 Season resolution)
+    const season = !e.ast.seasons ? null : seasonsUseDates(e.ast.seasons) ? e.seasonAt(year.tagDay) : seasonIn(e.ast.seasons, year, dayOrdinal);
     if (season) tags.push(`season:${season}`);
     tags.push(...this.dayTags(e, year.tagDay));
     return {
@@ -333,7 +334,10 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
       // the year holding day 0 until the Studio reads each year's own length (P3b)
       yearLength: year0.length,
       epochYear: year0.index + (this.yearUnit()?.number ?? 0),
-      seasons: [...(ast.seasons?.marks ?? [])].sort((a, b) => a.from - b.from).map((s) => ({ name: s.name, from: s.from })),
+      // date marks project into the year holding day 0 (§16.7 P6): approximate in years of another length
+      ...(ast.seasons && seasonsUseDates(ast.seasons)
+        ? { seasons: e.seasonProjection() }
+        : { seasons: [...((ast.seasons?.marks ?? []) as readonly SeasonMark[])].sort((a, b) => a.from - b.from).map((s) => ({ name: s.name, from: s.from })) }),
       moons: (ast.bodies ?? []).flatMap((b) =>
         b.moon ? [{ name: b.moon.name, cycleDays: toNumber(b.period), phaseAtEpoch: toNumber(b.epoch), ...(b.moon.phases ? { phases: b.moon.phases.map((p) => ({ name: p.name, at: p.at })) } : {}) }] : [],
       ),
