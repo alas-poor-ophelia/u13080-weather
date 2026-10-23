@@ -31,6 +31,8 @@ import { seamOf, type YearSeam } from "./years";
 import { wrap } from "../../seshat/phase";
 import type { ModGate, Predicate, SpellSpec } from "../../core/types";
 import { moonPhase } from "../../seshat/body";
+import { legacyMoonPhase } from "../../core/previous";
+import type { GeneratorMode } from "../../core/version";
 import { seasonAtPhase } from "../../plugin/time/seasons";
 import type { Span } from "./lanes";
 import { zoomLabel, type Window } from "./zoom";
@@ -49,6 +51,11 @@ export interface SpanCalendar {
   moons: ReadonlyArray<{ name: string; cycleDays: number; phaseAtEpoch?: number }>;
   eras: ReadonlyArray<{ name: string; from: number; to?: number; enabled?: boolean }>;
   flipSeasons?: boolean;
+  /**
+   * the generator the world runs (SESHAT-v0 §17.2); absent = "current". moonSpans reads no phase (its pulse
+   * geometry is the same continuous formula at 0.0.3 and 0.0.4), so only moonPhaseAt follows it.
+   */
+  mode?: GeneratorMode;
 }
 
 export interface SpanOptions {
@@ -100,8 +107,10 @@ export function dayOrdinalAt(year: number, cal: SpanCalendar): number {
 /**
  * A moon's phase on `dayOrdinal`: the same function `InternalCalendar.toContext`
  * hands the predicate, so a pulse's edge lands exactly where Seshat's `inPhase` flips.
+ * "previous" mode returns the 0.0.3 float formula, as the InternalCalendar does in that mode.
  */
-export function moonPhaseAt(moon: SpanCalendar["moons"][number], dayOrdinal: number): number {
+export function moonPhaseAt(moon: SpanCalendar["moons"][number], dayOrdinal: number, mode: GeneratorMode = "current"): number {
+  if (mode === "previous") return legacyMoonPhase(moon.cycleDays, moon.phaseAtEpoch ?? 0, dayOrdinal);
   return moonPhase(moon.cycleDays, moon.phaseAtEpoch ?? 0, dayOrdinal);
 }
 

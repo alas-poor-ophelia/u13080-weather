@@ -15,6 +15,7 @@ import {
 } from "../src/core/classify";
 import { buildReport, type WeatherReport } from "../src/core/report";
 import type { DailyRecord } from "../src/core/generator";
+import { GENERATOR_VERSION } from "../src/core/version";
 
 type ReportOver = Omit<Partial<WeatherReport>, "temperature" | "precipitation" | "wind"> & {
   temperature?: Partial<WeatherReport["temperature"]>;
@@ -270,7 +271,7 @@ group("classify: the whole record", () => {
       tempMean: 4, tempHigh: 7, tempLow: 1, tempResidual: 0, humidity: 0.8, cloudCover: 0.9,
       windSpeedKph: 17.6, windDirectionDeg: 247.4, calm: false, tags: [],
     };
-    const r = buildReport(rec, "z", { seed: "s", provenance: { profileHash: "p", calendarHash: "c" } }, 9);
+    const r = buildReport(rec, "z", { seed: "s", generatorVersion: GENERATOR_VERSION, provenance: { profileHash: "p", calendarHash: "c" } }, 9);
     const c = classify(r);
     expect(c.beaufort).toBe(3);
     expect(c.compass).toBe("WSW");

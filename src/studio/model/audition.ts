@@ -20,6 +20,7 @@ import { canonicalJson, createGenerator, profileHash, validateProfile, type Vali
 import { buildReport, overrideKey, type Override, type WeatherReport } from "../../core/report";
 import { hash32 } from "../../core/rng";
 import type { Era, Regime, ZoneProfile } from "../../core/types";
+import { generatorVersionOf, type GeneratorMode } from "../../core/version";
 import type { TimeAdapter, TimeContext } from "../../plugin/time/adapter";
 import { flipSeasonTags } from "../../plugin/time/seasons";
 
@@ -32,6 +33,8 @@ export interface AuditionInput {
   /** 0 = the real roll (the world seed, unmodified); any other value previews `seed + "|audition:" + salt`. */
   salt: number;
   overrides?: readonly Override[];
+  /** the generator the world runs (SESHAT-v0 §17.2), like `adapter` the world's own; absent = "current" */
+  mode?: GeneratorMode;
 }
 
 export interface AuditionDay {
@@ -74,7 +77,7 @@ function overridesHash(zoneId: string, overrides: readonly Override[] | undefine
 /** Cache key: everything that can change what a year's roll looks like. */
 export function auditionKey(i: AuditionInput): string {
   const flip = i.zone.flipSeasons === true ? "flip" : "noflip";
-  return `${i.seed}|${i.salt}|${profileHash(i.zone)}|${i.adapter.configHash()}|${erasHash(i.eras)}|${flip}|${i.year}|${overridesHash(i.zone.id, i.overrides)}`;
+  return `${i.seed}|${i.salt}|${profileHash(i.zone)}|${i.adapter.configHash()}|${erasHash(i.eras)}|${flip}|${i.year}|${overridesHash(i.zone.id, i.overrides)}|${i.mode ?? "current"}`;
 }
 
 /**
@@ -200,7 +203,8 @@ export function rollYear(i: AuditionInput, cache?: Map<string, AuditionYear>): A
   };
 
   const genSeed = i.salt !== 0 ? `${i.seed}|audition:${i.salt}` : i.seed;
-  const { generator, engine } = createGenerator(i.zone, genSeed, timeOf, eraModifiers(i.eras));
+  const mode = i.mode ?? "current";
+  const { generator, engine } = createGenerator(i.zone, genSeed, timeOf, eraModifiers(i.eras), mode);
 
   const profHash = profileHash(i.zone);
   const calendarHash = calendarHashOf(i.adapter.configHash(), i.eras);
@@ -213,7 +217,7 @@ export function rollYear(i: AuditionInput, cache?: Map<string, AuditionYear>): A
     const time = timeOf(d);
     if (yearOf(time) !== i.year) break;
     const record = generator.day(d);
-    const report = buildReport(record, i.zone.id, { seed: genSeed, provenance: { profileHash: profHash, calendarHash }, overrides: overrideMap });
+    const report = buildReport(record, i.zone.id, { seed: genSeed, generatorVersion: generatorVersionOf(mode), provenance: { profileHash: profHash, calendarHash }, overrides: overrideMap });
     const dayOfYear = time.dayOfYear ?? d - firstDay;
     // `engine.forDay` is pure and deterministic (PLAN §0.1): re-invoking it with
     // the regime the generator settled on reproduces exactly the set the roll

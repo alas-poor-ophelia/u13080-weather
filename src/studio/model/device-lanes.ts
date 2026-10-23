@@ -35,6 +35,7 @@ import { wrap } from "../../seshat/phase";
 import { ERA_TAG_PREFIX } from "../../core/eras";
 import { canonicalJson } from "../../core/profile";
 import type { Era, Modifier, Predicate } from "../../core/types";
+import type { GeneratorMode } from "../../core/version";
 import { displayName as tagName } from "./copy";
 import { displayName, type Device } from "./devices";
 import { dayRangeLabel, dayRangeLabelOf } from "./format";
@@ -300,7 +301,8 @@ export function dragToWhen(m: Modifier, span: Span, newFrom: number, newTo: numb
  * equal objects — the same identity the store's dirty tracking and the
  * header's Köppen memo use.
  */
-export function spellRunsKey(o: { modifier: Modifier; eras: readonly Era[]; seed: string; salt: number; firstYear: number; years: number; calendar?: string }): string {
-  // the calendar decides which days make up each year the roll covers (§14.8 C9)
-  return [o.modifier.id, o.seed, o.salt, o.firstYear, o.years, canonicalJson(o.modifier), canonicalJson(o.eras), o.calendar ?? ""].join("|");
+export function spellRunsKey(o: { modifier: Modifier; eras: readonly Era[]; seed: string; salt: number; firstYear: number; years: number; calendar?: string; mode?: GeneratorMode | undefined }): string {
+  // the calendar decides which days make up each year the roll covers (§14.8 C9); the generator mode
+  // decides the spell window, and a definition calendar's hash is the same in both modes (wadjet-9lc)
+  return [o.modifier.id, o.seed, o.salt, o.firstYear, o.years, canonicalJson(o.modifier), canonicalJson(o.eras), o.calendar ?? "", o.mode ?? "current"].join("|");
 }

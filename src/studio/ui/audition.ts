@@ -41,6 +41,7 @@ import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { PrecipType } from "../../core/generator";
 import type { Override } from "../../core/report";
 import type { Modifier } from "../../core/types";
+import type { GeneratorMode } from "../../core/version";
 import { generatedPatch } from "../../plugin/pins";
 import type { TimeAdapter } from "../../plugin/time/adapter";
 import { rollCached, type AuditionDay, type AuditionInput, type AuditionYear } from "../model/audition";
@@ -178,11 +179,11 @@ export function seasonRuns(days: readonly AuditionDay[]): Array<{ name: string; 
  * read the same way `spans.ts` reads a pulse edge, so a mark lands on the day
  * the predicate would flip on.
  */
-export function fullMoonIndices(days: readonly AuditionDay[], moon: { name: string; cycleDays: number; phaseAtEpoch?: number }): number[] {
+export function fullMoonIndices(days: readonly AuditionDay[], moon: { name: string; cycleDays: number; phaseAtEpoch?: number }, mode: GeneratorMode = "current"): number[] {
   const out: number[] = [];
   for (let i = 1; i < days.length; i++) {
-    const prev = moonPhaseAt(moon, days[i - 1]!.dayOrdinal);
-    const now = moonPhaseAt(moon, days[i]!.dayOrdinal);
+    const prev = moonPhaseAt(moon, days[i - 1]!.dayOrdinal, mode);
+    const now = moonPhaseAt(moon, days[i]!.dayOrdinal, mode);
     // The wrap at 1 → 0 is not a crossing of 0.5; only a rise through it is.
     if (prev < 0.5 && now >= 0.5) out.push(i);
   }
@@ -267,6 +268,7 @@ export function createAuditionSurface(): Surface {
       year: centreYear(state),
       salt: state.view.rerollSalt,
       overrides: state.world.overrides,
+      mode: c.plugin.world.mode,
     };
   }
 
@@ -380,7 +382,7 @@ export function createAuditionSurface(): Surface {
     // second cycle's ticks would be noise, not information.
     const moon = described?.moons[0];
     if (moon !== undefined && days.length > 0) {
-      for (const at of fullMoonIndices(days, moon)) {
+      for (const at of fullMoonIndices(days, moon, ctx?.plugin.world.mode)) {
         const dot = marks.createDiv({ cls: "wadjet-studio-audition-moon", attr: { "data-hint": auditionHint("audition.moon", `${moon.name} full · ${dayLabel(days[at]!.dayOfYear, days.length)}`) } });
         dot.setCssProps({ "--wadjet-studio-audition-x": `${(at / days.length) * 100}%` });
       }

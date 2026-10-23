@@ -5,6 +5,7 @@ import { createGenerator } from "../src/core/profile";
 import { gregorianTime } from "../src/core/generator";
 import { GLYPH_EMOJI, icon } from "../src/plugin/render";
 import type { Preset, ZoneProfile } from "../src/core/types";
+import { GENERATOR_VERSION } from "../src/core/version";
 
 type ReportOver = Omit<Partial<WeatherReport>, "precipitation" | "wind"> & {
   precipitation?: Partial<WeatherReport["precipitation"]>;
@@ -179,7 +180,7 @@ group("render: icon() rides on glyphKey", () => {
     const zone: ZoneProfile = { id: "g", name: "G", schemaVersion: 1, climate: fjord.climate, regimes: fjord.regimes, modifiers: [] };
     const { generator, resolved } = createGenerator(zone, "seed", gregorianTime);
     for (let d = 0; d < 365; d++) {
-      const r = buildReport(generator.day(d), "g", { seed: "seed", provenance: { profileHash: resolved.profileHash, calendarHash: "c" } });
+      const r = buildReport(generator.day(d), "g", { seed: "seed", generatorVersion: GENERATOR_VERSION, provenance: { profileHash: resolved.profileHash, calendarHash: "c" } });
       expect(icon(r)).toBe(glyphKey(r) === "windy" ? "💨" : oldIcon(r));
     }
   });

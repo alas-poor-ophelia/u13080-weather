@@ -102,6 +102,11 @@ export interface EvalOptions {
   unknownTag?: (tag: string) => boolean;
   /** evaluate every child of all/any instead of stopping at the deciding one */
   exhaustive?: boolean;
+  /**
+   * phase leaves wrap with `((x % 1) + 1) % 1` instead of `wrap` (inPhaseLegacy): Wadjet's previous
+   * generator, wadjet-gen/0.0.3 (docs/SESHAT-v0.md §17.2). Set only by its engine's option sets.
+   */
+  legacyWrap?: boolean;
 }
 
 /** The fields of a day a TimeView reads (Wadjet's DayTime / TimeContext fit it). */
@@ -172,6 +177,14 @@ export function inPhase(x: number, lo: number, hi: number): boolean {
   return t >= lo || t < hi;
 }
 
+/** inPhase with the wrap Wadjet's generator 0.0.3 used, `((x % 1) + 1) % 1`: an exact edge can land an ulp low (EvalOptions.legacyWrap). */
+export function inPhaseLegacy(x: number, lo: number, hi: number): boolean {
+  const t = ((x % 1) + 1) % 1;
+  if (lo === hi) return false;
+  if (lo < hi) return t >= lo && t < hi;
+  return t >= lo || t < hi;
+}
+
 export function evaluate(r: RuleAst, view: DayView, opts: EvalOptions): boolean | undefined {
   switch (r.kind) {
     case "all":
@@ -197,7 +210,7 @@ export function evaluate(r: RuleAst, view: DayView, opts: EvalOptions): boolean 
       // a named phase is resolved before evaluation; one that reaches here unresolved matches nothing
       if (r.from === undefined) return false;
       const x = r.body !== undefined ? view.bodyPhase(r.body) : view.unitPhase(r.unit!);
-      return x === undefined ? false : inPhase(x, r.from, r.to);
+      return x === undefined ? false : opts.legacyWrap ? inPhaseLegacy(x, r.from, r.to) : inPhase(x, r.from, r.to);
     }
     case "dayIn": {
       const x = view.dayInUnit(r.unit);

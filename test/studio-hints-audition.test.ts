@@ -13,6 +13,7 @@ import { AUDITION_HINTS, AUDITION_HINT_KEYS, auditionHint, dayTip } from "../src
 import { HINT_SEPARATOR, parseHint } from "../src/studio/model/hints";
 import { buildReport } from "../src/core/report";
 import type { DailyRecord } from "../src/core/generator";
+import { GENERATOR_VERSION } from "../src/core/version";
 
 const AUDITION_SOURCE = await Bun.file(new URL("../src/studio/ui/audition.ts", import.meta.url)).text();
 
@@ -41,7 +42,7 @@ const record: DailyRecord = {
   tags: [],
 };
 
-const report = buildReport(record, "greywold", { seed: "s", provenance: { profileHash: "p", calendarHash: "c" } });
+const report = buildReport(record, "greywold", { seed: "s", generatorVersion: GENERATOR_VERSION, provenance: { profileHash: "p", calendarHash: "c" } });
 
 suite("audition hints", () => {
   test("every key the strip uses exists in AUDITION_HINTS", () => {

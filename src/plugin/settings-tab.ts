@@ -12,7 +12,7 @@ import type { Override, OverridePatch } from "../core/report";
 import { withMinus } from "../core/report";
 import type { PrecipType } from "../core/generator";
 import type { Era, Geography, Orographic, ZoneProfile } from "../core/types";
-import { GENERATOR_VERSION } from "../core/version";
+import { GENERATOR_VERSION, modeFor, PREVIOUS_GENERATOR_VERSION } from "../core/version";
 import { PRESETS } from "../generated/presets";
 import { openStudio } from "../studio/ui/open";
 import { dayFieldText, parseDayField, validateDayField, type DayText } from "./current-day";
@@ -87,9 +87,15 @@ export class WadjetSettingTab extends PluginSettingTab {
           },
           {
             name: "Generator",
-            desc: `This world last accepted ${s.generatorVersion}. The plugin now runs ${GENERATOR_VERSION}. Only the current generator ships, so past weather may already differ from before. Pinned days are kept.`,
+            desc:
+              modeFor(s.generatorVersion) === "previous"
+                ? `This world runs the previous weather generator (${PREVIOUS_GENERATOR_VERSION}), so its weather is unchanged.`
+                : `This world last accepted ${s.generatorVersion}. The plugin now runs ${GENERATOR_VERSION}. Only the current generator ships, so past weather may already differ from before. Pinned days are kept.`,
             visible: () => generatorMismatch(this.plugin.settings),
             render: (setting) => {
+              // a world on the previous generator is moved by Upgrade (wadjet-9lc step 3), never by Acknowledge: stamping the
+              // version here would switch its weather to the current generator at the next load, with no way to keep days
+              if (modeFor(this.plugin.settings.generatorVersion) === "previous") return;
               setting.addButton((b) =>
                 b
                   .setButtonText("Acknowledge")

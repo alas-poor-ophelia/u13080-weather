@@ -26,7 +26,7 @@ import type { Preset, ZoneProfile } from "../src/core/types";
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
 const zone: ZoneProfile = { id: "greywold", name: "Greywold", schemaVersion: 1, climate: fjord.climate, regimes: fjord.regimes, modifiers: [] };
 const { generator, resolved } = createGenerator(zone, "seed", gregorianTime);
-const cfg: ReportBuilderConfig = { seed: "seed", provenance: { profileHash: resolved.profileHash, calendarHash: "cal:test" } };
+const cfg: ReportBuilderConfig = { seed: "seed", generatorVersion: GENERATOR_VERSION, provenance: { profileHash: resolved.profileHash, calendarHash: "cal:test" } };
 
 const rec = (over: Partial<DailyRecord> = {}): DailyRecord => ({
   dayOrdinal: 10,

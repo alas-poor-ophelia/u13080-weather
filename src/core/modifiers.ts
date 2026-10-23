@@ -12,22 +12,25 @@ import { wrap } from "../seshat/phase";
 import { evaluate, TimeView, type EvalOptions, type RuleAst } from "../seshat/rule";
 import { DEFAULT_YEAR_LENGTH } from "../seshat/year";
 import { DrawStream, bernoulli, drawKey, geometricDuration } from "./rng";
-import { compilePredicate, generationOptions, staticOptions, type RuleHostContext } from "./rules";
+import { legacyWrap } from "./previous";
+import { compilePredicate, generationOptions, legacyGenerationOptions, legacyStaticOptions, staticOptions, type RuleHostContext } from "./rules";
 import type { DayTime, Modifier, ModifierOp, Predicate } from "./types";
+import type { GeneratorMode } from "./version";
 
 /**
  * Sample an onset envelope at phase `t` (PLAN §0 D8). Points are sorted by
  * phase and interpolated linearly; the segment from the last point to the
  * first wraps across 1→0. A single point is a constant; an empty envelope is 1.
- * Pure: no RNG, no state.
+ * Pure: no RNG, no state. `legacy` wraps `t` as the previous generator did
+ * (wadjet-gen/0.0.3, `((t % 1) + 1) % 1`; docs/SESHAT-v0.md §17.2).
  */
-export function sampleEnvelope(env: readonly (readonly [number, number])[], t: number): number {
+export function sampleEnvelope(env: readonly (readonly [number, number])[], t: number, legacy = false): number {
   if (env.length === 0) return 1;
   const pts = [...env].sort((a, b) => a[0] - b[0]);
   const first = pts[0]!;
   const last = pts[pts.length - 1]!;
   if (pts.length === 1) return first[1];
-  const x = wrap(t);
+  const x = legacy ? legacyWrap(t) : wrap(t);
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i]!;
     const b = pts[i + 1]!;
@@ -85,10 +88,11 @@ function carrierPhase(c: Compiled, time: DayTime): number | undefined {
   return time.moons?.[0]?.phase;
 }
 
-function envelopeFactor(c: Compiled, op: ModifierOp, time: DayTime): number {
+/** `legacy`: the engine runs the previous generator, whose envelopes wrapped with `((x % 1) + 1) % 1` (§17.2). */
+function envelopeFactor(c: Compiled, op: ModifierOp, time: DayTime, legacy: boolean): number {
   if (!op.envelope?.length) return 1;
   const phase = carrierPhase(c, time);
-  return phase === undefined ? 1 : sampleEnvelope(op.envelope, phase);
+  return phase === undefined ? 1 : sampleEnvelope(op.envelope, phase, legacy);
 }
 
 /**
@@ -126,6 +130,8 @@ export interface ModifierEngineConfig {
   zoneId: string;
   modifiers: readonly Modifier[];
   timeOf: (dayOrdinal: number) => DayTime;
+  /** which generator's formulas run (SESHAT-v0 §17.2); absent = "current". "previous" runs 0.0.3's phase wrap and spell window. */
+  mode?: GeneratorMode;
 }
 
 export interface DailyModifierResult {
@@ -148,11 +154,17 @@ export class ModifierEngine {
   private readonly host: RuleHostContext;
   private readonly generation: EvalOptions;
   private readonly estimate: EvalOptions;
+  /** the generator this engine runs (§17.2); per instance, never a module global */
+  readonly mode: GeneratorMode;
 
   constructor(readonly cfg: ModifierEngineConfig) {
+    this.mode = cfg.mode ?? "current";
     this.host = { seed: cfg.seed, zoneId: cfg.zoneId, modifierId: "", dayOrdinal: 0, regime: "" };
-    this.generation = generationOptions(this.host);
-    this.estimate = staticOptions(this.host);
+    // "previous" (wadjet-gen/0.0.3): phase leaves wrap the 0.0.3 way, and the spell window is 0.0.3's
+    // (regime true, era tags read as on the day; see legacyEstimateWindowDays)
+    const previous = this.mode === "previous";
+    this.generation = previous ? legacyGenerationOptions(this.host) : generationOptions(this.host);
+    this.estimate = previous ? legacyStaticOptions(this.host) : staticOptions(this.host);
     // a disabled modifier never reaches a day: no ops, no tag, not in `active`, and no spell window
     this.daily = cfg.modifiers.filter((m) => (m.stage ?? "daily") === "daily" && m.enabled !== false).map(compileModifier);
     for (const c of this.daily) {
@@ -176,7 +188,7 @@ export class ModifierEngine {
       // tag even at factor 0, and `time` here is the same object the predicate saw (so a gate can
       // read a tag pushed by an earlier modifier today).
       const gate = gateFactor(m, time);
-      ops.push(...m.apply.filter((o) => o.enabled !== false).map((o) => scaleOpMagnitude(o, gate * envelopeFactor(c, o, time))));
+      ops.push(...m.apply.filter((o) => o.enabled !== false).map((o) => scaleOpMagnitude(o, gate * envelopeFactor(c, o, time, this.mode === "previous"))));
       if (m.tag) tags.push(m.tag);
       active.push(m.id);
     }
@@ -208,6 +220,7 @@ export class ModifierEngine {
    * YEAR_LENGTH_MAX days and the count scaled to the full year.
    */
   private estimateWindowDays(c: Compiled): number {
+    if (this.mode === "previous") return this.legacyEstimateWindowDays(c);
     const reported = (this.cfg.timeOf(0) as DayTime & { yearLength?: number }).yearLength;
     const year = typeof reported === "number" && Number.isFinite(reported) && reported >= 1 ? Math.floor(reported) : DEFAULT_YEAR_LENGTH;
     if (!c.rule) return year;
@@ -220,6 +233,21 @@ export class ModifierEngine {
     // per-day start probability of meanStartsPerYear
     if (n === 0) return year;
     return scanned === year ? n : Math.max(1, Math.round((n * year) / scanned));
+  }
+
+  /**
+   * The previous generator's window (wadjet-gen/0.0.3, verbatim from c773f5d's minus side): days 0..364
+   * whatever year the calendar reports, regime terms true, era tags read as on the day (so a spell gated
+   * on an era outside that year, or on `not` one inside it, finds no day and falls back to 365), counted
+   * where `when` holds; 365 when it holds on none.
+   */
+  private legacyEstimateWindowDays(c: Compiled): number {
+    if (!c.rule) return 365;
+    let n = 0;
+    for (let d = 0; d < 365; d++) {
+      if (this.evaluate(c, c.rule, d, this.cfg.timeOf(d), "", this.estimate) === true) n++;
+    }
+    return n === 0 ? 365 : n;
   }
 
   private startsAt(c: Compiled, d: number, regime: string): boolean {

@@ -12,7 +12,7 @@ import { classify, type Classification } from "../core/classify";
 import { glyph, glyphKey, type GlyphKey } from "../core/glyphs";
 import type { WeatherReport } from "../core/report";
 import { convertReport, type ConvertedReport, type Units } from "../core/units";
-import { GENERATOR_VERSION, RNG_VERSION, SCHEMA_VERSION } from "../core/version";
+import { RNG_VERSION, SCHEMA_VERSION } from "../core/version";
 import type { WadjetEvent, WadjetEventPayloads } from "./events";
 import { InterpreterRegistry, codedError, type InterpretContext, type InterpreterInfo, type WeatherInterpreter } from "./interpreters";
 import type { CalendarDescription, TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
@@ -246,7 +246,10 @@ export class ApiController {
       apiVersion: API_VERSION,
       ready: false,
       schemaVersion: SCHEMA_VERSION,
-      generatorVersion: GENERATOR_VERSION,
+      // the generator this world RUNS (SESHAT-v0 §17.5 item 3), read live so an Upgrade or a synced reload shows at once
+      get generatorVersion() {
+        return world.generatorVersion;
+      },
       rngVersion: RNG_VERSION,
 
       getReport: (zoneId, t) => (live(), world.getReport(zoneId, t)),

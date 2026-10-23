@@ -6,10 +6,11 @@ import { REPORT_FIELDS, cToF, convertReport, fieldText, isReportField, mmToIn, r
 import { PRESETS } from "../src/generated/presets";
 import { parseCodeblock } from "../src/plugin/codeblock-parse";
 import { zoneFromPreset } from "../src/plugin/zones";
+import { GENERATOR_VERSION } from "../src/core/version";
 
 const zone = zoneFromPreset({ name: "Greywold", preset: PRESETS.find((p) => p.id === "fjord-coast")!, existingIds: new Set() }).zone;
 const g = createGenerator(zone, "units", gregorianTime).generator;
-const report = (d: number, hour?: number) => buildReport(g.day(d), zone.id, { seed: "units", provenance: { profileHash: "x", calendarHash: "y" }, overrides: new Map() }, hour);
+const report = (d: number, hour?: number) => buildReport(g.day(d), zone.id, { seed: "units", generatorVersion: GENERATOR_VERSION, provenance: { profileHash: "x", calendarHash: "y" }, overrides: new Map() }, hour);
 
 describe("units", () => {
   test("the zone is valid and conversions round like the report", () => {

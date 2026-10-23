@@ -15,7 +15,7 @@
  */
 import type { DailyRecord, PrecipType } from "./generator";
 import { DrawStream, drawKey, uniform } from "./rng";
-import { GENERATOR_VERSION, RNG_VERSION, SCHEMA_VERSION } from "./version";
+import { RNG_VERSION, SCHEMA_VERSION } from "./version";
 
 export interface Provenance {
   worldSeed: string;
@@ -197,6 +197,8 @@ const TRACE_MM = 0.1;
 
 export interface ReportBuilderConfig {
   seed: string;
+  /** stamped in provenance.generatorVersion: the version the world RUNS (generatorVersionOf(mode)), not a constant (SESHAT-v0 §17.2) */
+  generatorVersion: string;
   provenance: Omit<Provenance, "worldSeed" | "generatorVersion" | "rngVersion">;
   bands?: DescriptorBands;
   overrides?: ReadonlyMap<string, OverridePatch>;
@@ -240,7 +242,7 @@ export function buildReport(rec: DailyRecord, zoneId: string, cfg: ReportBuilder
     conditions,
     descriptors: { temperature: "", precipitation: "", wind: "", sky: "" },
     overridden: false,
-    provenance: { worldSeed: cfg.seed, generatorVersion: GENERATOR_VERSION, rngVersion: RNG_VERSION, ...cfg.provenance },
+    provenance: { worldSeed: cfg.seed, generatorVersion: cfg.generatorVersion, rngVersion: RNG_VERSION, ...cfg.provenance },
   };
 
   // 3. overrides

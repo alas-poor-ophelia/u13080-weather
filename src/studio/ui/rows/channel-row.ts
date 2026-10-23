@@ -116,6 +116,7 @@ export function auditionInputFor(ctx: SurfaceContext, state: StudioState, year: 
     year,
     salt: state.view.rerollSalt,
     overrides: state.world.overrides,
+    mode: ctx.plugin.world.mode,
   };
 }
 

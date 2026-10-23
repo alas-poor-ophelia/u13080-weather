@@ -16,6 +16,7 @@ import { Generator, MAX_PERSISTENCE, type GeneratorConfig } from "./generator";
 import { type DailyModifierResult, ModifierEngine } from "./modifiers";
 import { hash32 } from "./rng";
 import type { AutomationLane, ClimateParams, Curve, DayTime, ModGate, Modifier, ModifierOp, Predicate, ZoneProfile } from "./types";
+import type { GeneratorMode } from "./version";
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -345,10 +346,17 @@ export function resolveProfile(z: ZoneProfile): ResolvedProfile {
 }
 
 /** Build a running Generator for a zone: resolution + modifier engine wired into dailyModifiers. `worldModifiers` are appended (not hashed into the profile — the caller keys on them). */
-export function createGenerator(z: ZoneProfile, seed: string, timeOf: (dayOrdinal: number) => DayTime, worldModifiers: readonly Modifier[] = []): { generator: Generator; resolved: ResolvedProfile; engine: ModifierEngine } {
+export function createGenerator(
+  z: ZoneProfile,
+  seed: string,
+  timeOf: (dayOrdinal: number) => DayTime,
+  worldModifiers: readonly Modifier[] = [],
+  /** which generator's formulas run (SESHAT-v0 §17.2), passed to the modifier engine; per call, never global */
+  mode: GeneratorMode = "current",
+): { generator: Generator; resolved: ResolvedProfile; engine: ModifierEngine } {
   const resolved = resolveProfile(z);
   // world-level modifiers (the era timeline) run after the zone's own, so a zone can be overridden by its era
-  const engine = new ModifierEngine({ seed, zoneId: z.id, modifiers: [...resolved.dailyModifiers, ...worldModifiers], timeOf });
+  const engine = new ModifierEngine({ seed, zoneId: z.id, modifiers: [...resolved.dailyModifiers, ...worldModifiers], timeOf, mode });
   const cfg: GeneratorConfig = {
     seed,
     zoneId: z.id,

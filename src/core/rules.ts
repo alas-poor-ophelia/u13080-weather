@@ -57,6 +57,20 @@ export function generationOptions(h: RuleHostContext): EvalOptions {
   return { host: (key, arg) => (key === "regime" ? h.regime === arg : chance(h, arg as number)) };
 }
 
+/** Generation in the previous generator (wadjet-gen/0.0.3, docs/SESHAT-v0.md §17.2): as generationOptions, with 0.0.3's phase wrap. */
+export function legacyGenerationOptions(h: RuleHostContext): EvalOptions {
+  return { ...generationOptions(h), legacyWrap: true };
+}
+
+/**
+ * The previous generator's spell-window estimate (0.0.3's stripRegime): every regime term true, era and
+ * every other tag read as on the day, chance drawn, 0.0.3's phase wrap; two-valued, so the caller counts
+ * `=== true` (docs/SESHAT-v0.md §17.5 item 3).
+ */
+export function legacyStaticOptions(h: RuleHostContext): EvalOptions {
+  return { host: (key, arg) => (key === "regime" ? true : chance(h, arg as number)), legacyWrap: true };
+}
+
 /** The spell-window estimate: regime and era tags unknown (Kleene), every child evaluated. */
 export function staticOptions(h: RuleHostContext): EvalOptions {
   return { host: (key, arg) => (key === "regime" ? undefined : chance(h, arg as number)), unknownTag: (t) => t.startsWith(ERA_TAG_PREFIX), exhaustive: true };

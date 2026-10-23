@@ -166,6 +166,7 @@ export function spanCalendarFor(ctx: SurfaceContext, state: StudioState): SpanCa
     moons: description.readOnly ? description.moons : state.world.calendar.moons,
     eras: state.world.eras,
     ...(zone?.flipSeasons === true ? { flipSeasons: true } : {}),
+    mode: ctx.plugin.world.mode,
   };
 }
 

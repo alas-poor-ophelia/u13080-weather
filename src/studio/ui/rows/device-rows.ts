@@ -192,7 +192,7 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
     const time = ctx.plugin.time.active ?? null;
     const zone = zoneOf(state);
     if (time === null || zone === null) return null;
-    return { zone, eras: state.world.eras, seed: ctx.plugin.settings.worldSeed, adapter: time, year, salt: state.view.rerollSalt, overrides: state.world.overrides };
+    return { zone, eras: state.world.eras, seed: ctx.plugin.settings.worldSeed, adapter: time, year, salt: state.view.rerollSalt, overrides: state.world.overrides, mode: ctx.plugin.world.mode };
   }
 
   /**
@@ -212,7 +212,7 @@ export function createDeviceRow(modifierId: string): PlaylistRow {
     // The whole identity of what the runs are, not a sketch of it: the
     // modifier's and the eras' CONTENT are in the key, so editing a spell's
     // chance or an era's span invalidates the memo (`model/device-lanes.ts`).
-    const key = spellRunsKey({ modifier: m, eras: state.world.eras, seed: probe.seed, salt: probe.salt, firstYear: years[0] ?? 0, years: years.length, calendar: host?.ctx === undefined ? "" : calendarKey(host.ctx) });
+    const key = spellRunsKey({ modifier: m, eras: state.world.eras, seed: probe.seed, salt: probe.salt, firstYear: years[0] ?? 0, years: years.length, calendar: host?.ctx === undefined ? "" : calendarKey(host.ctx), mode: probe.mode });
     const memo = runsMemo;
     if (memo !== null && memo.key === key) return memo.days;
 

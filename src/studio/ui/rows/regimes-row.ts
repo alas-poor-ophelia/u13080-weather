@@ -195,7 +195,7 @@ export function createRegimesRow(): PlaylistRow {
     const id = state.view.zoneId;
     const zone = id === null ? undefined : state.zones[id];
     if (zone === undefined) return null;
-    return { zone, eras: state.world.eras, seed: c.plugin.settings.worldSeed, adapter: time, year, salt: state.view.rerollSalt, overrides: state.world.overrides };
+    return { zone, eras: state.world.eras, seed: c.plugin.settings.worldSeed, adapter: time, year, salt: state.view.rerollSalt, overrides: state.world.overrides, mode: c.plugin.world.mode };
   }
 
   // --- what to draw --------------------------------------------------------

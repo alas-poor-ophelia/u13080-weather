@@ -11,6 +11,7 @@ import { createGenerator, profileHash, validateProfile, type ValidationIssue } f
 import { buildReport, describe, overrideKey, type DescriptorBands, type Override, type OverridePatch, type WeatherReport } from "../core/report";
 import { calendarHashOf, eraModifiers, erasHash, withEraTags } from "../core/eras";
 import type { DayTime, Era, ZoneProfile } from "../core/types";
+import { generatorVersionOf, type GeneratorMode } from "../core/version";
 import { makePayload, type PayloadArgs, type WadjetEvent, type WadjetEventPayloads } from "./events";
 import { adapterFault, type TimeAdapter, type TimeContext, type TimeRegistry } from "./time/adapter";
 import { codedError } from "./interpreters";
@@ -41,6 +42,8 @@ export interface WorldState {
   eras?: Era[];
   overrides: Override[];
   bands?: DescriptorBands;
+  /** which generator the world runs (SESHAT-v0 §17.2; modeFor(settings.generatorVersion)); absent = "current" */
+  generatorMode?: GeneratorMode;
 }
 
 /** Throw a TypeError unless `v` is a safe integer (|v| <= 2^53 - 1). */
@@ -150,12 +153,21 @@ export class World {
   get seed(): string {
     return this.state.seed;
   }
+  /** The generator this world runs (§17.2). */
+  get mode(): GeneratorMode {
+    return this.state.generatorMode ?? "current";
+  }
+  /** The version stamped in provenance.generatorVersion and reported by the API: the running generator's. */
+  get generatorVersion(): string {
+    return generatorVersionOf(this.mode);
+  }
   private indexOverrides(): void {
     this.overrideMap = new Map(this.state.overrides.map((o) => [overrideKey(o.zoneId, o.dayOrdinal), o.patch]));
   }
   private snapshotKeys(): Keys {
     const eras = this.state.eras ?? [];
-    const shared = `${this.state.seed}|${eras.length ? erasHash(eras) : ""}|${this.state.bands ? JSON.stringify(this.state.bands) : ""}`;
+    // the mode is shared: a mode change (an Upgrade, a synced downgrade) moves every zone's weather
+    const shared = `${this.state.seed}|${eras.length ? erasHash(eras) : ""}|${this.state.bands ? JSON.stringify(this.state.bands) : ""}|${this.mode}`;
     const active = this.time.active;
     let calendar: Keys["calendar"] = null;
     if (active) {
@@ -203,11 +215,11 @@ export class World {
     const hash = profileHash(zone);
     // flipSeasons is calendar-side, not part of profileHash (D5/D9) — the cache key carries it instead.
     const flip = zone.flipSeasons === true;
-    const key = `${this.state.seed}|${hash}|${this.calendarHash()}${flip ? "|flip" : ""}`;
+    const key = `${this.state.seed}|${hash}|${this.calendarHash()}${flip ? "|flip" : ""}|${this.mode}`;
     const cached = this.generators.get(zoneId);
     if (cached && cached.key === key) return cached;
     const timeOf: (d: number) => DayTime = dayTimeFn(adapter, eras, flip);
-    const { generator } = createGenerator(zone, this.state.seed, timeOf, eraModifiers(eras));
+    const { generator } = createGenerator(zone, this.state.seed, timeOf, eraModifiers(eras), this.mode);
     const entry = { key, generator, hash };
     this.generators.set(zoneId, entry);
     return entry;
@@ -251,7 +263,7 @@ export class World {
     }
     const { generator, hash } = this.generator(zoneId);
     const rec = generator.day(t.dayOrdinal);
-    return buildReport(rec, zoneId, { seed: this.state.seed, provenance: { profileHash: hash, calendarHash: this.calendarHash() }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }, t.hour);
+    return buildReport(rec, zoneId, { seed: this.state.seed, generatorVersion: this.generatorVersion, provenance: { profileHash: hash, calendarHash: this.calendarHash() }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }, t.hour);
   }
 
   /** Daily reports for [fromDay, toDay], inclusive. Integer bounds, fromDay <= toDay, at most MAX_RANGE_DAYS days. */
@@ -262,7 +274,8 @@ export class World {
     if (toDay - fromDay + 1 > MAX_RANGE_DAYS) throw new RangeError(`A range covers at most ${MAX_RANGE_DAYS} days (asked for ${toDay - fromDay + 1}).`);
     const { generator, hash } = this.generator(zoneId);
     const cal = this.calendarHash();
-    return generator.range(fromDay, toDay).map((rec) => buildReport(rec, zoneId, { seed: this.state.seed, provenance: { profileHash: hash, calendarHash: cal }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }));
+    const version = this.generatorVersion;
+    return generator.range(fromDay, toDay).map((rec) => buildReport(rec, zoneId, { seed: this.state.seed, generatorVersion: version, provenance: { profileHash: hash, calendarHash: cal }, ...(this.state.bands ? { bands: this.state.bands } : {}), overrides: this.overrideMap }));
   }
 
   now(): TimeContext | null {

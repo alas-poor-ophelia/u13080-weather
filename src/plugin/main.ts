@@ -3,7 +3,7 @@ import type { StudioStash } from "../studio/model/stash";
 import { openStudioFromCommand } from "../studio/ui/open";
 import { StudioView, VIEW_TYPE as STUDIO_VIEW_TYPE } from "../studio/ui/view";
 import type { WeatherReport } from "../core/report";
-import { GENERATOR_VERSION } from "../core/version";
+import { GENERATOR_VERSION, modeFor, type GeneratorMode } from "../core/version";
 import { ApiController, type WadjetAPI } from "./api";
 import { Calendars } from "./calendars";
 import { calendarOfDefinition } from "../studio/model/definition";
@@ -101,6 +101,7 @@ export default class WadjetPlugin extends Plugin {
       this.settings.calendar,
       () => this.settings.currentDayOrdinal,
       (d) => this.writeCurrentDay(d),
+      this.generatorMode(),
     );
     this.internalHash = this.internalCalendar.configHash();
     this.time.register(this.internalCalendar);
@@ -162,7 +163,9 @@ export default class WadjetPlugin extends Plugin {
     this.registerView(STUDIO_VIEW_TYPE, (leaf) => new StudioView(leaf, this));
     this.registerCommands();
 
-    if (generatorMismatch(this.settings)) {
+    if (this.generatorMode() === "previous") {
+      new Notice(`Wadjet has a new weather generator (${GENERATOR_VERSION}). This world keeps the old one (${this.settings.generatorVersion}), so its weather stays as you saw it.`, 10000);
+    } else if (generatorMismatch(this.settings)) {
       new Notice(`The weather generator was updated (${this.settings.generatorVersion} → ${GENERATOR_VERSION}). Only the current generator ships, so past weather may differ from what you saw before. Pinned days are kept. You can acknowledge the change in settings.`, 10000);
     }
 
@@ -212,7 +215,8 @@ export default class WadjetPlugin extends Plugin {
     const display = this.settings.calendar.display;
     this.calendars.follow(() => {
       this.settings = next;
-      this.internalCalendar.update(next.calendar);
+      // the mode, the internal calendar and the world move together (SESHAT-v0 §17.5 item 7); rebuild() follows
+      this.internalCalendar.update(next.calendar, this.generatorMode());
     });
     this.internalHash = this.internalCalendar.configHash();
     if (next.calendar.display !== display) this.emitDisplayChanged();
@@ -225,9 +229,14 @@ export default class WadjetPlugin extends Plugin {
     delete (window as WindowWithWadjet).Wadjet;
   }
 
+  /** The generator this world runs, from the version it last accepted (SESHAT-v0 §17.2). */
+  private generatorMode(): GeneratorMode {
+    return modeFor(this.settings.generatorVersion);
+  }
+
   private worldState() {
     const s = this.settings;
-    return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}) };
+    return { seed: s.worldSeed, zones: s.zones, eras: s.eras, overrides: s.overrides, ...(s.bands ? { bands: s.bands } : {}), generatorMode: this.generatorMode() };
   }
 
   /**
@@ -255,7 +264,7 @@ export default class WadjetPlugin extends Plugin {
   async saveAndRebuild(): Promise<void> {
     await this.saveSettings();
     if (this.dead) return;
-    this.internalCalendar.update(this.settings.calendar);
+    this.internalCalendar.update(this.settings.calendar, this.generatorMode());
     this.world.setState(this.worldState());
     const hash = this.internalCalendar.configHash();
     if (hash !== this.internalHash) {
