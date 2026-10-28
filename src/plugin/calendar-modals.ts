@@ -15,7 +15,8 @@ import { askKeptOnCalendarChange, keptToggleRow, renderUpgradeFirst } from "./up
 /** Validation for the calendar definition: the first error (with its line when known), or nothing. */
 export function badDefinition(text: string): string | undefined {
   const r = prepareDefinition(text);
-  return "error" in r ? (r.line === undefined ? r.error : `Line ${r.line}: ${r.error}`) : undefined;
+  // a parse error's message already starts "line N: " (seshat ParseError); only capitalise it
+  return "error" in r ? r.error.replace(/^line (\d+): /, "Line $1: ") : undefined;
 }
 
 /**
