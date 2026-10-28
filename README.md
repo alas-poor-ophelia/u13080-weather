@@ -367,7 +367,8 @@ a moon (`CROSSING:BODY=moon-1;MARK=0`, starting on the day of the new moon or th
 seasons can start on dates (`MARK:Spring=month:3.20`); a rule can name a moon phase (`NAME=Full`), read
 another rule's tag, look at the day before (`SHIFT`) or find the first day after another
 (`FIRST`, enough for the first full moon after the equinox, and Easter). Removing a moon or phase a
-calendar depends on is refused.
+calendar depends on is refused. [docs/CALENDARS.md](docs/CALENDARS.md) builds a calendar step by step
+and lists every part of the text, its limits and its messages.
 
 A world made before calendar definitions runs on the **legacy calendar**: one year length, seasons
 as fractions of the year, moons, edited in Settings. It runs exactly as it always did. Change
