@@ -19,6 +19,8 @@ import type { Locator, Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { MODIFIER_EXAMPLES } from "../../src/plugin/modifier-examples";
 import { paramsByChannel } from "../../src/studio/model/device-edit";
+import { print } from "../../src/seshat";
+import { HEBREW_LOOSE } from "../fixtures/orrery";
 import { installPlugin, launchObsidian, notices, resetPluginData, withApp, PLUGIN_DIR, VAULT, type Obsidian } from "./obsidian";
 
 let ob: Obsidian;
@@ -9914,6 +9916,8 @@ describe("climate studio · theme", () => {
 
 const GREGORIAN_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "gregorian.seshat"), "utf8");
 const HARPTOS_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "harptos.seshat"), "utf8");
+/** Hebrew with a weekday cycle and Heshvan and Kislev taking 28 to 31 days (test/fixtures/orrery.ts): a stage edit moves a year and the months still fill it. */
+const HEBREW_LOOSE_TEXT = print(HEBREW_LOOSE);
 
 /** Press Continue on whatever world-level or rewrite confirm is up; false when none came. */
 async function passAnyConfirm(): Promise<boolean> {
@@ -10738,6 +10742,81 @@ describe("climate studio · calendar orrery", () => {
       expect(await text()).not.toContain("INTERVAL=1600");
       expect(stored()).toContain("INTERVAL=4");
       console.log(`  · orrery gear: leap every 4 → 5 made year ${target} 366 days, ＋ term added EXRULE 1600, Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 98: the Orrery edits a stage on a Hebrew world: stage 1 reads its weekday test by day name, toggling the cell this year's molad falls on moves the year's start and lights ●, and Undo goes back to clean", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), HEBREW_LOOSE_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const undo = (): Promise<boolean> => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.undo(), VIEW_TYPE);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const textOf = async (sel: string) => ((await win.locator(sel).first().textContent()) ?? "").trim();
+      const text = () => textOf(".wadjet-studio-orrery-text");
+      const dayLbl = () => textOf(".wadjet-studio-orrery-daylbl");
+      const chip = () => textOf(".wadjet-studio-orrery-chip-label");
+      const issues = async () => (await win.locator(".wadjet-studio-window-issue").allTextContents()).join(" | ");
+
+      // the stages group carries ＋ stage on a year a crossing starts; the crossing and its train have their own inspectors
+      await expect.poll(() => win.locator('.wadjet-studio-orrery-add[data-add="stage"]').count()).toBe(1);
+      await win.locator('.wadjet-studio-orrery-row[data-part="train:year"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("CROSSING · INDEX");
+      expect(await win.locator('[data-editor="train"] [data-part="train-a"]').count()).toBe(1);
+      await win.locator('.wadjet-studio-orrery-row[data-part="crossing:year"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("CROSSING · YEAR BASE");
+      expect(await win.locator('[data-editor="crossing"] [data-part="period-parts"]').count()).toBe(1);
+
+      // stage 1: RULES · FIRST MATCH, its weekday test by day name, and the cell this year's molad day falls on
+      const day0 = await dayLbl();
+      await win.locator('.wadjet-studio-orrery-row[data-part="stage:year:0"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C4 · STAGE");
+      expect(await win.locator('[data-editor="stage"]').count()).toBe(1);
+      expect(await textOf('[data-part="rule-0-text"]')).toBe("starts on Rishon · Revi'i · Shishi → +1");
+      expect(await win.locator('[data-part="rule-0"] .wadjet-studio-orrery-cell').count()).toBe(7);
+      expect(await chip()).not.toContain("●");
+      const now = win.locator('[data-part="rule-0"] .wadjet-studio-orrery-cell.is-now');
+      expect(await now.count()).toBe(1);
+      const cell = (await now.getAttribute("data-part")) ?? "";
+      const label = (await now.textContent()) ?? "";
+      const wasOn = (await now.getAttribute("aria-pressed")) === "true";
+
+      // toggle it (the world confirm, when it comes, re-runs the edit): this year starts a day later or earlier
+      await now.click();
+      const confirmed = await passAnyConfirm();
+      await expect.poll(() => win.locator(`[data-part="${cell}"]`).getAttribute("aria-pressed"), { timeout: 10_000 }).toBe(wasOn ? "false" : "true");
+      await expect.poll(dayLbl).not.toBe(day0);
+      await expect.poll(chip).toContain("●");
+      await expect.poll(text).not.toContain("IN=2,4,6;");
+      expect(stored()).toContain("IN=2,4,6;");
+      await expect.poll(issues).toBe("");
+      const day1 = await dayLbl();
+
+      // Undo back to clean: the toggle is one step
+      for (let i = 0; i < 3 && (await chip()).includes("●"); i++) {
+        expect(await undo()).toBe(true);
+        await nextFrame();
+      }
+      await expect.poll(chip).not.toContain("●");
+      await expect.poll(dayLbl).toBe(day0);
+      await expect.poll(text).toContain("IN=2,4,6;");
+      console.log(`  · orrery stage: ${label} toggled ${wasOn ? "off" : "on"} in stage 1 moved the year ("${day0}" → "${day1}"), Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
     } finally {
       await close();
       await discardStudioWorldDraft();

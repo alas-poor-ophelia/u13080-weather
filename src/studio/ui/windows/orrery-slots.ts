@@ -4,7 +4,8 @@
  *
  * - Year (constant base): a `length` knob (300–420, wider for a year outside
  *   that) and a chip per gear term, `+N when <gear>`, that selects the gear.
- *   A year that starts by a crossing is read-only here (NOW shows it).
+ *   A year that starts by a crossing has no knob here (NOW shows it): its
+ *   crossing, train and stages have their own inspectors (slice 5d).
  * - Slot unit: SLOTS · THIS YEAR (n, name, flag, this year's length; a row
  *   selects its slot) and `＋ slot`.
  * - Slot: rename, a `days` knob (0–60), `filler` and `takes the rest`
@@ -79,7 +80,7 @@ export function buildYearEditor(parent: HTMLElement, deps: YearEditorDeps): Part
   const u = deps.ast.units.find((x): x is CycleUnitAst => x.kind === "cycle" && x.id === deps.unitId);
   if (!u) return editor;
   if (u.crossing) {
-    parent.createDiv({ cls: "wadjet-studio-orrery-note", text: "Read-only here: this year starts on the day of a crossing, so its length is the days from one crossing to the next. Its crossing and stages are edited as text for now." });
+    parent.createDiv({ cls: "wadjet-studio-orrery-note", text: "This year starts on the day of a crossing, so its length is the days from one crossing to the next: its crossing, train and stages are edited on their own parts (the chips below)." });
     return editor;
   }
   const id = u.id;

@@ -11,7 +11,7 @@ export { DAY_LIMIT } from "./day";
 export { gearBelow, gearDensity, gearDeviation, gearMatches, gearPeriod, type GearAst } from "./gear";
 export { Engine, type Position } from "./engine";
 export type { StartTrace } from "./start";
-export { checkRule, FIRST_WITHIN_MAX, problems, ruleCycles, ruleTagSetters, SHIFT_DAYS_MAX, validate, type Problem } from "./validate";
+export { checkRule, FIRST_WITHIN_MAX, problems, ruleCycles, ruleTagSetters, SHIFT_DAYS_MAX, startRuleProblem, validate, type Problem } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
 export { COPTIC, ETHIOPIAN } from "./calendars/ethiopian";

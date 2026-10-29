@@ -12,7 +12,10 @@
  *   (windows/orrery-slots.ts). The units group shows no ＋: adding a slot
  *   unit (or a cycle) waits for its editor; a slot is added from the slot
  *   unit's own inspector. Slice 5c: the gear inspector
- *   (windows/orrery-gears.ts) and the gears group's ＋ gear.
+ *   (windows/orrery-gears.ts) and the gears group's ＋ gear. Slice 5d: the
+ *   crossing and train inspectors (windows/orrery-crossing.ts), the stage
+ *   inspector (windows/orrery-stages.ts) and the stages group's ＋ stage, on
+ *   a year that starts by a crossing.
  * - A draft that does not run (slots that no longer fill their year, the
  *   commonest outcome of a slot edit) keeps the editors open: the scope,
  *   list and NOW draw the last draft that ran, the verdict and TEXT are the
@@ -53,7 +56,8 @@ import { draftOf, type CalendarDraft, type CalendarEdit } from "../../model/defi
 import { orreryHint } from "../../model/hints-orrery";
 import { addBody, draftReader } from "../../model/orrery-body";
 import { addGearPart } from "../../model/orrery-gears";
-import { buildOrrery, clampDay, partInfo, partText, problemsByPart, orreryProblems, type OrreryModel, type ViewName } from "../../model/orrery-geometry";
+import { buildOrrery, clampDay, partInfo, partText, problemsByPart, orreryProblems, stageFacts, type OrreryModel, type ViewName } from "../../model/orrery-geometry";
+import { addStage, stagesApply } from "../../model/orrery-stages";
 import { needsWorldConfirm } from "../../model/world-confirm";
 import { ORRERY_RATES, ORRERY_THEMES, orreryFit, scrubDay, scrubFraction, scrubSegments, seasonSegments, stepDay, stepYear, type OrreryTheme } from "../../model/orrery-transport";
 import type { StudioIssue } from "../../model/validation";
@@ -64,8 +68,10 @@ import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 import { confirmWorldEdit, type WorldSubject } from "../world-confirm-modal";
 import { buildBodyEditor, type EditPhase, type PartEditor } from "./orrery-body";
+import { buildCrossingEditor, buildTrainEditor } from "./orrery-crossing";
 import { buildGearEditor } from "./orrery-gears";
 import { buildSlotEditor, buildSlotUnitEditor, buildYearEditor } from "./orrery-slots";
+import { buildStageEditor } from "./orrery-stages";
 
 /** The id this window is registered and opened under. */
 export const ORRERY_WINDOW = "orrery";
@@ -135,10 +141,17 @@ function relatedParts(ast: CalendarAst, part: PartId | null): PartId[] {
     if (u?.kind === "cycle") {
       for (const g of u.gears ?? []) out.push(`gear:${g.gear}`);
       if (u.crossing) out.push(`crossing:${u.id}`);
+      if (u.crossing?.index) out.push(`train:${u.id}`);
+      (u.stages ?? []).forEach((_, i) => out.push(`stage:${u.id}:${i}`));
     } else if (u?.kind === "slots") out.push(`unit:${u.in}`);
   }
   if (kind === "stage") {
-    if (cycles.some((u) => u.id === id && u.kind === "cycle" && u.crossing)) out.push(`crossing:${id}`);
+    const u = cycles.find((x) => x.id === id);
+    if (u?.kind === "cycle" && u.crossing) {
+      out.push(`crossing:${id}`);
+      const n = Number(part.split(":")[2]);
+      (u.stages ?? []).forEach((_, i) => i !== n && out.push(`stage:${id}:${i}`));
+    }
   }
   return out;
 }
@@ -511,6 +524,20 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     }, "click", "calendar");
   }
 
+  /** ＋ stage: a stage after the year's others that moves nothing yet, selected (also when the edit waits for the world confirm). */
+  function addStageRow(): void {
+    const unit = model?.year.unit;
+    if (unit === undefined) return;
+    edit((c, b) => {
+      const r = addStage(c, b, unit);
+      if (!("refused" in r) && r.index !== undefined) {
+        selected = `stage:${unit}:${r.index}`;
+        listKey = "";
+      }
+      return r;
+    }, "click", "calendar");
+  }
+
   /** The editors' `selectAfter`: the part the edit in hand lands on (a moved, added or removed slot). */
   function selectAfter(part: PartId): void {
     selected = part;
@@ -559,17 +586,18 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     listEl.empty();
     if (!m) return;
     for (const g of m.groups) {
-      // a ＋ shows where its editor exists (slice 5a: bodies; 5c: gears); the other groups' ＋ wait for theirs
-      const add = editable && (g.add === "body" || g.add === "gear") ? g.add : null;
+      // a ＋ shows where its editor exists (slice 5a: bodies; 5c: gears; 5d: stages, on a year a crossing starts); the other groups' ＋ wait for theirs
+      const add = editable && (g.add === "body" || g.add === "gear" || (g.add === "stage" && ast !== null && stagesApply(ast, m.year.unit))) ? g.add : null;
       // a group's empty header is where its ＋ goes: an empty group without one is left out
       if (!g.rows.length && add === null) continue;
       const group = listEl.createDiv({ cls: "wadjet-studio-orrery-group" });
       const label = group.createDiv({ cls: "wadjet-studio-orrery-group-label" });
       label.createSpan({ text: g.label });
       if (add !== null) {
-        const body = add === "body";
-        const onAdd = body ? addBodyPart : addGearRow;
-        const plus = label.createSpan({ cls: "wadjet-studio-orrery-add", text: "＋", attr: { role: "button", tabindex: "0", "aria-label": body ? "Add a body" : "Add a gear", "data-hint": body ? orreryHint("orrery.addBody") : orreryHint("orrery.addGear"), "data-add": add } });
+        const onAdd = add === "body" ? addBodyPart : add === "gear" ? addGearRow : addStageRow;
+        const aria = add === "body" ? "Add a body" : add === "gear" ? "Add a gear" : "Add a stage";
+        const hint = add === "body" ? orreryHint("orrery.addBody") : add === "gear" ? orreryHint("orrery.addGear") : orreryHint("orrery.addStage");
+        const plus = label.createSpan({ cls: "wadjet-studio-orrery-add", text: "＋", attr: { role: "button", tabindex: "0", "aria-label": aria, "data-hint": hint, "data-add": add } });
         plus.addEventListener("click", onAdd);
         plus.addEventListener("keydown", (ev) => {
           if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -616,7 +644,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     const u = ast.units.find((x) => x.id === id);
     const slot = kind === "slot" && u?.kind === "slots" ? u.slots[Number(n)] : undefined;
     const title = slot && u?.kind === "slots" ? (slot.name ?? `slot ${Number(n) + (u.number ?? 1)}`) : id;
-    return { code: kind === "slot" ? "C2 · SLOT" : kind === "gear" ? "C3 · GEAR" : "C2", title, sub: "in the draft · the scope shows the last calendar that runs", now: [{ key: "this year", value: "— (the draft does not run)", tone: "err" }] };
+    const code = kind === "slot" ? "C2 · SLOT" : kind === "gear" ? "C3 · GEAR" : kind === "stage" ? "C4 · STAGE" : kind === "crossing" ? "CROSSING · YEAR BASE" : kind === "train" ? "CROSSING · INDEX" : "C2";
+    return { code, title: kind === "stage" ? `stage ${Number(n) + 1}` : title, sub: "in the draft · the scope shows the last calendar that runs", now: [{ key: "this year", value: "— (the draft does not run)", tone: "err" }] };
   }
   /** The control in the inspector that has focus (its `data-part`), so a rebuild can give it back. */
   function focusedPart(): string | null {
@@ -707,6 +736,15 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
       // the occurrence of the unit the gear counts, on the window's day (none while the scope draws an older calendar)
       const index = !g || behind || m.ast !== ast ? null : g.on === m.year.unit ? m.year.index : (m.today.positions.get(g.on)?.index ?? null);
       editor = buildGearEditor(host("gear"), title, { ast: draft, gearId: id, index, refusal, edit, select: (part) => select(part), selectAfter });
+    }
+    if ((kind === "crossing" || kind === "train") && id !== undefined && editable) {
+      const deps = { ast: draft, baseAst: baseOf(ctx.store.get()).ast ?? null, unitId: id, refusal, edit, select: (part: PartId) => select(part) };
+      editor = kind === "crossing" ? buildCrossingEditor(host("crossing"), deps) : buildTrainEditor(host("train"), deps);
+    }
+    if (kind === "stage" && id !== undefined && n !== undefined && editable) {
+      // this year's stage, read through the engine's start trace (none while the scope draws an older calendar)
+      const facts = behind || m.ast !== ast || id !== m.year.unit ? null : stageFacts(draft, id, Number(n), m.year.index);
+      editor = buildStageEditor(host("stage"), { ast: draft, unitId: id, index: Number(n), facts, refusal, edit, select: (part) => select(part), selectAfter });
     }
     if (kind === "body" && id !== undefined && editable) {
       const st = ctx.store.get();

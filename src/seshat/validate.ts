@@ -364,6 +364,30 @@ export function problems(stored: CalendarAst): Problem[] {
 }
 
 /**
+ * The checks `problems()` makes of cycle unit `unitId`'s own start rule, on
+ * resolved numbers: its base (V5, V8, a crossing's INDEX and V3 through it),
+ * its stages' shapes and windows (V2), and the shortest occurrence the gear
+ * terms and stages leave (V3). The first message, in `problems()`'s words, or
+ * null. It skips the calendar-wide scans (slot sums, rules), so an editor can
+ * run it on every edit; `problems()` still runs after (the Studio's Orrery,
+ * docs/SESHAT-v0.md §18.6 item 2).
+ */
+export function startRuleProblem(stored: CalendarAst, unitId: string): string | null {
+  const ast = resolve(stored);
+  const u = ast.units.find((x) => x.id === unitId);
+  if (u?.kind !== "cycle") return null;
+  const bodyMap = new Map((Array.isArray(ast.bodies) ? ast.bodies : []).filter((b): b is BodyAst => isObj(b)).map((b) => [b.id, b] as const));
+  const errors: string[] = [];
+  const rf = (msg: string) => errors.push(`unit "${u.id}": ${msg}`);
+  let loss = 0;
+  for (const t of u.gears ?? []) if (inBounds(t.add)) loss += Math.min(0, t.add);
+  loss -= checkStages(u.stages, rf);
+  const shortest = checkBase(u, loss, rf, bodyMap);
+  if (shortest !== null && shortest + loss < 1) rf(`an occurrence can be ${shortest + loss} days long; every occurrence needs at least one day (V3)`);
+  return errors.length ? toProblem(errors[0]!, undefined).message : null;
+}
+
+/**
  * One base per unit that never resets (V8): a constant anchor and length, or a
  * crossing. A crossing's rationals must be in lowest terms (so equal calendars
  * hash equal), its period at least one day, and its integer form must stay

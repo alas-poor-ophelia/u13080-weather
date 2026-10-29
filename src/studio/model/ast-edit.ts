@@ -21,13 +21,14 @@
  *   `mergeCalendar`): a slice the draft did not edit passes through as stored
  *   now, and a slice it did edit is refused when it changed in storage since,
  *   or when a part its edits read without writing did (`replayProblem`).
+ * - A crossing's INDEX (the train, slice 5d) sits in its `crossing:` slice.
  * - A crossing that follows a body keeps its occurrence numbers: a moved mark
  *   or offset, or a different body, moves its K by the smallest shift (the
  *   rule `epochEditK` applies to an epoch edit, §16.7 P1). START changes the
  *   start day by less than one day, so K stays.
  */
 import { canonicalJson } from "../../core/profile";
-import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, type BodyRef, type By, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
+import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, startRuleProblem, type BodyRef, type By, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
 
 export type AstEdit = { readonly ast: CalendarAst } | { readonly refused: true; readonly reason: string };
 
@@ -370,7 +371,21 @@ export function setStages(ast: CalendarAst, unitId: string, stages: readonly Sta
     }
   }
   const next = withSlice(ast, `stages:${unitId}`, stages.length ? stages : undefined);
-  return next ? { ast: next } : refuse(`there is no cycle unit "${unitId}"`);
+  if (!next) return refuse(`there is no cycle unit "${unitId}"`);
+  // the validator's own checks of the unit's start rule (V2 windows, V3 shortest occurrence), cheaply; problems() runs after
+  const why = startRuleProblem(next, unitId);
+  return why ? refuse(why) : { ast: next };
+}
+
+/**
+ * The day cycle whose seven (or `mod`) labels name a weekday test's residues:
+ * a cycle unit one day long, with labels, and no crossing. The first such
+ * unit, or undefined. Residue r of a test with offset o is the day d with
+ * (d − o) mod m = r, which carries label (r + o − anchor) mod labels.
+ */
+export function weekdayCycle(ast: CalendarAst, mod = 7): (CycleUnitAst & { readonly anchor: number; readonly labels: NonNullable<CycleUnitAst["labels"]> }) | undefined {
+  for (const u of ast.units) if (u.kind === "cycle" && !u.crossing && u.length === 1 && u.labels?.length === mod && !u.gears?.length && !u.stages?.length && !u.ledger?.length) return u as CycleUnitAst & { anchor: number; labels: NonNullable<CycleUnitAst["labels"]> };
+  return undefined;
 }
 
 // ---- crossings
@@ -381,10 +396,32 @@ function crossingOf(ast: CalendarAst, unitId: string): CrossingAst | string {
   return u.crossing ?? `the ${unitId} does not start by a crossing`;
 }
 
+/** `ast` with unit `unitId`'s crossing set to `c`, refused with the validator's own message when the start rule would not run (V3, V5, V8). */
 const putCrossing = (ast: CalendarAst, unitId: string, c: CrossingAst): AstEdit => {
   const next = withSlice(ast, `crossing:${unitId}`, c);
-  return next ? { ast: next } : refuse(`the ${unitId} does not start by a crossing`);
+  if (!next) return refuse(`the ${unitId} does not start by a crossing`);
+  const why = startRuleProblem(next, unitId);
+  return why ? refuse(why) : { ast: next };
 };
+
+/**
+ * A crossing's INDEX, the train: occurrence k reads crossing floor((k·a + c)/L)
+ * (Hebrew's 235 months in 19 years, c 1), or (null) crossing k itself. a and L
+ * are whole numbers of at least 1 and c a whole number, as the validator asks;
+ * a ratio that leaves an occurrence no day, or numbers too fine to count
+ * exactly, is refused with the validator's own reason.
+ */
+export function setCrossingIndex(ast: CalendarAst, unitId: string, index: { readonly a: number; readonly c: number; readonly L: number } | null): AstEdit {
+  const c = crossingOf(ast, unitId);
+  if (typeof c === "string") return refuse(c);
+  const { index: _i, ...rest } = c;
+  if (index === null) return putCrossing(ast, unitId, rest);
+  const { a, c: phase, L } = index;
+  if (!isInt(a) || a < 1) return refuse(`a train counts ${String(a)} crossings; write a whole number of at least 1`);
+  if (!isInt(L) || L < 1) return refuse(`a train turns in ${String(L)} years; write a whole number of at least 1`);
+  if (!isInt(phase)) return refuse(`a train's phase is ${String(phase)}; write a whole number`);
+  return putCrossing(ast, unitId, { ...rest, index: { a, c: phase, L } });
+}
 
 /** A body reference with its K set (0 is written as absent). */
 function withK(ref: BodyRef, k: number): BodyRef {
@@ -690,7 +727,8 @@ function termsNaming(ast: CalendarAst, id: string): boolean {
  * - `crossing:u`: the bodies its K was chosen against;
  * - `gear:g`: the terms naming g (after a rename or a removal), the other ids (an added gear);
  * - `feeds:u`, `ledger:u`: each term's gear still counting u;
- * - `stages:u`, `length:u`: nothing outside the slice.
+ * - `stages:u`: the day cycle that names a weekday test's residues (`weekdayCycle`), while a test counts in its labels;
+ * - `length:u`: nothing outside the slice.
  */
 export function replayProblem(key: SliceKey, base: CalendarAst, draft: CalendarAst, stored: CalendarAst, out: CalendarAst): string | null {
   const moved = "changed outside the studio since this edit";
@@ -703,6 +741,15 @@ export function replayProblem(key: SliceKey, base: CalendarAst, draft: CalendarA
   const kind = key.slice(0, at);
   const id = key.slice(at + 1);
   if (kind === "slots") return same(slotReferences(stored, id), slotReferences(base, id)) ? null : `a rule, an exception or a season that reads the ${id} ${moved}`;
+  if (kind === "stages") {
+    // a weekday test is edited cell by weekday: the residues mean those days only while the day cycle stays as it was
+    const mods = new Set((cycleUnit(draft, id)?.stages ?? []).flatMap((s) => s.rules.flatMap((r) => ("residue" in r ? [r.residue.mod] : []))));
+    for (const m of mods) {
+      const w = weekdayCycle(base, m);
+      if (w && !same(weekdayCycle(stored, m), w)) return `a weekday test of the ${id} reads the ${w.id} days, which ${moved}`;
+    }
+    return null;
+  }
   if (kind === "crossing") {
     const followed = new Set([base, draft].flatMap((a) => {
       const b = cycleUnit(a, id)?.crossing?.body;

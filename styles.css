@@ -6861,6 +6861,58 @@
 .wadjet-studio-orrery-cell.is-now:focus-visible {
   border-color: #e9ebee;
 }
+/* slice 5d: the stage's RULES rows, a residue rule's weekday cells, readouts (K, a length rule's year) */
+.wadjet-studio-orrery-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wadjet-studio-orrery-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 3px 4px;
+  border-left: 2px solid var(--wadjet-studio-border);
+  border-radius: 2px;
+}
+.wadjet-studio-orrery-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wadjet-studio-orrery-rule-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-orrery-cycle.is-residue {
+  grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+}
+.wadjet-studio-orrery-cell.is-named {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+}
+.wadjet-studio-orrery-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.wadjet-studio-orrery-readout-value {
+  font-size: var(--wadjet-studio-fs-chip);
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-orrery-readout.is-lit .wadjet-studio-orrery-readout-value {
+  color: var(--wadjet-studio-gold);
+}
 .wadjet-studio-orrery-chip {
   display: inline-flex;
   align-items: center;

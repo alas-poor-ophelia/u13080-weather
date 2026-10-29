@@ -566,7 +566,8 @@ function partGroups(p: Prepared, year: YearFacts, today: DayFacts, found: readon
       const shift = u === p.yearUnit ? stageShift(year.trace, i) : null;
       stages.push(row(`stage:${u.id}:${i}`, `${many ? `${u.id} ` : ""}stage ${i + 1}`, shift === null ? "" : `${signed(shift)} this year`, (shift ?? 0) !== 0));
     });
-  if (stages.length) groups.push({ label: "STAGES · C4", add: "stage", rows: stages });
+  // a year that starts by a crossing shows its stages group even with none, so the group header can carry ＋ stage
+  if (stages.length || p.yearUnit.crossing) groups.push({ label: "STAGES · C4", add: "stage", rows: stages });
   if (ast.seasons) groups.push({ label: "SEASONS", add: "season", rows: [row("seasons", "seasons", `${ast.seasons.marks.length} marks${ast.seasons.marks.some(isDateMark) ? " · dated" : ""}`)] });
   if (ast.rules?.length) groups.push({ label: "RULES · LAMPS", rows: ast.rules.map((r) => row(`rule:${r.id}`, r.name ?? r.id, r.tags?.length ? r.tags.join(", ") : "—", today.rules.get(r.id) === true)) });
   const ledger: PartRow[] = [];
@@ -587,6 +588,38 @@ function bodyName(ast: CalendarAst, id: string): string {
 }
 
 const stageShift = (t: StartTrace, i: number): number => t.levels[i + 1]! - t.levels[i]!;
+
+/** One stage in year `k`, read through the engine's start trace: the start it reads, its shift, the rule that matched, and per rule the length its test reads (null for a weekday test). */
+export interface StageFacts {
+  /** the start the stage reads (the stage below's output) */
+  readonly below: number;
+  readonly shift: number;
+  /** the index of the rule that matched, or −1 */
+  readonly fired: number;
+  /** per rule: a length test's occurrence k + at, as long as the stage below makes it; null for a weekday test */
+  readonly lengths: ReadonlyArray<number | null>;
+}
+
+/** Stage `i` of cycle unit `unitId` in occurrence `k`, or null for a definition that cannot run (or an occurrence past the day line). */
+export function stageFacts(ast: CalendarAst, unitId: string, i: number, k: number): StageFacts | null {
+  const p = prepare(ast);
+  if (p.kind === "empty") return null;
+  const u = p.ast.units.find((x) => x.id === unitId);
+  const stage = u?.kind === "cycle" ? u.stages?.[i] : undefined;
+  if (!stage) return null;
+  try {
+    const e = p.engine;
+    const tr = e.startTrace(unitId, k);
+    return {
+      below: tr.levels[i]!,
+      shift: stageShift(tr, i),
+      fired: tr.fired[i]!,
+      lengths: stage.rules.map((r) => ("length" in r ? e.startTrace(unitId, k + r.length.at + 1).levels[i]! - e.startTrace(unitId, k + r.length.at).levels[i]! : null)),
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ---- the machine
 

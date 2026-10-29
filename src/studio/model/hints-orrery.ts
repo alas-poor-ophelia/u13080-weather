@@ -1,6 +1,7 @@
 /**
  * The ORRERY window's editors' half of the hint tables (docs/SESHAT-v0.md
- * §18; bead wadjet-b6x, slice 5a onward; 5b: year, slot unit and slot; 5c: gear).
+ * §18; bead wadjet-b6x, slice 5a onward; 5b: year, slot unit and slot; 5c: gear;
+ * 5d: crossing, train and stage).
  *
  * Same house rules as `hints.ts` (SPEC §9): product microcopy, sentence
  * case, no explainer prose, no trailing full stop. The *name* says what the
@@ -51,6 +52,31 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.feedRemove": ["Stop feeding", "the length no longer changes when the gear engages"],
   "orrery.addFeed": ["Add feed", "lets the gear add a day to the year's length or to a slot"],
   "orrery.removeGear": ["Remove gear", "removes the gear and what it adds; refused while a rule change in Exceptions reads it"],
+  "orrery.crossingBody": ["Followed body", "the body whose crossings start each year; selects it"],
+  "orrery.crossingFollow": ["Follow another body", "the year follows another body's crossings; K moves so the years keep their numbers"],
+  "orrery.crossingMark": ["Mark", "the body's phase at the crossing, as a fraction of a turn; K moves so the years keep their numbers"],
+  "orrery.crossingOffset": ["Offset", "moves every crossing by whole hours, as a sunset day start; K moves by the turns it crosses"],
+  "orrery.crossingStart": ["Start", "the year starts on the day holding the crossing, or on the first day that begins after it"],
+  "orrery.crossingK": ["K", "renumbers the crossings so the years keep their numbers when the mark, offset or body moves"],
+  "orrery.crossingZeroHours": ["Crossing 0 hour", "the hour of its day crossing 0 falls in, 0 to 23"],
+  "orrery.crossingZeroParts": ["Crossing 0 parts", "parts of that hour, 0 to 1079 (1080 to the hour)"],
+  "orrery.trainCrossings": ["Crossings", "crossings counted in one turn of the train; drag ↕, or double-click to type"],
+  "orrery.trainYears": ["Years", "years in one turn of the train"],
+  "orrery.trainPhase": ["Phase", "shifts which years of the train read one crossing more"],
+  "orrery.addStage": ["Add stage", "adds a stage after the others with a weekday test that moves nothing yet"],
+  "orrery.stageFired": ["Fired", "lit when this rule is the first that matches this year"],
+  "orrery.stageRuleUp": ["Read earlier", "moves the rule up; the first rule that matches decides"],
+  "orrery.stageRuleDown": ["Read later", "moves the rule down; the first rule that matches decides"],
+  "orrery.stageRuleRemove": ["Remove rule", "takes the rule out of the stage; a stage keeps at least one"],
+  "orrery.stageAdd": ["Add", "days the start moves when this rule is the first to match, 0 to 3"],
+  "orrery.stageWindow": ["Which year", "the rule tests how long the last, this or the next year runs in the stage below"],
+  "orrery.stageRuns": ["Runs", "the length in days the rule tests for, 340 to 400"],
+  "orrery.stageActual": ["Runs now", "how long that year runs in the stage below; lit when the rule's length matches"],
+  "orrery.stageMod": ["Mod", "the cycle the weekday test counts in, 2 to 14; marked days at or past it drop out"],
+  "orrery.stageCell": ["Day", "a day the start may fall on for the rule to match; click to mark or unmark it"],
+  "orrery.addLengthRule": ["Add length rule", "adds a length test last in the stage that moves nothing yet"],
+  "orrery.addResidueRule": ["Add residue rule", "adds a weekday test last in the stage that moves nothing yet"],
+  "orrery.removeStage": ["Remove stage", "removes the stage; the stages after it read the one before"],
 };
 
 /**
