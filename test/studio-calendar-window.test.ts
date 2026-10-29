@@ -12,7 +12,8 @@ import { GREGORIAN, HEBREW } from "../src/seshat";
 import { recognise } from "../src/plugin/time/form";
 import { calendarOfDefinition } from "../src/studio/model/definition";
 
-const SOURCE = readFileSync(new URL("../src/studio/ui/windows/calendar.ts", import.meta.url), "utf8");
+// the window, and the Orrery | Form toggle that both calendar views carry (calendar-mode.ts)
+const SOURCE = ["calendar.ts", "calendar-mode.ts"].map((f) => readFileSync(new URL(`../src/studio/ui/windows/${f}`, import.meta.url), "utf8")).join("\n");
 
 function keysUsed(): string[] {
   const found = new Set<string>();

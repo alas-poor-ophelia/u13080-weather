@@ -1474,6 +1474,11 @@
 .wadjet-studio-window-head > .is-tail {
   margin-left: auto;
 }
+/* The calendar's Orrery | Form toggle (docs/SESHAT-v0.md §18.3 D9): first in
+   the head of both views, never squeezed by the source chip beside it. */
+.wadjet-studio-window-head > .wadjet-studio-calendar-mode {
+  flex: 0 0 auto;
+}
 .wadjet-studio-window-bar.is-tailed .wadjet-studio-window-spacer {
   display: none;
 }

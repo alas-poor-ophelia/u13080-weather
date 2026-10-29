@@ -9,6 +9,7 @@
 import { makeHintLookup, type Hint, type HintLookup } from "./hints";
 
 export const CALENDAR_HINTS: Record<string, Hint> = {
+  "calendar.mode": ["Orrery or form", "the same calendar, drawn as a machine or written as fields; the ruler's Calendar ⚑ opens the last one chosen"],
   "calendar.tabs": ["Calendar parts", "seasons, and the year, its months and its week; one at a time"],
   "calendar.leapToggle": ["Leap rules", "shows the rules as fields, or folds them back into their sentence"],
   "calendar.source": ["Calendar source", "a definition is edited here; the legacy calendar and plugin calendars are described"],

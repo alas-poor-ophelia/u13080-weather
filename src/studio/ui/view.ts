@@ -86,6 +86,7 @@ export interface PersistedViewState {
   jsonOpen: boolean;
   fixedOpen: Record<string, boolean>;
   orrery?: { theme: OrreryTheme; scanlines: boolean };
+  calendarMode?: "orrery" | "form";
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
@@ -122,6 +123,8 @@ function readPersisted(raw: unknown): Partial<PersistedViewState> {
   }
   const orr = raw["orrery"];
   if (isRecord(orr) && typeof orr["theme"] === "string" && (ORRERY_THEMES as readonly string[]).includes(orr["theme"]) && typeof orr["scanlines"] === "boolean") out.orrery = { theme: orr["theme"] as OrreryTheme, scanlines: orr["scanlines"] };
+  const mode = raw["calendarMode"];
+  if (mode === "orrery" || mode === "form") out.calendarMode = mode;
   return out;
 }
 
@@ -217,6 +220,7 @@ export class StudioView extends ItemView {
       jsonOpen: v.jsonOpen,
       fixedOpen: { ...v.fixedOpen },
       ...(v.orrery ? { orrery: { ...v.orrery } } : {}),
+      ...(v.calendarMode ? { calendarMode: v.calendarMode } : {}),
     };
     return { ...state };
   }
@@ -235,6 +239,7 @@ export class StudioView extends ItemView {
       if (next.jsonOpen !== undefined) v.jsonOpen = next.jsonOpen;
       if (next.fixedOpen !== undefined) v.fixedOpen = next.fixedOpen;
       if (next.orrery !== undefined) v.orrery = next.orrery;
+      if (next.calendarMode !== undefined) v.calendarMode = next.calendarMode;
     });
     // The store's notification is a frame away; the tab title and the header
     // are read straight after setViewState, so repaint now as well.

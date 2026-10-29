@@ -20,6 +20,8 @@
  *   bar's calendar chip is the way in on every world (item 12): its menu
  *   opens Change calendar… on the chosen preset, and holds the scope's theme
  *   and scanlines (§18.4 Q2), remembered per Studio view.
+ * - The Orrery | Form toggle before the chip is added by
+ *   `calendar-mode.ts` (slice 1b), which wraps this builder.
  */
 import { Menu, type EventRef } from "obsidian";
 import type { CalendarAst, PartId, Problem } from "../../../seshat";

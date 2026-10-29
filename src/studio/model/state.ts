@@ -50,6 +50,8 @@ export interface ViewState {
   rerollSalt: number;
   /** the Orrery's scope look, per Studio view (docs/SESHAT-v0.md §18.4 Q2); absent: phosphor with scanlines */
   orrery?: { theme: OrreryTheme; scanlines: boolean };
+  /** the calendar view the ruler's Calendar ⚑ opens, per Studio view (§18.3 D9); absent: the Orrery */
+  calendarMode?: "orrery" | "form";
 }
 
 export interface StudioState {

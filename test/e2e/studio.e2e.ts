@@ -1206,7 +1206,8 @@ describe("climate studio · playlist ruler and zoom", () => {
       ob.page,
       (app, a: { type: string }) => {
         const leaf = app.workspace.getLeavesOfType(a.type)[0];
-        return (leaf.view.store.get().view.openWindows as string[]).filter((id) => id === "calendar").length;
+        // the ⚑ opens the calendar view last chosen, the Orrery by default (docs/SESHAT-v0.md §18.3 D9)
+        return (leaf.view.store.get().view.openWindows as string[]).filter((id) => id === "calendar" || id === "orrery").length;
       },
       { type: VIEW_TYPE },
     );
@@ -1215,7 +1216,7 @@ describe("climate studio · playlist ruler and zoom", () => {
     const after = await probePlaylist();
     expect(after.ticks).toBeGreaterThan(0);
     expect(after.rulerLabel).toContain("Calendar");
-    console.log(`  · Calendar label click: seasons panels open ${opened}, ruler still drawing ${after.ticks} ticks`);
+    console.log(`  · Calendar label click: calendar panels open ${opened}, ruler still drawing ${after.ticks} ticks`);
 
     // Leave the leaf as this describe found it: a panel left open would ride
     // into the next describe's probes through `view.openWindows`.
@@ -10257,6 +10258,145 @@ describe("climate studio · calendar orrery", () => {
       console.log(`  · orrery: ${drawn.lit} lit px on ${drawn.w}×${drawn.h}; "${whole}" → "leap"; LCD ${d1} ‹ ${d0} › ${d2} (today stays D${todayAfter}); 20 open/close: ${JSON.stringify(counts)}; legacy: "${message.slice(0, 50)}…"`);
     } finally {
       await close();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 94: the ruler's Calendar ⚑ opens the Orrery; its Orrery | Form toggle swaps to the form on Year and back, in place, and the ⚑ reopens the view last chosen", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    type Probe = { open: string[]; pos: Record<string, { x: number; y: number }>; mode: string | null; persisted: string | null };
+    const probe = (): Promise<Probe> =>
+      withApp(
+        ob.page,
+        (app, type: string) => {
+          const view = app.workspace.getLeavesOfType(type)[0].view;
+          const v = view.store.get().view;
+          const pos: Record<string, { x: number; y: number }> = {};
+          for (const id of ["orrery", "calendar"]) if (v.windowPos[id]) pos[id] = { x: v.windowPos[id].x, y: v.windowPos[id].y };
+          const open = (v.openWindows as string[]).filter((id) => id === "orrery" || id === "calendar");
+          return { open, pos, mode: v.calendarMode ?? null, persisted: view.getState().calendarMode ?? null };
+        },
+        VIEW_TYPE,
+      );
+    const saved: { mode: string | null; pos: Record<string, unknown> } = await withApp(
+      ob.page,
+      (app, type: string) => {
+        const v = app.workspace.getLeavesOfType(type)[0].view.store.get().view;
+        return { mode: v.calendarMode ?? null, pos: structuredClone({ orrery: v.windowPos.orrery, calendar: v.windowPos.calendar }) };
+      },
+      VIEW_TYPE,
+    );
+    const closeBoth = () =>
+      withApp(
+        ob.page,
+        (app, type: string) => {
+          const w = app.workspace.getLeavesOfType(type)[0]?.view.windows;
+          w?.close("orrery");
+          w?.close("calendar");
+        },
+        VIEW_TYPE,
+      );
+    const orrery = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]');
+    const form = ob.page.locator('.wadjet-studio-window[data-kind="calendar"]');
+    const flag = ob.page.locator(".wadjet-studio-ruler-label");
+    const selected = (win: typeof orrery, group: string) => win.locator(`${group} .wadjet-studio-segment.is-selected`).getAttribute("data-value");
+    const toggle = (win: typeof orrery, to: "orrery" | "form") => win.locator(`.wadjet-studio-calendar-mode .wadjet-studio-segment[data-value="${to}"]`).click();
+    const box = async (win: typeof orrery) => {
+      const b = await win.boundingBox();
+      return { x: Math.round(b?.x ?? -1), y: Math.round(b?.y ?? -1) };
+    };
+    try {
+      await closeBoth();
+      // a Studio view that never chose: the default
+      await withApp(
+        ob.page,
+        (app, type: string) =>
+          app.workspace.getLeavesOfType(type)[0].view.store.update((s: any) => {
+            delete s.view.calendarMode;
+          }),
+        VIEW_TYPE,
+      );
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+
+      // ⚑ → the Orrery
+      await flag.click();
+      await orrery.first().waitFor({ state: "visible", timeout: 10_000 });
+      expect(await form.count()).toBe(0);
+      const p0 = await probe();
+      expect(p0.open).toEqual(["orrery"]);
+      expect(p0.mode).toBeNull();
+      expect(await selected(orrery, ".wadjet-studio-calendar-mode")).toBe("orrery");
+      const at = await box(orrery);
+
+      // Orrery → Form: the Orrery closes, the form opens on Year where the Orrery stood
+      await toggle(orrery, "form");
+      await form.first().waitFor({ state: "visible", timeout: 10_000 });
+      await expect.poll(() => orrery.count()).toBe(0);
+      const p1 = await probe();
+      expect(p1.open).toEqual(["calendar"]);
+      expect(p1.mode).toBe("form");
+      expect(p1.persisted).toBe("form");
+      expect(p1.pos.calendar).toEqual(p0.pos.orrery);
+      expect(await box(form)).toEqual(at);
+      const tab = await selected(form, ".wadjet-studio-calendar-tabs");
+      expect(tab).toBe("year");
+      expect(await selected(form, ".wadjet-studio-calendar-mode")).toBe("form");
+
+      // Form → Orrery: back in the same place
+      await toggle(form, "orrery");
+      await orrery.first().waitFor({ state: "visible", timeout: 10_000 });
+      await expect.poll(() => form.count()).toBe(0);
+      const p2 = await probe();
+      expect(p2.open).toEqual(["orrery"]);
+      expect(p2.mode).toBe("orrery");
+      expect(p2.pos.orrery).toEqual(p0.pos.orrery);
+      expect(await box(orrery)).toEqual(at);
+
+      // remembered: Form, close it with ×, and the ⚑ brings the form back, on Seasons as the ⚑ always opened it
+      await toggle(orrery, "form");
+      await form.first().waitFor({ state: "visible", timeout: 10_000 });
+      await form.locator(".wadjet-studio-window-close").click();
+      await expect.poll(() => form.count()).toBe(0);
+      await flag.click();
+      await form.first().waitFor({ state: "visible", timeout: 10_000 });
+      expect(await orrery.count()).toBe(0);
+      expect(await selected(form, ".wadjet-studio-calendar-tabs")).toBe("seasons");
+      expect(await box(form)).toEqual(at);
+
+      // and Orrery, close, ⚑: the Orrery again
+      await toggle(form, "orrery");
+      await orrery.first().waitFor({ state: "visible", timeout: 10_000 });
+      await orrery.locator(".wadjet-studio-window-close").click();
+      await expect.poll(() => orrery.count()).toBe(0);
+      await flag.click();
+      await orrery.first().waitFor({ state: "visible", timeout: 10_000 });
+      expect(await form.count()).toBe(0);
+      const p3 = await probe();
+      expect(p3.open).toEqual(["orrery"]);
+      expect(p3.mode).toBe("orrery");
+      console.log(`  · ⚑ → orrery at ${JSON.stringify(at)}; toggle → form on ${tab} at the same spot, and back; form remembered → ⚑ opens it on Seasons; orrery remembered → ⚑ opens the Orrery`);
+    } finally {
+      await closeBoth();
+      await withApp(
+        ob.page,
+        (app, a: { type: string; saved: { mode: string | null; pos: Record<string, unknown> } }) =>
+          app.workspace.getLeavesOfType(a.type)[0].view.store.update((s: any) => {
+            if (a.saved.mode === null) delete s.view.calendarMode;
+            else s.view.calendarMode = a.saved.mode;
+            for (const id of ["orrery", "calendar"]) {
+              if (a.saved.pos[id]) s.view.windowPos[id] = a.saved.pos[id];
+              else delete s.view.windowPos[id];
+            }
+          }),
+        { type: VIEW_TYPE, saved },
+      );
       await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
       await setStudioWindowSize(before.width, before.height);
       await widenWindow();

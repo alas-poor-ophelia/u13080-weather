@@ -26,7 +26,7 @@
  * The ruler is not a component-bin part (SPEC law 3) — it is chrome, the same
  * status as the header's transport buttons and a floating window's ×.
  */
-import { openCalendarWindow } from "./windows/calendar";
+import { openCalendarView } from "./windows/calendar-mode";
 import type { YearSeam } from "../model/years";
 import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
 import type { CalendarDescription } from "../../plugin/time/adapter";
@@ -219,19 +219,20 @@ export function createRuler(props: RulerProps): RulerComponent {
   const namesEl = ticksEl.createDiv({ cls: "wadjet-studio-ruler-names" });
   const stripEl = ticksEl.createDiv({ cls: "wadjet-studio-ruler-strip" });
 
-  function openSeasons(): void {
-    // one Calendar window, on its Seasons tab (ruled 2026-10-21)
-    openCalendarWindow(props.ctx, "seasons");
+  function openCalendar(): void {
+    // the calendar view last chosen with the Orrery | Form toggle, the Orrery by default
+    // (docs/SESHAT-v0.md §18.3 D9); the form opens on its Seasons tab (ruled 2026-10-21)
+    openCalendarView(props.ctx);
   }
 
   function onLabelClick(): void {
-    openSeasons();
+    openCalendar();
   }
 
   function onLabelKey(ev: KeyboardEvent): void {
     if (ev.key !== "Enter" && ev.key !== " ") return;
     ev.preventDefault();
-    openSeasons();
+    openCalendar();
   }
 
   /** Ruler drag = pan. The window at pointerdown is the origin, so the gesture never drifts. */
