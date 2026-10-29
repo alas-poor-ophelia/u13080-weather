@@ -790,7 +790,14 @@
 }
 .wadjet-studio-knob-dial svg {
   position: absolute;
-  inset: -6px;
+  /* Sized explicitly, not by `inset` alone: an <svg> is a replaced element, so
+     any width/height reaching it (a host rule, or WebKit's own sizing) wins over
+     right/bottom, and the face then sits up and left of the disc and too small.
+     That is what the iPad showed (wadjet-ytu). */
+  top: -6px;
+  left: -6px;
+  width: calc(100% + 12px);
+  height: calc(100% + 12px);
   pointer-events: none;
   overflow: visible;
 }
