@@ -10512,4 +10512,108 @@ describe("climate studio · calendar orrery", () => {
       await nextFrame();
     }
   });
+
+  test("step 96: the Orrery edits the months: the days knob moves the LCD and lights ●, a sub-threshold jiggle leaves the inspector live, a slot renames, ＋ slot after makes the year not add up (issue strip and the month LED), and Undo goes back to clean", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const undo = (): Promise<boolean> => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.undo(), VIEW_TYPE);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const textOf = async (sel: string) => ((await win.locator(sel).first().textContent()) ?? "").trim();
+      const text = () => textOf(".wadjet-studio-orrery-text");
+      const lcd = () => textOf(".wadjet-studio-orrery-lcd");
+      const chip = () => textOf(".wadjet-studio-orrery-chip-label");
+      const issues = async () => (await win.locator(".wadjet-studio-window-issue").allTextContents()).join(" | ");
+      const monthLed = () => win.locator('.wadjet-studio-orrery-row[data-part="unit:month"] .wadjet-studio-orrery-led');
+      const title = () => win.locator(".wadjet-studio-orrery-title-input").inputValue();
+
+      // the Orrery's own day into February (its transport, never the settings' today): January's length moves its date
+      const scrub = win.locator(".wadjet-studio-orrery-scrub");
+      await scrub.focus();
+      for (let i = 0; i < 80 && !(await lcd()).includes("-02-1"); i++) await ob.page.keyboard.press("ArrowRight");
+      await expect.poll(lcd).toMatch(/-02-1\d/);
+      const lcd0 = await lcd();
+
+      // the months: SLOTS · THIS YEAR and its ＋ slot; the units group still has no ＋ (adding a slot unit waits for its editor)
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:month"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOTS");
+      expect(await win.locator('[data-editor="slots"]').count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-orrery-slot").count()).toBe(12);
+      expect(await textOf('[data-part="slot-row-1"] .wadjet-studio-orrery-slot-flag')).toBe("rest");
+      expect(await win.locator('[data-part="add-slot"]').count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="body"]').count()).toBe(1);
+
+      // January: the slot inspector
+      await win.locator('[data-part="slot-row-0"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOT");
+      expect(await win.locator('[data-editor="slot"]').count()).toBe(1);
+      expect(await title()).toBe("January");
+      expect(await text()).toContain("SLOT:January=31");
+      expect(await win.locator('[data-part="slot-filler"] [aria-checked="true"]').textContent()).toBe("off");
+      expect(await chip()).not.toContain("●");
+
+      // the days knob (the world confirm, when it comes, is asked first and the drag made after): February gives the days up
+      const dial = '.wadjet-studio-window[data-kind="orrery"] [data-part="slot-days"] .wadjet-studio-knob-dial';
+      await dragKnobDial(dial, -8);
+      const confirmed = await passAnyConfirm();
+      if (confirmed) await dragKnobDial(dial, -8);
+      await expect.poll(text, { timeout: 10_000 }).not.toContain("SLOT:January=31");
+      const days = /SLOT:January=(\d+)/.exec(await text())?.[1] ?? "";
+      expect(days).toMatch(/^\d+$/);
+      await expect.poll(lcd).not.toBe(lcd0);
+      const lcd1 = await lcd();
+      await expect.poll(chip).toContain("●");
+      expect(stored()).toContain("SLOT:January=31");
+      expect(await issues()).toBe("");
+
+      // a press with a 1 px wobble (under the drag threshold) closes its gesture: the inspector rebuilds on the next edit (5a review)
+      await dragKnobDial(dial, 1);
+      await nextFrame();
+
+      // rename: the TEXT and the title follow
+      const name = win.locator(".wadjet-studio-orrery-title-input");
+      await name.fill("Janus");
+      await name.press("Enter");
+      await passAnyConfirm();
+      await expect.poll(text).toContain(`SLOT:Janus=${days}`);
+
+      // ＋ slot after: the new slot is selected (a frozen inspector would still show Janus), and the year no longer adds up
+      await win.locator('[data-part="slot-add-after"]').click();
+      await passAnyConfirm();
+      await expect.poll(title).toBe("New slot");
+      await expect.poll(issues, { timeout: 10_000 }).toContain("slots take at least");
+      await expect.poll(async () => (await monthLed().getAttribute("class")) ?? "").toContain("is-error");
+      expect(await win.locator('[data-editor="slot"]').count()).toBe(1);
+
+      // Undo back to clean: the drag, the rename and the add are one step each
+      for (let i = 0; i < 6 && (await chip()).includes("●"); i++) {
+        expect(await undo()).toBe(true);
+        await nextFrame();
+      }
+      await expect.poll(chip).not.toContain("●");
+      await expect.poll(issues).toBe("");
+      await expect.poll(async () => (await monthLed().getAttribute("class")) ?? "").not.toContain("is-error");
+      await expect.poll(lcd).toBe(lcd0);
+      expect(stored()).toContain("SLOT:January=31");
+      console.log(`  · orrery slots: January → ${days} d (LCD "${lcd0}" → "${lcd1}"), renamed, ＋ slot after flagged the months, Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
 });

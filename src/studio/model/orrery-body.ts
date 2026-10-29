@@ -16,10 +16,10 @@
  * the step grid's rational (rational-knob.ts `knobRational`).
  */
 import { namedPhasesOf } from "../../plugin/time/form";
-import type { CalendarAst, Rational } from "../../seshat";
+import { frac, fromNumber, rational, toNumber, type CalendarAst, type Rational } from "../../seshat";
 import { draftAst, sameCalendar, type CalendarDraft, type CalendarEdit } from "./definition";
 import { DEFAULT_MOON_PHASES } from "./devices";
-import { knobRational, type KnobStep } from "./rational-knob";
+import { cellOf, cellOfValue, cellValue, knobRational, type KnobStep } from "./rational-knob";
 import type { DraftMoon } from "./state";
 
 export type Phase = { readonly name: string; readonly at: number };
@@ -168,6 +168,43 @@ export function knobWrite(value: number, current: Rational, stored: Rational | n
   const kept = knobRational(value, current, step);
   if (kept === current || stored === null) return kept;
   return knobRational(value, stored, step);
+}
+
+/** The whole turns of `r` (floor), exactly. */
+function wholeTurns(r: Rational): number {
+  const m = ((r.n % r.d) + r.d) % r.d;
+  return (r.n - m) / r.d;
+}
+
+/**
+ * The epoch an epoch knob writes for its float `value`, the fraction of a turn
+ * it shows (frac of the epoch, 0 to `max`): the draft's `current` epoch while
+ * the knob is in the cell its fraction shows in, else the `stored` epoch in
+ * that one's, else the grid's fraction plus the current epoch's whole turns
+ * (so 3/2 moved by a step is 151/100, never 51/100). A fraction past the
+ * knob's top (0.995 up to 1) shows in its top cell, so a drag back there
+ * snaps back to it too.
+ */
+export function epochWrite(value: number, current: Rational, stored: Rational | null, step: KnobStep, max: number): Rational {
+  const top = cellOfValue(max, step);
+  const shown = (r: Rational): number => Math.min(cellOf(frac(r), step), top);
+  const cell = Math.min(cellOfValue(value, step), top);
+  if (cell === shown(current)) return current;
+  if (stored !== null && cell === shown(stored)) return stored;
+  const f = cellValue(cell, step);
+  return rational(f.n + wholeTurns(current) * f.d, f.d);
+}
+
+/**
+ * The fraction a 0-to-`max` fraction knob writes (a phase's `at`): `origin`
+ * while the knob is in the cell it shows in (a drag back to the start keeps
+ * it exactly, 0.995 included), else the cell's value on the step grid.
+ */
+export function fractionWrite(value: number, origin: number, step: KnobStep, max: number): number {
+  const top = cellOfValue(max, step);
+  const cell = Math.min(cellOfValue(value, step), top);
+  if (Number.isFinite(origin) && cell === Math.min(cellOf(fromNumber(origin), step), top)) return origin;
+  return toNumber(cellValue(cell, step));
 }
 
 /** The ids of the rules that read phase `name` of body `id` by name (their chips in the inspector). */

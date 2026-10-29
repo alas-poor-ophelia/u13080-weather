@@ -14,7 +14,7 @@ import { toNumber, type BodyAst, type CalendarAst, type PartId, type Rational } 
 import { moveMoon, type CalendarDraft, type CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
 import { phaseName } from "../../model/orrery-geometry";
-import { addPhase, knobWrite, moonOf, phaseRules, removeBody, renameBody, setBodyPhases, type Phase } from "../../model/orrery-body";
+import { addPhase, epochWrite, fractionWrite, knobWrite, moonOf, phaseRules, removeBody, renameBody, setBodyPhases, type Phase } from "../../model/orrery-body";
 import { fromMolad, moladOf, type Molad } from "../../model/rational-knob";
 import { createChip, createKnob, type ChipComponent, type KnobComponent, type KnobPhase } from "../components";
 
@@ -42,10 +42,16 @@ export interface BodyEditor {
   destroy(): void;
 }
 
+/** Every Orrery part editor has this shape (the body's, and slice 5b's year, slot unit and slot editors). */
+export type PartEditor = BodyEditor;
+
 const PERIOD_STEP: Rational = { n: 1, d: 100 };
 const EPOCH_STEP: Rational = { n: 1, d: 100 };
+/** The top of a 0-to-1 fraction knob: 0.99 (a fraction from 0.995 up shows there and snaps back there). */
+const FRACTION_MAX = 0.99;
 
-function button(parent: HTMLElement, text: string, label: string, hint: string, part: string, onClick: () => void): HTMLElement {
+/** An op button (Enter and Space press it too). */
+export function button(parent: HTMLElement, text: string, label: string, hint: string, part: string, onClick: () => void): HTMLElement {
   const el = parent.createDiv({ cls: "wadjet-studio-orrery-op", text, attr: { role: "button", tabindex: "0", "aria-label": label, "data-hint": hint, "data-part": part } });
   el.addEventListener("click", onClick);
   el.addEventListener("keydown", (ev) => {
@@ -57,7 +63,7 @@ function button(parent: HTMLElement, text: string, label: string, hint: string, 
 }
 
 /** A text input that commits on change (Enter, or leaving it); Escape puts the drawn value back. */
-function input(parent: HTMLElement, value: string, label: string, hint: string, part: string, cls: string, commit: (text: string) => void): HTMLInputElement {
+export function input(parent: HTMLElement, value: string, label: string, hint: string, part: string, cls: string, commit: (text: string) => void): HTMLInputElement {
   const el = parent.createEl("input", { cls, type: "text", attr: { spellcheck: "false", "aria-label": label, "data-hint": hint, "data-part": part } });
   el.value = value;
   el.addEventListener("keydown", (ev) => {
@@ -135,12 +141,13 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
   const ep = toNumber(epoch) - Math.floor(toNumber(epoch));
   knobs.push(
     createKnob(knobRow.createDiv({ cls: "wadjet-studio-orrery-knob", attr: { "data-part": "body-epoch" } }), {
-      spec: { min: 0, max: 0.99, step: 0.01 },
-      value: ep,
+      spec: { min: 0, max: FRACTION_MAX, step: 0.01 },
+      value: Math.min(FRACTION_MAX, ep),
       label: "epoch",
       fmt: (v) => v.toFixed(2),
       hint: orreryHint("orrery.epoch"),
-      onChange: (v, phase) => deps.edit((c, b) => moveTo(c, b, { epoch: knobWrite(v, epoch, stored?.epoch ?? null, EPOCH_STEP) }), phase),
+      // the knob shows the fraction of a turn; the whole turns of the epoch are kept (5a review)
+      onChange: (v, phase) => deps.edit((c, b) => moveTo(c, b, { epoch: epochWrite(v, epoch, stored?.epoch ?? null, EPOCH_STEP, FRACTION_MAX) }), phase),
     }),
   );
 
@@ -162,10 +169,14 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
           hint,
           onChange: (v, phase) =>
             deps.edit((c, b) => {
-              const w = fromMolad({ ...m.molad, [key]: Math.round(v) });
+              const next = { ...m.molad, [key]: Math.round(v) };
+              // a drag back to where the molad began keeps the period exactly as it was, even one that is no whole
+              // number of parts (its knobs show it rounded); one back to the stored molad writes the stored period
+              if (next.days === m.molad.days && next.hours === m.molad.hours && next.parts === m.molad.parts) return moveTo(c, b, { period });
+              const w = fromMolad(next);
               if (w.kind === "refused") return { refused: true, reason: w.reason };
-              // a drag back to where the molad began keeps the period exactly as it was
-              return moveTo(c, b, { period: w.value.n * period.d === period.n * w.value.d ? period : w.value });
+              const same = (r: Rational | null | undefined): r is Rational => !!r && w.value.n * r.d === r.n * w.value.d;
+              return moveTo(c, b, { period: same(period) ? period : same(stored?.period) ? stored.period : w.value });
             }, phase),
         }),
       );
@@ -187,14 +198,15 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
     row.toggleClass("is-current", p.name === current);
     input(row, p.name, `Phase ${i + 1} name`, orreryHint("orrery.phaseName"), `phase-${i}-name`, "wadjet-studio-orrery-phase-name", (text) => write((ps) => ps.map((q, j) => (j === i ? { ...q, name: text } : q)), "click"));
     knobs.push(
-      createKnob(row.createDiv({ cls: "wadjet-studio-orrery-knob" }), {
-        spec: { min: 0, max: 0.99, step: 0.01 },
-        value: Math.min(0.99, p.at),
+      createKnob(row.createDiv({ cls: "wadjet-studio-orrery-knob", attr: { "data-part": `phase-${i}-at` } }), {
+        spec: { min: 0, max: FRACTION_MAX, step: 0.01 },
+        value: Math.min(FRACTION_MAX, p.at),
         label: "at",
         size: "sm",
         fmt: (v) => v.toFixed(2),
         hint: orreryHint("orrery.phaseAt"),
-        onChange: (v, phase) => write((ps) => ps.map((q, j) => (j === i ? { ...q, at: Math.round(v * 100) / 100 } : q)), phase),
+        // a drag back to where the phase began keeps its exact start (5a review)
+        onChange: (v, phase) => write((ps) => ps.map((q, j) => (j === i ? { ...q, at: fractionWrite(v, p.at, EPOCH_STEP, FRACTION_MAX) } : q)), phase),
       }),
     );
     button(row, "×", `Remove phase ${p.name}`, orreryHint("orrery.phaseRemove"), `phase-${i}-remove`, () => write((ps) => ps.filter((_, j) => j !== i), "click"));

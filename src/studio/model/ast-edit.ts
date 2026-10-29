@@ -1,7 +1,10 @@
 /**
  * Edits to the parts of a Seshat definition the form model does not reach
  * (docs/SESHAT-v0.md §18.6 items 2 and 11, bead wadjet-b6x): gears, stages,
- * crossings and dated season marks. Pure: AST in, AST out, no DOM, no store.
+ * crossings, dated season marks, and (slice 5b) a year's length and a slot
+ * unit's slots where the form reads them as text (a filler or gear-carrying
+ * slot, tags, limits, keyed lengths, nested units, a second slot unit).
+ * Pure: AST in, AST out, no DOM, no store.
  *
  * - Every edit returns `{ ast }` or `{ refused, reason }`; a refusal names
  *   what is wrong in on-screen terms and the draft stays as it was. The checks
@@ -9,7 +12,9 @@
  *   `problems()` on the result (it costs 70-216 ms on Hebrew, §18.6 item 7),
  *   so no edit here calls it.
  * - Each edit touches one SLICE of the AST: one gear, one unit's stages, one
- *   unit's crossing, or the season marks. Slices are how a Save replays the
+ *   unit's crossing, one cycle unit's constant length, one slot unit's slots,
+ *   or the season marks (a slot edit that moves slots also moves the marks
+ *   that name them, so it touches two). Slices are how a Save replays the
  *   draft's edits onto the definition stored at Save time (definition.ts
  *   `mergeCalendar`): a slice the draft did not edit passes through as stored
  *   now, and a slice it did edit is refused when it changed in storage since.
@@ -19,7 +24,7 @@
  *   start day by less than one day, so K stays.
  */
 import { canonicalJson } from "../../core/profile";
-import { epochEditK, rational, type BodyRef, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type Rational, type SeasonMarkAst, type SeasonsAst, type StageAst, type UnitAst } from "../../seshat";
+import { childrenOf, epochEditK, rational, type BodyRef, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type Rational, type RuleAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
 
 export type AstEdit = { readonly ast: CalendarAst } | { readonly refused: true; readonly reason: string };
 
@@ -30,8 +35,11 @@ const isReduced = (r: Rational): boolean => isInt(r.n) && isInt(r.d) && r.d > 0 
 
 // ---- slices
 
-/** One editable slice of a definition: a gear by id, a cycle unit's stages or crossing by unit id, or the season marks. */
-export type SliceKey = `gear:${string}` | `stages:${string}` | `crossing:${string}` | "marks";
+/**
+ * One editable slice of a definition: a gear by id; a cycle unit's stages, crossing or constant length (`length:`)
+ * by unit id; a slot unit's slots (`slots:`) by unit id; or the season marks.
+ */
+export type SliceKey = `gear:${string}` | `stages:${string}` | `crossing:${string}` | `length:${string}` | `slots:${string}` | "marks";
 
 /** What a slice reads on a definition without the unit it names (distinct from a unit without stages). */
 export const NO_UNIT = "\u0000no unit";
@@ -41,23 +49,31 @@ function cycleUnit(ast: CalendarAst, id: string): CycleUnitAst | undefined {
   return u?.kind === "cycle" ? u : undefined;
 }
 
-/** The value of slice `key` on `ast` (undefined: absent; NO_UNIT: the unit itself is missing or not a cycle). */
+function slotUnit(ast: CalendarAst, id: string): SlotsUnitAst | undefined {
+  const u = ast.units.find((x) => x.id === id);
+  return u?.kind === "slots" ? u : undefined;
+}
+
+/** The value of slice `key` on `ast` (undefined: absent; NO_UNIT: the unit itself is missing or not of the slice's kind). */
 export function sliceOf(ast: CalendarAst, key: SliceKey): unknown {
   if (key === "marks") return ast.seasons;
   const at = key.indexOf(":");
   const kind = key.slice(0, at);
   const id = key.slice(at + 1);
   if (kind === "gear") return ast.gears.find((g) => g.id === id);
+  if (kind === "slots") return slotUnit(ast, id)?.slots ?? NO_UNIT;
   const u = cycleUnit(ast, id);
   if (!u) return NO_UNIT;
+  if (kind === "length") return u.crossing ? undefined : u.length;
   return kind === "stages" ? u.stages : u.crossing;
 }
 
-/** Every slice key either definition has, in a stable order: gears, then each cycle unit's stages and crossing, then the marks. */
+/** Every slice key either definition has, in a stable order: gears, then each cycle unit's stages, crossing and length, each slot unit's slots, then the marks. */
 function sliceKeys(a: CalendarAst, b: CalendarAst): SliceKey[] {
   const gears = [...new Set([...a.gears, ...b.gears].map((g) => g.id))];
   const units = [...new Set([...a.units, ...b.units].filter((u) => u.kind === "cycle").map((u) => u.id))];
-  return [...gears.map((id): SliceKey => `gear:${id}`), ...units.flatMap((id): SliceKey[] => [`stages:${id}`, `crossing:${id}`]), "marks"];
+  const slotted = [...new Set([...a.units, ...b.units].filter((u) => u.kind === "slots").map((u) => u.id))];
+  return [...gears.map((id): SliceKey => `gear:${id}`), ...units.flatMap((id): SliceKey[] => [`stages:${id}`, `crossing:${id}`, `length:${id}`]), ...slotted.map((id): SliceKey => `slots:${id}`), "marks"];
 }
 
 /** The slices `draft` changed from `base`. */
@@ -88,8 +104,20 @@ export function withSlice(ast: CalendarAst, key: SliceKey, value: unknown): Cale
     const g = value as GearAst;
     return { ...ast, gears: has ? ast.gears.map((x) => (x.id === id ? g : x)) : [...ast.gears, g] };
   }
+  if (kind === "slots") {
+    const s = slotUnit(ast, id);
+    if (!s || !Array.isArray(value)) return null; // a slot unit always has its slots; adding or removing a unit is no slice
+    const next: SlotsUnitAst = { ...s, slots: value as SlotAst[] };
+    return { ...ast, units: ast.units.map((x) => (x === s ? next : x)) };
+  }
   const u = cycleUnit(ast, id);
   if (!u) return null;
+  if (kind === "length") {
+    if (u.crossing) return value === undefined ? ast : null; // a crossing base has no length of its own
+    if (typeof value !== "number") return null;
+    const next = { ...u, length: value } as UnitAst;
+    return { ...ast, units: ast.units.map((x) => (x === u ? next : x)) };
+  }
   const field = kind === "stages" ? "stages" : "crossing";
   if (field === "crossing" && (value === undefined) !== (u.crossing === undefined)) return null; // a base kind changes with its anchor and length, which no slice holds
   const { [field]: _old, ...rest } = u as CycleUnitAst & Record<string, unknown>;
@@ -100,7 +128,10 @@ export function withSlice(ast: CalendarAst, key: SliceKey, value: unknown): Cale
 /** `ast` with every slice taken out: two definitions that differ only in their slices are equal here. */
 export function outsideSlices(ast: CalendarAst): unknown {
   const { gears: _g, seasons: _s, units, ...rest } = ast;
-  return { ...rest, units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : u)) };
+  return {
+    ...rest,
+    units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, length: _l, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : (({ slots: _sl, ...x }) => x)(u))),
+  };
 }
 
 // ---- gears
@@ -351,4 +382,103 @@ export function removeSeasonMark(ast: CalendarAst, index: number): AstEdit {
   if (marks.length) return { ast: { ...ast, seasons: { ...s, marks } } };
   const { seasons: _s, ...rest } = ast;
   return { ast: rest };
+}
+
+// ---- a cycle unit's length and a slot unit's slots (slice 5b)
+
+/**
+ * A cycle unit's base length in days (its gear terms still add to it). A
+ * crossing base has no length of its own: its occurrences run from one
+ * crossing to the next.
+ */
+export function setCycleLength(ast: CalendarAst, unitId: string, length: number): AstEdit {
+  const u = cycleUnit(ast, unitId);
+  if (!u) return refuse(`there is no cycle unit "${unitId}"`);
+  if (u.crossing) return refuse(`the ${unitId} starts by a crossing, so its length is the days from one crossing to the next`);
+  if (!isInt(length) || length < 1) return refuse(`a ${unitId} of ${length} days; write a whole number of at least 1`);
+  const next = withSlice(ast, `length:${unitId}`, length);
+  return next ? { ast: next } : refuse(`there is no cycle unit "${unitId}"`);
+}
+
+/** Why a slot cannot be written, or null. */
+function slotProblem(s: SlotAst): string | null {
+  if (s.name !== undefined && (typeof s.name !== "string" || s.name.trim() === "")) return "a slot's name cannot be blank";
+  if (typeof s.length === "number") {
+    if (!isInt(s.length) || s.length < 0) return `a slot of ${s.length} days; write a whole number from 0 up`;
+  } else if (s.length !== "slack" && !(typeof s.length === "object" && s.length.by === "parent")) return "a slot is a number of days, or takes the rest";
+  if (s.length !== "slack" && (s.min !== undefined || s.max !== undefined || s.fill !== undefined)) return "only a slot that takes the rest has a fewest, a most or a fill order";
+  for (const v of [s.min, s.max, s.fill]) if (v !== undefined && (!isInt(v) || v < 0)) return "a slot's fewest, most and fill order are whole numbers from 0 up";
+  if (s.filler !== undefined && typeof s.filler !== "boolean") return "a slot is a filler or it is not";
+  return null;
+}
+
+/** Whether slot unit `inner` sits (at any depth) inside slot unit `outer`. */
+function inside(ast: CalendarAst, inner: string, outer: string): boolean {
+  for (let u = slotUnit(ast, inner), n = 0; u && n < ast.units.length; u = slotUnit(ast, u.in), n++) if (u.in === outer) return true;
+  return false;
+}
+
+/**
+ * Why the slots of `unitId` cannot be added to, removed from or reordered, or
+ * null: a rule reads the unit by number (it would then match other slots), or
+ * an exception sets the lengths of this unit, or of one inside it, slot by
+ * slot. A length, name or flag change keeps every slot's number and is never
+ * refused here.
+ */
+export function slotOrderProblem(ast: CalendarAst, unitId: string): string | null {
+  const reads = (r: RuleAst): boolean => (r.kind === "index" && r.unit === unitId) || childrenOf(r).some(reads);
+  const rule = (ast.rules ?? []).find((r) => reads(r.rule));
+  if (rule) return `the rule "${rule.name ?? rule.id}" reads the ${unitId} by number; change it first (Edit definition)`;
+  for (const u of ast.units) {
+    if (u.kind !== "cycle") continue;
+    const e = (u.ledger ?? []).find((x) => x.kind === "slots" && (x.unit === unitId || inside(ast, x.unit, unitId)));
+    if (e) return `an exception sets the ${e.kind === "slots" ? e.unit : unitId} lengths slot by slot; change it first (Exceptions)`;
+  }
+  return null;
+}
+
+/**
+ * Set slot unit `unitId`'s slots. `from[i]` is the index in the current list
+ * that slot i was, or null for a new slot (omitted: slot for slot). A season
+ * mark on a slot of this unit follows its slot; a mark whose slot is gone
+ * refuses the edit, naming the season. Adding, removing or reordering is
+ * refused while `slotOrderProblem` names a reason. Whether the slots still
+ * fill their parent is `problems()`'s to say (the caller runs it).
+ */
+export function setSlotUnit(ast: CalendarAst, unitId: string, slots: readonly SlotAst[], from?: ReadonlyArray<number | null>): AstEdit {
+  const u = slotUnit(ast, unitId);
+  if (!u) return refuse(`there is no slot unit "${unitId}"`);
+  if (slots.length === 0) return refuse(`the ${unitId} needs at least one slot`);
+  const was = from ?? slots.map((_, i) => i);
+  if (was.length !== slots.length) return refuse("every slot needs to say where it came from");
+  for (const s of slots) {
+    const why = slotProblem(s);
+    if (why) return refuse(why);
+  }
+  const reordered = was.length !== u.slots.length || was.some((f, i) => f !== i);
+  if (reordered) {
+    const why = slotOrderProblem(ast, unitId);
+    if (why) return refuse(why);
+  }
+  let out: CalendarAst | null = withSlice(ast, `slots:${unitId}`, slots.map((s) => ({ ...s })));
+  if (!out) return refuse(`there is no slot unit "${unitId}"`);
+  const seasons = out.seasons;
+  if (reordered && seasons?.marks.some((m) => "slot" in m && m.slot.unit === unitId)) {
+    const marks: SeasonMarkAst[] = [];
+    for (const m of seasons.marks) {
+      if (!("slot" in m) || m.slot.unit !== unitId) {
+        marks.push(m);
+        continue;
+      }
+      const index = was.indexOf(m.slot.index);
+      if (index < 0) {
+        const name = u.slots[m.slot.index]?.name ?? `${unitId} ${m.slot.index + (u.number ?? 1)}`;
+        return refuse(`the season ${m.name} starts in ${name}, so ${name} cannot be removed; change the season first`);
+      }
+      marks.push(index === m.slot.index ? m : { ...m, slot: { ...m.slot, index } });
+    }
+    out = withSlice(out, "marks", { ...seasons, marks });
+    if (!out) return refuse("the season marks cannot follow their slots");
+  }
+  return { ast: out };
 }

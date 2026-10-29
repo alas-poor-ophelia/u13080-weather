@@ -125,6 +125,8 @@ export function createKnob(parent: HTMLElement, initial: KnobProps): KnobCompone
   checkSpec(initial.spec);
   let props = initial;
   let cancelDrag: (() => void) | null = null;
+  /** a "drag" was reported in the gesture under way (its "end" is owed) */
+  let dragged = false;
 
   const el = parent.createDiv({ cls: "wadjet-studio-knob" });
   const dial = el.createDiv({ cls: "wadjet-studio-knob-dial" });
@@ -213,12 +215,20 @@ export function createKnob(parent: HTMLElement, initial: KnobProps): KnobCompone
     ev.preventDefault();
     dial.focus();
     const start = props.value;
+    dragged = false;
     cancelDrag = beginDrag(ev, {
       capture: dial,
-      onMove: (move, _dx, dy) => commit(dragToValue(start, dy, props.spec, move.shiftKey), "drag"),
+      onMove: (move, _dx, dy) => {
+        dragged = true;
+        commit(dragToValue(start, dy, props.spec, move.shiftKey), "drag");
+      },
       onEnd: (end, _dx, dy, moved) => {
         cancelDrag = null;
-        if (moved) commit(dragToValue(start, dy, props.spec, end.shiftKey), "end");
+        // a "drag" frame always gets its "end", even under the drag threshold (a 1 px wobble), so a consumer
+        // holding its rebuilds for the gesture never waits for one that does not come
+        const close = moved || dragged;
+        dragged = false;
+        if (close) commit(dragToValue(start, dy, props.spec, end.shiftKey), "end");
       },
     });
   }
@@ -253,6 +263,13 @@ export function createKnob(parent: HTMLElement, initial: KnobProps): KnobCompone
     },
     destroy() {
       cancelDrag?.();
+      cancelDrag = null;
+      // destroyed mid-gesture: the owed "end" closes it at the value last reported (no new value, so a consumer
+      // only commits what its frames already wrote)
+      if (dragged) {
+        dragged = false;
+        if (!props.disabled) props.onChange(props.value, "end");
+      }
       dial.removeEventListener("pointerdown", onPointerDown);
       dial.removeEventListener("keydown", onKeyDown);
       dial.removeEventListener("dblclick", openInput);

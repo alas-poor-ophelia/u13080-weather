@@ -8,13 +8,22 @@
  *   draft, Save and undo. A draft without the AST layer (another build's
  *   state) draws the stored definition, read-only.
  * - Editors, slice 5a: the body inspector (windows/orrery-body.ts) and the
- *   parts list's ＋ body. Every edit runs behind the session's world confirm;
+ *   parts list's ＋ body. Slice 5b: the year, slot unit and slot inspectors
+ *   (windows/orrery-slots.ts). The units group shows no ＋: adding a slot
+ *   unit (or a cycle) waits for its editor; a slot is added from the slot
+ *   unit's own inspector.
+ * - A draft that does not run (slots that no longer fill their year, the
+ *   commonest outcome of a slot edit) keeps the editors open: the scope,
+ *   list and NOW draw the last draft that ran, the verdict and TEXT are the
+ *   draft's own, and the issue strip says the scope is behind.
+ * - Every edit runs behind the session's world confirm;
  *   a click or typed value is one undo step, and a knob drag is one too: its
  *   frames update the store without history and its end calls `snapshot()`
  *   (store.ts). A refusal shows its reason in the inspector and changes
  *   nothing. The title chip shows ● while the calendar draft is dirty, and
- *   its menu's "↺ revert edits" puts the calendar part of the draft back to
- *   its base, as one undo step.
+ *   its menu's "↺ revert calendar edits" puts the whole calendar part of the
+ *   draft (form, seasons and moon edits too) back to its base, as one undo
+ *   step, behind the world confirm like every other edit.
  *
  * - A 3-column body (the handoff's 216 px | scope | 284 px): the parts list,
  *   the scope (ui/orrery-canvas.ts) with its view switch, hover tag,
@@ -36,7 +45,7 @@
  *   `calendar-mode.ts` (slice 1b), which wraps this builder.
  */
 import { Menu, type EventRef } from "obsidian";
-import type { CalendarAst, PartId, Problem } from "../../../seshat";
+import { printPart, type CalendarAst, type PartId, type Problem } from "../../../seshat";
 import { OptInModal } from "../../../plugin/calendar-modals";
 import { WORLD_PRESETS } from "../../../plugin/opt-in";
 import { draftOf, type CalendarDraft, type CalendarEdit } from "../../model/definition";
@@ -51,8 +60,9 @@ import { createOrreryCanvas, type OrreryCanvas } from "../orrery-canvas";
 import { beginDrag, markDragTarget } from "../pointer";
 import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
-import { confirmWorldEdit } from "../world-confirm-modal";
-import { buildBodyEditor, type BodyEditor, type EditPhase } from "./orrery-body";
+import { confirmWorldEdit, type WorldSubject } from "../world-confirm-modal";
+import { buildBodyEditor, type EditPhase, type PartEditor } from "./orrery-body";
+import { buildSlotEditor, buildSlotUnitEditor, buildYearEditor } from "./orrery-slots";
 
 /** The id this window is registered and opened under. */
 export const ORRERY_WINDOW = "orrery";
@@ -176,15 +186,22 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   let flushNext = false;
   /** problems ran inside a paint: the chrome (LED, issue strip) is refreshed at its end */
   let chromeStale = false;
-  let editor: BodyEditor | null = null;
+  let editor: PartEditor | null = null;
+  /** the editor is being torn down: a knob's closing "end" only closes its undo step (no re-entrant paint) */
+  let tearing = false;
+  /** the last draft AST that runs, and the AST the scope draws (the draft, or that one while the draft does not run) */
+  let lastDrawn: CalendarAst | null = null;
+  let drawnAst: CalendarAst | null = null;
+  /** the scope draws `lastDrawn`, not the draft */
+  let behind = false;
 
   const look = (): { theme: OrreryTheme; scanlines: boolean } => ctx.store.get().view.orrery ?? { theme: "phosphor", scanlines: true };
 
   // ---- the scope
   const canvas: OrreryCanvas = createOrreryCanvas(scopeEl, {
     build: (d) => {
-      if (!ast) return null;
-      const m = buildOrrery(ast, d, { problems: verdict });
+      if (!drawnAst) return null;
+      const m = buildOrrery(drawnAst, d, { problems: verdict });
       return m.kind === "orrery" ? m : null;
     },
     onHover: (part) => {
@@ -303,7 +320,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     if (editable)
       menu.addItem((item) =>
         item
-          .setTitle("↺ revert edits")
+          .setTitle("↺ revert calendar edits")
           .setDisabled(!dirty)
           .onClick(() => revert()),
       );
@@ -389,7 +406,15 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
    * A click or typed value is one undo step; drag frames update without history and the drag's end snapshots,
    * so a drag is one step (store.ts); the end also runs `problems()` at once.
    */
-  function edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void {
+  function edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase, subject: WorldSubject = selected?.startsWith("body:") ? "moons" : "calendar"): void {
+    if (tearing || closed) {
+      // a knob destroyed mid-drag closes its gesture: its frames are already in the store, so they become one step
+      if (phase === "end" && dragging) {
+        dragging = false;
+        ctx.store.snapshot();
+      }
+      return;
+    }
     if (!editable) return;
     if (needsWorldConfirm()) {
       // the confirm cannot interrupt a live gesture: ask first, drag after
@@ -401,10 +426,10 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
           dragging = false;
           redrawInspector();
         };
-        confirmWorldEdit(ctx.plugin.app, ctx, "moons", after, after);
+        confirmWorldEdit(ctx.plugin.app, ctx, subject, after, after);
         return;
       }
-      confirmWorldEdit(ctx.plugin.app, ctx, "moons", () => edit(make, phase), redrawInspector);
+      confirmWorldEdit(ctx.plugin.app, ctx, subject, () => edit(make, phase, subject), redrawInspector);
       return;
     }
     if (asking) return;
@@ -421,10 +446,9 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
       editor?.setRefusal(r.reason);
       if (phase === "drag") return;
       dragging = false;
-      if (phase === "end") {
-        flushNext = true;
-        ctx.store.snapshot(); // earlier frames of the drag may have moved the draft: they are its one step
-      }
+      // earlier frames of the drag may have moved the draft: they are its one step (no AST change is pending
+      // from this refusal, so `flushNext` stays as it was: it is set on the success path only)
+      if (phase === "end") ctx.store.snapshot();
       redrawInspector();
       return;
     }
@@ -445,6 +469,12 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   /** Put the calendar part of the draft back to its base: the draft drawn is the stored definition again. One undo step. */
   function revert(): void {
     if (!editable || !dirty) return;
+    if (needsWorldConfirm()) return void confirmWorldEdit(ctx.plugin.app, ctx, "calendar", () => revertNow(), redrawInspector);
+    revertNow();
+  }
+  function revertNow(): void {
+    if (!editable || !dirty) return;
+    dragging = false;
     ctx.store.update(
       (x) => {
         x.world.calendar = structuredClone(draftOf(baseOf(x)));
@@ -463,7 +493,13 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
         listKey = "";
       }
       return r;
-    }, "click");
+    }, "click", "moons");
+  }
+
+  /** The editors' `selectAfter`: the part the edit in hand lands on (a moved, added or removed slot). */
+  function selectAfter(part: PartId): void {
+    selected = part;
+    listKey = "";
   }
 
   // ---- moving the day
@@ -490,6 +526,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
 
   function select(part: PartId | null): void {
     if (part !== selected) refusal = null;
+    // a selection rebuilds the inspector: a drag that never sent its end (a knob gone mid-gesture) is over
+    dragging = false;
     selected = part;
     canvas.setHighlight({ selected, errors });
     paint();
@@ -542,10 +580,46 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     }
   }
 
+  /** Whether `part` is a part of the draft (the scope may be drawing an older AST that lacks it). */
+  function inDraft(part: PartId): boolean {
+    if (!ast) return false;
+    try {
+      return printPart(ast, part) !== null;
+    } catch {
+      return true; // it is there, but prints with an error
+    }
+  }
+  /** The inspector's header and NOW: the model's, or for a part only the draft has, its name and why NOW is empty. */
+  function infoOf(m: OrreryModel): ReturnType<typeof partInfo> {
+    const info = partInfo(m, selected);
+    if (selected === null || !ast || !inDraft(selected)) return info;
+    const [kind, id, n] = selected.split(":") as [string, string, string | undefined];
+    // a slot of the older AST the scope draws may be another slot of the draft (an added one shifts the rest)
+    if (info.code !== "—" && !(behind && kind === "slot")) return info;
+    const u = ast.units.find((x) => x.id === id);
+    const slot = kind === "slot" && u?.kind === "slots" ? u.slots[Number(n)] : undefined;
+    const title = slot && u?.kind === "slots" ? (slot.name ?? `slot ${Number(n) + (u.number ?? 1)}`) : id;
+    return { code: kind === "slot" ? "C2 · SLOT" : "C2", title, sub: "in the draft · the scope shows the last calendar that runs", now: [{ key: "this year", value: "— (the draft does not run)", tone: "err" }] };
+  }
+  /** The control in the inspector that has focus (its `data-part`), so a rebuild can give it back. */
+  function focusedPart(): string | null {
+    const a = inspEl.ownerDocument.activeElement;
+    if (!a || !inspEl.contains(a)) return null;
+    return a.closest("[data-part]")?.getAttribute("data-part") ?? null;
+  }
+  /** Give focus back to the control with `part` after a rebuild (a knob's dial, else the control itself). */
+  function refocus(part: string | null): void {
+    if (part === null) return;
+    const el = Array.from(inspEl.querySelectorAll<HTMLElement>("[data-part]")).find((x) => x.getAttribute("data-part") === part);
+    if (!el) return;
+    const target = el.matches("input, [tabindex]") ? el : el.querySelector<HTMLElement>("input, [tabindex='0']");
+    target?.focus();
+  }
+
   let inspKey = "";
   function paintInspector(): void {
     const m = model;
-    const k = m ? JSON.stringify([selected, m.today.day, verdictFor === m.ast, stale, revision, editable]) : "";
+    const k = m ? JSON.stringify([selected, m.today.day, verdictFor === ast, stale, revision, editable, behind]) : "";
     if (k === inspKey) return;
     inspKey = k;
     if (m && dragging && editor) {
@@ -553,11 +627,24 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
       paintReadouts(m);
       return;
     }
-    editor?.destroy();
+    // a keyboard edit rebuilds the inspector: the control that had focus gets it back (5a review)
+    const hadFocus = focusedPart();
+    const old = editor;
     editor = null;
+    tearing = true;
+    try {
+      old?.destroy();
+    } finally {
+      tearing = false;
+    }
+    dragging = false;
     inspEl.empty();
     if (!m) return;
-    const info = partInfo(m, selected);
+    buildInspector(m);
+    refocus(hadFocus);
+  }
+  function buildInspector(m: OrreryModel): void {
+    const info = infoOf(m);
     const head = inspEl.createDiv({ cls: "wadjet-studio-orrery-insp-head" });
     head.createSpan({ cls: "wadjet-studio-orrery-code", text: info.code });
     head.createDiv({ cls: "wadjet-studio-orrery-spring" });
@@ -574,11 +661,20 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     inspEl.createDiv({ cls: "wadjet-studio-orrery-sub", text: info.sub });
     nowEl = inspEl.createDiv({ cls: "wadjet-studio-orrery-section is-now" });
     paintNow(info.now);
-    const [kind, id] = (selected ?? "").split(":") as [string, string | undefined];
+    const [kind, id, n] = (selected ?? "").split(":") as [string, string | undefined, string | undefined];
+    const draft = ast ?? m.ast;
+    const host = (name: string): HTMLElement => inspEl.createDiv({ cls: "wadjet-studio-orrery-editor", attr: { "data-editor": name } });
+    const unit = id === undefined ? undefined : draft.units.find((u) => u.id === id);
+    if (editable && id !== undefined && (kind === "unit" || kind === "slot") && unit) {
+      const deps = { ast: draft, unitId: id, refusal, edit, select: (part: PartId) => select(part), selectAfter };
+      if (unit.kind === "cycle" && kind === "unit" && (unit.id === m.year.unit || unit.id === "year")) editor = buildYearEditor(host("year"), deps);
+      else if (unit.kind === "slots" && kind === "unit") editor = buildSlotUnitEditor(host("slots"), { ...deps, lengths: lengthsOf(m, unit) });
+      else if (unit.kind === "slots" && kind === "slot" && n !== undefined) editor = buildSlotEditor(host("slot"), title, { ...deps, index: Number(n), lengths: lengthsOf(m, unit) });
+    }
     if (kind === "body" && id !== undefined && editable) {
       const st = ctx.store.get();
-      editor = buildBodyEditor(inspEl.createDiv({ cls: "wadjet-studio-orrery-editor", attr: { "data-editor": "body" } }), title, {
-        ast: m.ast,
+      editor = buildBodyEditor(host("body"), title, {
+        ast: draft,
         baseAst: baseOf(st).ast ?? null,
         calendar: st.world.calendar,
         bodyId: id,
@@ -622,11 +718,17 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     }
   }
   function paintText(m: OrreryModel): void {
-    textEl?.setText(partText(m.ast, selected) || "(this part writes no text of its own)");
+    textEl?.setText(partText(ast ?? m.ast, selected) || "(this part writes no text of its own)");
+  }
+  /** This year's lengths of slot unit `u`'s slots, in the parent occurrence holding the day; null while the scope is behind the draft. */
+  function lengthsOf(m: OrreryModel, u: { id: string; in: string }): readonly number[] | null {
+    if (behind || m.ast !== ast) return null;
+    const t = m.year.slots.find((x) => x.unit === u.id && (u.in === m.year.unit || x.path[x.path.length - 1] === m.today.positions.get(u.in)?.index)) ?? m.year.slots.find((x) => x.unit === u.id);
+    return t?.lengths ?? null;
   }
   /** NOW and TEXT only, from the draft as it is (a drag in progress keeps the editor's controls). */
   function paintReadouts(m: OrreryModel): void {
-    paintNow(partInfo(m, selected).now);
+    paintNow(infoOf(m).now);
     paintText(m);
   }
 
@@ -713,6 +815,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     if (!ast) {
       selected = null;
       hover = null;
+      dragging = false;
+      lastDrawn = null;
       verdict = [];
       verdictFor = null;
       errors = new Set();
@@ -733,11 +837,29 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     else if (source === "plugin") emptyMessage = `${ctx.calendar()?.label ?? "A calendar plugin"} supplies this world's days. The orrery draws calendar definitions only; that calendar is edited where it comes from.`;
     else if (source === "fault") emptyMessage = `This world's calendar definition cannot run (${ctx.plugin.calendars.fault() ?? "no definition is loaded"}), so there is nothing to draw. Fix it with Edit definition in the settings, or choose another calendar in the menu above.`;
     else if (ast) {
-      const m = buildOrrery(ast, day + 0.5, { problems: verdict });
+      drawnAst = ast;
+      behind = false;
+      let m = buildOrrery(ast, day + 0.5, { problems: verdict });
+      if (m.kind === "orrery") lastDrawn = ast;
+      else if (editable && lastDrawn && lastDrawn !== ast) {
+        // an edit left the draft unable to run (slots that no longer fill the year): its verdict is known now (the
+        // build ran problems()), so the LED and the issue strip say why, and the scope keeps the last draft that ran
+        if (verdictFor !== ast) {
+          runProblems(ast);
+          chromeStale = true;
+        }
+        const was = buildOrrery(lastDrawn, day + 0.5, { problems: verdict });
+        if (was.kind === "orrery") {
+          m = was;
+          drawnAst = lastDrawn;
+          behind = true;
+        }
+      }
       if (m.kind === "orrery") model = m;
       else emptyMessage = `This calendar definition cannot be drawn: ${m.message}.`;
     }
-    if (model && selected !== null && partInfo(model, selected).code === "—") selected = null;
+    if (!model) drawnAst = null;
+    if (model && selected !== null && partInfo(model, selected).code === "—" && !inDraft(selected)) selected = null;
     empty.setText(emptyMessage);
     empty.toggleClass("is-hidden", model !== null);
     grid.toggleClass("is-hidden", model === null);
@@ -828,18 +950,20 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
         const a = model.ast;
         return `calendar.definition › VCALENDAR ${a.name} · ${a.units.length} units · ${a.gears.length} gears · ${(a.bodies ?? []).length} bodies · ${(a.rules ?? []).length} rules`;
       }
-      return `calendar.definition › ${oneLine(partText(model.ast, selected)) || selected}`;
+      return `calendar.definition › ${oneLine(partText(ast ?? model.ast, selected)) || selected}`;
     },
     issues: (): StudioIssue[] => {
       if (model && draftError !== null) return [{ level: "error", path: "calendar.definition", message: `the draft does not compile (${draftError}); the Orrery shows the calendar without those edits`, unit: { kind: "zone" }, win: "none" }];
       if (!model || verdict.length === 0) return [];
       const more = verdict.length > 1 ? ` (+${verdict.length - 1} more)` : "";
-      return [{ level: "error", path: "calendar.definition", message: `${verdict[0]!.message}${more}${stale ? " · checking…" : ""}`, unit: { kind: "zone" }, win: "none" }];
+      return [{ level: "error", path: "calendar.definition", message: `${verdict[0]!.message}${more}${stale ? " · checking…" : ""}${behind ? " · the scope shows the last calendar that runs" : ""}`, unit: { kind: "zone" }, win: "none" }];
     },
     onClose: () => {
       closed = true;
       cancelProblems();
+      tearing = true;
       editor?.destroy();
+      tearing = false;
       editor = null;
       cancelScrub?.();
       scrub.removeEventListener("pointerdown", onScrubDown);

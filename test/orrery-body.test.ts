@@ -15,7 +15,7 @@ import { describe, expect, test } from "bun:test";
 import { canonicalJson } from "../src/core/profile";
 import { GREGORIAN, parse, print, type CalendarAst } from "../src/seshat";
 import { draftAst, moveMoon, seshatDraft, type CalendarDraft, type CalendarEdit } from "../src/studio/model/definition";
-import { addBody, addPhase, draftReader, freshName, knobWrite, moonOf, phaseInsertAt, phaseRules, phasesProblem, removeBody, renameBody, setBodyPhases } from "../src/studio/model/orrery-body";
+import { addBody, addPhase, draftReader, epochWrite, fractionWrite, freshName, knobWrite, moonOf, phaseInsertAt, phaseRules, phasesProblem, removeBody, renameBody, setBodyPhases } from "../src/studio/model/orrery-body";
 import { cellOf } from "../src/studio/model/rational-knob";
 
 /** Gregorian with a moon, a month that follows it, and a rule that reads its Full phase by name. */
@@ -162,5 +162,30 @@ describe("draftReader", () => {
     expect(c.error).toContain("cannot be removed");
     expect(c.ast).toBe(broken.ast!);
     expect(read({ seasons: [], moons: [] }, base)).toBeNull();
+  });
+});
+
+describe("5a review: the epoch and phase knobs keep their exact origin", () => {
+  const STEP = { n: 1, d: 100 };
+  test("an epoch past one turn keeps its whole turns: 3/2 moved a step is 151/100, never 51/100", () => {
+    const e = { n: 3, d: 2 };
+    expect(epochWrite(0.51, e, null, STEP, 0.99)).toEqual({ n: 151, d: 100 });
+    expect(epochWrite(0.5, e, null, STEP, 0.99)).toBe(e); // its own cell: itself
+    expect(epochWrite(0.25, { n: -3, d: 4 }, null, STEP, 0.99)).toEqual({ n: -3, d: 4 }); // −3/4 shows 0.25, its own cell
+    expect(epochWrite(0.3, { n: -3, d: 4 }, null, STEP, 0.99)).toEqual({ n: -7, d: 10 }); // −1 + 0.3
+  });
+  test("back to the stored epoch's cell writes the stored epoch", () => {
+    const stored = { n: 5, d: 4 };
+    expect(epochWrite(0.25, { n: 13, d: 10 }, stored, STEP, 0.99)).toBe(stored);
+  });
+  test("an epoch from 0.995 up shows in the top cell and snaps back there", () => {
+    const e = { n: 997, d: 1000 };
+    expect(epochWrite(0.99, e, null, STEP, 0.99)).toBe(e);
+    expect(epochWrite(0.98, e, null, STEP, 0.99)).toEqual({ n: 49, d: 50 });
+  });
+  test("a phase start: its own cell keeps the exact value, 0.995 included; another cell is the grid's", () => {
+    expect(fractionWrite(0.45, 0.4512, STEP, 0.99)).toBe(0.4512);
+    expect(fractionWrite(0.99, 0.997, STEP, 0.99)).toBe(0.997);
+    expect(fractionWrite(0.47, 0.4512, STEP, 0.99)).toBe(0.47);
   });
 });

@@ -6739,6 +6739,58 @@
   font-size: var(--wadjet-studio-fs-chip);
   color: var(--wadjet-studio-text-mute);
 }
+/* slice 5b: SLOTS · THIS YEAR (n, name, flag, length) and the slot's off | on switches */
+.wadjet-studio-orrery-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.wadjet-studio-orrery-slot {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto 44px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text-dim);
+  border-left: 2px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.wadjet-studio-orrery-slot:hover,
+.wadjet-studio-orrery-slot:focus-visible {
+  background: #33363a;
+  border-left-color: #e9ebee;
+}
+.wadjet-studio-orrery-slot.is-absent {
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-orrery-slot-n,
+.wadjet-studio-orrery-slot-len {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wadjet-studio-orrery-slot-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-orrery-slot-flag {
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-orrery-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.wadjet-studio-orrery-toggle-label {
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text-dim);
+}
 .wadjet-studio-orrery-chip {
   display: inline-flex;
   align-items: center;

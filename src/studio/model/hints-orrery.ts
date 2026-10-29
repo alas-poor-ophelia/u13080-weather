@@ -1,6 +1,6 @@
 /**
  * The ORRERY window's editors' half of the hint tables (docs/SESHAT-v0.md
- * §18; bead wadjet-b6x, slice 5a onward).
+ * §18; bead wadjet-b6x, slice 5a onward; 5b: year, slot unit and slot).
  *
  * Same house rules as `hints.ts` (SPEC §9): product microcopy, sentence
  * case, no explainer prose, no trailing full stop. The *name* says what the
@@ -24,6 +24,18 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.phaseRule": ["Rule", "a rule that reads this phase by name; selects its lamp"],
   "orrery.addPhase": ["Add phase", "inserts a phase at the middle of the largest gap"],
   "orrery.removeBody": ["Remove body", "removes the moon from the draft; refused while a unit follows it"],
+  "orrery.yearDays": ["Year length", "days in a year before any leap rule adds to it; the slots must still fill every year"],
+  "orrery.yearGear": ["Leap rule", "a gear that adds days to the year when it engages; selects the gear"],
+  "orrery.slotRow": ["Slot", "this year's length of the slot; selects it"],
+  "orrery.addSlot": ["Add slot", "adds a slot at the end, as long as the last one; the slots must still fill their parent"],
+  "orrery.slotName": ["Slot name", "renames the slot; dates show the new name"],
+  "orrery.slotDays": ["Days", "the slot's length in days, 0 for absent; a slot that took the rest takes this many instead"],
+  "orrery.slotFiller": ["Filler", "the slot belongs to its parent but to no unit inside it, as a festival day outside every tenday"],
+  "orrery.slotRest": ["Takes the rest", "the slot takes whatever the other slots leave of its parent"],
+  "orrery.slotUp": ["Move slot up", "swaps the slot with the one before it; a season on either follows its slot"],
+  "orrery.slotDown": ["Move slot down", "swaps the slot with the one after it; a season on either follows its slot"],
+  "orrery.slotAddAfter": ["Add slot after", "inserts a slot after this one, as long as this one"],
+  "orrery.slotRemove": ["Remove slot", "takes the slot out of its unit; refused while a season starts in it"],
 };
 
 /**
