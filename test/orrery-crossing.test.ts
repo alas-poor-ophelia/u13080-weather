@@ -70,6 +70,30 @@ describe("the molad written as numbers (Hebrew)", () => {
     expect(sameCalendar(back.calendar, base)).toBe(true);
     expect(sanity(back.ast)).toEqual([20708, 385]);
   });
+  test("a period edit keeps the year holding the Orrery's day in place: crossing 0 moves, the far past moves instead; back is exact", () => {
+    const { base, draft } = opened(HEBREW);
+    const p = literal(draft.ast!).period;
+    const was = new Engine(draft.ast!);
+    // without a reference the far past stays and the present moves (the finding: 5787 starts 3 days later)
+    const loose = done(setLiteralPeriod(draft, base, "year", { n: 382717, d: 12960 }));
+    expect(new Engine(loose.ast).start("year", 5786)).not.toBe(was.start("year", 5786));
+    const r = done(setLiteralPeriod(draft, base, "year", { n: 382717, d: 12960 }, 5786));
+    const now = new Engine(r.ast);
+    expect(now.start("year", 5786)).toBe(was.start("year", 5786));
+    expect(now.start("year", 5786)).toBe(20708);
+    expect(now.start("year", 0)).not.toBe(was.start("year", 0));
+    // exactly: crossing j = floor((5786·235 + 1)/19) is at the same instant, in rationals
+    const j = Math.floor((5786 * 235 + 1) / 19);
+    const instant = (c: LiteralCrossingAst) => BigInt(c.at.n) * BigInt(c.period.d) + BigInt(j) * BigInt(c.period.n) * BigInt(c.at.d);
+    const den = (c: LiteralCrossingAst) => BigInt(c.at.d) * BigInt(c.period.d);
+    const a = literal(draft.ast!);
+    const b = literal(r.ast);
+    expect(instant(a) * den(b)).toBe(instant(b) * den(a));
+    expect(editedSlices(base.ast!, r.calendar.ast!)).toEqual(["crossing:year"]);
+    const back = done(setLiteralPeriod(r.calendar, base, "year", periodWrite({ days: 29, hours: 12, parts: 793 }, literal(r.ast).period, p) as { n: number; d: number }, 5786));
+    expect(literal(back.ast).at).toEqual(literal(HEBREW).at);
+    expect(sameCalendar(back.calendar, base)).toBe(true);
+  });
   test("hours and parts out of range, and a period under a day, are refused with their reasons", () => {
     const p = literal(HEBREW).period;
     expect(periodWrite({ days: 29, hours: 24, parts: 0 }, p, p)).toContain("hours run from 0 to 23");

@@ -310,10 +310,49 @@ export function removeGear(ast: CalendarAst, id: string): AstEdit {
   return { ast: mapTerms({ ...ast, gears: ast.gears.filter((x) => x.id !== id) }, (t) => (t.gear === id ? null : t)) };
 }
 
+/** The widest table whose fewest-terms interval form is searched for (larger ones get one interval per position). */
+const GEAR_FORM_MAX = 5000;
+
+type Interval = { every: number; offset?: number; sign: 1 | -1 };
+
+/**
+ * A short sum of intervals matching exactly the indices m with (m mod period) in `on`, each term's offset relative
+ * to the table (in [0, every)), or null past GEAR_FORM_MAX. Greedy over the divisors of the period, smallest first:
+ * a residue class whose remaining count is one value v ≠ 0 at more than half its members takes the term v·[m ≡ o
+ * mod e]; at e = period every member is settled, so the sum is exact. Gregorian's 97 of 400 come back as +4 −100
+ * +400, a table of one position as one term.
+ */
+function fewestIntervals(period: number, on: ReadonlySet<number>): Interval[] | null {
+  if (period > GEAR_FORM_MAX) return null;
+  const rest = Array.from({ length: period }, (_, m) => (on.has(m) ? 1 : 0));
+  const terms: Interval[] = [];
+  for (let e = 1; e <= period; e++) {
+    if (period % e !== 0) continue;
+    const size = period / e;
+    for (let o = 0; o < e; o++) {
+      const tally = new Map<number, number>();
+      for (let m = o; m < period; m += e) if (rest[m] !== 0) tally.set(rest[m]!, (tally.get(rest[m]!) ?? 0) + 1);
+      for (const [v, count] of tally) {
+        if (count * 2 <= size) continue;
+        const sign: 1 | -1 = v > 0 ? 1 : -1;
+        for (let i = 0; i < Math.abs(v); i++) terms.push({ every: e, ...(o ? { offset: o } : {}), sign });
+        for (let m = o; m < period; m += e) rest[m]! -= v;
+        break;
+      }
+    }
+  }
+  return terms;
+}
+
 /**
  * Switch gear `id` between a sum of intervals and a table of positions in a
  * cycle, matching the same indices: intervals become the table over their lcm
- * (at most GEAR_TABLE_MAX), and a table becomes one interval per position.
+ * (at most GEAR_TABLE_MAX; an offset every term shares stays the table's), and
+ * a table becomes the fewest intervals the greedy search finds
+ * (`fewestIntervals`), or one interval per position when that is no shorter.
+ * Gregorian (+4 −100 +400) and Harptos (every 4, offset −1) switch there and
+ * back to the terms they had; a hand-made sum may come back in another,
+ * equivalent spelling (`kindRoundTrips` says which).
  */
 export function setGearKind(ast: CalendarAst, id: string, kind: GearAst["kind"]): AstEdit {
   const g = gearOf(ast, id);
@@ -322,24 +361,40 @@ export function setGearKind(ast: CalendarAst, id: string, kind: GearAst["kind"])
   if (g.kind === "intervals") {
     const period = gearPeriod(g);
     if (!isInt(period) || period > GEAR_TABLE_MAX) return refuse(`the gear repeats every ${period}; a table of positions holds a cycle of at most ${GEAR_TABLE_MAX}`);
-    const positions: number[] = [];
     for (let n = 0; n < period; n++) {
       let sum = 0;
       for (const t of g.terms) if (mod(n - (t.offset ?? 0), t.every) === 0) sum += t.sign;
       if (sum !== 0 && sum !== 1) return refuse(`the terms count index ${n} ${sum} times; make them nest first`);
-      if (gearMatches(g, n)) positions.push(n);
     }
-    return { ast: putGear(ast, { id: g.id, on: g.on, kind: "positions", period, positions }) };
+    const shared = g.terms[0]?.offset ?? 0;
+    const offset = g.terms.every((t) => (t.offset ?? 0) === shared) ? shared : 0;
+    const positions: number[] = [];
+    for (let m = 0; m < period; m++) if (gearMatches(g, m + offset)) positions.push(m);
+    return { ast: putGear(ast, { id: g.id, on: g.on, kind: "positions", period, positions, ...(offset ? { offset } : {}) }) };
   }
   if (g.positions.length === 0) return refuse("the table marks no position; mark one first");
   const off = g.offset ?? 0;
-  const terms = [...g.positions]
-    .sort((a, b) => a - b)
-    .map((p) => {
-      const offset = mod(p + off, g.period);
-      return { every: g.period, ...(offset ? { offset } : {}), sign: 1 as const };
-    });
+  const on = new Set(g.positions.filter((p) => isInt(p) && p >= 0 && p < g.period));
+  const each: Interval[] = [...on].sort((a, b) => a - b).map((p) => ({ every: g.period, ...(p ? { offset: p } : {}), sign: 1 }));
+  const found = fewestIntervals(g.period, on);
+  const relative = found && found.length < each.length ? found : each;
+  // the table's offset moves every term; written as it was when it fits the term's interval, else in [0, every)
+  const terms = relative.map((t) => {
+    const x = (t.offset ?? 0) + off;
+    const offset = x <= -t.every || x >= t.every ? mod(x, t.every) : x;
+    return { every: t.every, ...(offset ? { offset } : {}), sign: t.sign };
+  });
   return { ast: putGear(ast, { id: g.id, on: g.on, kind: "intervals", terms }) };
+}
+
+/** Whether switching gear `id` from intervals to positions and back gives the terms it has now (true for a table: no terms to lose). */
+export function kindRoundTrips(ast: CalendarAst, id: string): boolean {
+  const g = ast.gears.find((x) => x.id === id);
+  if (!g || g.kind !== "intervals") return true;
+  const there = setGearKind(ast, id, "positions");
+  if ("refused" in there) return true; // refused: nothing switches, nothing is lost
+  const back = setGearKind(there.ast, id, "intervals");
+  return !("refused" in back) && same(back.ast.gears.find((x) => x.id === id), g);
 }
 
 /**
@@ -543,15 +598,36 @@ export function setCrossingBody(ast: CalendarAst, unitId: string, bodyId: string
   return putCrossing(ast, unitId, { ...f.c, body: withK({ ...ref, id: bodyId }, k) });
 }
 
-/** A crossing written as numbers (`CROSSING:<period>@<at>`): its period (positive days) and the instant of crossing 0. */
-export function setLiteralCrossing(ast: CalendarAst, unitId: string, next: { readonly period?: Rational; readonly at?: Rational }): AstEdit {
+/** The crossing number occurrence `k` of a unit starting by crossing `c` reads: floor((k·a + c)/L) through its train, else k. */
+export function crossingNumberOf(c: CrossingAst, k: number): number {
+  const i = c.index;
+  return i ? Math.floor((k * i.a + i.c) / i.L) : k;
+}
+
+/**
+ * A crossing written as numbers (`CROSSING:<period>@<at>`): its period (positive days) and the instant of crossing 0.
+ * With `keep` (an occurrence index, the one holding the Orrery's day), a new period re-anchors crossing 0 so the
+ * crossing that occurrence reads, j, stays at its instant: at' = at + j·(period − period'), exactly. The occurrences
+ * near it keep their days and the far past moves instead (crossing 0 of Hebrew is some 71,000 months back). The
+ * re-anchoring is path-independent (at + j·period is kept), so a knob dragged back to the stored period restores the
+ * stored instant exactly. An `at` given with the period wins.
+ */
+export function setLiteralCrossing(ast: CalendarAst, unitId: string, next: { readonly period?: Rational; readonly at?: Rational; readonly keep?: number }): AstEdit {
   const c = crossingOf(ast, unitId);
   if (typeof c === "string") return refuse(c);
   if (c.body) return refuse(`the ${unitId} follows the body "${c.body.id}"; change the body instead`);
   const period = next.period ?? c.period;
-  const at = next.at ?? c.at;
+  let at = next.at ?? c.at;
   if (!isReduced(period) || !isReduced(at)) return refuse("a period and an instant are fractions in lowest terms");
   if (period.n <= 0) return refuse("a crossing period must be longer than 0 days");
+  if (next.at === undefined && next.keep !== undefined && isInt(next.keep) && !same(period, c.period)) {
+    const j = BigInt(crossingNumberOf(c, next.keep));
+    const moved = addB(big(c.at), mulB({ n: j, d: 1n }, subB(big(c.period), big(period))));
+    const n = safeK(moved.n);
+    const d = safeK(moved.d);
+    if (n === null || d === null) return refuse("keeping this year in place needs numbers too large to count exactly");
+    at = { n, d };
+  }
   return putCrossing(ast, unitId, { ...c, period, at });
 }
 
@@ -745,7 +821,7 @@ function termsNaming(ast: CalendarAst, id: string): boolean {
  * - `marks`: the slots of each unit a dated mark names;
  * - `crossing:u`: the bodies its K was chosen against;
  * - `gear:g`: the terms naming g (after a rename or a removal), the other ids (an added gear);
- * - `feeds:u`, `ledger:u`: each term's gear still counting u;
+ * - `feeds:u`, `ledger:u`: each term's gear still declared, and still counting u;
  * - `stages:u`: the day cycle that names a weekday test's residues (`weekdayCycle`), while a test counts in its labels;
  * - `length:u`: nothing outside the slice.
  */
@@ -790,6 +866,8 @@ export function replayProblem(key: SliceKey, base: CalendarAst, draft: CalendarA
   if (kind === "feeds" || kind === "ledger") {
     const u = cycleUnit(out, id);
     const terms = kind === "feeds" ? (u?.gears ?? []) : (u?.ledger ?? []).flatMap((e) => (e.kind === "switch" ? (e.rule.gears ?? []) : []));
+    const missing = terms.find((t) => !out.gears.some((x) => x.id === t.gear));
+    if (missing) return `the gear "${missing.gear}" that the ${id} reads is gone; it was renamed or removed outside the studio since this edit`;
     const off = terms.find((t) => {
       const g = out.gears.find((x) => x.id === t.gear);
       return g !== undefined && g.on !== id;

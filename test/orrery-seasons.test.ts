@@ -17,9 +17,12 @@
  */
 import { describe, expect, test } from "bun:test";
 import { editedSlices } from "../src/studio/model/ast-edit";
-import { mergeCalendar, sameCalendar, seshatDraft, type CalendarDraft, type CalendarEdit, type MergeResult } from "../src/studio/model/definition";
+import { draftAst, mergeCalendar, sameCalendar, seshatDraft, type CalendarDraft, type CalendarEdit, type MergeResult } from "../src/studio/model/definition";
+import { initialState, type StudioSettingsLike } from "../src/studio/model/state";
+import { createStore } from "../src/studio/model/store";
+import { renameUnit } from "../src/studio/model/unit-edit";
 import { yearFacts } from "../src/studio/model/orrery-geometry";
-import { addMark, convertMark, fractionFor, removeMark, renameMark, setMarkDay, setMarkFrom, setMarkKind, setMarkSlot, type SeasonYear } from "../src/studio/model/orrery-seasons";
+import { addMark, convertMark, fractionFor, removeMark, renameMark, setMarkDay, setMarkFrom, seasonsWindowLock, setMarkKind, setMarkSlot, type SeasonYear } from "../src/studio/model/orrery-seasons";
 import { moveSlot, removeSlot } from "../src/studio/model/orrery-slots";
 import { fractionBoundary, GREGORIAN, HARPTOS, HEBREW, parse, print, problems, type CalendarAst, type SeasonMarkAst, type SlotsUnitAst } from "../src/seshat";
 import { LUNAR } from "./fixtures/orrery";
@@ -229,5 +232,66 @@ describe("the stale guard (§18.6 item 1)", () => {
     const d = done(setMarkSlot(draft, base, 2, { unit: "month", index: 6, day: 3 }));
     const lengths = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === "month" && u.kind === "slots" ? { ...u, slots: u.slots.map((s, i) => (i === 0 ? { ...s, name: "First" } : s)) } : u)) }));
     expect(staleWhy(mergeCalendar(lengths, base, d.calendar))).toContain("a season starts on a day of the month");
+  });
+});
+
+describe("Parallax on 5e/5f: the Seasons window, the last day, undo across the fold, a renamed month", () => {
+  test("the Seasons window edits fractions of the year only: dated marks, or marks over another unit, lock it", () => {
+    expect(seasonsWindowLock(undefined)).toBeNull();
+    expect(seasonsWindowLock({ unit: "year", marks: [{ name: "A", from: 0 }] })).toBeNull();
+    expect(seasonsWindowLock({ unit: "year", marks: [{ name: "A", day: 3 }] })).toBe("dated");
+    expect(seasonsWindowLock({ unit: "pawukon", marks: [{ name: "A", from: 0.5 }] })).toBe("unit");
+  });
+
+  test("a fraction past the start of the year's last day lands on the last day as a date, or is refused, never moved to the start", () => {
+    const late: SeasonMarkAst = { name: "Late", from: 0.999 };
+    expect(fractionBoundary(0.999, 365)).toBeNull();
+    expect(convertMark(late, "day", null, 365, null)).toEqual({ mark: { name: "Late", day: 365 }, kept: false });
+    expect(convertMark(late, "day", 365, 365, null)).toEqual({ mark: { name: "Late", day: 365 }, kept: false });
+    expect(convertMark(late, "slot", null, 365, { id: "month", lengths: [31, 334] })).toEqual({ mark: { name: "Late", slot: { unit: "month", index: 1, day: 334 } }, kept: false });
+    expect(convertMark(late, "slot", null, 365, { id: "month", lengths: [31, 300] })).toContain("move it earlier in the year");
+    expect(convertMark(late, "slot", null, 365, { id: "month", lengths: null })).toContain("move it earlier in the year");
+    // through the editor, on Gregorian 2024 (366 days)
+    const { text, base, draft } = opened({ ...GREGORIAN, seasons: { unit: "year", marks: [{ name: "Winter", from: 0 }, late] } });
+    const d = done(setMarkKind(draft, base, 1, "day", seasonYear(draft.ast!, Y)));
+    expect(marks(d.ast)[1]).toEqual({ name: "Late", day: 366 });
+    expect(print(written(mergeCalendar(text, base, d.calendar)))).toContain("Late=DAY:366");
+  });
+
+  test("undo across the fraction-to-date fold: each step comes back whole, and each saves as it shows", () => {
+    const settings = (t: string): StudioSettingsLike => ({ zones: [], eras: [], overrides: [], calendar: seshatDraft(parse(t)), calendarSource: "seshat" });
+    const text = print({ ...GREGORIAN, seasons: { unit: "year", marks: [{ name: "Winter", from: 0 }, { name: "Summer", from: 0.5 }] } });
+    const store = createStore(initialState(settings(text), null), (f) => f());
+    const step = (f: (c: CalendarDraft, b: CalendarDraft) => CalendarEdit): void =>
+      store.update(
+        (s) => {
+          s.world.calendar = done(f(s.world.calendar, s.calendarBase!)).calendar;
+        },
+        { history: true },
+      );
+    step((c, b) => renameMark(c, b, 0, "Frost")); // a pending field edit
+    const field = structuredClone(store.get().world.calendar);
+    step((c, b) => setMarkKind(c, b, 1, "day", seasonYear((draftAst(c, b) as { ast: CalendarAst }).ast, Y))); // folds it into the layer
+    const folded = structuredClone(store.get().world.calendar);
+    expect(marks(folded.ast!)).toEqual([{ name: "Frost", from: 0 }, { name: "Summer", day: 184 }]);
+    const save = () => marks(written(mergeCalendar(text, store.get().calendarBase!, store.get().world.calendar)));
+    expect(store.undo()).toBe(true);
+    expect(sameCalendar(store.get().world.calendar, field)).toBe(true);
+    expect(store.get().world.calendar.ast!.seasons!.marks).toEqual([{ name: "Winter", from: 0 }, { name: "Summer", from: 0.5 }]);
+    expect(save()).toEqual([{ name: "Frost", from: 0 }, { name: "Summer", from: 0.5 }]);
+    expect(store.undo()).toBe(true);
+    expect(mergeCalendar(text, store.get().calendarBase!, store.get().world.calendar).kind).toBe("unchanged");
+    expect(store.redo()).toBe(true);
+    expect(store.redo()).toBe(true);
+    expect(sameCalendar(store.get().world.calendar, folded)).toBe(true);
+    expect(save()).toEqual([{ name: "Frost", from: 0 }, { name: "Summer", day: 184 }]);
+  });
+
+  test("a rename of the months follows into a month-and-day mark", () => {
+    const r = renameUnit(LUNAR, "month", "moon-month");
+    if ("refused" in r) throw new Error(r.reason);
+    expect(problems(r.ast)).toEqual([]);
+    expect(marks(r.ast).filter((m) => "slot" in m).map((m) => ("slot" in m ? m.slot.unit : ""))).toEqual(["moon-month"]);
+    expect(marks(r.ast).filter((m) => "slot" in m)).toHaveLength(marks(LUNAR).filter((m) => "slot" in m).length);
   });
 });

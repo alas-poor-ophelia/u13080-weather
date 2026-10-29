@@ -16,7 +16,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { canonicalJson } from "../src/core/profile";
-import { editedSlices, renameGear, setGearFeed, setGearKind, type AstEdit } from "../src/studio/model/ast-edit";
+import { editedSlices, kindRoundTrips, renameGear, replayProblem, setGearFeed, setGearKind, type AstEdit } from "../src/studio/model/ast-edit";
 import { mergeCalendar, sameCalendar, seshatDraft, type CalendarDraft, type CalendarEdit, type MergeResult } from "../src/studio/model/definition";
 import { addGearPart, addTerm, feedsOf, feedTargets, formReadsGear, removeGearPart, removeTerm, renameGearIn, setFeed, setKind, setTerm, termEngaged, togglePosition } from "../src/studio/model/orrery-gears";
 import { setYearLength } from "../src/studio/model/orrery-slots";
@@ -187,12 +187,36 @@ describe("kind", () => {
     const long = { ...GREGORIAN, gears: [{ id: "leap", on: "year", kind: "intervals" as const, terms: [{ every: 4, sign: 1 as const }, { every: 1000, sign: -1 as const }] }] };
     expect(refused(setGearKind(long, "leap", "positions"))).toContain("at most 400");
   });
+  test("Gregorian and Harptos switch to a table and back to the terms they had (the fewest intervals), the form reading Gregorian's year again", () => {
+    const g = opened(GREGORIAN);
+    const there = done(setKind(g.draft, g.base, "leap", "positions"));
+    const back = done(setKind(there.calendar, g.base, "leap", "intervals"));
+    expect(gear(back.ast, "leap")).toEqual(gear(GREGORIAN, "leap"));
+    expect(back.calendar.form?.year).toEqual(g.base.form?.year);
+    expect(sameCalendar(back.calendar, g.base)).toBe(true);
+    expect(kindRoundTrips(GREGORIAN, "leap")).toBe(true);
+    const h = opened(HARPTOS);
+    const t = done(setKind(h.draft, h.base, "shieldmeet", "positions"));
+    expect(gear(t.ast, "shieldmeet")).toEqual({ id: "shieldmeet", on: "year", kind: "positions", period: 4, positions: [0], offset: -1 });
+    const hb = done(setKind(t.calendar, h.base, "shieldmeet", "intervals"));
+    expect(gear(hb.ast, "shieldmeet")).toEqual(gear(HARPTOS, "shieldmeet"));
+    expect(sameCalendar(hb.calendar, h.base)).toBe(true);
+    expect(kindRoundTrips(HARPTOS, "shieldmeet")).toBe(true);
+  });
+  test("a sum spelt longer than it needs comes back in its shorter spelling, the same years engaged (the inspector asks first)", () => {
+    const spelt: CalendarAst = { ...GREGORIAN, gears: [{ id: "leap", on: "year", kind: "intervals", terms: [{ every: 2, sign: 1 }, { every: 2, offset: 1, sign: 1 }, { every: 4, offset: 1, sign: -1 }, { every: 4, offset: 2, sign: -1 }, { every: 4, offset: 3, sign: -1 }] }] };
+    expect(kindRoundTrips(spelt, "leap")).toBe(false);
+    const back = ok(setGearKind(ok(setGearKind(spelt, "leap", "positions")), "leap", "intervals"));
+    expect(gear(back, "leap")).toEqual({ id: "leap", on: "year", kind: "intervals", terms: [{ every: 4, sign: 1 }] });
+    expect(sameYears(gear(back, "leap")!, gear(spelt, "leap")!, -40, 80)).toBe(true);
+    expect(kindRoundTrips(HEBREW, "leap")).toBe(true); // a table loses no terms
+  });
   test("Gregorian through the AST: the year stops reading as fields, refused while the year holds a field edit", () => {
     const { base, draft } = opened(GREGORIAN);
     const r = done(setKind(draft, base, "leap", "positions"));
     expect(r.calendar.form?.year).toBeUndefined();
     const pending = done(setYearLength(draft, base, "year", 366));
-    expect(refused(setKind(pending.calendar, base, "leap", "positions"))).toContain("unsaved edit");
+    expect(refused(setKind(pending.calendar, base, "leap", "positions"))).toContain("the year has an unsaved edit");
   });
   test("the cycle-year grid toggles a position", () => {
     const { base, draft } = opened(HEBREW);
@@ -275,6 +299,19 @@ describe("the stale guard on the gear slices (§18.6 item 1)", () => {
     expect(mergeCalendar(gearMoved, base, r.calendar).kind).toBe("stale");
     const feedMoved = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === "year" && u.kind === "cycle" ? { ...u, gears: [{ gear: "shieldmeet", add: 2 }] } : u)) }));
     expect(mergeCalendar(feedMoved, base, r.calendar).kind).toBe("stale");
+  });
+  test("a feed naming a gear removed outside the studio is stale, with the reason (replayProblem)", () => {
+    const extra: CalendarAst = { ...HARPTOS, gears: [...HARPTOS.gears, { id: "extra", on: "year", kind: "intervals", terms: [{ every: 7, sign: 1 }] }] };
+    const { text, base, draft } = opened(extra);
+    const r = done(setFeed(draft, base, "extra", { unit: "year" }, 1));
+    expect(editedSlices(base.ast!, r.calendar.ast!)).toEqual(["feeds:year"]);
+    const gone = outside(text, (a) => ({ ...a, gears: a.gears.filter((g) => g.id !== "extra") }));
+    const m = mergeCalendar(gone, base, r.calendar);
+    expect(m.kind).toBe("stale");
+    expect(JSON.stringify(m)).toContain('the gear \\"extra\\" that the year reads is gone');
+    const stored = parse(gone);
+    const out = { ...stored, units: stored.units.map((u) => (u.id === "year" ? year(r.calendar.ast!) : u)) };
+    expect(replayProblem("feeds:year", base.ast!, r.calendar.ast!, stored, out)).toContain("is gone");
   });
   test("Gregorian's form-path leap edit: an outside month rename survives", () => {
     const { text, base, draft } = opened(GREGORIAN);

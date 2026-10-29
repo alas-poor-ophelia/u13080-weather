@@ -21,8 +21,8 @@
  *   caller's.
  */
 import { canonicalJson } from "../../core/profile";
-import { ID, type By, type CalendarAst, type CycleUnitAst, type FormatAst, type LabelAst, type RuleAst, type RuleDefAst, type UnitAst } from "../../seshat";
-import { declaredAs, weekdayCycle, withSlice, type AstEdit, type SliceKey } from "./ast-edit";
+import { ID, type By, type CalendarAst, type CycleUnitAst, type FormatAst, type LabelAst, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type UnitAst } from "../../seshat";
+import { declaredAs, outsideSlices, weekdayCycle, withSlice, type AstEdit, type SliceKey } from "./ast-edit";
 
 const refuse = (reason: string): AstEdit => ({ refused: true, reason });
 const same = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
@@ -177,13 +177,38 @@ export function unitReaders(ast: CalendarAst, id: string): string[] {
   if (ast.seasons?.unit === id) out.push("the seasons divide it");
   for (const g of ast.gears) if (g.on === id) out.push(`the gear "${g.id}" counts it`);
   for (const u of ast.units) if (u.kind === "slots" && u.in === id) out.push(`the ${u.id} sits in it`);
-  for (const u of ast.units) {
-    if (u.kind !== "cycle") continue;
-    const mods = new Set((u.stages ?? []).flatMap((s) => s.rules.flatMap((r) => ("residue" in r ? [r.residue.mod] : []))));
-    for (const m of mods) if (weekdayCycle(ast, m)?.id === id) out.push(`the ${u.id}'s stages name its days`);
-  }
+  for (const r of stageReads(ast, id)) if (r.titled) out.push(`the ${r.unit}'s stages name its days`);
   return [...new Set(out)];
 }
+
+/** A stage's weekday test that reads labelled cycle `id`'s days: the unit and stage (0-based) holding it, its modulus, and whether its cells are titled by `id`'s labels. */
+export type StageRead = { readonly unit: string; readonly stage: number; readonly mod: number; readonly titled: boolean };
+
+/**
+ * The stages' weekday tests (residues of the day) that read cycle unit `id`: those whose cells are titled by its
+ * labels (`weekdayCycle`), and those whose modulus is its label count (a one-day labelled cycle's days, untitled
+ * only because another cycle of that count comes first). A test reads the day itself, not the cycle, so a new
+ * count or a moved anchor leaves it on the same days but under other labels.
+ */
+export function stageReads(ast: CalendarAst, id: string): StageRead[] {
+  const c = cycleUnit(ast, id);
+  if (!c?.labels?.length) return [];
+  const count = c.labels.length;
+  const out: StageRead[] = [];
+  for (const u of ast.units) {
+    if (u.kind !== "cycle") continue;
+    (u.stages ?? []).forEach((s, stage) => {
+      const mods = new Set(s.rules.flatMap((r) => ("residue" in r ? [r.residue.mod] : [])));
+      for (const m of mods) {
+        const titled = weekdayCycle(ast, m)?.id === id;
+        if (titled || (m === count && c.length === 1 && !c.crossing)) out.push({ unit: u.id, stage, mod: m, titled });
+      }
+    });
+  }
+  return out;
+}
+
+const stageWords = (r: StageRead): string => `stage ${r.stage + 1} of the ${r.unit}`;
 
 // ---- rename and remove
 
@@ -191,7 +216,8 @@ const ID_WORDS = "lower-case letters, digits and hyphens, starting with a letter
 
 /**
  * Rename unit `from` to `to`, and every place that names it: the formats' tokens, the rules' reads (BYLABEL and
- * the rest), the seasons, the gears that count it, the slot units inside it and the exceptions that set its slots.
+ * the rest), the seasons (the unit they divide, and the slot unit a dated mark names), the gears that count it,
+ * the slot units inside it and the exceptions that set its slots.
  * The year is not renamed here (the form reads it by its id); an id another part declares is refused.
  */
 export function renameUnit(ast: CalendarAst, from: string, to: string): AstEdit {
@@ -216,9 +242,17 @@ export function renameUnit(ast: CalendarAst, from: string, to: string): AstEdit 
     gears: ast.gears.map((g) => (g.on === from ? { ...g, on: id } : g)),
     ...(ast.formats ? { formats: ast.formats.map((x): FormatAst => ({ ...x, pattern: mapPattern(x.pattern, f) })) } : {}),
     ...(ast.rules ? { rules: ast.rules.map((r) => ({ ...r, rule: mapRuleUnits(r.rule, f) })) } : {}),
-    ...(ast.seasons ? { seasons: ast.seasons.unit === from ? { ...ast.seasons, unit: id } : ast.seasons } : {}),
+    ...(ast.seasons ? { seasons: renameInSeasons(ast.seasons, from, id) } : {}),
   };
   return { ast: out };
+}
+
+/** `s` with unit `from` renamed `to` where it names it: the unit the marks divide, and each month-and-day mark's slot unit. */
+function renameInSeasons(s: SeasonsAst, from: string, to: string): SeasonsAst {
+  const marks = s.marks.map((m): SeasonMarkAst => ("slot" in m && m.slot.unit === from ? { ...m, slot: { ...m.slot, unit: to } } : m));
+  const moved = marks.some((m, i) => m !== s.marks[i]);
+  if (s.unit !== from && !moved) return s;
+  return { ...s, ...(s.unit === from ? { unit: to } : {}), ...(moved ? { marks } : {}) };
 }
 
 /** Remove unit `id`; refused, naming the first reader, while anything reads it (`unitReaders`). */
@@ -252,13 +286,16 @@ const carries = (l: LabelAst, x: string): boolean => (x.startsWith("#") ? (l.tag
 /**
  * Why unit `id`'s labels cannot become `labels` (`from[i]`: the index label i had, null for a new one), or null:
  * a rule's label filter on the unit would match other days. A changed count moves every day's label (occurrence k
- * carries label k mod count), so it is refused while any filter reads the unit by label; with the count kept, a
+ * carries label k mod count), so it is refused while any filter reads the unit by label, and while a stage's weekday
+ * test reads its days (`stageReads`: its cells would no longer line up with the labels); with the count kept, a
  * rename onto or away from a name a filter reads is refused.
  */
 export function cycleLabelProblem(ast: CalendarAst, id: string, labels: readonly LabelAst[], from: ReadonlyArray<number | null>): string | null {
   const u = cycleUnit(ast, id);
   if (!u) return null;
   const was = u.labels ?? [];
+  const stage = labels.length !== was.length ? stageReads(ast, id)[0] : undefined;
+  if (stage) return `${stageWords(stage)} tests the ${id}'s ${stage.mod} days, and a new count would break that test; change the stage first (Stages)`;
   for (const r of unitReads(ast, id)) {
     if (r.how !== "label" || !r.by || !("label" in r.by)) continue;
     if (labels.length !== was.length) return `the rule "${ruleName(r.rule)}" reads the ${id} by its labels, and a new count moves every day's label; change it first (Edit definition)`;
@@ -302,8 +339,9 @@ export function setCycleLabels(ast: CalendarAst, id: string, labels: readonly La
 
 /**
  * Why unit `id`'s anchor cannot move, or null: a rule reads it by number (an index, a phase, a day, BYNTH, a
- * frequency, which would then match other days), a gear counts it, or an exception is written against its
- * occurrences. A label filter follows the labels, so it does not refuse the move.
+ * frequency, which would then match other days), a gear counts it, an exception is written against its
+ * occurrences, the seasons divide it, or a slot unit sits in it. A label filter follows the labels, so it does not
+ * refuse the move; a stage's weekday test warns (`anchorWarnings`).
  */
 export function anchorProblem(ast: CalendarAst, id: string): string | null {
   const u = cycleUnit(ast, id);
@@ -314,7 +352,18 @@ export function anchorProblem(ast: CalendarAst, id: string): string | null {
   if (r) return `the rule "${ruleName(r.rule)}" reads the ${id} by number; change it first (Edit definition)`;
   const g = ast.gears.find((x) => x.on === id);
   if (g) return `the gear "${g.id}" counts the ${id}; it would engage on other days`;
+  if (ast.seasons?.unit === id) return `the seasons divide the ${id}; they would start on other days`;
+  const s = ast.units.find((x) => x.kind === "slots" && x.in === id);
+  if (s) return `the ${s.id} sits in the ${id}; its slots would fall on other days`;
   return null;
+}
+
+/**
+ * What moving unit `id`'s anchor changes without refusing (shown beside `today is`): each stage whose weekday test
+ * reads its days stays on the same days, which now carry other labels.
+ */
+export function anchorWarnings(ast: CalendarAst, id: string): string[] {
+  return [...new Set(stageReads(ast, id).map((r) => `${stageWords(r)} keeps its days, so its ${id} labels move with it`))];
 }
 
 /**
@@ -360,32 +409,84 @@ export function anchorFor(anchor: number, length: number, count: number, day: nu
 /** A change to a unit that no slice holds. */
 export type UnitOp = { readonly kind: "rename"; readonly from: string; readonly to: string } | { readonly kind: "remove"; readonly id: string };
 
+/** How many pairings `unitOps` weighs before it gives up (each is replayed and compared whole). */
+const PAIRINGS_MAX = 256;
+
+/** A unit with its id and the ids it names blanked: two units that differ only by a rename are equal here. */
+const unitShape = (u: UnitAst): unknown => ({ ...u, id: "", ...(u.kind === "slots" ? { in: "" } : {}) });
+
 /**
- * The renames and removals that take `base`'s units to `draft`'s, in order, or null when the draft's units are not
- * the base's with some renamed and some removed (a unit added, or the order changed). Two lists are walked side by
- * side: an id both have is kept; a draft id the base lacks is the base unit at that place renamed; else the base
- * unit was removed.
+ * The operations a pairing means, ordered so each one fits when it is made: removals and renames, each as soon as
+ * nothing refuses it (a reader of a removed unit renamed or removed first, a rename's new id freed first); null
+ * when none fits (a swap of two ids, which needs a third).
+ */
+function orderOps(base: CalendarAst, pending: UnitOp[]): UnitOp[] | null {
+  const ops: UnitOp[] = [];
+  let ast = base;
+  let left = pending;
+  while (left.length) {
+    const i = left.findIndex((op) => !("refused" in applyUnitOps(ast, [op])));
+    if (i < 0) return null;
+    const op = left[i]!;
+    ast = (applyUnitOps(ast, [op]) as { ast: CalendarAst }).ast;
+    ops.push(op);
+    left = left.filter((_, j) => j !== i);
+  }
+  return ops;
+}
+
+/**
+ * The renames and removals that take `base`'s units to `draft`'s, in order, or null when no such operations give
+ * exactly the draft (a unit added, the order changed, two ids swapped, or a removal and a rename the Studio cannot
+ * tell apart). A unit keeps its place when renamed, so each pairing of the draft's units with the base's, in order
+ * and of the same kind, is a candidate; the pairings are weighed by content (a unit whose id is kept, then one
+ * equal to its base unit but for the id, counts first), and the first whose operations, made on the base, give
+ * the draft's ids in order and everything the slices do not hold as the draft has it is the answer. A Save then
+ * replays the slices, so it writes exactly the draft's meaning or refuses.
  */
 export function unitOps(base: CalendarAst, draft: CalendarAst): UnitOp[] | null {
-  const ids = new Set(base.units.map((u) => u.id));
-  const ops: UnitOp[] = [];
-  let j = 0;
-  for (let i = 0; i < base.units.length; i++) {
-    const b = base.units[i]!;
-    const d = draft.units[j];
-    if (d && d.id === b.id) {
-      j++;
-      continue;
+  const bs = base.units;
+  const ds = draft.units;
+  if (ds.length > bs.length || new Set(ds.map((u) => u.id)).size !== ds.length) return null;
+  const target = outsideSlices(draft);
+  const fits = (ops: readonly UnitOp[]): boolean => {
+    const made = applyUnitOps(base, ops);
+    return !("refused" in made) && same(made.ast.units.map((u) => u.id), ds.map((u) => u.id)) && same(outsideSlices(made.ast), target);
+  };
+  if (bs.length === ds.length && bs.every((u, i) => u.id === ds[i]!.id)) return fits([]) ? [] : null;
+  // every pairing: draft unit j with base unit pick[j], strictly in order, of one kind; scored by content
+  const score = (d: UnitAst, b: UnitAst): number => (d.id === b.id ? 2 : 0) + (same(unitShape(d), unitShape(b)) ? 1 : 0);
+  const found: Array<{ pick: number[]; score: number }> = [];
+  const pick: number[] = [];
+  const walk = (j: number, from: number, total: number): void => {
+    if (found.length >= PAIRINGS_MAX) return;
+    if (j === ds.length) {
+      found.push({ pick: [...pick], score: total });
+      return;
     }
-    if (d && !ids.has(d.id) && d.kind === b.kind) {
-      ops.push({ kind: "rename", from: b.id, to: d.id });
-      j++;
-      continue;
+    for (let i = from; i <= bs.length - (ds.length - j); i++) {
+      if (bs[i]!.kind !== ds[j]!.kind) continue;
+      pick.push(i);
+      walk(j + 1, i + 1, total + score(ds[j]!, bs[i]!));
+      pick.pop();
     }
-    ops.push({ kind: "remove", id: b.id });
+  };
+  walk(0, 0, 0);
+  found.sort((a, b) => b.score - a.score);
+  for (const { pick: p } of found) {
+    const paired = new Set(p);
+    const pending: UnitOp[] = [
+      ...bs.flatMap((b, i): UnitOp[] => (paired.has(i) ? [] : [{ kind: "remove", id: b.id }])),
+      ...p.flatMap((i, j): UnitOp[] => (bs[i]!.id === ds[j]!.id ? [] : [{ kind: "rename", from: bs[i]!.id, to: ds[j]!.id }])),
+    ];
+    const ops = orderOps(base, pending);
+    if (ops && fits(ops)) return ops;
   }
-  return j === draft.units.length ? ops : null;
+  return null;
 }
+
+/** What a Save says when `unitOps` finds no operations that give the draft. */
+export const UNIT_OPS_REFUSED = "several units were renamed or removed at once in a way the Studio cannot replay safely; save after each rename, or undo";
 
 /** `ast` with `ops` made in order, or the first refusal. */
 export function applyUnitOps(ast: CalendarAst, ops: readonly UnitOp[]): AstEdit {
@@ -423,13 +524,17 @@ export function replayUnitOps(stored: CalendarAst, base: CalendarAst, ops: reado
 
 /**
  * What a `cycle:` edit reads outside its slice: the rules that read the unit (a label filter by name, a read by
- * number) and the gears that count it. A Save replays the edit only while these are as the edit saw them
- * (`cycleReplayProblem`).
+ * number), the gears that count it, the seasons that divide it, the slot units inside it and the stages whose
+ * weekday tests read its days (those tests as they are). A Save replays the edit only while these are as the
+ * edit saw them (`cycleReplayProblem`).
  */
 export function cycleReferences(ast: CalendarAst, id: string): unknown {
   return {
     rules: unitReads(ast, id).map((r) => [r.rule.id, r.how, r.by ?? null]),
     gears: ast.gears.filter((g) => g.on === id).map((g) => g.id),
+    seasons: ast.seasons?.unit === id,
+    slots: ast.units.filter((u) => u.kind === "slots" && u.in === id).map((u) => u.id),
+    stages: stageReads(ast, id).map((r) => [r.unit, r.stage, r.mod, cycleUnit(ast, r.unit)?.stages?.[r.stage]?.rules.filter((x) => "residue" in x && x.residue.mod === r.mod) ?? null]),
   };
 }
 
@@ -438,5 +543,5 @@ export function cycleReplayProblem(key: SliceKey, base: CalendarAst, stored: Cal
   if (!key.startsWith("cycle:")) return null;
   const id = key.slice("cycle:".length);
   if (same(cycleReferences(stored, id), cycleReferences(base, id))) return null;
-  return `a rule or a gear that reads the ${id} changed outside the studio since this edit`;
+  return `a rule, a gear, the seasons, a slot unit or a stage that reads the ${id} changed outside the studio since this edit`;
 }

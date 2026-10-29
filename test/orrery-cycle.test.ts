@@ -20,7 +20,10 @@ import { editedSlices } from "../src/studio/model/ast-edit";
 import { calendarOfDefinition, mergeCalendar, sameCalendar, seshatDraft, type CalendarDraft, type CalendarEdit, type MergeResult } from "../src/studio/model/definition";
 import { addLabel, cycleEditable, inFormWeek, labelOn, removeCycle, removeLabel, renameCycle, renameLabel, setTodayIs } from "../src/studio/model/orrery-cycle";
 import { residueCells } from "../src/studio/model/orrery-stages";
-import { anchorFor, cyclePartner, formatUnits, renameUnit, unitOps, unitReaders } from "../src/studio/model/unit-edit";
+import { anchorFor, anchorProblem, anchorWarnings, cyclePartner, formatUnits, renameUnit, UNIT_OPS_REFUSED, unitOps, unitReaders } from "../src/studio/model/unit-edit";
+import { initialState, type StudioSettingsLike } from "../src/studio/model/state";
+import { applyStash, takeStash } from "../src/studio/model/stash";
+import { createStore } from "../src/studio/model/store";
 import { BALINESE, Engine, formatDay, GREGORIAN, HARPTOS, HEBREW, MAYA, parse, print, problems, type CalendarAst, type CycleUnitAst, type RuleDefAst, type SlotsUnitAst, type StageRule } from "../src/seshat";
 import { HEBREW_WEEK, PASARAN } from "./fixtures/orrery";
 
@@ -320,7 +323,7 @@ describe("the stale guard (§18.6 item 1)", () => {
   test("today is (cycle: slices) is stale when a rule reading the weekday was added outside; an unrelated edit still saves", () => {
     const { text, base, draft } = opened(GREGORIAN);
     const r = done(setTodayIs(draft, base, "weekday", 0, D, cycle(draft.ast!, "weekday").anchor));
-    expect(staleWhy(mergeCalendar(outside(text, (a) => withRule(a, mondays)), base, r.calendar))).toContain("a rule or a gear that reads the weekday changed outside");
+    expect(staleWhy(mergeCalendar(outside(text, (a) => withRule(a, mondays)), base, r.calendar))).toContain("a stage that reads the weekday changed outside");
     const renamedMonth = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === "month" && u.kind === "slots" ? { ...u, slots: u.slots.map((s, i) => (i === 0 ? { ...s, name: "Janvier" } : s)) } : u)) }));
     const saved = written(mergeCalendar(renamedMonth, base, r.calendar));
     expect(long(saved, D)).toBe("Sunday 4 October 2024");
@@ -333,5 +336,131 @@ describe("the stale guard (§18.6 item 1)", () => {
     const shift = (id: string) => outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === id && u.kind === "cycle" && !u.crossing ? { ...u, anchor: u.anchor + 1 } : u)) }));
     expect(mergeCalendar(shift("pasaran"), base, r.calendar).kind).toBe("stale");
     expect(names(written(mergeCalendar(shift("weekday"), base, r.calendar)), "pasaran")[0]).toBe("Legi!");
+  });
+});
+
+describe("renames and removals together (Parallax on 5e/5f): a Save writes exactly the draft, or refuses", () => {
+  // Gregorian with two Balinese day cycles no part reads; the triwara carries a display NUMBER (outside every slice),
+  // so a graft of its shell onto another unit shows
+  const balinese = (id: string): CycleUnitAst => ({ ...cycle(BALINESE, id), anchor: 0 });
+  const PLAIN: CalendarAst = { ...GREGORIAN, units: [...GREGORIAN.units, balinese("triwara"), balinese("sadwara")] };
+  const NUMBERED: CalendarAst = { ...PLAIN, units: PLAIN.units.map((u) => (u.id === "triwara" ? { ...u, number: 5 } : u)) };
+  const ids = (ast: CalendarAst) => ast.units.map((u) => u.id);
+  const sadwara = names(BALINESE, "sadwara");
+
+  test("remove the triwara, rename the sadwara to sixer: the sixer is the sadwara, the triwara's number goes with it", () => {
+    const { text, base, draft } = opened(NUMBERED);
+    const r = done(renameCycle(done(removeCycle(draft, base, "triwara")).calendar, base, "sadwara", "sixer"));
+    expect(unitOps(base.ast!, r.calendar.ast!)).toEqual([
+      { kind: "remove", id: "triwara" },
+      { kind: "rename", from: "sadwara", to: "sixer" },
+    ]);
+    const saved = written(mergeCalendar(text, base, r.calendar));
+    expect(ids(saved)).toEqual(ids(r.calendar.ast!));
+    expect(names(saved, "sixer")).toEqual(sadwara);
+    expect(cycle(saved, "sixer").number).toBeUndefined();
+    expect(sameCalendar(seshatDraft(saved), seshatDraft(r.calendar.ast!))).toBe(true);
+  });
+
+  test("remove the triwara, rename the sadwara to triwara: the new triwara is the sadwara", () => {
+    const { text, base, draft } = opened(NUMBERED);
+    const r = done(renameCycle(done(removeCycle(draft, base, "triwara")).calendar, base, "sadwara", "triwara"));
+    expect(unitOps(base.ast!, r.calendar.ast!)).toEqual([
+      { kind: "remove", id: "triwara" },
+      { kind: "rename", from: "sadwara", to: "triwara" },
+    ]);
+    const saved = written(mergeCalendar(text, base, r.calendar));
+    expect(ids(saved)).toEqual(ids(r.calendar.ast!));
+    expect(names(saved, "triwara")).toEqual(sadwara);
+    expect(cycle(saved, "triwara").number).toBeUndefined();
+  });
+
+  test("a swap through a temporary id is refused with a way out, never grafted", () => {
+    const { text, base, draft } = opened(NUMBERED);
+    let c = done(renameCycle(draft, base, "triwara", "tmp")).calendar;
+    c = done(renameCycle(c, base, "sadwara", "triwara")).calendar;
+    c = done(renameCycle(c, base, "tmp", "sadwara")).calendar;
+    expect(unitOps(base.ast!, c.ast!)).toBeNull();
+    expect(mergeCalendar(text, base, c)).toEqual({ kind: "error", message: UNIT_OPS_REFUSED });
+    expect(UNIT_OPS_REFUSED).toContain("save after each rename");
+  });
+
+  test("rename and back is no operation and nothing to save", () => {
+    const { text, base, draft } = opened(NUMBERED);
+    const c = done(renameCycle(done(renameCycle(draft, base, "triwara", "sadwara-2")).calendar, base, "sadwara-2", "triwara")).calendar;
+    expect(unitOps(base.ast!, c.ast!)).toEqual([]);
+    expect(mergeCalendar(text, base, c).kind).toBe("unchanged");
+  });
+
+  test("remove, then a unit of the same id: saved when only its slices differ, refused when it differs outside them", () => {
+    const back = (ast: CalendarAst, unit: CycleUnitAst): CalendarAst => ({ ...ast, units: ast.units.flatMap((u) => (u.id === "sadwara" ? [unit, u] : [u])) });
+    const fresh = { id: "triwara", kind: "cycle", anchor: 0, length: 1, labels: [{ name: "A" }, { name: "B" }] } as CycleUnitAst;
+    const plain = opened(PLAIN);
+    const gone = done(removeCycle(plain.draft, plain.base, "triwara")).calendar;
+    const again: CalendarDraft = { ...gone, ast: back(gone.ast!, fresh) };
+    expect(unitOps(plain.base.ast!, again.ast!)).toEqual([]);
+    expect(names(written(mergeCalendar(plain.text, plain.base, again)), "triwara")).toEqual(["A", "B"]);
+    const numbered = opened(NUMBERED);
+    const gone2 = done(removeCycle(numbered.draft, numbered.base, "triwara")).calendar;
+    const again2: CalendarDraft = { ...gone2, ast: back(gone2.ast!, fresh) };
+    expect(unitOps(numbered.base.ast!, again2.ast!)).toBeNull();
+    expect(mergeCalendar(numbered.text, numbered.base, again2)).toEqual({ kind: "error", message: UNIT_OPS_REFUSED });
+  });
+});
+
+describe("what the label count and the anchor read (Parallax on 5e/5f)", () => {
+  const STAGED = (ast: CalendarAst): CalendarAst => ({ ...ast, units: ast.units.map((u) => (u.id === "year" && u.kind === "cycle" ? { ...u, stages: [{ rules: [{ add: 0, residue: { mod: 7, in: [0] } }] }] } : u)) });
+
+  test("a count change is refused while a stage tests the weekday's days, on the AST path and the form's week", () => {
+    const h = opened(HEBREW_WEEK);
+    expect(refused(addLabel(h.draft, h.base, "weekday"))).toContain("stage 1 of the year tests the weekday's 7 days");
+    expect(refused(removeLabel(h.draft, h.base, "weekday", 6))).toContain("stage 1 of the year");
+    done(renameLabel(h.draft, h.base, "weekday", 0, "Yom Rishon")); // the count kept: allowed
+    const g = opened(STAGED(GREGORIAN));
+    expect(inFormWeek(g.draft, g.draft.ast!, "weekday")).toBe(true);
+    expect(refused(addLabel(g.draft, g.base, "weekday"))).toContain("stage 1 of the year");
+    expect(refused(removeLabel(g.draft, g.base, "weekday", 0))).toContain("stage 1 of the year");
+  });
+
+  test("today is: refused while the seasons divide the unit or a slot unit sits in it; a stage's test warns", () => {
+    expect(anchorProblem(BALINESE, "pawukon")).toContain("the wuku sits in the pawukon");
+    const seasoned: CalendarAst = { ...BALINESE, seasons: { unit: "pawukon", marks: [{ name: "One", from: 0 }] } };
+    expect(anchorProblem(seasoned, "pawukon")).toContain("the seasons divide the pawukon");
+    expect(anchorProblem(HEBREW_WEEK, "weekday")).toBeNull();
+    expect(anchorWarnings(HEBREW_WEEK, "weekday")).toEqual(["stage 1 of the year keeps its days, so its weekday labels move with it"]);
+    expect(anchorWarnings(GREGORIAN, "weekday")).toEqual([]);
+  });
+
+  test("a today is Save is stale when the stage reading the weekday changed outside", () => {
+    const { text, base, draft } = opened(HEBREW_WEEK);
+    const r = done(setTodayIs(draft, base, "weekday", 1, 0, cycle(draft.ast!, "weekday").anchor));
+    const flip = (x: StageRule): StageRule => ("residue" in x ? { ...x, residue: { ...x.residue, offset: (x.residue.offset ?? 0) + 7 } } : x);
+    const restaged = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === "year" && u.kind === "cycle" ? { ...u, stages: u.stages!.map((st, i) => (i === 0 ? { rules: st.rules.map(flip) } : st)) } : u)) }));
+    expect(restaged).not.toBe(text);
+    expect(staleWhy(mergeCalendar(restaged, base, r.calendar))).toContain("a stage that reads the weekday changed outside");
+  });
+});
+
+describe("a stash across a rename", () => {
+  const settings = (text: string): StudioSettingsLike => ({ zones: [], eras: [], overrides: [], calendar: seshatDraft(parse(text)), calendarSource: "seshat" });
+  test("a rename stashed and restored saves as the rename, onto the stored calendar and onto one changed outside since", () => {
+    const text = print(GREGORIAN);
+    const store = createStore(initialState(settings(text), null), (f) => f());
+    store.update(
+      (s) => {
+        s.world.calendar = done(renameCycle(s.world.calendar, s.calendarBase!, "weekday", "dow")).calendar;
+      },
+      { history: true },
+    );
+    const stash = takeStash(store.get(), store)!;
+    const back = applyStash(initialState(settings(text), null), structuredClone(stash));
+    expect(unitOps(back.calendarBase!.ast!, back.world.calendar.ast!)).toEqual([{ kind: "rename", from: "weekday", to: "dow" }]);
+    const saved = written(mergeCalendar(text, back.calendarBase!, back.world.calendar));
+    expect(saved.formats!.some((f) => f.pattern.includes("{dow:name}"))).toBe(true);
+    expect(long(saved, D)).toBe("Friday 4 October 2024");
+    const now = outside(text, (a) => withRule(a, mondays));
+    const later = applyStash(initialState(settings(now), null), structuredClone(stash));
+    const saved2 = written(mergeCalendar(now, later.calendarBase!, later.world.calendar));
+    expect(saved2.rules!.find((x) => x.id === "market")!.rule).toEqual({ kind: "recur", freq: "day", by: [{ unit: "dow", label: ["Monday"] }] });
   });
 });

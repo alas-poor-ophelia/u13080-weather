@@ -123,9 +123,13 @@ export function periodWrite(next: Molad, origin: Rational, stored: Rational | nu
   return sameR(stored, w.value) ? stored : w.value;
 }
 
-/** Set a literal crossing's period (positive days, exact). */
-export function setLiteralPeriod(calendar: CalendarDraft, base: CalendarDraft, unitId: string, period: Rational): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setLiteralCrossing(a, unitId, { period }));
+/**
+ * Set a literal crossing's period (positive days, exact). `keep` is the occurrence holding the Orrery's day: the
+ * crossing it reads stays at its instant (crossing 0 moves instead, ast-edit.ts `setLiteralCrossing`), so the
+ * present keeps its days and the far past moves. Null (the draft does not run) keeps crossing 0 where it is.
+ */
+export function setLiteralPeriod(calendar: CalendarDraft, base: CalendarDraft, unitId: string, period: Rational, keep: number | null = null): CalendarEdit {
+  return applyAstEdit(calendar, base, (a) => setLiteralCrossing(a, unitId, keep === null ? { period } : { period, keep }));
 }
 
 /** The day crossing 0 falls on and its hour and parts in that day (the knobs show the hour and parts; the day is kept). */

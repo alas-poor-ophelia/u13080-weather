@@ -22,7 +22,7 @@ import type { CalendarAst, CycleUnitAst, PartId } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
 import { addLabel, inFormWeek, labelOn, removeCycle, removedWith, removeLabel, renameCycle, renameLabel, setTodayIs } from "../../model/orrery-cycle";
-import { anchorProblem, unitReaders } from "../../model/unit-edit";
+import { anchorProblem, anchorWarnings, unitReaders } from "../../model/unit-edit";
 import { createKnob, type KnobComponent } from "../components";
 import { button, input, type EditPhase, type PartEditor } from "./orrery-body";
 
@@ -115,6 +115,7 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
       }),
     );
     if (why) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `The anchor stays: ${why}.` });
+    else for (const w of anchorWarnings(deps.ast, id)) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `Moving it: ${w}.`, attr: { "data-part": "cycle-today-warning" } });
   }
 
   // ---- what reads it, and remove

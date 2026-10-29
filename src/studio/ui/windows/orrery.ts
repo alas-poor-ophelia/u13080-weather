@@ -756,10 +756,12 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
       const g = draft.gears.find((x) => x.id === id);
       // the occurrence of the unit the gear counts, on the window's day (none while the scope draws an older calendar)
       const index = !g || behind || m.ast !== ast ? null : g.on === m.year.unit ? m.year.index : (m.today.positions.get(g.on)?.index ?? null);
-      editor = buildGearEditor(host("gear"), title, { ast: draft, gearId: id, index, refusal, edit, select: (part) => select(part), selectAfter });
+      editor = buildGearEditor(host("gear"), title, { app: ctx.plugin.app, ast: draft, gearId: id, index, refusal, edit, select: (part) => select(part), selectAfter });
     }
     if ((kind === "crossing" || kind === "train") && id !== undefined && editable) {
-      const deps = { ast: draft, baseAst: baseOf(ctx.store.get()).ast ?? null, unitId: id, refusal, edit, select: (part: PartId) => select(part) };
+      // the occurrence holding the window's day, which a period edit keeps in place (none while the scope draws an older calendar)
+      const occurrence = behind || m.ast !== ast ? null : id === m.year.unit ? m.year.index : (m.today.positions.get(id)?.index ?? null);
+      const deps = { ast: draft, baseAst: baseOf(ctx.store.get()).ast ?? null, unitId: id, occurrence, refusal, edit, select: (part: PartId) => select(part) };
       editor = kind === "crossing" ? buildCrossingEditor(host("crossing"), deps) : buildTrainEditor(host("train"), deps);
     }
     if (kind === "stage" && id !== undefined && n !== undefined && editable) {

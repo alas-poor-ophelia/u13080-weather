@@ -35,6 +35,7 @@
  * callers — see its file doc).
  */
 import { seasonsUseDates } from "../../../seshat";
+import { seasonsWindowLock } from "../../model/orrery-seasons";
 import { DEFAULT_YEAR_LENGTH } from "../../../seshat/year";
 import { dayLabel, tabular } from "../../model/format";
 import { seasonsHint } from "../../model/hints-seasons";
@@ -80,6 +81,8 @@ interface CalendarView {
   readOnly: boolean;
   label: string;
   editHint?: string;
+  /** the unit the seasons divide, when it is not the year (then read-only here) */
+  over?: string;
   seasons: ReadonlyArray<{ name: string; from: number }>;
   yearLength: number;
 }
@@ -97,13 +100,16 @@ function calendarView(ctx: SurfaceContext, state: StudioState): CalendarView {
   // A Seshat draft's AST layer is the draft the Orrery edits (slice 5f): its marks decide, and its field holds that projection
   const layer = state.calendarSource === "seshat" ? state.world.calendar.ast : undefined;
   const def = layer ?? (state.calendarSource === "seshat" ? (ctx.plugin.calendars.seshat?.definition() ?? null) : null);
-  const dated = !!def?.seasons && seasonsUseDates(def.seasons);
-  const readOnly = (description?.readOnly ?? false) || dated;
+  const lock = seasonsWindowLock(def?.seasons);
+  const dated = lock === "dated";
+  // seasons that divide another unit than the year: this window writes fractions of the year, so it only shows them
+  const over = lock === "unit" ? def!.seasons!.unit : null;
+  const readOnly = (description?.readOnly ?? false) || lock !== null;
   const seasons = readOnly && !(layer && !description?.readOnly) ? (description?.seasons ?? []) : state.world.calendar.seasons;
   const yearLength = description?.yearLength ?? DEFAULT_YEAR_LENGTH;
-  const label = dated ? `${description?.readOnly ? description.label : "calendar definition"} · seasons on dates, approximate` : readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
-  const editHint = dated ? "the seasons start on dates: edit them in the calendar text (Edit as text)" : description?.editHint;
-  return { readOnly, label, seasons, yearLength, ...(editHint !== undefined ? { editHint } : {}) };
+  const label = dated ? `${description?.readOnly ? description.label : "calendar definition"} · seasons on dates, approximate` : over !== null ? `${description?.readOnly ? description.label : "calendar definition"} · seasons over the ${over}` : readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
+  const editHint = dated ? "the seasons start on dates: edit them in the calendar text (Edit as text)" : over !== null ? `the seasons divide the ${over}, not the year: edit them in the Orrery or the calendar text (Edit as text)` : description?.editHint;
+  return { readOnly, label, seasons, yearLength, ...(editHint !== undefined ? { editHint } : {}), ...(over !== null ? { over } : {}) };
 }
 
 /**
@@ -450,11 +456,12 @@ export const buildSeasonsWindow: WindowBuilder = (ctx) => {
     sourceChip.update({ label: view.readOnly ? `${view.label} · read-only` : view.label });
     body.toggleClass("is-readonly", view.readOnly);
     const dated = view.readOnly && seasonsUseDates(ctx.plugin.calendars.seshat?.definition()?.seasons ?? { marks: [] });
-    notice.toggleClass("is-hidden", !dated);
+    notice.toggleClass("is-hidden", !dated && view.over === undefined);
     if (dated)
       noticeText.setText(
         "Read-only: these seasons start on dates, so their lengths change from year to year. The ribbon shows where they fall in one year, approximately. Change them in the calendar's text.",
       );
+    else if (view.over !== undefined) noticeText.setText(`Read-only: these seasons divide the ${view.over}, not the year, and this window edits seasons of the year. Change them in the Orrery or in the calendar's text.`);
 
     renderBar(view);
 

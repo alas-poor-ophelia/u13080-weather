@@ -35,6 +35,8 @@ export interface CrossingEditorDeps {
   /** the AST the draft was seeded from (a knob's stored value, for its snap-back), or null */
   baseAst: CalendarAst | null;
   unitId: string;
+  /** the occurrence of the unit holding the window's day (a period edit keeps its crossing in place), or null when the scope draws an older calendar */
+  occurrence: number | null;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
   edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
@@ -183,23 +185,26 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
   const at = c.at;
   const storedLit = stored && !stored.body ? stored : null;
   const m = moladOf(period);
+  // the occurrence holding the window's day, read once as the editor is built: every frame of a drag keeps the same crossing
+  const keep = deps.occurrence;
   const sec = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
   sec.createDiv({ cls: "wadjet-studio-orrery-caps", text: `Period${m.exact ? "" : " · ≈"}` });
   dhpKnobs(
     sec.createDiv({ cls: "wadjet-studio-orrery-knobs" }),
     knobs,
     [
-      { key: "days", label: "days", max: 60, hint: orreryHint("orrery.moladDays"), part: "period-days" },
-      { key: "hours", label: "hours", max: 23, hint: orreryHint("orrery.moladHours"), part: "period-hours" },
-      { key: "parts", label: "parts", max: 1079, hint: orreryHint("orrery.moladParts"), part: "period-parts" },
+      { key: "days", label: "days", max: 60, hint: orreryHint("orrery.crossingPeriodDays"), part: "period-days" },
+      { key: "hours", label: "hours", max: 23, hint: orreryHint("orrery.crossingPeriodHours"), part: "period-hours" },
+      { key: "parts", label: "parts", max: 1079, hint: orreryHint("orrery.crossingPeriodParts"), part: "period-parts" },
     ],
     m.molad,
     (next, phase) =>
       deps.edit((cal, b) => {
         const w = periodWrite(next, period, storedLit?.period ?? null);
-        return typeof w === "string" ? fail(w) : setLiteralPeriod(cal, b, id, w);
+        return typeof w === "string" ? fail(w) : setLiteralPeriod(cal, b, id, w, keep);
       }, phase),
   );
+  if (keep !== null) sec.createDiv({ cls: "wadjet-studio-orrery-note", text: `Keeps this ${id} in place: crossing 0 moves instead.`, attr: { "data-part": "period-keeps" } });
   const z = crossingZero(at);
   const zero = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
   zero.createDiv({ cls: "wadjet-studio-orrery-caps", text: `Crossing 0 · D${z.day}${z.exact ? "" : " · ≈"}` });
@@ -229,6 +234,7 @@ export function buildTrainEditor(parent: HTMLElement, deps: CrossingEditorDeps):
   const id = deps.unitId;
   parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `${t.a} crossings in ${t.L} years: year k reads crossing ⌊(${t.a}·k ${t.c < 0 ? "−" : "+"} ${Math.abs(t.c)}) / ${t.L}⌋.`, attr: { "data-part": "train-sentence" } });
   const row = parent.createDiv({ cls: "wadjet-studio-orrery-knobs" });
+  parent.createDiv({ cls: "wadjet-studio-orrery-note", text: "Most ratios stop the months adding up; the draft stops running until they do.", attr: { "data-part": "train-warning" } });
   const knob = (part: string, label: string, spec: { min: number; max: number; scale?: "log" }, value: number, hint: string, write: (v: number) => Partial<{ a: number; c: number; L: number }>): void => {
     knobs.push(
       createKnob(row.createDiv({ cls: "wadjet-studio-orrery-knob", attr: { "data-part": part } }), {

@@ -35,7 +35,7 @@ import { prepareDefinition } from "../../plugin/time/seshat";
 import { compile, FormError, recognise, type FormEdits, type MoonForm } from "../../plugin/time/form";
 import { editedSlices, outsideSlices, replayProblem, sliceOf, slotReferences, withSlice, type AstEdit } from "./ast-edit";
 import { moveBody } from "./rational-knob";
-import { applyUnitOps, cycleReplayProblem, replayUnitOps, unitOps } from "./unit-edit";
+import { applyUnitOps, cycleReplayProblem, replayUnitOps, UNIT_OPS_REFUSED, unitOps } from "./unit-edit";
 import type { CalendarSource, DraftMoon, FormDraft, WorldDraft } from "./state";
 
 export type CalendarDraft = WorldDraft["calendar"];
@@ -273,7 +273,7 @@ function mergeLayers(stored: string, storedAst: CalendarAst, base: Layered, draf
   // units renamed or removed (slice 5e) are no slice: they are made first, on the stored definition and on the base
   // alike, so the slices below compare like with like (unit-edit.ts)
   const ops = unitOps(base.ast, draft.ast);
-  if (ops === null) return { kind: "error", message: "the draft's units are not the stored calendar's" };
+  if (ops === null) return { kind: "error", message: UNIT_OPS_REFUSED };
   let ast = storedAst;
   let seed = base.ast;
   if (ops.length) {
@@ -414,7 +414,7 @@ export function applyAstEdit(calendar: CalendarDraft, base: CalendarDraft, edit:
     if (same(partOf(before, k), partOf(after, k))) continue;
     const mine = partOf(calendar, k);
     if (mine !== undefined && !same(mine, partOf(base, k)) && !same(mine, partOf(before, k))) {
-      return { refused: true, reason: `the ${PART_WORDS[k]} have an unsaved edit this change would also move; save or undo that edit first` };
+      return { refused: true, reason: `the ${PART_WORDS[k]} ${k === "name" || k === "year" || k === "week" ? "has" : "have"} an unsaved edit this change would also move; save or undo that edit first` };
     }
     next = setPart(next, k, partOf(after, k));
   }

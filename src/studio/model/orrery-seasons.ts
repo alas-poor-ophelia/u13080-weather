@@ -26,7 +26,7 @@
  * replays the marks only while those slots are as the edit saw them
  * (`replayProblem`).
  */
-import { fractionBoundary, isDateMark, seasonsUseDates, type CalendarAst, type SeasonMarkAst, type SlotsUnitAst } from "../../seshat";
+import { fractionBoundary, isDateMark, seasonsUseDates, type CalendarAst, type SeasonMarkAst, type SeasonsAst, type SlotsUnitAst } from "../../seshat";
 import { addSeasonMark, markProblem, removeSeasonMark, setSeasonMark, withSlice, type AstEdit } from "./ast-edit";
 import { applyAstEdit, calendarOfDefinition, draftAst, type CalendarDraft, type CalendarEdit } from "./definition";
 import { freshName, phaseInsertAt } from "./orrery-body";
@@ -59,6 +59,17 @@ function withDraft(next: CalendarDraft, base: CalendarDraft): CalendarEdit {
 
 /** The unit the marks divide (the year when there are none yet). */
 const seasonsUnit = (ast: CalendarAst): string => ast.seasons?.unit ?? "year";
+
+/**
+ * Why the Seasons window (fractions of the year, written through the form's year) cannot edit these seasons, or
+ * null: a mark starts on a date ("dated"), or the marks divide another unit than the year ("unit": the form would
+ * write them over the year). Both are edited in the Orrery or as text.
+ */
+export function seasonsWindowLock(seasons: SeasonsAst | undefined): "dated" | "unit" | null {
+  if (!seasons) return null;
+  if (seasonsUseDates(seasons)) return "dated";
+  return seasons.unit !== "year" ? "unit" : null;
+}
 
 /** Whether the marks are edited through the AST layer: the layer's marks are dated, they divide another unit than the year, or the result is dated. */
 function throughAst(calendar: CalendarDraft, ast: CalendarAst, next: readonly SeasonMarkAst[]): boolean {
@@ -173,10 +184,20 @@ export function fractionFor(at: number, length: number): number {
  * Mark `m` written as `kind`, starting on the same day this year (`at`) where it can: `kept` false when it could
  * not (the mark falls on no day this year, or the day lies in no slot), and the mark starts where the hint says
  * (the year's first day, or the slot's first). `unit` is the slot unit a month-and-day mark names.
+ *
+ * A fraction past the start of the year's last day falls on no day inside the year (a virtual day just past its
+ * end, seasons.ts `markDay`): as a date it lands on the last day (`kept` false: one day earlier), or is refused,
+ * with the reason, when the last day lies in no slot, rather than moving the season to the year's start.
  */
 export function convertMark(m: SeasonMarkAst, kind: MarkKind, at: number | null, length: number, unit: { readonly id: string; readonly lengths: readonly number[] | null } | null): { mark: SeasonMarkAst; kept: boolean } | string {
   const name = m.name;
   if (kind === kindOf(m)) return { mark: m, kept: true };
+  if (kind !== "fraction" && "from" in m && length > 0 && (at === null || at >= length) && fractionBoundary(m.from, length) === null) {
+    const last = convertMark(m, kind, length - 1, length, unit);
+    if (typeof last === "string") return last;
+    if (!last.kept) return `${name} starts after the year's last day begins, and that day is in no slot of the ${unit?.id ?? "year"} this year; move it earlier in the year first`;
+    return { mark: last.mark, kept: false };
+  }
   if (kind === "fraction") return at === null || !(length > 0) ? { mark: { name, from: 0 }, kept: false } : { mark: { name, from: fractionFor(at, length) }, kept: true };
   if (kind === "day") return at === null ? { mark: { name, day: 1 }, kept: false } : { mark: { name, day: at + 1 }, kept: true };
   if (!unit) return "the year has no months directly in it for a season to start in";

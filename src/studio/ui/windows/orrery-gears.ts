@@ -19,16 +19,18 @@
  * every control reads the draft when it commits, a knob's origin is the gear
  * as the editor was built, and the editor never writes the store itself.
  */
-import { Menu } from "obsidian";
+import { Menu, Modal, type App } from "obsidian";
 import type { CalendarAst, GearAst, PartId } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
-import { switchesReading } from "../../model/ast-edit";
+import { kindRoundTrips, switchesReading } from "../../model/ast-edit";
 import { orreryHint } from "../../model/hints-orrery";
 import { addTerm, cellOf, EVERY, FEED_DAYS, feedsOf, feedTargets, offsetRange, removeGearPart, removeTerm, renameGearIn, setFeed, setKind, setTerm, termEngaged, togglePosition, type FeedTarget } from "../../model/orrery-gears";
 import { createKnob, createSegmented, type KnobComponent, type SegmentedComponent } from "../components";
 import { button, input, type EditPhase, type PartEditor } from "./orrery-body";
 
 export interface GearEditorDeps {
+  /** for the confirm before a kind switch that cannot come back to the same terms */
+  app: App;
   /** the draft AST (the one the edits read) */
   ast: CalendarAst;
   gearId: string;
@@ -92,7 +94,12 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
       { value: "positions", label: "positions in a cycle", hint: orreryHint("orrery.gearKind") },
     ],
     value: g.kind,
-    onChange: (v) => deps.edit((c, b) => setKind(c, b, id, v as GearAst["kind"]), "click"),
+    onChange: (v) => {
+      const switchTo = (): void => deps.edit((c, b) => setKind(c, b, id, v as GearAst["kind"]), "click");
+      // a sum the table cannot give back as written: ask first (Undo restores it; switching back does not)
+      if (v !== "positions" || kindRoundTrips(deps.ast, id)) return switchTo();
+      new KindConfirmModal(deps.app, id, (ok) => (ok ? switchTo() : kind.update({ value: g.kind }))).open();
+    },
   });
   kind.el.setAttr("aria-label", "Gear kind");
   parts.push(kind);
@@ -158,6 +165,38 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
     }, "click"),
   ).addClass("is-danger");
   return editor;
+}
+
+/** The question before a switch to a table whose terms will not come back as written. Escape and click-outside cancel. */
+class KindConfirmModal extends Modal {
+  private settled = false;
+
+  constructor(
+    app: App,
+    private readonly gearId: string,
+    private readonly done: (ok: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  override onOpen(): void {
+    this.titleEl.setText("Switch to a table of positions?");
+    this.contentEl.createEl("p", { text: `The same years stay engaged, but switching ${this.gearId} back to intervals will not restore these terms as written; Undo will.` });
+    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+    buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.settle(false));
+    buttons.createEl("button", { cls: "mod-cta", text: "Switch" }).addEventListener("click", () => this.settle(true));
+  }
+
+  private settle(ok: boolean): void {
+    this.settled = true;
+    this.close();
+    this.done(ok);
+  }
+
+  override onClose(): void {
+    this.contentEl.empty();
+    if (!this.settled) this.done(false);
+  }
 }
 
 /** TERMS: one row per interval term, then ＋ term. */
