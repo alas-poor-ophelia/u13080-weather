@@ -11,7 +11,8 @@
  *   parts list's ＋ body. Slice 5b: the year, slot unit and slot inspectors
  *   (windows/orrery-slots.ts). The units group shows no ＋: adding a slot
  *   unit (or a cycle) waits for its editor; a slot is added from the slot
- *   unit's own inspector.
+ *   unit's own inspector. Slice 5c: the gear inspector
+ *   (windows/orrery-gears.ts) and the gears group's ＋ gear.
  * - A draft that does not run (slots that no longer fill their year, the
  *   commonest outcome of a slot edit) keeps the editors open: the scope,
  *   list and NOW draw the last draft that ran, the verdict and TEXT are the
@@ -51,6 +52,7 @@ import { WORLD_PRESETS } from "../../../plugin/opt-in";
 import { draftOf, type CalendarDraft, type CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
 import { addBody, draftReader } from "../../model/orrery-body";
+import { addGearPart } from "../../model/orrery-gears";
 import { buildOrrery, clampDay, partInfo, partText, problemsByPart, orreryProblems, type OrreryModel, type ViewName } from "../../model/orrery-geometry";
 import { needsWorldConfirm } from "../../model/world-confirm";
 import { ORRERY_RATES, ORRERY_THEMES, orreryFit, scrubDay, scrubFraction, scrubSegments, seasonSegments, stepDay, stepYear, type OrreryTheme } from "../../model/orrery-transport";
@@ -62,6 +64,7 @@ import type { SurfaceContext } from "../surfaces";
 import type { WindowBuild, WindowBuilder } from "../windows";
 import { confirmWorldEdit, type WorldSubject } from "../world-confirm-modal";
 import { buildBodyEditor, type EditPhase, type PartEditor } from "./orrery-body";
+import { buildGearEditor } from "./orrery-gears";
 import { buildSlotEditor, buildSlotUnitEditor, buildYearEditor } from "./orrery-slots";
 
 /** The id this window is registered and opened under. */
@@ -496,6 +499,18 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     }, "click", "moons");
   }
 
+  /** ＋ gear: a new gear that feeds nothing, selected (also when the edit waits for the world confirm). */
+  function addGearRow(): void {
+    edit((c, b) => {
+      const r = addGearPart(c, b);
+      if (!("refused" in r) && r.id !== undefined) {
+        selected = `gear:${r.id}`;
+        listKey = "";
+      }
+      return r;
+    }, "click", "calendar");
+  }
+
   /** The editors' `selectAfter`: the part the edit in hand lands on (a moved, added or removed slot). */
   function selectAfter(part: PartId): void {
     selected = part;
@@ -544,20 +559,22 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     listEl.empty();
     if (!m) return;
     for (const g of m.groups) {
-      // a ＋ shows where its editor exists (slice 5a: bodies); the other groups' ＋ wait for theirs
-      const add = editable && g.add === "body" ? g.add : null;
+      // a ＋ shows where its editor exists (slice 5a: bodies; 5c: gears); the other groups' ＋ wait for theirs
+      const add = editable && (g.add === "body" || g.add === "gear") ? g.add : null;
       // a group's empty header is where its ＋ goes: an empty group without one is left out
       if (!g.rows.length && add === null) continue;
       const group = listEl.createDiv({ cls: "wadjet-studio-orrery-group" });
       const label = group.createDiv({ cls: "wadjet-studio-orrery-group-label" });
       label.createSpan({ text: g.label });
-      if (add === "body") {
-        const plus = label.createSpan({ cls: "wadjet-studio-orrery-add", text: "＋", attr: { role: "button", tabindex: "0", "aria-label": "Add a body", "data-hint": orreryHint("orrery.addBody"), "data-add": add } });
-        plus.addEventListener("click", addBodyPart);
+      if (add !== null) {
+        const body = add === "body";
+        const onAdd = body ? addBodyPart : addGearRow;
+        const plus = label.createSpan({ cls: "wadjet-studio-orrery-add", text: "＋", attr: { role: "button", tabindex: "0", "aria-label": body ? "Add a body" : "Add a gear", "data-hint": body ? orreryHint("orrery.addBody") : orreryHint("orrery.addGear"), "data-add": add } });
+        plus.addEventListener("click", onAdd);
         plus.addEventListener("keydown", (ev) => {
           if (ev.key !== "Enter" && ev.key !== " ") return;
           ev.preventDefault();
-          addBodyPart();
+          onAdd();
         });
       }
       for (const r of g.rows) {
@@ -599,7 +616,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     const u = ast.units.find((x) => x.id === id);
     const slot = kind === "slot" && u?.kind === "slots" ? u.slots[Number(n)] : undefined;
     const title = slot && u?.kind === "slots" ? (slot.name ?? `slot ${Number(n) + (u.number ?? 1)}`) : id;
-    return { code: kind === "slot" ? "C2 · SLOT" : "C2", title, sub: "in the draft · the scope shows the last calendar that runs", now: [{ key: "this year", value: "— (the draft does not run)", tone: "err" }] };
+    return { code: kind === "slot" ? "C2 · SLOT" : kind === "gear" ? "C3 · GEAR" : "C2", title, sub: "in the draft · the scope shows the last calendar that runs", now: [{ key: "this year", value: "— (the draft does not run)", tone: "err" }] };
   }
   /** The control in the inspector that has focus (its `data-part`), so a rebuild can give it back. */
   function focusedPart(): string | null {
@@ -670,6 +687,12 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
       if (unit.kind === "cycle" && kind === "unit" && (unit.id === m.year.unit || unit.id === "year")) editor = buildYearEditor(host("year"), deps);
       else if (unit.kind === "slots" && kind === "unit") editor = buildSlotUnitEditor(host("slots"), { ...deps, lengths: lengthsOf(m, unit) });
       else if (unit.kind === "slots" && kind === "slot" && n !== undefined) editor = buildSlotEditor(host("slot"), title, { ...deps, index: Number(n), lengths: lengthsOf(m, unit) });
+    }
+    if (kind === "gear" && id !== undefined && editable) {
+      const g = draft.gears.find((x) => x.id === id);
+      // the occurrence of the unit the gear counts, on the window's day (none while the scope draws an older calendar)
+      const index = !g || behind || m.ast !== ast ? null : g.on === m.year.unit ? m.year.index : (m.today.positions.get(g.on)?.index ?? null);
+      editor = buildGearEditor(host("gear"), title, { ast: draft, gearId: id, index, refusal, edit, select: (part) => select(part), selectAfter });
     }
     if (kind === "body" && id !== undefined && editable) {
       const st = ctx.store.get();

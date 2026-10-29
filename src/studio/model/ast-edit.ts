@@ -12,9 +12,11 @@
  *   `problems()` on the result (it costs 70-216 ms on Hebrew, §18.6 item 7),
  *   so no edit here calls it.
  * - Each edit touches one SLICE of the AST: one gear, one unit's stages, one
- *   unit's crossing, one cycle unit's constant length, one slot unit's slots,
- *   or the season marks (a slot edit that moves slots also moves the marks
- *   that name them, so it touches two). Slices are how a Save replays the
+ *   unit's crossing, one cycle unit's constant length, its own gear terms
+ *   (`feeds:`, slice 5c) or its ledger (`ledger:`), one slot unit's slots, or
+ *   the season marks (a slot edit that moves slots also moves the marks that
+ *   name them, so it touches two; a gear's rename or removal touches every
+ *   slice that names it). Slices are how a Save replays the
  *   draft's edits onto the definition stored at Save time (definition.ts
  *   `mergeCalendar`): a slice the draft did not edit passes through as stored
  *   now, and a slice it did edit is refused when it changed in storage since.
@@ -24,7 +26,7 @@
  *   start day by less than one day, so K stays.
  */
 import { canonicalJson } from "../../core/profile";
-import { childrenOf, epochEditK, rational, type BodyRef, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type Rational, type RuleAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
+import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, type BodyRef, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
 
 export type AstEdit = { readonly ast: CalendarAst } | { readonly refused: true; readonly reason: string };
 
@@ -36,10 +38,11 @@ const isReduced = (r: Rational): boolean => isInt(r.n) && isInt(r.d) && r.d > 0 
 // ---- slices
 
 /**
- * One editable slice of a definition: a gear by id; a cycle unit's stages, crossing or constant length (`length:`)
- * by unit id; a slot unit's slots (`slots:`) by unit id; or the season marks.
+ * One editable slice of a definition: a gear by id; a cycle unit's stages, crossing, constant length (`length:`),
+ * own gear terms (`feeds:`) or ledger (`ledger:`) by unit id; a slot unit's slots (`slots:`) by unit id; or the
+ * season marks.
  */
-export type SliceKey = `gear:${string}` | `stages:${string}` | `crossing:${string}` | `length:${string}` | `slots:${string}` | "marks";
+export type SliceKey = `gear:${string}` | `stages:${string}` | `crossing:${string}` | `length:${string}` | `feeds:${string}` | `ledger:${string}` | `slots:${string}` | "marks";
 
 /** What a slice reads on a definition without the unit it names (distinct from a unit without stages). */
 export const NO_UNIT = "\u0000no unit";
@@ -65,15 +68,17 @@ export function sliceOf(ast: CalendarAst, key: SliceKey): unknown {
   const u = cycleUnit(ast, id);
   if (!u) return NO_UNIT;
   if (kind === "length") return u.crossing ? undefined : u.length;
+  if (kind === "feeds") return u.gears;
+  if (kind === "ledger") return u.ledger;
   return kind === "stages" ? u.stages : u.crossing;
 }
 
-/** Every slice key either definition has, in a stable order: gears, then each cycle unit's stages, crossing and length, each slot unit's slots, then the marks. */
+/** Every slice key either definition has, in a stable order: gears, then each cycle unit's stages, crossing, length, gear terms and ledger, each slot unit's slots, then the marks. */
 function sliceKeys(a: CalendarAst, b: CalendarAst): SliceKey[] {
   const gears = [...new Set([...a.gears, ...b.gears].map((g) => g.id))];
   const units = [...new Set([...a.units, ...b.units].filter((u) => u.kind === "cycle").map((u) => u.id))];
   const slotted = [...new Set([...a.units, ...b.units].filter((u) => u.kind === "slots").map((u) => u.id))];
-  return [...gears.map((id): SliceKey => `gear:${id}`), ...units.flatMap((id): SliceKey[] => [`stages:${id}`, `crossing:${id}`, `length:${id}`]), ...slotted.map((id): SliceKey => `slots:${id}`), "marks"];
+  return [...gears.map((id): SliceKey => `gear:${id}`), ...units.flatMap((id): SliceKey[] => [`stages:${id}`, `crossing:${id}`, `length:${id}`, `feeds:${id}`, `ledger:${id}`]), ...slotted.map((id): SliceKey => `slots:${id}`), "marks"];
 }
 
 /** The slices `draft` changed from `base`. */
@@ -118,7 +123,7 @@ export function withSlice(ast: CalendarAst, key: SliceKey, value: unknown): Cale
     const next = { ...u, length: value } as UnitAst;
     return { ...ast, units: ast.units.map((x) => (x === u ? next : x)) };
   }
-  const field = kind === "stages" ? "stages" : "crossing";
+  const field = kind === "stages" ? "stages" : kind === "feeds" ? "gears" : kind === "ledger" ? "ledger" : "crossing";
   if (field === "crossing" && (value === undefined) !== (u.crossing === undefined)) return null; // a base kind changes with its anchor and length, which no slice holds
   const { [field]: _old, ...rest } = u as CycleUnitAst & Record<string, unknown>;
   const next = (value === undefined ? rest : { ...rest, [field]: value }) as UnitAst;
@@ -130,7 +135,7 @@ export function outsideSlices(ast: CalendarAst): unknown {
   const { gears: _g, seasons: _s, units, ...rest } = ast;
   return {
     ...rest,
-    units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, length: _l, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : (({ slots: _sl, ...x }) => x)(u))),
+    units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, length: _l, gears: _gt, ledger: _lg, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : (({ slots: _sl, ...x }) => x)(u))),
   };
 }
 
@@ -176,6 +181,167 @@ export function setGearPositions(ast: CalendarAst, gearId: string, table: { read
   const positions = [...new Set(table.positions)].sort((a, b) => a - b);
   const { offset: _o, ...rest } = g;
   return { ast: putGear(ast, { ...rest, period: table.period, positions, ...(table.offset ? { offset: table.offset } : {}) }) };
+}
+
+// ---- a gear's name, kind, feeds, and the gear itself (slice 5c)
+
+/** The widest cycle a table of positions is switched to (the inspector's cycle-year grid). */
+export const GEAR_TABLE_MAX = 400;
+
+const mod = (a: number, m: number): number => {
+  const r = a % m;
+  return r < 0 ? r + m : r + 0;
+};
+
+/** What declares `id` (every id is one namespace: units, gears, rules, bodies), or null. */
+function declaredAs(ast: CalendarAst, id: string): string | null {
+  if (ast.units.some((u) => u.id === id)) return "unit";
+  if (ast.gears.some((g) => g.id === id)) return "gear";
+  if ((ast.rules ?? []).some((r) => r.id === id)) return "rule";
+  if ((ast.bodies ?? []).some((b) => b.id === id)) return "body";
+  return null;
+}
+
+/** `o` with `f` applied to each of its gear terms (null drops one); `o` itself when nothing changes. */
+function withTerms<T extends { readonly gears?: readonly GearTerm[] }>(o: T, f: (t: GearTerm) => GearTerm | null): T {
+  const was = o.gears;
+  if (!was) return o;
+  const next = was.flatMap((t) => {
+    const r = f(t);
+    return r ? [r] : [];
+  });
+  if (next.length === was.length && next.every((t, i) => t === was[i])) return o;
+  const { gears: _g, ...rest } = o;
+  return (next.length ? { ...rest, gears: next } : rest) as unknown as T;
+}
+
+/**
+ * `ast` with `f` applied to every gear term it holds: a cycle unit's own, a
+ * ledger switch's rule's, and each slot's. These are every place a definition
+ * names a gear (rules, seasons and day labels never do).
+ */
+function mapTerms(ast: CalendarAst, f: (t: GearTerm) => GearTerm | null): CalendarAst {
+  const units = ast.units.map((u): UnitAst => {
+    if (u.kind === "slots") {
+      const slots = u.slots.map((s) => withTerms(s, f));
+      return slots.every((s, i) => s === u.slots[i]) ? u : { ...u, slots };
+    }
+    let next: CycleUnitAst = withTerms(u, f);
+    const ledger = u.ledger;
+    if (ledger) {
+      const entries = ledger.map((e): LedgerEntry => {
+        if (e.kind !== "switch") return e;
+        const rule = withTerms(e.rule, f);
+        return rule === e.rule ? e : { ...e, rule };
+      });
+      if (entries.some((e, i) => e !== ledger[i])) next = { ...next, ledger: entries };
+    }
+    return next;
+  });
+  return units.every((u, i) => u === ast.units[i]) ? ast : { ...ast, units };
+}
+
+/** The ledger switches whose rule reads gear `id`, each as "<unit> <displayed number>". */
+export function switchesReading(ast: CalendarAst, id: string): string[] {
+  return ast.units.flatMap((u) => (u.kind === "cycle" ? (u.ledger ?? []).flatMap((e) => (e.kind === "switch" && (e.rule.gears ?? []).some((t) => t.gear === id) ? [`${u.id} ${e.from + (u.number ?? 0)}`] : [])) : []));
+}
+
+const ID_WORDS = "lower-case letters, digits and hyphens, starting with a letter";
+
+/**
+ * Rename gear `from` to `to`, and every term that names it with it: the
+ * cycle units' own terms, the ledger switches' rules and the slots (so the
+ * rename reaches every slice that names the gear, and nothing else). An id
+ * another part already declares is refused, naming that part's kind.
+ */
+export function renameGear(ast: CalendarAst, from: string, to: string): AstEdit {
+  const g = gearOf(ast, from);
+  if (typeof g === "string") return refuse(g);
+  const id = to.trim();
+  if (id === from) return { ast };
+  if (!ID.test(id)) return refuse(`a gear's id is ${ID_WORDS}; "${id}" is not one`);
+  const taken = declaredAs(ast, id);
+  if (taken) return refuse(`the id "${id}" is already taken by a ${taken}; units, gears, rules and bodies share one list of ids`);
+  const renamed: CalendarAst = { ...ast, gears: ast.gears.map((x) => (x.id === from ? { ...x, id } : x)) };
+  return { ast: mapTerms(renamed, (t) => (t.gear === from ? { ...t, gear: id } : t)) };
+}
+
+/** Add `gear` after the others, its shape checked as the set edits check it. It feeds nothing yet. */
+export function addGear(ast: CalendarAst, gear: GearAst): AstEdit {
+  if (!ID.test(gear.id)) return refuse(`a gear's id is ${ID_WORDS}; "${gear.id}" is not one`);
+  const taken = declaredAs(ast, gear.id);
+  if (taken) return refuse(`the id "${gear.id}" is already taken by a ${taken}`);
+  if (!cycleUnit(ast, gear.on)) return refuse(`a gear counts a cycle unit; "${gear.on}" is not one`);
+  const placed: CalendarAst = { ...ast, gears: [...ast.gears, gear] };
+  return gear.kind === "intervals" ? setGearIntervals(placed, gear.id, gear.terms) : setGearPositions(placed, gear.id, gear);
+}
+
+/**
+ * Remove gear `id` and every term that names it (the lengths it fed lose what
+ * it added). Refused while a ledger switch's rule reads it: that rule governs
+ * years already counted, so it is changed in Exceptions first.
+ */
+export function removeGear(ast: CalendarAst, id: string): AstEdit {
+  const g = gearOf(ast, id);
+  if (typeof g === "string") return refuse(g);
+  const reads = switchesReading(ast, id);
+  if (reads.length) return refuse(`the rule change from ${reads[0]} reads the gear "${id}"; change it first (Exceptions)`);
+  return { ast: mapTerms({ ...ast, gears: ast.gears.filter((x) => x.id !== id) }, (t) => (t.gear === id ? null : t)) };
+}
+
+/**
+ * Switch gear `id` between a sum of intervals and a table of positions in a
+ * cycle, matching the same indices: intervals become the table over their lcm
+ * (at most GEAR_TABLE_MAX), and a table becomes one interval per position.
+ */
+export function setGearKind(ast: CalendarAst, id: string, kind: GearAst["kind"]): AstEdit {
+  const g = gearOf(ast, id);
+  if (typeof g === "string") return refuse(g);
+  if (g.kind === kind) return { ast };
+  if (g.kind === "intervals") {
+    const period = gearPeriod(g);
+    if (!isInt(period) || period > GEAR_TABLE_MAX) return refuse(`the gear repeats every ${period}; a table of positions holds a cycle of at most ${GEAR_TABLE_MAX}`);
+    const positions: number[] = [];
+    for (let n = 0; n < period; n++) {
+      let sum = 0;
+      for (const t of g.terms) if (mod(n - (t.offset ?? 0), t.every) === 0) sum += t.sign;
+      if (sum !== 0 && sum !== 1) return refuse(`the terms count index ${n} ${sum} times; make them nest first`);
+      if (gearMatches(g, n)) positions.push(n);
+    }
+    return { ast: putGear(ast, { id: g.id, on: g.on, kind: "positions", period, positions }) };
+  }
+  if (g.positions.length === 0) return refuse("the table marks no position; mark one first");
+  const off = g.offset ?? 0;
+  const terms = [...g.positions]
+    .sort((a, b) => a - b)
+    .map((p) => {
+      const offset = mod(p + off, g.period);
+      return { every: g.period, ...(offset ? { offset } : {}), sign: 1 as const };
+    });
+  return { ast: putGear(ast, { id: g.id, on: g.on, kind: "intervals", terms }) };
+}
+
+/**
+ * Gear `gearId` adds `add` days to cycle unit `unitId`'s length when it
+ * engages, or (null) no longer does. A gear lengthens only the unit it counts
+ * (or a slot inside it, which is a slot edit). 0 days is kept as written.
+ */
+export function setGearFeed(ast: CalendarAst, gearId: string, unitId: string, add: number | null): AstEdit {
+  const g = gearOf(ast, gearId);
+  if (typeof g === "string") return refuse(g);
+  const u = cycleUnit(ast, unitId);
+  if (!u) return refuse(`there is no cycle unit "${unitId}"`);
+  const was = u.gears ?? [];
+  let terms: GearTerm[];
+  if (add === null) terms = was.filter((t) => t.gear !== gearId);
+  else {
+    if (g.on !== unitId) return refuse(`the gear "${gearId}" counts the ${g.on}, so it lengthens the ${g.on} or a slot inside it, not the ${unitId}`);
+    if (!isInt(add)) return refuse(`a gear adds ${String(add)} days; write a whole number`);
+    const at = was.findIndex((t) => t.gear === gearId);
+    terms = at < 0 ? [...was, { gear: gearId, add }] : was.map((t, i) => (i === at ? { ...t, add } : t));
+  }
+  const next = withSlice(ast, `feeds:${unitId}`, terms.length ? terms : undefined);
+  return next ? { ast: next } : refuse(`there is no cycle unit "${unitId}"`);
 }
 
 // ---- stages

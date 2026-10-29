@@ -1,6 +1,6 @@
 /**
  * The ORRERY window's editors' half of the hint tables (docs/SESHAT-v0.md
- * §18; bead wadjet-b6x, slice 5a onward; 5b: year, slot unit and slot).
+ * §18; bead wadjet-b6x, slice 5a onward; 5b: year, slot unit and slot; 5c: gear).
  *
  * Same house rules as `hints.ts` (SPEC §9): product microcopy, sentence
  * case, no explainer prose, no trailing full stop. The *name* says what the
@@ -36,6 +36,21 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.slotDown": ["Move slot down", "swaps the slot with the one after it; a season on either follows its slot"],
   "orrery.slotAddAfter": ["Add slot after", "inserts a slot after this one, as long as this one"],
   "orrery.slotRemove": ["Remove slot", "takes the slot out of its unit; refused while a season starts in it"],
+  "orrery.addGear": ["Add gear", "adds a gear on every 4th year that feeds nothing yet; Save writes it"],
+  "orrery.gearName": ["Gear id", "renames the gear; every length it feeds and every rule change that reads it follow"],
+  "orrery.gearKind": ["Kind", "a sum of intervals, or a table of positions in a cycle; the same years stay engaged"],
+  "orrery.termPin": ["Pin", "lit when this term's pin is at the pointer this year"],
+  "orrery.termSign": ["Add or take away", "RRULE adds the years it matches, EXRULE takes them away; the sum must stay 0 or 1"],
+  "orrery.termEvery": ["Every", "the term matches one year in this many; drag ↕, or double-click to type"],
+  "orrery.termOffset": ["Offset", "shifts which year of the interval the term matches"],
+  "orrery.termRemove": ["Remove term", "takes the term out of the gear; a gear keeps at least one"],
+  "orrery.addTerm": ["Add term", "adds a term that takes away every 4th year of the last one"],
+  "orrery.gearCell": ["Cycle year", "gold years are leap years; click to mark or unmark one"],
+  "orrery.feedTarget": ["Fed length", "a length this gear adds to when it engages; selects it"],
+  "orrery.feedAdd": ["Add", "days added to the length when the gear engages, −30 to +30"],
+  "orrery.feedRemove": ["Stop feeding", "the length no longer changes when the gear engages"],
+  "orrery.addFeed": ["Add feed", "lets the gear add a day to the year's length or to a slot"],
+  "orrery.removeGear": ["Remove gear", "removes the gear and what it adds; refused while a rule change in Exceptions reads it"],
 };
 
 /**

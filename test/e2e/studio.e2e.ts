@@ -10138,7 +10138,9 @@ describe("climate studio · calendar orrery", () => {
       const whole = ((await title.textContent()) ?? "").trim();
       await win.locator('.wadjet-studio-orrery-row[data-part="gear:leap"]').click();
       await nextFrame();
-      await expect.poll(async () => ((await title.textContent()) ?? "").trim()).toBe("leap");
+      // the gear's title is its rename input on an editable draft (slice 5c)
+      const shown = async () => ((await title.locator("input").count()) ? await title.locator("input").inputValue() : ((await title.textContent()) ?? "").trim());
+      await expect.poll(shown).toBe("leap");
       expect(whole).not.toBe("leap");
       expect(((await win.locator(".wadjet-studio-orrery-code").textContent()) ?? "").trim()).toBe("C3 · GEAR");
       expect(await win.locator(".wadjet-studio-orrery-row.is-selected").count()).toBe(1);
@@ -10439,9 +10441,10 @@ describe("climate studio · calendar orrery", () => {
       expect(await win.locator(".wadjet-studio-orrery-title-input").inputValue()).toBe("Lantern");
       expect(await text()).toContain("PERIOD:59/2");
       expect(await chip()).not.toContain("●");
-      // the ＋ shows on the bodies group only (the other editors are later slices)
-      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(1);
+      // the ＋ shows on the bodies and (5c) gears groups only (the other editors are later slices)
+      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(2);
       expect(await win.locator('.wadjet-studio-orrery-add[data-add="body"]').count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="gear"]').count()).toBe(1);
       // the fixture world's today is near day 0, where every period puts the same moon day: the Orrery's own day moves
       // three years on (its transport, never the settings' today)
       for (let i = 0; i < 3; i++) {
@@ -10544,15 +10547,16 @@ describe("climate studio · calendar orrery", () => {
       await expect.poll(lcd).toMatch(/-02-1\d/);
       const lcd0 = await lcd();
 
-      // the months: SLOTS · THIS YEAR and its ＋ slot; the units group still has no ＋ (adding a slot unit waits for its editor)
+      // the months: SLOTS · THIS YEAR and its ＋ slot; the units group still has no ＋ (adding a slot unit waits for its editor): the ＋s are the bodies' and (5c) the gears'
       await win.locator('.wadjet-studio-orrery-row[data-part="unit:month"]').click();
       await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOTS");
       expect(await win.locator('[data-editor="slots"]').count()).toBe(1);
       expect(await win.locator(".wadjet-studio-orrery-slot").count()).toBe(12);
       expect(await textOf('[data-part="slot-row-1"] .wadjet-studio-orrery-slot-flag')).toBe("rest");
       expect(await win.locator('[data-part="add-slot"]').count()).toBe(1);
-      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(2);
       expect(await win.locator('.wadjet-studio-orrery-add[data-add="body"]').count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="gear"]').count()).toBe(1);
 
       // January: the slot inspector
       await win.locator('[data-part="slot-row-0"]').click();
@@ -10607,6 +10611,98 @@ describe("climate studio · calendar orrery", () => {
       await expect.poll(lcd).toBe(lcd0);
       expect(stored()).toContain("SLOT:January=31");
       console.log(`  · orrery slots: January → ${days} d (LCD "${lcd0}" → "${lcd1}"), renamed, ＋ slot after flagged the months, Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 97: the Orrery edits a gear: typing 5 into the leap rule's every knob makes a year divisible by 5 (and not by 4) 366 days and lights ●, ＋ term adds an EXRULE, and Undo goes back to clean", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const undo = (): Promise<boolean> => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.undo(), VIEW_TYPE);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const textOf = async (sel: string) => ((await win.locator(sel).first().textContent()) ?? "").trim();
+      const text = () => textOf(".wadjet-studio-orrery-text");
+      const lcd = () => textOf(".wadjet-studio-orrery-lcd");
+      const dayLbl = () => textOf(".wadjet-studio-orrery-daylbl");
+      const chip = () => textOf(".wadjet-studio-orrery-chip-label");
+      const issues = async () => (await win.locator(".wadjet-studio-window-issue").allTextContents()).join(" | ");
+      const yearNow = async () => Number(/^(-?\d+)-/.exec(await lcd())?.[1] ?? NaN);
+
+      // the Orrery's own day into the nearest year divisible by 5 and not by 4 (5, 2025 …): a common year under every 4
+      const y0 = await yearNow();
+      expect(Number.isFinite(y0)).toBe(true);
+      let target = y0;
+      for (let d = 0; d < 20; d++) {
+        const c = [y0 + d, y0 - d].find((y) => y % 5 === 0 && y % 4 !== 0);
+        if (c !== undefined) {
+          target = c;
+          break;
+        }
+      }
+      for (let i = 0; i < 20 && (await yearNow()) !== target; i++) await win.locator(`.wadjet-studio-orrery-key[aria-label="${(await yearNow()) > target ? "Back one year" : "Forward one year"}"]`).click();
+      await expect.poll(yearNow).toBe(target);
+      await expect.poll(dayLbl).toMatch(/ of 365$/);
+
+      // the leap gear: C3 · GEAR, its TERMS (+4 −100 +400) and FEEDS (the year's length)
+      await win.locator('.wadjet-studio-orrery-row[data-part="gear:leap"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C3 · GEAR");
+      expect(await win.locator('[data-editor="gear"]').count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-orrery-term").count()).toBe(3);
+      expect(await win.locator('[data-part="term-1-sign"] [aria-checked="true"]').textContent()).toBe("EXRULE −");
+      expect(await textOf('[data-part="feed-0"] .wadjet-studio-orrery-feed-target')).toBe("year length");
+      expect(await win.locator(".wadjet-studio-orrery-title-input").inputValue()).toBe("leap");
+      expect(await chip()).not.toContain("●");
+
+      // every 4 → 5, typed into the knob (the world confirm, when it comes, re-runs the edit)
+      await win.locator('[data-part="term-0-every"] .wadjet-studio-knob-dial').dblclick();
+      const field = win.locator('[data-part="term-0-every"] .wadjet-studio-knob-input');
+      await field.waitFor({ state: "visible", timeout: 10_000 });
+      await field.fill("5");
+      await field.press("Enter");
+      const confirmed = await passAnyConfirm();
+      await expect.poll(text, { timeout: 10_000 }).toContain("RRULE:FREQ=year;INTERVAL=5");
+      await expect.poll(dayLbl).toMatch(/ of 366$/);
+      await expect.poll(chip).toContain("●");
+      expect(stored()).toContain("INTERVAL=4");
+      expect(await issues()).toBe("");
+
+      // ＋ term: an EXRULE every 1600 that nests, so the year stays 366 days and nothing is flagged
+      await win.locator('[data-part="add-term"]').click();
+      await passAnyConfirm();
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-term").count()).toBe(4);
+      expect(await win.locator('[data-part="term-3-sign"] [aria-checked="true"]').textContent()).toBe("EXRULE −");
+      await expect.poll(text).toContain("EXRULE:FREQ=year;INTERVAL=1600");
+      await expect.poll(dayLbl).toMatch(/ of 366$/);
+      expect(await issues()).toBe("");
+
+      // Undo back to clean: the typed value and the ＋ term are one step each
+      for (let i = 0; i < 4 && (await chip()).includes("●"); i++) {
+        expect(await undo()).toBe(true);
+        await nextFrame();
+      }
+      await expect.poll(chip).not.toContain("●");
+      await expect.poll(dayLbl).toMatch(/ of 365$/);
+      await expect.poll(text).toContain("RRULE:FREQ=year;INTERVAL=4");
+      expect(await text()).not.toContain("INTERVAL=1600");
+      expect(stored()).toContain("INTERVAL=4");
+      console.log(`  · orrery gear: leap every 4 → 5 made year ${target} 366 days, ＋ term added EXRULE 1600, Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
     } finally {
       await close();
       await discardStudioWorldDraft();

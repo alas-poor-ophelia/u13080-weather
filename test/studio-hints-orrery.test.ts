@@ -8,7 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { HINT_SEPARATOR, parseHint } from "../src/studio/model/hints";
 import { ORRERY_HINTS, ORRERY_HINT_KEYS, orreryHint } from "../src/studio/model/hints-orrery";
 
-const FILES = ["../src/studio/ui/windows/orrery.ts", "../src/studio/ui/windows/orrery-body.ts", "../src/studio/ui/windows/orrery-slots.ts"];
+const FILES = ["../src/studio/ui/windows/orrery.ts", "../src/studio/ui/windows/orrery-body.ts", "../src/studio/ui/windows/orrery-slots.ts", "../src/studio/ui/windows/orrery-gears.ts"];
 const SOURCES = await Promise.all(FILES.map((f) => Bun.file(new URL(f, import.meta.url)).text()));
 
 function keysUsed(): string[] {

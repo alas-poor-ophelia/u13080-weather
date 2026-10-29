@@ -6791,6 +6791,76 @@
   font-size: var(--wadjet-studio-fs-chip);
   color: var(--wadjet-studio-text-dim);
 }
+/* slice 5c: the gear's TERMS rows, FEEDS rows and cycle-year grid */
+.wadjet-studio-orrery-terms,
+.wadjet-studio-orrery-feeds {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wadjet-studio-orrery-term,
+.wadjet-studio-orrery-feed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-left: 2px solid transparent;
+  border-radius: 2px;
+}
+.wadjet-studio-orrery-term-sign {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wadjet-studio-orrery-feed-target {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text);
+  cursor: pointer;
+}
+.wadjet-studio-orrery-feed-target:hover,
+.wadjet-studio-orrery-feed-target:focus-visible {
+  text-decoration: underline;
+}
+.wadjet-studio-orrery-cycle {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22px, 1fr));
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.wadjet-studio-orrery-cell {
+  box-sizing: border-box;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  font-size: var(--wadjet-studio-fs-chip);
+  font-variant-numeric: tabular-nums;
+  color: var(--wadjet-studio-text-mute);
+  background: #2e3135;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.wadjet-studio-orrery-cell.is-leap {
+  color: #17181a;
+  background: var(--wadjet-studio-gold);
+}
+.wadjet-studio-orrery-cell.is-now {
+  border-color: #e9ebee;
+}
+.wadjet-studio-orrery-cell:hover,
+.wadjet-studio-orrery-cell:focus-visible {
+  border-color: var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-orrery-cell.is-now:hover,
+.wadjet-studio-orrery-cell.is-now:focus-visible {
+  border-color: #e9ebee;
+}
 .wadjet-studio-orrery-chip {
   display: inline-flex;
   align-items: center;
