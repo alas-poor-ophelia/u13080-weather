@@ -10446,10 +10446,11 @@ describe("climate studio · calendar orrery", () => {
       expect(await win.locator(".wadjet-studio-orrery-title-input").inputValue()).toBe("Lantern");
       expect(await text()).toContain("PERIOD:59/2");
       expect(await chip()).not.toContain("●");
-      // the ＋ shows on the bodies and (5c) gears groups only (the other editors are later slices)
-      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(2);
+      // the ＋ shows on the bodies, (5c) gears and (5f) seasons groups only (the units' waits for its editor)
+      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(3);
       expect(await win.locator('.wadjet-studio-orrery-add[data-add="body"]').count()).toBe(1);
       expect(await win.locator('.wadjet-studio-orrery-add[data-add="gear"]').count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="season"]').count()).toBe(1);
       // the fixture world's today is near day 0, where every period puts the same moon day: the Orrery's own day moves
       // three years on (its transport, never the settings' today)
       for (let i = 0; i < 3; i++) {
@@ -10552,16 +10553,17 @@ describe("climate studio · calendar orrery", () => {
       await expect.poll(lcd).toMatch(/-02-1\d/);
       const lcd0 = await lcd();
 
-      // the months: SLOTS · THIS YEAR and its ＋ slot; the units group still has no ＋ (adding a slot unit waits for its editor): the ＋s are the bodies' and (5c) the gears'
+      // the months: SLOTS · THIS YEAR and its ＋ slot; the units group still has no ＋ (adding a slot unit waits for its editor): the ＋s are the bodies', (5c) the gears' and (5f) the seasons'
       await win.locator('.wadjet-studio-orrery-row[data-part="unit:month"]').click();
       await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOTS");
       expect(await win.locator('[data-editor="slots"]').count()).toBe(1);
       expect(await win.locator(".wadjet-studio-orrery-slot").count()).toBe(12);
       expect(await textOf('[data-part="slot-row-1"] .wadjet-studio-orrery-slot-flag')).toBe("rest");
       expect(await win.locator('[data-part="add-slot"]').count()).toBe(1);
-      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(2);
+      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(3);
       expect(await win.locator('.wadjet-studio-orrery-add[data-add="body"]').count()).toBe(1);
       expect(await win.locator('.wadjet-studio-orrery-add[data-add="gear"]').count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="season"]').count()).toBe(1);
 
       // January: the slot inspector
       await win.locator('[data-part="slot-row-0"]').click();
@@ -10817,6 +10819,185 @@ describe("climate studio · calendar orrery", () => {
       await expect.poll(dayLbl).toBe(day0);
       await expect.poll(text).toContain("IN=2,4,6;");
       console.log(`  · orrery stage: ${label} toggled ${wasOn ? "off" : "on"} in stage 1 moved the year ("${day0}" → "${day1}"), Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 99: the Orrery edits a labelled cycle: renaming today's weekday shows in the day line's long format and lights ●, today is moves the weekday NOW names, and Undo goes back to clean", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const undo = (): Promise<boolean> => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.undo(), VIEW_TYPE);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const textOf = async (sel: string) => ((await win.locator(sel).first().textContent()) ?? "").trim();
+      const text = () => textOf(".wadjet-studio-orrery-text");
+      const chip = () => textOf(".wadjet-studio-orrery-chip-label");
+      const issues = async () => (await win.locator(".wadjet-studio-window-issue").allTextContents()).join(" | ");
+      const now = async (key: string) => {
+        const rows = win.locator(".wadjet-studio-orrery-now");
+        for (let i = 0; i < (await rows.count()); i++) if (((await rows.nth(i).locator(".wadjet-studio-orrery-now-key").textContent()) ?? "") === key) return ((await rows.nth(i).locator(".wadjet-studio-orrery-now-value").textContent()) ?? "").trim();
+        return "";
+      };
+      const pick = async (part: string, code: string) => {
+        await win.locator(`.wadjet-studio-orrery-row[data-part="${part}"]`).click();
+        await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe(code);
+      };
+
+      // the weekday: C5 labels, the id inline, LABELS · 7 with today's highlighted, the today is knob and Remove cycle
+      await pick("dayline", "DRIVE");
+      const long0 = await now("long");
+      await pick("unit:weekday", "C2 · CYCLE · C5");
+      expect(await win.locator('[data-editor="cycle"]').count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-orrery-title-input").inputValue()).toBe("weekday");
+      expect(await win.locator(".wadjet-studio-orrery-label").count()).toBe(7);
+      expect(await win.locator('[data-part="cycle-today"]').count()).toBe(1);
+      expect(await win.locator('[data-part="remove-cycle"]').count()).toBe(1);
+      const today = await now("label");
+      expect(long0.startsWith(`${today} `)).toBe(true);
+      const current = win.locator(".wadjet-studio-orrery-label.is-current input");
+      expect(await current.count()).toBe(1);
+      expect(await current.inputValue()).toBe(today);
+      expect(await chip()).not.toContain("●");
+
+      // rename today's day name (the world confirm, when it comes, re-runs the edit): TEXT, ● and the long format follow
+      await current.fill("Zday");
+      await current.press("Enter");
+      const confirmed = await passAnyConfirm();
+      await expect.poll(text, { timeout: 10_000 }).toContain("LABEL:Zday");
+      await expect.poll(chip).toContain("●");
+      await expect.poll(() => now("label")).toBe("Zday");
+      expect(stored()).toContain(`LABEL:${today}`);
+      expect(await issues()).toBe("");
+      await pick("dayline", "DRIVE");
+      await expect.poll(() => now("long")).toBe(long0.replace(today, "Zday"));
+
+      // today is: type the next day's name into the knob; the weekday NOW names it, and the long format with it
+      await pick("unit:weekday", "C2 · CYCLE · C5");
+      const labels = await win.locator(".wadjet-studio-orrery-label input").evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+      const at = labels.indexOf("Zday");
+      const next = labels[(at + 1) % labels.length]!;
+      await win.locator('[data-part="cycle-today"] .wadjet-studio-knob-dial').dblclick();
+      const field = win.locator('[data-part="cycle-today"] .wadjet-studio-knob-input');
+      await field.waitFor({ state: "visible", timeout: 10_000 });
+      await field.fill(next);
+      await field.press("Enter");
+      await passAnyConfirm();
+      await expect.poll(() => now("label"), { timeout: 10_000 }).toBe(next);
+      await expect.poll(text).not.toMatch(/ANCHOR:D3\r?\n/);
+      expect(await issues()).toBe("");
+      await pick("dayline", "DRIVE");
+      await expect.poll(() => now("long")).toBe(long0.replace(today, next));
+
+      // Undo back to clean: the rename and the knob are one step each
+      for (let i = 0; i < 4 && (await chip()).includes("●"); i++) {
+        expect(await undo()).toBe(true);
+        await nextFrame();
+      }
+      await expect.poll(chip).not.toContain("●");
+      await expect.poll(() => now("long")).toBe(long0);
+      expect(stored()).toContain(`LABEL:${today}`);
+      console.log(`  · orrery cycle: ${today} → Zday ("${long0}" → Zday …), today is ${next}, Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 100: the Orrery edits seasons on a Gregorian world without any: ＋ mark twice draws the season strip, a mark switched to day of year keeps its day and its day knob moves the strip, and Save stores DAY:", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const textOf = async (sel: string) => ((await win.locator(sel).first().textContent()) ?? "").trim();
+      const text = () => textOf(".wadjet-studio-orrery-text");
+      const chip = () => textOf(".wadjet-studio-orrery-chip-label");
+      const issues = async () => (await win.locator(".wadjet-studio-window-issue").allTextContents()).join(" | ");
+      const strip = () => win.locator(".wadjet-studio-orrery-seasons").innerHTML();
+
+      // no seasons: the strip is empty, and the seasons group shows its ＋ only
+      expect(await win.locator(".wadjet-studio-orrery-season").count()).toBe(0);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="season"]').count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-row[data-part="seasons"]').count()).toBe(0);
+
+      // ＋ mark (the world confirm, when it comes, re-runs the edit): the Seasons inspector, one mark, the strip drawn
+      await win.locator('.wadjet-studio-orrery-add[data-add="season"]').click();
+      const confirmed = await passAnyConfirm();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code"), { timeout: 10_000 }).toBe("SEASONS");
+      expect(await win.locator('[data-editor="seasons"]').count()).toBe(1);
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-mark").count()).toBe(1);
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-season").count()).toBeGreaterThan(0);
+      await expect.poll(chip).toContain("●");
+
+      // ＋ mark again: opposite the first, a second season on the strip
+      await win.locator('[data-part="add-mark"]').click();
+      await passAnyConfirm();
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-mark").count()).toBe(2);
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-season").count()).toBe(2);
+      expect(await win.locator('[data-part="mark-1-from"]').count()).toBe(1);
+      const date1 = await textOf('[data-part="mark-1-date"]');
+      const strip0 = await strip();
+
+      // the second mark from a fraction to a day of the year: the same start day, a DAY: mark, the day knob
+      await win.locator('[data-part="mark-1-kind"] [role="radio"]', { hasText: "day of year" }).click();
+      await passAnyConfirm();
+      await expect.poll(() => win.locator('[data-part="mark-1"]').getAttribute("data-kind"), { timeout: 10_000 }).toBe("day");
+      await expect.poll(text).toMatch(/=DAY:\d+/);
+      expect(await textOf('[data-part="mark-1-date"]')).toBe(date1);
+      expect(await strip()).toBe(strip0);
+      expect(await issues()).toBe("");
+
+      // the day knob, typed: the second season starts on day 100, and the strip moves
+      await win.locator('[data-part="mark-1-day"] .wadjet-studio-knob-dial').dblclick();
+      const field = win.locator('[data-part="mark-1-day"] .wadjet-studio-knob-input');
+      await field.waitFor({ state: "visible", timeout: 10_000 });
+      await field.fill("100");
+      await field.press("Enter");
+      await passAnyConfirm();
+      await expect.poll(text, { timeout: 10_000 }).toContain("=DAY:100");
+      await expect.poll(strip).not.toBe(strip0);
+      expect(stored()).not.toContain("DAY:");
+
+      // Save writes the dated mark
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
+      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
+      await saveBtn.click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+      await expect.poll(stored, { timeout: 10_000 }).toContain("=DAY:100");
+      await expect.poll(chip).not.toContain("●");
+      console.log(`  · orrery seasons: ＋ mark ×2, the second switched to day of year (${date1}) then day 100, saved as DAY:100${confirmed ? " (after the world confirm)" : ""}`);
     } finally {
       await close();
       await discardStudioWorldDraft();

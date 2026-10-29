@@ -25,7 +25,9 @@ const mod = (a: number, m: number) => ((a % m) + m) % m;
 describe("parts and groups", () => {
   test("Gregorian: units, the leap gear lit in a leap year, no crossing or stages", () => {
     const m = model(GREGORIAN, 20000); // 2024-10-04
-    expect(m.groups.map((g) => g.label)).toEqual(["DRIVE", "BODIES · C1", "UNITS · C2", "GEARS · C3"]);
+    // a year without seasons shows the group empty, for its ＋ mark (slice 5f)
+    expect(m.groups.map((g) => g.label)).toEqual(["DRIVE", "BODIES · C1", "UNITS · C2", "GEARS · C3", "SEASONS"]);
+    expect(rows(m, "SEASONS")).toEqual([]);
     expect(rows(m, "UNITS · C2")).toEqual(["unit:year", "unit:month", "unit:week", "unit:weekday"]);
     expect(row(m, "gear:leap")).toMatchObject({ spec: "+4 −100 +400", lit: true });
     expect(row(m, "unit:year").spec).toBe("365 +1 d");

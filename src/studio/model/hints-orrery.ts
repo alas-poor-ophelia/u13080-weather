@@ -1,7 +1,7 @@
 /**
  * The ORRERY window's editors' half of the hint tables (docs/SESHAT-v0.md
  * §18; bead wadjet-b6x, slice 5a onward; 5b: year, slot unit and slot; 5c: gear;
- * 5d: crossing, train and stage).
+ * 5d: crossing, train and stage; 5e: labelled cycle; 5f: seasons).
  *
  * Same house rules as `hints.ts` (SPEC §9): product microcopy, sentence
  * case, no explainer prose, no trailing full stop. The *name* says what the
@@ -77,6 +77,19 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.addLengthRule": ["Add length rule", "adds a length test last in the stage that moves nothing yet"],
   "orrery.addResidueRule": ["Add residue rule", "adds a weekday test last in the stage that moves nothing yet"],
   "orrery.removeStage": ["Remove stage", "removes the stage; the stages after it read the one before"],
+  "orrery.cycleName": ["Cycle id", "renames the unit; the formats that print it and the rules that read it follow"],
+  "orrery.labelName": ["Label", "renames the label; refused while a rule reads it by name"],
+  "orrery.labelRemove": ["Remove label", "takes the label out; the cycle is one shorter, and so is the week that runs with it"],
+  "orrery.addLabel": ["Add label", "adds a label at the end; the cycle is one longer, and so is the week that runs with it"],
+  "orrery.todayIs": ["Today is", "moves the anchor so this label falls on the Orrery's day; the week moves with it"],
+  "orrery.removeCycle": ["Remove cycle", "removes the unit; refused while a format, a rule, a season, a gear or a stage reads it"],
+  "orrery.markName": ["Season name", "renames the season; the day line and the weather read the new name"],
+  "orrery.markKind": ["From", "how the season's start is written: a fraction of the year, a day of the year, or a day of a month; the start day stays the same this year where it can"],
+  "orrery.markFrom": ["From", "where the season starts, as a fraction of the year, 0 to 0.995"],
+  "orrery.markDay": ["Day", "the day the season starts on: of the year, or of its month"],
+  "orrery.markSlot": ["Month", "the month the season starts in; choose another"],
+  "orrery.markRemove": ["Remove season", "takes the season out; removing the last removes the seasons"],
+  "orrery.addMark": ["Add season", "adds a season at the middle of the longest one, as a fraction of the year"],
 };
 
 /**

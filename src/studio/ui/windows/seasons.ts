@@ -93,11 +93,13 @@ interface CalendarView {
  */
 function calendarView(ctx: SurfaceContext, state: StudioState): CalendarView {
   const description = ctx.calendar();
-  // seasons that start on dates draw read-only at their projection into one year (§16.7 P6): approximate, edited as text
-  const def = state.calendarSource === "seshat" ? (ctx.plugin.calendars.seshat?.definition() ?? null) : null;
+  // seasons that start on dates draw read-only at their projection into one year (§16.7 P6): approximate, edited as text.
+  // A Seshat draft's AST layer is the draft the Orrery edits (slice 5f): its marks decide, and its field holds that projection
+  const layer = state.calendarSource === "seshat" ? state.world.calendar.ast : undefined;
+  const def = layer ?? (state.calendarSource === "seshat" ? (ctx.plugin.calendars.seshat?.definition() ?? null) : null);
   const dated = !!def?.seasons && seasonsUseDates(def.seasons);
   const readOnly = (description?.readOnly ?? false) || dated;
-  const seasons = readOnly ? (description?.seasons ?? []) : state.world.calendar.seasons;
+  const seasons = readOnly && !(layer && !description?.readOnly) ? (description?.seasons ?? []) : state.world.calendar.seasons;
   const yearLength = description?.yearLength ?? DEFAULT_YEAR_LENGTH;
   const label = dated ? `${description?.readOnly ? description.label : "calendar definition"} · seasons on dates, approximate` : readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
   const editHint = dated ? "the seasons start on dates: edit them in the calendar text (Edit as text)" : description?.editHint;

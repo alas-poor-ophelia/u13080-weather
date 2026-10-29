@@ -568,7 +568,9 @@ function partGroups(p: Prepared, year: YearFacts, today: DayFacts, found: readon
     });
   // a year that starts by a crossing shows its stages group even with none, so the group header can carry ＋ stage
   if (stages.length || p.yearUnit.crossing) groups.push({ label: "STAGES · C4", add: "stage", rows: stages });
+  // a calendar with a year and no seasons shows the group empty, so its header can carry ＋ mark (slice 5f)
   if (ast.seasons) groups.push({ label: "SEASONS", add: "season", rows: [row("seasons", "seasons", `${ast.seasons.marks.length} marks${ast.seasons.marks.some(isDateMark) ? " · dated" : ""}`)] });
+  else if (cycles.some((u) => u.id === "year")) groups.push({ label: "SEASONS", add: "season", rows: [] });
   if (ast.rules?.length) groups.push({ label: "RULES · LAMPS", rows: ast.rules.map((r) => row(`rule:${r.id}`, r.name ?? r.id, r.tags?.length ? r.tags.join(", ") : "—", today.rules.get(r.id) === true)) });
   const ledger: PartRow[] = [];
   const touched = new Set(year.ledger.map((s) => s.part));

@@ -22,13 +22,16 @@
  *   now, and a slice it did edit is refused when it changed in storage since,
  *   or when a part its edits read without writing did (`replayProblem`).
  * - A crossing's INDEX (the train, slice 5d) sits in its `crossing:` slice.
+ * - A cycle unit's ANCHOR and LABELS (slice 5e, the labelled cycle) are its
+ *   `cycle:` slice. Renaming or removing a unit is no slice: it is replayed
+ *   as an operation before the slices (unit-edit.ts `unitOps`).
  * - A crossing that follows a body keeps its occurrence numbers: a moved mark
  *   or offset, or a different body, moves its K by the smallest shift (the
  *   rule `epochEditK` applies to an epoch edit, §16.7 P1). START changes the
  *   start day by less than one day, so K stays.
  */
 import { canonicalJson } from "../../core/profile";
-import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, startRuleProblem, type BodyRef, type By, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
+import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, startRuleProblem, type BodyRef, type By, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LabelAst, type LedgerEntry, type Rational, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
 
 export type AstEdit = { readonly ast: CalendarAst } | { readonly refused: true; readonly reason: string };
 
@@ -41,10 +44,18 @@ const isReduced = (r: Rational): boolean => isInt(r.n) && isInt(r.d) && r.d > 0 
 
 /**
  * One editable slice of a definition: a gear by id; a cycle unit's stages, crossing, constant length (`length:`),
- * own gear terms (`feeds:`) or ledger (`ledger:`) by unit id; a slot unit's slots (`slots:`) by unit id; or the
- * season marks.
+ * own gear terms (`feeds:`), ledger (`ledger:`) or anchor and labels (`cycle:`) by unit id; a slot unit's slots
+ * (`slots:`) by unit id; or the season marks.
  */
-export type SliceKey = `gear:${string}` | `stages:${string}` | `crossing:${string}` | `length:${string}` | `feeds:${string}` | `ledger:${string}` | `slots:${string}` | "marks";
+export type SliceKey = `gear:${string}` | `stages:${string}` | `crossing:${string}` | `length:${string}` | `feeds:${string}` | `ledger:${string}` | `cycle:${string}` | `slots:${string}` | "marks";
+
+/** A cycle unit's `cycle:` slice: its anchor (a constant base's) and its labels, each when present. */
+export interface CycleSlice {
+  readonly anchor?: number;
+  readonly labels?: readonly LabelAst[];
+}
+
+const cycleSlice = (u: CycleUnitAst): CycleSlice => ({ ...(u.crossing ? {} : { anchor: u.anchor }), ...(u.labels ? { labels: u.labels } : {}) });
 
 /** What a slice reads on a definition without the unit it names (distinct from a unit without stages). */
 export const NO_UNIT = "\u0000no unit";
@@ -72,15 +83,16 @@ export function sliceOf(ast: CalendarAst, key: SliceKey): unknown {
   if (kind === "length") return u.crossing ? undefined : u.length;
   if (kind === "feeds") return u.gears;
   if (kind === "ledger") return u.ledger;
+  if (kind === "cycle") return cycleSlice(u);
   return kind === "stages" ? u.stages : u.crossing;
 }
 
-/** Every slice key either definition has, in a stable order: gears, then each cycle unit's stages, crossing, length, gear terms and ledger, each slot unit's slots, then the marks. */
+/** Every slice key either definition has, in a stable order: gears, then each cycle unit's stages, crossing, length, gear terms, ledger, anchor and labels, each slot unit's slots, then the marks. */
 function sliceKeys(a: CalendarAst, b: CalendarAst): SliceKey[] {
   const gears = [...new Set([...a.gears, ...b.gears].map((g) => g.id))];
   const units = [...new Set([...a.units, ...b.units].filter((u) => u.kind === "cycle").map((u) => u.id))];
   const slotted = [...new Set([...a.units, ...b.units].filter((u) => u.kind === "slots").map((u) => u.id))];
-  return [...gears.map((id): SliceKey => `gear:${id}`), ...units.flatMap((id): SliceKey[] => [`stages:${id}`, `crossing:${id}`, `length:${id}`, `feeds:${id}`, `ledger:${id}`]), ...slotted.map((id): SliceKey => `slots:${id}`), "marks"];
+  return [...gears.map((id): SliceKey => `gear:${id}`), ...units.flatMap((id): SliceKey[] => [`stages:${id}`, `crossing:${id}`, `length:${id}`, `feeds:${id}`, `ledger:${id}`, `cycle:${id}`]), ...slotted.map((id): SliceKey => `slots:${id}`), "marks"];
 }
 
 /** The slices `draft` changed from `base`. */
@@ -125,6 +137,13 @@ export function withSlice(ast: CalendarAst, key: SliceKey, value: unknown): Cale
     const next = { ...u, length: value } as UnitAst;
     return { ...ast, units: ast.units.map((x) => (x === u ? next : x)) };
   }
+  if (kind === "cycle") {
+    const v = (value ?? {}) as CycleSlice;
+    if (!u.crossing && !isInt(v.anchor)) return null; // a constant base always has its anchor
+    const { anchor: _a, labels: _l, ...rest } = u as CycleUnitAst & Record<string, unknown>;
+    const next = { ...rest, ...(u.crossing ? {} : { anchor: v.anchor }), ...(v.labels ? { labels: v.labels } : {}) } as UnitAst;
+    return { ...ast, units: ast.units.map((x) => (x === u ? next : x)) };
+  }
   const field = kind === "stages" ? "stages" : kind === "feeds" ? "gears" : kind === "ledger" ? "ledger" : "crossing";
   if (field === "crossing" && (value === undefined) !== (u.crossing === undefined)) return null; // a base kind changes with its anchor and length, which no slice holds
   const { [field]: _old, ...rest } = u as CycleUnitAst & Record<string, unknown>;
@@ -137,7 +156,7 @@ export function outsideSlices(ast: CalendarAst): unknown {
   const { gears: _g, seasons: _s, units, ...rest } = ast;
   return {
     ...rest,
-    units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, length: _l, gears: _gt, ledger: _lg, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : (({ slots: _sl, ...x }) => x)(u))),
+    units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, length: _l, gears: _gt, ledger: _lg, anchor: _a, labels: _lb, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : (({ slots: _sl, ...x }) => x)(u))),
   };
 }
 
@@ -196,7 +215,7 @@ const mod = (a: number, m: number): number => {
 };
 
 /** What declares `id` (every id is one namespace: units, gears, rules, bodies), or null. */
-function declaredAs(ast: CalendarAst, id: string): string | null {
+export function declaredAs(ast: CalendarAst, id: string): string | null {
   if (ast.units.some((u) => u.id === id)) return "unit";
   if (ast.gears.some((g) => g.id === id)) return "gear";
   if ((ast.rules ?? []).some((r) => r.id === id)) return "rule";
@@ -539,7 +558,7 @@ export function setLiteralCrossing(ast: CalendarAst, unitId: string, next: { rea
 // ---- dated season marks
 
 /** Why a season mark cannot be written into `seasons` of `ast`, or null. */
-function markProblem(ast: CalendarAst, seasonsUnit: string, m: SeasonMarkAst): string | null {
+export function markProblem(ast: CalendarAst, seasonsUnit: string, m: SeasonMarkAst): string | null {
   if (typeof m.name !== "string" || m.name.trim() === "") return "a season needs a name";
   if ("slot" in m) {
     const s = m.slot;

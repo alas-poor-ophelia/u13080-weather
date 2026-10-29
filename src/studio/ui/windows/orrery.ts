@@ -15,7 +15,10 @@
  *   (windows/orrery-gears.ts) and the gears group's ＋ gear. Slice 5d: the
  *   crossing and train inspectors (windows/orrery-crossing.ts), the stage
  *   inspector (windows/orrery-stages.ts) and the stages group's ＋ stage, on
- *   a year that starts by a crossing.
+ *   a year that starts by a crossing. Slice 5e: the labelled cycle inspector
+ *   (windows/orrery-cycle.ts) on a cycle unit that is not the year. Slice 5f:
+ *   the Seasons inspector (windows/orrery-seasons.ts) and the seasons
+ *   group's ＋ mark, shown on a calendar with a year even without seasons.
  * - A draft that does not run (slots that no longer fill their year, the
  *   commonest outcome of a slot edit) keeps the editors open: the scope,
  *   list and NOW draw the last draft that ran, the verdict and TEXT are the
@@ -56,7 +59,9 @@ import { draftOf, type CalendarDraft, type CalendarEdit } from "../../model/defi
 import { orreryHint } from "../../model/hints-orrery";
 import { addBody, draftReader } from "../../model/orrery-body";
 import { addGearPart } from "../../model/orrery-gears";
-import { buildOrrery, clampDay, partInfo, partText, problemsByPart, orreryProblems, stageFacts, type OrreryModel, type ViewName } from "../../model/orrery-geometry";
+import { buildOrrery, clampDay, dayFacts, partInfo, partText, problemsByPart, orreryProblems, stageFacts, type OrreryModel, type ViewName } from "../../model/orrery-geometry";
+import { cycleEditable } from "../../model/orrery-cycle";
+import { addMark, type SeasonYear } from "../../model/orrery-seasons";
 import { addStage, stagesApply } from "../../model/orrery-stages";
 import { needsWorldConfirm } from "../../model/world-confirm";
 import { ORRERY_RATES, ORRERY_THEMES, orreryFit, scrubDay, scrubFraction, scrubSegments, seasonSegments, stepDay, stepYear, type OrreryTheme } from "../../model/orrery-transport";
@@ -69,8 +74,10 @@ import type { WindowBuild, WindowBuilder } from "../windows";
 import { confirmWorldEdit, type WorldSubject } from "../world-confirm-modal";
 import { buildBodyEditor, type EditPhase, type PartEditor } from "./orrery-body";
 import { buildCrossingEditor, buildTrainEditor } from "./orrery-crossing";
+import { buildCycleEditor } from "./orrery-cycle";
 import { buildGearEditor } from "./orrery-gears";
 import { buildSlotEditor, buildSlotUnitEditor, buildYearEditor } from "./orrery-slots";
+import { buildSeasonsEditor } from "./orrery-seasons";
 import { buildStageEditor } from "./orrery-stages";
 
 /** The id this window is registered and opened under. */
@@ -538,6 +545,19 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     }, "click", "calendar");
   }
 
+  /** ＋ mark: a season at the middle of the longest, the seasons selected (also when the edit waits for the world confirm). */
+  function addSeasonRow(): void {
+    const phases = model && !behind && model.ast === ast ? model.year.seasons.map((x) => x.phase) : [];
+    edit((c, b) => {
+      const r = addMark(c, b, phases);
+      if (!("refused" in r)) {
+        selected = "seasons";
+        listKey = "";
+      }
+      return r;
+    }, "click", "calendar");
+  }
+
   /** The editors' `selectAfter`: the part the edit in hand lands on (a moved, added or removed slot). */
   function selectAfter(part: PartId): void {
     selected = part;
@@ -586,17 +606,17 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     listEl.empty();
     if (!m) return;
     for (const g of m.groups) {
-      // a ＋ shows where its editor exists (slice 5a: bodies; 5c: gears; 5d: stages, on a year a crossing starts); the other groups' ＋ wait for theirs
-      const add = editable && (g.add === "body" || g.add === "gear" || (g.add === "stage" && ast !== null && stagesApply(ast, m.year.unit))) ? g.add : null;
+      // a ＋ shows where its editor exists (slice 5a: bodies; 5c: gears; 5d: stages, on a year a crossing starts; 5f: seasons); the units' ＋ waits for its editor
+      const add = editable && (g.add === "body" || g.add === "gear" || g.add === "season" || (g.add === "stage" && ast !== null && stagesApply(ast, m.year.unit))) ? g.add : null;
       // a group's empty header is where its ＋ goes: an empty group without one is left out
       if (!g.rows.length && add === null) continue;
       const group = listEl.createDiv({ cls: "wadjet-studio-orrery-group" });
       const label = group.createDiv({ cls: "wadjet-studio-orrery-group-label" });
       label.createSpan({ text: g.label });
       if (add !== null) {
-        const onAdd = add === "body" ? addBodyPart : add === "gear" ? addGearRow : addStageRow;
-        const aria = add === "body" ? "Add a body" : add === "gear" ? "Add a gear" : "Add a stage";
-        const hint = add === "body" ? orreryHint("orrery.addBody") : add === "gear" ? orreryHint("orrery.addGear") : orreryHint("orrery.addStage");
+        const onAdd = add === "body" ? addBodyPart : add === "gear" ? addGearRow : add === "season" ? addSeasonRow : addStageRow;
+        const aria = add === "body" ? "Add a body" : add === "gear" ? "Add a gear" : add === "season" ? "Add a season" : "Add a stage";
+        const hint = add === "body" ? orreryHint("orrery.addBody") : add === "gear" ? orreryHint("orrery.addGear") : add === "season" ? orreryHint("orrery.addMark") : orreryHint("orrery.addStage");
         const plus = label.createSpan({ cls: "wadjet-studio-orrery-add", text: "＋", attr: { role: "button", tabindex: "0", "aria-label": aria, "data-hint": hint, "data-add": add } });
         plus.addEventListener("click", onAdd);
         plus.addEventListener("keydown", (ev) => {
@@ -728,6 +748,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     if (editable && id !== undefined && (kind === "unit" || kind === "slot") && unit) {
       const deps = { ast: draft, unitId: id, refusal, edit, select: (part: PartId) => select(part), selectAfter };
       if (unit.kind === "cycle" && kind === "unit" && (unit.id === m.year.unit || unit.id === "year")) editor = buildYearEditor(host("year"), deps);
+      else if (unit.kind === "cycle" && kind === "unit" && cycleEditable(draft, id, m.year.unit)) editor = buildCycleEditor(host("cycle"), title, { ast: draft, calendar: ctx.store.get().world.calendar, unitId: id, yearUnit: m.year.unit, day: m.today.day, refusal, edit, selectAfter });
       else if (unit.kind === "slots" && kind === "unit") editor = buildSlotUnitEditor(host("slots"), { ...deps, lengths: lengthsOf(m, unit) });
       else if (unit.kind === "slots" && kind === "slot" && n !== undefined) editor = buildSlotEditor(host("slot"), title, { ...deps, index: Number(n), lengths: lengthsOf(m, unit) });
     }
@@ -745,6 +766,16 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
       // this year's stage, read through the engine's start trace (none while the scope draws an older calendar)
       const facts = behind || m.ast !== ast || id !== m.year.unit ? null : stageFacts(draft, id, Number(n), m.year.index);
       editor = buildStageEditor(host("stage"), { ast: draft, unitId: id, index: Number(n), facts, refusal, edit, select: (part) => select(part), selectAfter });
+    }
+    if (selected === "seasons" && editable) {
+      // this year's marks, read from the model (none while the scope draws an older calendar)
+      const year = behind || m.ast !== ast ? null : seasonYear(m);
+      const marks = draft.seasons?.marks ?? [];
+      const starts = marks.map((_, i) => {
+        const f = year ? m.year.seasons.find((x) => x.order === i) : undefined;
+        return f ? (dayFacts(draft, m.year.start + f.at)?.date ?? `D${m.year.start + f.at}`) : null;
+      });
+      editor = buildSeasonsEditor(host("seasons"), { ast: draft, year, starts, phases: year ? m.year.seasons.map((x) => x.phase) : [], refusal, edit });
     }
     if (kind === "body" && id !== undefined && editable) {
       const st = ctx.store.get();
@@ -800,6 +831,14 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     if (behind || m.ast !== ast) return null;
     const t = m.year.slots.find((x) => x.unit === u.id && (u.in === m.year.unit || x.path[x.path.length - 1] === m.today.positions.get(u.in)?.index)) ?? m.year.slots.find((x) => x.unit === u.id);
     return t?.lengths ?? null;
+  }
+  /** This year's facts the Seasons inspector reads: the year's length, the day each mark falls on, the months directly in the year. */
+  function seasonYear(m: OrreryModel): SeasonYear {
+    const at: Array<number | null> = (m.ast.seasons?.marks ?? []).map(() => null);
+    for (const f of m.year.seasons) at[f.order] = f.at;
+    const slots = new Map<string, readonly number[]>();
+    for (const t of m.year.slots) if (t.path.length === 1) slots.set(t.unit, t.lengths);
+    return { length: m.year.length, at, slots };
   }
   /** NOW and TEXT only, from the draft as it is (a drag in progress keeps the editor's controls). */
   function paintReadouts(m: OrreryModel): void {

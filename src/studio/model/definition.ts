@@ -35,6 +35,7 @@ import { prepareDefinition } from "../../plugin/time/seshat";
 import { compile, FormError, recognise, type FormEdits, type MoonForm } from "../../plugin/time/form";
 import { editedSlices, outsideSlices, replayProblem, sliceOf, slotReferences, withSlice, type AstEdit } from "./ast-edit";
 import { moveBody } from "./rational-knob";
+import { applyUnitOps, cycleReplayProblem, replayUnitOps, unitOps } from "./unit-edit";
 import type { CalendarSource, DraftMoon, FormDraft, WorldDraft } from "./state";
 
 export type CalendarDraft = WorldDraft["calendar"];
@@ -261,16 +262,28 @@ function monthsUnit(ast: CalendarAst): string | undefined {
   return ms.length === 1 ? ms[0]!.id : undefined;
 }
 
-function mergeLayers(stored: string, ast: CalendarAst, base: Layered, draft: Layered): MergeResult {
-  const now = calendarOfDefinition(ast);
+function mergeLayers(stored: string, storedAst: CalendarAst, base: Layered, draft: Layered): MergeResult {
+  const now = calendarOfDefinition(storedAst);
   // a part that moved in storage is stale, unless the draft holds what storage holds now (then there is nothing to write)
   const parts: Part[] = [];
   for (const k of pendingParts(base, draft, viewOf(draft.ast))) {
     if (unchanged(now, base, k)) parts.push(k);
-    else if (!same(partOf(draft, k), partOf(now, k))) return { kind: "stale", stored: seshatDraft(ast) };
+    else if (!same(partOf(draft, k), partOf(now, k))) return { kind: "stale", stored: seshatDraft(storedAst) };
   }
-  const slices = editedSlices(base.ast, draft.ast).filter((k) => !same(sliceOf(draft.ast, k), sliceOf(ast, k)));
-  if (slices.some((k) => !same(sliceOf(ast, k), sliceOf(base.ast, k)))) return { kind: "stale", stored: seshatDraft(ast) };
+  // units renamed or removed (slice 5e) are no slice: they are made first, on the stored definition and on the base
+  // alike, so the slices below compare like with like (unit-edit.ts)
+  const ops = unitOps(base.ast, draft.ast);
+  if (ops === null) return { kind: "error", message: "the draft's units are not the stored calendar's" };
+  let ast = storedAst;
+  let seed = base.ast;
+  if (ops.length) {
+    const r = replayUnitOps(storedAst, base.ast, ops);
+    if ("stale" in r) return { kind: "stale", stored: seshatDraft(storedAst), reason: r.stale };
+    ast = r.stored;
+    seed = r.base;
+  }
+  const slices = editedSlices(seed, draft.ast).filter((k) => !same(sliceOf(draft.ast, k), sliceOf(ast, k)));
+  if (slices.some((k) => !same(sliceOf(ast, k), sliceOf(seed, k)))) return { kind: "stale", stored: seshatDraft(storedAst) };
   let out = ast;
   for (const k of slices) {
     const next = withSlice(out, k, sliceOf(draft.ast, k));
@@ -280,15 +293,15 @@ function mergeLayers(stored: string, ast: CalendarAst, base: Layered, draft: Lay
   // each slice's edits were checked against parts of the draft they read but do not write: when storage moved one, the
   // replay would bind differently (a slot by number, a mark by index), so the Save is stale, never silently wrong
   for (const k of slices) {
-    const why = replayProblem(k, base.ast, draft.ast, ast, out);
-    if (why) return { kind: "stale", stored: seshatDraft(ast), reason: why };
+    const why = replayProblem(k, seed, draft.ast, ast, out) ?? cycleReplayProblem(k, seed, ast);
+    if (why) return { kind: "stale", stored: seshatDraft(storedAst), reason: why };
   }
   // the form's months write over the stored months: the rules and exceptions that read them by number or name must be
   // as the edit saw them (their marks the compile itself moves by name)
   if (parts.includes("months")) {
-    const m = monthsUnit(ast) ?? monthsUnit(base.ast);
-    if (m !== undefined && !same(slotReferences(ast, m, false), slotReferences(base.ast, m, false))) {
-      return { kind: "stale", stored: seshatDraft(ast), reason: `a rule or an exception that reads the ${m} changed outside the studio since this edit` };
+    const m = monthsUnit(ast) ?? monthsUnit(seed);
+    if (m !== undefined && !same(slotReferences(ast, m, false), slotReferences(seed, m, false))) {
+      return { kind: "stale", stored: seshatDraft(storedAst), reason: `a rule or an exception that reads the ${m} changed outside the studio since this edit` };
     }
   }
   const edits = formEdits(out, base, draft, parts);
@@ -297,7 +310,7 @@ function mergeLayers(stored: string, ast: CalendarAst, base: Layered, draft: Lay
   if ("error" in c) return { kind: "error", message: c.error };
   const prepared = prepareDefinition(print(c.ast));
   if ("error" in prepared) return { kind: "error", message: prepared.line === undefined ? prepared.error : `line ${prepared.line}: ${prepared.error}` };
-  return { kind: "write", text: prepared.text, rewrites: stored !== print(ast) };
+  return { kind: "write", text: prepared.text, rewrites: stored !== print(storedAst) };
 }
 
 /**
@@ -390,7 +403,10 @@ export function applyAstEdit(calendar: CalendarDraft, base: CalendarDraft, edit:
     const d = draftAst(calendar, base);
     return "error" in d ? { refused: true, reason: d.error } : { calendar, ast: d.ast };
   }
-  if (!same(outsideSlices(r.ast), outsideSlices(layer))) return { refused: true, reason: "this edit reaches past the part it edits" };
+  // a rename or removal of a unit (slice 5e) reaches the formats and rules that name it: a Save replays it as an operation
+  const ops = unitOps(layer, r.ast);
+  const made = ops?.length ? applyUnitOps(layer, ops) : { ast: layer };
+  if (ops === null || "refused" in made || !same(outsideSlices(r.ast), outsideSlices(made.ast))) return { refused: true, reason: "this edit reaches past the part it edits" };
   const before = viewOf(layer);
   const after = viewOf(r.ast);
   let next: CalendarDraft = { ...calendar, ast: r.ast };

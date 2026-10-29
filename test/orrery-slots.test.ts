@@ -326,7 +326,8 @@ describe("the stale guard on the new slices (§18.6 item 1)", () => {
   });
   test("applyAstEdit still refuses an edit past its slices; a length edit is inside its slice", () => {
     const { base, draft } = opened(HARPTOS);
-    expect(refused(applyAstEdit(draft, base, (a) => ({ ast: { ...a, units: a.units.map((u) => (u.id === "year" ? { ...u, anchor: 5 } : u)) } as CalendarAst })))).toContain("past the part");
+    // the year's NUMBER is no slice (its anchor and labels are its `cycle:` slice since 5e)
+    expect(refused(applyAstEdit(draft, base, (a) => ({ ast: { ...a, units: a.units.map((u) => (u.id === "year" ? { ...u, number: 5 } : u)) } })))).toContain("past the part");
     expect("calendar" in applyAstEdit(draft, base, (a) => setCycleLength(a, "year", 360))).toBe(true);
   });
 });

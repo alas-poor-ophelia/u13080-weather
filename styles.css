@@ -6671,6 +6671,29 @@
   background: #33363a;
   border-left-color: #e9ebee;
 }
+/* slice 5f: a season mark's row (swatch · name · start · ×, then its from switch and knobs) */
+.wadjet-studio-orrery-swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--wadjet-orrery-swatch, #8c939c);
+}
+.wadjet-studio-orrery-mark-date {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-orrery-mark-kind {
+  width: 100%;
+}
+.wadjet-studio-orrery-mark .wadjet-studio-orrery-knobs {
+  width: 100%;
+}
 .wadjet-studio-orrery-phase-rules {
   display: flex;
   flex-wrap: wrap;

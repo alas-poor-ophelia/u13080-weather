@@ -5,12 +5,15 @@
  *   mark, INDEX=12/0/1), months tiling it with a slack last month, season
  *   marks by fraction, by day of year and by month and day, a day label, and
  *   a named rule (full moons, one skipped).
+ * - PASARAN: Gregorian with a five-day Javanese market week on its own
+ *   one-day labelled cycle, so the day names are read two ways and the form
+ *   reads no week: every labelled cycle edit there is an AST edit (slice 5e).
  * - LEVANAH (§18.6 item 13): the Hebrew preset with a body Levanah sharing
  *   the molad's period, its epoch 579383/765433 placing phase 0 six hours
  *   before crossing 0 (the preset's crossing includes the six-hour shift), so
  *   no geometry may assume the molad mark sits at phase 0.
  */
-import { HEBREW, type CalendarAst, type RuleAst } from "../../src/seshat";
+import { GREGORIAN, HEBREW, type CalendarAst, type RuleAst } from "../../src/seshat";
 
 const fullMoons: RuleAst = { kind: "all", of: [{ kind: "phase", body: "moon", name: "Full" }, { kind: "not", of: { kind: "dates", days: [100] } }] };
 
@@ -90,4 +93,11 @@ export const HEBREW_LOOSE: CalendarAst = {
   ...HEBREW_WEEK,
   name: "Hebrew (loose)",
   units: HEBREW_WEEK.units.map((u) => (u.id === "month" && u.kind === "slots" ? ({ ...u, slots: u.slots.map((s) => (s.length === "slack" ? { ...s, min: 28, max: 31 } : s)) }) : u)),
+};
+
+/** PASARAN: Gregorian with the five pasaran days (1970-01-01, day 0, was Wage). */
+export const PASARAN: CalendarAst = {
+  ...GREGORIAN,
+  name: "Gregorian with pasaran",
+  units: [...GREGORIAN.units, { id: "pasaran", kind: "cycle", anchor: -3, length: 1, labels: ["Legi", "Pahing", "Pon", "Wage", "Kliwon"].map((name) => ({ name })) }],
 };
