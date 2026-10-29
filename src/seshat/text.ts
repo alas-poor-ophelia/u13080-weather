@@ -6,8 +6,14 @@
  * Lexical rules:
  * - a line is `KEY:VALUE`, KEY uppercase; blank lines are ignored, and a `#`
  *   in column 0 starts a comment line (`#` elsewhere is text);
- * - values escape `\ , ; : = #` with a backslash, a newline as `\n`, a
- *   carriage return as `\r`, and the empty string as `\0`; nothing is trimmed;
+ * - one escaping rule for every text value (names, tags, labels, formats) and
+ *   for season marks: a backslash before `\ , ; : = #` is that character and
+ *   never a separator; `\n` is a newline, `\r` a carriage return, and `\0` the
+ *   empty string; nothing is trimmed. A raw `\` always starts an escape; a raw
+ *   `,` `;` `=` `:` needs one only where it would separate (a list, the
+ *   parameters, the `=` after a name, the `:` after the unit of BYNTH, BYLABEL
+ *   and BYDAY or in a TABLE row); a raw `#` never does. The printer escapes all
+ *   six, so printed text is canonical;
  * - a parameter list is `[positional;]KEY=VALUE;…`, lists are `,`-separated;
  * - numbers print as JavaScript's shortest round trip (`-0` kept), day
  *   literals as `D<n>`, rationals as `n` or `n/d` (lowest terms, d > 1), and
@@ -51,9 +57,10 @@ export function esc(s: string): string {
 }
 
 /**
- * The text of an escaped value. Escaping is lexical, not layout: a raw special
- * character and a raw empty value are errors (the empty string is `\\0`), so
- * every value has one spelling.
+ * The text of an escaped value, read once the value has been cut at its
+ * separators: a special character still raw here separated nothing, so it is
+ * text. A raw empty value is an error (the empty string is `\\0`), so an empty
+ * list item or a missing value cannot pass for an empty name.
  */
 function unesc(s: string, line: number): string {
   if (s === "\\0") return "";
@@ -62,7 +69,6 @@ function unesc(s: string, line: number): string {
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]!;
     if (ch !== "\\") {
-      if (SPECIAL.has(ch)) throw new SeshatSyntaxError(`"${ch}" must be escaped as "\\${ch}"`, line);
       out += ch;
       continue;
     }
@@ -293,7 +299,7 @@ function toMarks<F extends "from" | "at">(p: Props, key: string, marker: string,
 }
 const tags = (t: readonly string[], key = "TAGS:") => `${key}${list(t.map(esc))}`;
 
-/** Gears read as RRULE/EXRULE (§4): `on` sits in every term (FREQ) or in POSITIONS (ON); an `ON:` line only for a gear with no terms. */
+/** Gears read as RRULE/EXRULE (§4): `on` sits in every term (FREQ) or in POSITIONS (ON). A gear with no terms has no spelling. */
 function gearLines(g: GearAst): string[] {
   if (g.kind === "positions") fields(g, `gear "${g.id}"`, "id", "on", "kind", "period", "positions", "offset");
   else {
@@ -302,7 +308,7 @@ function gearLines(g: GearAst): string[] {
   }
   const out = [`UID:${id(g.id)}`];
   if (g.kind === "positions") out.push(`POSITIONS:ON=${id(g.on)};PERIOD=${num(g.period)};AT=${list(g.positions.map(num))}${g.offset !== undefined ? `;OFFSET=${num(g.offset)}` : ""}`);
-  else if (g.terms.length === 0) out.push(`ON:${id(g.on)}`);
+  else if (g.terms.length === 0) throw new RangeError(`gear "${g.id}" has no RRULE or EXRULE line; a gear needs at least one, or POSITIONS`);
   else for (const t of g.terms) out.push(`${t.sign === -1 ? "EXRULE" : "RRULE"}:FREQ=${id(g.on)};INTERVAL=${num(t.every)}${t.offset !== undefined ? `;OFFSET=${num(t.offset)}` : ""}`);
   return out;
 }
@@ -669,12 +675,14 @@ function seasonsBlock(c: Component): SeasonsAst {
     const kv = cut(l.value, "=");
     if (!kv) throw new SeshatSyntaxError("MARK is <name>=<from>, <name>=DAY:<n> or <name>=<unit>:<slot>.<day>", l.no);
     const name = unesc(kv[0], l.no);
-    const d = DAY_MARK.exec(kv[1]);
+    // a mark is read whole, its escapes removed as a name's are: month\:3.1 is month:3.1
+    const at = kv[1] === "" ? "" : unesc(kv[1], l.no);
+    const d = DAY_MARK.exec(at);
     if (d) return { name, day: wholeIn(d[1]!, l.no) };
-    const sm = SLOT_MARK.exec(kv[1]);
+    const sm = SLOT_MARK.exec(at);
     if (sm) return { name, slot: { unit: sm[1]!, index: wholeIn(sm[2]!, l.no), day: wholeIn(sm[3]!, l.no) } };
-    if (/^[A-Za-z]/.test(kv[1])) throw new SeshatSyntaxError(`"${kv[1]}" is not a season mark (a fraction, DAY:<n> or <unit>:<slot>.<day>)`, l.no);
-    return { name, from: toNum(kv[1], l.no) };
+    if (/^[A-Za-z]/.test(at)) throw new SeshatSyntaxError(`"${at}" is not a season mark (a fraction, DAY:<n> or <unit>:<slot>.<day>)`, l.no);
+    return { name, from: toNum(at, l.no) };
   });
   return { unit: toId(u.value, u), marks };
 }
@@ -698,20 +706,20 @@ function slotIndices(seasons: SeasonsAst, units: readonly UnitAst[]): SeasonsAst
 }
 
 function gear(c: Component): GearAst {
-  const p = new Props(c, ["UID", "ON", "POSITIONS", "RRULE", "EXRULE"], []);
+  const onLine = c.items.find((it): it is { line: Line } => "line" in it && it.line.key === "ON");
+  if (onLine) throw new SeshatSyntaxError("a gear has no ON line: it names its unit in RRULE:FREQ=<unit> or POSITIONS:ON=<unit>", onLine.line.no);
+  const p = new Props(c, ["UID", "POSITIONS", "RRULE", "EXRULE"], []);
   const u = p.req("UID");
   const gid = toId(u.value, u);
   const pos = p.one("POSITIONS");
   const termLines = p.seq(["RRULE", "EXRULE"], []).map((it) => (it as { line: Line }).line);
-  const onLine = p.one("ON");
-  if ([pos, onLine, termLines.length ? termLines : undefined].filter(Boolean).length !== 1) throw new SeshatSyntaxError("a gear has POSITIONS, or RRULE/EXRULE terms, or (with no terms) ON", c.no);
+  if ([pos, termLines.length ? termLines : undefined].filter(Boolean).length !== 1) throw new SeshatSyntaxError("a gear has POSITIONS or RRULE/EXRULE terms, one of the two", c.no);
   if (pos) {
     const q = params(pos, ["ON", "PERIOD", "AT", "OFFSET"]);
     if (q.pos !== undefined) throw new SeshatSyntaxError("POSITIONS takes only parameters", pos.no);
     const off = q.get("OFFSET");
     return { id: gid, on: toId(need(q.get("ON"), "ON", pos), pos), kind: "positions", period: toNum(need(q.get("PERIOD"), "PERIOD", pos), pos.no), positions: nums(need(q.get("AT"), "AT", pos), pos), ...(off !== undefined ? { offset: toNum(off, pos.no) } : {}) };
   }
-  if (onLine) return { id: gid, on: toId(onLine.value, onLine), kind: "intervals", terms: [] };
   const on = new Set<string>();
   const terms = termLines.map((l): Extract<GearAst, { kind: "intervals" }>["terms"][number] => {
     const q = params(l, ["FREQ", "INTERVAL", "OFFSET"]);

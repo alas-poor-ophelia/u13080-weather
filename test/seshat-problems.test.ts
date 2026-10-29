@@ -21,8 +21,8 @@ const TEN: CalendarAst = {
   ],
 };
 const withLedger = (ledger: unknown[]): CalendarAst => ({ ...TEN, units: [{ ...TEN.units[0]!, ledger } as CalendarAst["units"][number], TEN.units[1]!] });
-const where = (p: Problem): Omit<Problem, "message"> => {
-  const { message: _m, ...rest } = p;
+const where = (p: Problem): Omit<Problem, "message" | "code"> => {
+  const { message: _m, code: _c, ...rest } = p;
   return rest;
 };
 
@@ -49,7 +49,9 @@ describe("validation problems carry their location", () => {
     // occurrence 2 starts on day 20 by the rule; pinning occurrence 3 there leaves occurrence 2 empty
     const found = problems(withLedger([{ kind: "slots", from: 1, unit: "part", lengths: [3, 7] }, { kind: "starts", from: 3, startsOn: 20 }]));
     expect(found).toHaveLength(1);
-    expect(found[0]!.message).toContain("(V7)");
+    // the rule's code is a field of its own; the message a user reads carries none
+    expect(found[0]!.code).toBe("V7");
+    expect(found[0]!.message).toMatch(/every occurrence needs at least one day$/);
     expect(where(found[0]!)).toEqual({ unit: "year", entry: 1 });
   });
 

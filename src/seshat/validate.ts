@@ -96,8 +96,20 @@ export interface Problem {
   readonly rule?: string;
   /** 0-based index into the calendar's day labels */
   readonly day?: number;
+  /** the rule it breaks in docs/SESHAT-v0.md §5 ("V3", "V7" …), when it names one; never part of `message` */
+  readonly code?: string;
 }
-type Where = Omit<Problem, "message">;
+
+/**
+ * A check names the §5 rule it enforces by ending a clause with " (V<n>)" in its source text; that is for
+ * readers of this file and for tests, not for the person reading the message, so it moves to `code`.
+ */
+const CODE = / \((V\d+)\)/;
+function toProblem(message: string, where: Where | undefined): Problem {
+  const m = CODE.exec(message);
+  return { message: m ? message.replace(CODE, "") : message, ...where, ...(m ? { code: m[1]! } : {}) };
+}
+type Where = Omit<Problem, "message" | "code">;
 
 export function validate(ast: CalendarAst): string[] {
   return problems(ast).map((p) => p.message);
@@ -348,7 +360,7 @@ export function problems(stored: CalendarAst): Problem[] {
     errors.push(`rules read each other's tags in a cycle: ${c.map((id) => `"${id}"`).join(" → ")}`);
     own(n, { rule: c[0]! });
   }
-  return errors.map((message, i) => ({ message, ...locs[i] }));
+  return errors.map((message, i) => toProblem(message, locs[i]));
 }
 
 /**

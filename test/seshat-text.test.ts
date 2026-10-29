@@ -148,7 +148,7 @@ function fuzzAst(seed: number): CalendarAst {
     ...opt("formats", r.listOf(() => ({ name: text(), pattern: `${text()}{${id()}}${text()}` }))),
     ...opt("seasons", r.maybe(() => ({ unit: id(), marks: Array.from({ length: r.int(0, 3) }, seasonMark) }))),
     ...opt("bodies", r.listOf(() => ({ id: id(), period: rat(), epoch: rat(), ...opt("moon", r.maybe(() => ({ name: text(), ...opt("phases", r.listOf(() => ({ name: text(), at: float() }))) }))) }))),
-    gears: Array.from({ length: r.int(0, 2) }, () => (r.next() < 0.5 ? { id: id(), on: id(), kind: "intervals" as const, terms: Array.from({ length: r.int(0, 3) }, () => ({ every: int(), ...opt("offset", r.maybe(int)), sign: r.pick([1, -1] as const) })) } : { id: id(), on: id(), kind: "positions" as const, period: int(), positions: Array.from({ length: r.int(0, 3) }, int), ...opt("offset", r.maybe(int)) })),
+    gears: Array.from({ length: r.int(0, 2) }, () => (r.next() < 0.5 ? { id: id(), on: id(), kind: "intervals" as const, terms: Array.from({ length: r.int(1, 3) }, () => ({ every: int(), ...opt("offset", r.maybe(int)), sign: r.pick([1, -1] as const) })) } : { id: id(), on: id(), kind: "positions" as const, period: int(), positions: Array.from({ length: r.int(0, 3) }, int), ...opt("offset", r.maybe(int)) })),
     units: Array.from({ length: r.int(0, 3) }, unit),
     ...opt("days", r.listOf(() => ({ day: int(), ...opt("name", r.maybe(text)), ...opt("tags", tagsOf()) }))),
     ...opt("rules", r.listOf(() => ({ id: id(), ...opt("name", r.maybe(text)), ...opt("tags", tagsOf()), rule: node(0) }))),
@@ -321,7 +321,7 @@ describe("Seshat text: errors", () => {
   });
 
   // review 2026-10-19 (Steadfast Hale): each of these was a repro
-  test("review repros: the safe-integer edge round-trips exactly; nesting, non-finite numbers and raw specials are syntax errors", () => {
+  test("review repros: the safe-integer edge round-trips exactly; nesting, non-finite numbers and empty values are syntax errors", () => {
     for (const at of [{ n: -(2 ** 53 - 1), d: 3 }, { n: -9_007_199_254_740_989, d: 7 }, { n: 2 ** 53 - 1, d: 2 }]) {
       const ast: CalendarAst = { name: "edge", gears: [], units: [{ id: "y", kind: "cycle", crossing: { period: { n: 1, d: 1 }, at } }] };
       expect(same(parse(print(ast)), ast)).toBeNull();
@@ -331,7 +331,8 @@ describe("Seshat text: errors", () => {
     refuse(greg.replace("END:VCALENDAR", "BEGIN:VRULE\nUID:r\n" + "BEGIN:ALL\n".repeat(300) + "END:VCALENDAR"), /nest deeper than 200/);
     refuse(greg.replace("NAME:Gregorian", "NAME:Gregorian\nRDATE:D1e999"), /not a finite number/);
     refuse(greg.replace("NAME:Gregorian", "NAME:Gregorian\nRDATE:D1.5"), /not a whole day/);
-    refuse(greg.replace("NAME:Gregorian", "NAME:a:b"), /":" must be escaped/);
+    // a raw colon in a name separates nothing (wadjet-cqb): it is text, and the printer escapes it
+    expect(parse(greg.replace("NAME:Gregorian", "NAME:a:b")).name).toBe("a:b");
     refuse(greg.replace("NAME:Gregorian", "NAME:"), /empty value is written/);
     refuse(greg.replace("SLOT:January=31", "BEGIN:VSLOT\nNAME:January\nTAGS:a,\nLENGTH:31\nEND:VSLOT"), /empty value is written/);
     refuse("", /line 1: a calendar starts with BEGIN:VCALENDAR/);
@@ -349,5 +350,95 @@ describe("Seshat text: errors", () => {
     expect(validate({ ...GREGORIAN, gears: [{ ...GREGORIAN.gears[0]!, id: "Leap" }], units: GREGORIAN.units.map((u) => (u.kind === "cycle" && u.gears ? { ...u, gears: [{ gear: "Leap", add: 1 }] } : u)) })).toContain('id "Leap" must match [a-z][a-z0-9-]*');
     expect(validate({ ...GREGORIAN, days: [{ day: 0, name: "bell\u0007" }] }).join()).toContain("control character");
     expect(validate({ ...GREGORIAN, bodies: [{ id: "moon", period: { n: -1, d: 1 }, epoch: { n: 0, d: 1 } }] }).join()).toContain('body "moon"');
+  });
+});
+
+// wadjet-cqb: one escaping rule in every text value and in season marks
+describe("Seshat text: one escaping rule", () => {
+  const greg = print(GREGORIAN);
+  const rule = "BEGIN:VRULE\nUID:r\n%\nTAG:x\nEND:VRULE\n\nEND:VCALENDAR";
+  const moon = "BEGIN:VBODY\nUID:moon\nPERIOD:59/2\nEPOCH:0\n%\nEND:VBODY\n\nBEGIN:VGEAR";
+  const seasons = "BEGIN:VSEASONS\nUNIT:year\n%\nEND:VSEASONS\n\nBEGIN:VGEAR";
+  const slots = (a: CalendarAst) => (a.units[1] as Extract<UnitAst, { kind: "slots" }>).slots;
+  const labels = (a: CalendarAst) => (a.units[3] as Extract<UnitAst, { kind: "cycle" }>).labels!;
+  /** [position, line to replace, raw spelling, canonical (escaped) spelling, the value read, what it must be] */
+  const cases: Array<[string, string, string, string, (a: CalendarAst) => unknown, unknown]> = [
+    ["NAME", "NAME:Gregorian", "NAME:Vale: #2, east; a=b", "NAME:Vale\\: \\#2\\, east\\; a\\=b", (a) => a.name, "Vale: #2, east; a=b"],
+    ["FORMAT pattern", "FORMAT:long={weekday\\:name} {month\\:day} {month\\:name} {year}", "FORMAT:long={weekday:name}, {month:day} #{year}=y", "FORMAT:long={weekday\\:name}\\, {month\\:day} \\#{year}\\=y", (a) => a.formats![1]!.pattern, "{weekday:name}, {month:day} #{year}=y"],
+    ["FORMAT name", "FORMAT:long=", "FORMAT:long: #2, b;c=", "FORMAT:long\\: \\#2\\, b\\;c=", (a) => a.formats![1]!.name, "long: #2, b;c"],
+    ["SLOT name", "SLOT:January=31", "SLOT:Jan: the first, #1; old=31", "SLOT:Jan\\: the first\\, \\#1\\; old=31", (a) => slots(a)[0]!.name, "Jan: the first, #1; old"],
+    ["VSLOT NAME", "NAME:February", "NAME:Feb: short, #2", "NAME:Feb\\: short\\, \\#2", (a) => slots(a)[1]!.name, "Feb: short, #2"],
+    ["LABEL", "LABEL:Sunday", "LABEL:Sun, day #1: rest=yes", "LABEL:Sun\\, day \\#1\\: rest\\=yes", (a) => labels(a)[0]!.name, "Sun, day #1: rest=yes"],
+    ["VLABEL TAGS", "LABEL:Sunday", "BEGIN:VLABEL\nTAGS:rest;day,holy:yes #1\nEND:VLABEL", "BEGIN:VLABEL\nTAGS:rest\\;day,holy\\:yes \\#1\nEND:VLABEL", (a) => labels(a)[0]!.tags, ["rest;day", "holy:yes #1"]],
+    ["RDATE NAME and TAGS", "FORMAT:default=", "RDATE:D0;NAME=New: Year #1, a=b;TAGS=feast:day\nFORMAT:default=", "RDATE:D0;NAME=New\\: Year \\#1\\, a\\=b;TAGS=feast\\:day\nFORMAT:default=", (a) => a.days, [{ day: 0, name: "New: Year #1, a=b", tags: ["feast:day"] }]],
+    ["VRULE NAME and TAGS", "END:VCALENDAR", rule.replace("%", "NAME:Market: #1, a=b\nTAGS:x:y"), rule.replace("%", "NAME:Market\\: \\#1\\, a\\=b\nTAGS:x\\:y"), (a) => [a.rules![0]!.name, a.rules![0]!.tags], ["Market: #1, a=b", ["x:y"]]],
+    ["TAG", "END:VCALENDAR", rule.replace("%\n", "").replace("TAG:x", "TAG:a:b #1, c=d;e"), rule.replace("%\n", "").replace("TAG:x", "TAG:a\\:b \\#1\\, c\\=d\\;e"), (a) => a.rules![0]!.rule, { kind: "tag", tag: "a:b #1, c=d;e" }],
+    ["BYLABEL", "END:VCALENDAR", rule.replace("%\n", "").replace("TAG:x", "RRULE:FREQ=weekday;BYLABEL=weekday:Sun: day #1"), rule.replace("%\n", "").replace("TAG:x", "RRULE:FREQ=weekday;BYLABEL=weekday:Sun\\: day \\#1"), (a) => (a.rules![0]!.rule as Extract<RuleAst, { kind: "recur" }>).by, [{ unit: "weekday", label: ["Sun: day #1"] }]],
+    ["MOON and PHASE names", "BEGIN:VGEAR", moon.replace("%", "MOON:Moon: #1, pale\nPHASE:New: dark, #1=0"), moon.replace("%", "MOON:Moon\\: \\#1\\, pale\nPHASE:New\\: dark\\, \\#1=0"), (a) => a.bodies![0]!.moon, { name: "Moon: #1, pale", phases: [{ name: "New: dark, #1", at: 0 }] }],
+    ["MARK name", "BEGIN:VGEAR", seasons.replace("%", "MARK:Spring: early, #1=0.25"), seasons.replace("%", "MARK:Spring\\: early\\, \\#1=0.25"), (a) => a.seasons!.marks, [{ name: "Spring: early, #1", from: 0.25 }]],
+  ];
+  for (const [where, find, raw, canonical, read, want] of cases) {
+    test(`${where}: a backslash is the character, a raw one that separates nothing is text, and both print canonical`, () => {
+      expect(greg).toContain(find);
+      const a = parse(greg.replace(find, raw));
+      const b = parse(greg.replace(find, canonical));
+      expect(read(a)).toEqual(want);
+      expect(same(a, b)).toBeNull();
+      const printed = print(a);
+      expect(printed).toBe(print(b));
+      for (const line of canonical.split("\n")) expect(printed).toContain(line);
+      expect(print(parse(printed))).toBe(printed);
+      expect(same(parse(printed), a)).toBeNull();
+    });
+  }
+
+  test("a season MARK takes the escaped colon as it takes the raw one: month\\:3.1 is month:3.1, DAY\\:80 is DAY:80", () => {
+    const marks = "MARK:Spring=DAY:80\nMARK:Summer=month:6.21\nMARK:Autumn=DAY\\:266\nMARK:Winter=month\\:12.21";
+    const ast = parse(greg.replace("BEGIN:VGEAR", seasons.replace("%", marks)));
+    expect(ast.seasons!.marks).toEqual([
+      { name: "Spring", day: 80 },
+      { name: "Summer", slot: { unit: "month", index: 5, day: 21 } },
+      { name: "Autumn", day: 266 },
+      { name: "Winter", slot: { unit: "month", index: 11, day: 21 } },
+    ]);
+    expect(validate(ast)).toEqual([]);
+    // the printer writes the mark's colon raw, and reading it back is a fixpoint
+    const printed = print(ast);
+    expect(printed).toContain("MARK:Autumn=DAY:266\nMARK:Winter=month:12.21");
+    expect(print(parse(printed))).toBe(printed);
+    expect(same(parse(printed), ast)).toBeNull();
+    // under a NUMBER:0 month unit the escaped mark still reads the printed number
+    const zero = parse(greg.replace("UID:month\nIN:year", "UID:month\nNUMBER:0\nIN:year").replace("BEGIN:VGEAR", seasons.replace("%", "MARK:Winter=month\\:11.21")));
+    expect(zero.seasons!.marks).toEqual([{ name: "Winter", slot: { unit: "month", index: 11, day: 21 } }]);
+  });
+
+  test("an escaped separator never separates: a list item, a parameter, a name's =, a BYNTH unit", () => {
+    expect(labels(parse(greg.replace("LABEL:Sunday", "BEGIN:VLABEL\nTAGS:a\\,b\nEND:VLABEL")))[0]).toEqual({ tags: ["a,b"] });
+    expect(parse(greg.replace("FORMAT:default=", "RDATE:D0;NAME=a\\;b\nFORMAT:default=")).days).toEqual([{ day: 0, name: "a;b" }]);
+    expect(slots(parse(greg.replace("SLOT:January=31", "SLOT:a\\=b=31")))[0]!.name).toBe("a=b");
+    expect(() => parse(greg.replace("END:VCALENDAR", rule.replace("%\n", "").replace("TAG:x", "RRULE:FREQ=month;BYNTH=month\\:1")))).toThrow(/BYNTH is <unit>:<values>/);
+    // a raw backslash is always an escape, and only the six specials, n, r and 0 follow one
+    expect(() => parse(greg.replace("NAME:Gregorian", "NAME:a\\b"))).toThrow(/bad escape "\\b"/);
+  });
+
+  test("a # starts a comment only in column 0", () => {
+    const ast = parse(greg.replace("NAME:Gregorian", "# a comment\nNAME:Gregorian #1"));
+    expect(ast.name).toBe("Gregorian #1");
+    expect(print(ast)).toContain("NAME:Gregorian \\#1");
+    expect(() => parse(greg.replace("NAME:Gregorian", " # not a comment\nNAME:Gregorian"))).toThrow(/expected KEY:VALUE/);
+  });
+});
+
+// wadjet-2ch: a gear with no terms has no spelling
+describe("Seshat text: no ON:<unit> gear", () => {
+  const greg = print(GREGORIAN);
+  const terms = "RRULE:FREQ=year;INTERVAL=4\nEXRULE:FREQ=year;INTERVAL=100\nRRULE:FREQ=year;INTERVAL=400";
+  test("the parser refuses an ON line in a gear, on its line, and says how a gear names its unit", () => {
+    expect(() => parse(greg.replace(terms, "ON:year"))).toThrow(/^line 9: a gear has no ON line: it names its unit in RRULE:FREQ=<unit> or POSITIONS:ON=<unit>$/);
+    expect(() => parse(greg.replace("UID:leap", "UID:leap\nON:year"))).toThrow(/^line 9: a gear has no ON line/);
+    expect(() => parse(greg.replace(`${terms}\n`, ""))).toThrow(/a gear has POSITIONS or RRULE\/EXRULE terms, one of the two/);
+  });
+  test("the printer refuses a gear with no terms rather than write a line nothing reads", () => {
+    expect(() => print({ ...GREGORIAN, gears: [{ id: "leap", on: "year", kind: "intervals", terms: [] }] })).toThrow(/gear "leap" has no RRULE or EXRULE line/);
   });
 });

@@ -139,8 +139,8 @@ The second is a **slot unit**: `month` divides each `year` (`IN:year`) into slot
 months of 30 days and *Yearsend* of 5 make 365.
 
 `UID` gives each unit an id. Ids are lower case letters, digits and hyphens, starting with a
-letter. Names (*Thaw*, *Calendar of the Vale*) can be any text, with six characters escaped
-(step 6).
+letter. Names (*Thaw*, *Calendar of the Vale*) can be any text; a character that would split a
+value is written with a backslash (step 6).
 
 That is a working calendar already; every step after this one builds on it.
 
@@ -351,8 +351,10 @@ which a date format can print (step 8).
   day of Autumn: a day in Autumn (`TAG:season\:Autumn`) whose day before was not (`NOT` of a
   `SHIFT`). In year 1, Autumn starts on 17 Mists and the Harvest Moon falls on 10 Frost.
 
-The colon in `season\:Autumn` is written with a backslash. In most values the characters
-`\ , ; : = #` must be escaped like this; the reference lists where.
+The colon in `season\:Autumn` is written with a backslash, as Save writes it. A backslash before
+any of `\ , ; : = #` always stands for that character; where the character separates nothing, as
+here, the plain one means the same (`TAG:season:Autumn`). The reference lists where a backslash is
+needed.
 
 A recurrence matches nothing before occurrence 0 of its `FREQ` unit. The Feast of Lanterns above
 starts in year 1; a world whose story runs into year 0 and earlier gives the rule an earlier
@@ -406,7 +408,8 @@ day's name, `{lunar-month:day}` the day of the lunar month. Tokens starting with
 placeholders: `{@season}`, `{@phase:moon}` (the moon's named phase) and `{@name}` (the names of
 the day's `RDATE` and of the rules that hold on it).
 
-In a `FORMAT` line the colons and commas are escaped (`\:`, `\,`), the same as in any other value.
+Save writes the colons and commas in a `FORMAT` line escaped (`\:`, `\,`), as in any other value;
+typed plain, they mean the same.
 
 | Format | Day 164 |
 | --- | --- |
@@ -574,7 +577,7 @@ fixed. A problem in the text itself starts with its line number. These are the c
 | Mistake | What Save says |
 | --- | --- |
 | A line is indented, or its key is in lower case | `Line 12: expected KEY:VALUE, got "  UID:x"` |
-| A colon or comma in a name, tag or format is not escaped | `Line 13: "," must be escaped as "\,"` (write `\,`, `\:`) |
+| A `;` in an `RDATE` name is not escaped | `Line 13: "b" in RDATE is not KEY=VALUE` (write `\;`) |
 | A key is misspelled | `Line 7: VUNIT has no property LENTH` |
 | A block is not closed | `Line 8: END:VCALENDAR closes BEGIN:VUNIT` |
 | An id has capitals or spaces | `Line 5: "Year" is not an id ([a-z][a-z0-9-]*)` |
@@ -614,13 +617,23 @@ Every line and block of the language, then its limits and its messages.
 | Day numbers | `D<n>`: `D0`, `D-719528`. A crossing instant may add a fraction of a day: `D-45942+266419/300000`. |
 | Line endings | LF or CRLF; a leading byte-order mark is ignored. |
 
-**Escaping.** Six characters have a meaning in values: `\` `,` `;` `:` `=` `#`. In names, tags,
-patterns and other text values, each of them must be written with a backslash before it (`\,`,
-`\:`, `\#`), a newline as `\n` and a carriage return as `\r`. A raw one is refused. This applies to
-`NAME`, `TAGS`, `TAG`, `SLOT` names, `LABEL`, `MOON`, `PHASE` names, `MARK` names, `FORMAT` names
-and patterns, and the text parts of `RDATE` and `BYLABEL`. It does **not** apply inside the
-structured part of a season mark: write `MARK:Spring=month:3.1` and `MARK:Summer=DAY:150` with
-plain colons.
+**Escaping.** One rule for every text value (`NAME`, `TAGS`, `TAG`, `SLOT` names, `LABEL`, `MOON`,
+`PHASE` names, `MARK` names, `FORMAT` names and patterns, and the text parts of `RDATE` and
+`BYLABEL`) and for season marks. A backslash before any of `\` `,` `;` `:` `=` `#` stands for that
+character and never separates anything (`\,` `\:` `\#`); `\n` is a newline and `\r` a carriage
+return. Without a backslash:
+
+- `\` always starts an escape, so a backslash itself is written `\\`;
+- `,` separates the items of a list (`TAGS`, `BYLABEL`), `;` the parameters of a line (`RDATE`,
+  `RRULE`), `=` a name from what follows (`SLOT`, `PHASE`, `MARK`, `FORMAT`, the first `=` only),
+  and `:` the unit from the list in `BYNTH`, `BYDAY` and `BYLABEL`. Where one of them would split
+  a value, a backslash keeps it in: `RDATE:D0;NAME=Bread\; Salt`, `SLOT:A\=B=30`;
+- anywhere else the plain character is text: `NAME:Vale: #2, east` is the name *Vale: #2, east*;
+- `#` never needs one: a comment is a whole line starting with `#`.
+
+A season mark is read whole, so `MARK:Spring=month:3.1` and `MARK:Spring=month\:3.1` are the same
+mark, and so are `DAY:150` and `DAY\:150`. Save writes every one of the six escaped in text values,
+and a season mark's colon plain.
 
 **Markers.** `BODIES:`, `DAYS:`, `RULES:`, `FORMATS:`, `MARKS:`, `PHASES:`, `LABELS:`, `LEDGER:`,
 `GEARS:`, `STAGES:` (and `BY=` inside an `RRULE`) stand alone with no value and mean "an empty
@@ -772,8 +785,8 @@ then adds days to the occurrences it picks. One gear can serve several units.
 | `POSITIONS` | `ON=<unit>;PERIOD=<n>;AT=<list>[;OFFSET=<n>]` | Picks the listed positions (0 to `PERIOD` − 1) in every run of `PERIOD` occurrences: a table, such as 7 leap years in 19. |
 
 A gear has either `RRULE`/`EXRULE` lines, all with the same `FREQ`, or one `POSITIONS` line.
-A gear written with only an `ON:<unit>` line, and no `RRULE`, `EXRULE` or `POSITIONS`, is read,
-but it picks nothing and Save refuses it with `gear "<id>": no intervals`.
+A gear names its unit in `FREQ` or `ON=`; it has no `ON:<unit>` line of its own, and Save refuses
+one.
 
 The count is the occurrence number, not the number dates print: with `NUMBER:1`, year 4 is
 occurrence 3. An occurrence *n* is picked by `RRULE:…;INTERVAL=i;OFFSET=o` when *n* − *o* is a
@@ -1023,7 +1036,8 @@ line (±10,000,000) reads nothing there.
 ### Formats
 
 `FORMAT:<name>=<pattern>`. The pattern is text with tokens in braces; `{{` and `}}` are literal
-braces. Escape `:`, `,`, `;`, `=`, `#` and `\` in the line as in any value.
+braces. Escaping is as in any value: a `\` is written `\\`, and an `=` in the format's name `\=`;
+the pattern needs no other backslash, though Save writes `:`, `,`, `;`, `=` and `#` escaped.
 
 | Token | Prints |
 | --- | --- |
@@ -1084,8 +1098,7 @@ formats may not hold placeholders.
 A definition that cannot be read or cannot run is not saved. The dialog shows the first problem.
 A problem reading the text names its line. Most others name the part they are about (`unit
 "month"`, `rule "lanterns"`, `format "long"`); a problem inside a rule adds where in the rule
-(`rule "x".all[1].not`). Some messages end in a code such as `(V3)`: it names the check and can be
-ignored. Below, `<…>` stands for the name or number in the message.
+(`rule "x".all[1].not`). Below, `<…>` stands for the name or number in the message.
 
 #### Reading the text
 
@@ -1097,8 +1110,7 @@ ignored. Below, `<…>` stands for the name or number in the message.
 | `<BLOCK> has no property <KEY>` · `<BLOCK> cannot hold <BLOCK>` | A line or block in a place that does not take it (often a misspelled key). |
 | `<BLOCK> needs <KEY>` · `<BLOCK> has <KEY> twice` | A required line is missing, or a single line is repeated. |
 | `SESHAT:<v> is not a version this reader knows (1)` | Write `SESHAT:1`. |
-| `"<c>" must be escaped as "\<c>"` | A raw `\ , ; : = #` in a value. See [The text](#the-text). |
-| `an empty value is written \0` · `bad escape "\<c>"` | An empty value, or a backslash before a character that needs none. |
+| `an empty value is written \0` · `bad escape "\<c>"` | An empty value, or a backslash before a character other than `\ , ; : = #`, `n`, `r` or `0` (write a backslash itself as `\\`). See [The text](#the-text). |
 | `<KEY> is a marker and takes no value` · `<KEY>: marks an empty list and stands alone` | A marker line with a value, or beside items. |
 | `"<value>" is not a number` · `… is not a whole day` · `… is not a day literal (D<n>)` | A number or day number in the wrong form (check for trailing spaces). |
 | `"<value>" is not a rational (n or n/d)` · `… is not in lowest terms with a denominator above 1` | A period, epoch or fraction written as a decimal, or not reduced (`2/4`). |
@@ -1123,7 +1135,7 @@ ignored. Below, `<…>` stands for the name or number in the message.
 | `a cycle needs CROSSING, or ANCHOR and LENGTH` · `a base is CROSSING or ANCHOR + LENGTH, not both` | A cycle unit has no base, or two. |
 | `unit "<u>": anchor <n> is not a whole day within ±10000000` | `ANCHOR` is off the day line. |
 | `unit "<u>": length <n> is not a whole number of days within ±20000000` | `LENGTH` is out of range. |
-| `unit "<u>": an occurrence can be <n> days long; every occurrence needs at least one day (V3)` | Negative gear terms or stages can shorten an occurrence to nothing. |
+| `unit "<u>": an occurrence can be <n> days long; every occurrence needs at least one day` | Negative gear terms or stages can shorten an occurrence to nothing. |
 | `unit "<u>": labels must be a non-empty list` | `LABELS:` on its own. |
 | `unit "<u>": stage <j> has no rules` · `… stage <j> rule <i>: …` | A `VSTAGE` is empty, or one of its numbers is out of range (modulus, residues, window offset within ±8, length at least 1). |
 
@@ -1131,10 +1143,10 @@ ignored. Below, `<…>` stands for the name or number in the message.
 
 | Message | Meaning |
 | --- | --- |
-| `a gear has POSITIONS, or RRULE/EXRULE terms, or (with no terms) ON` | A gear mixes forms or has none. |
+| `a gear has POSITIONS or RRULE/EXRULE terms, one of the two` | A gear mixes forms or has none. |
+| `a gear has no ON line: it names its unit in RRULE:FREQ=<unit> or POSITIONS:ON=<unit>` | A gear written `ON:<unit>`. |
 | `every term of a gear reads the same unit (one FREQ)` | `RRULE` and `EXRULE` lines with different `FREQ`. |
 | `gear "<g>": no unit "<u>"` · `gear "<g>": reads "<u>", which is not a cycle unit` | The gear reads a unit that is missing or a slot unit. |
-| `gear "<g>": no intervals` | A gear written `ON:<unit>`. |
 | `gear "<g>": interval <n> is not a whole number in 1..100000` · `gear "<g>": period <n> is too long to check (max 100000)` | An interval, or the intervals combined, too long. |
 | `gear "<g>": index <n> is counted <s> times; include/exclude intervals must nest` | `RRULE` and `EXRULE` lines that do not nest (every 4 and every 6, say). |
 | `gear "<g>": period <n> is not a whole number in 1..100000` · `gear "<g>": position <p> is outside 0..<n>` · `gear "<g>": a position is listed twice` | A `POSITIONS` table out of range. |
@@ -1169,9 +1181,9 @@ ignored. Below, `<…>` stands for the name or number in the message.
 | `CROSSING is <period>@<at> or BODY=<id>;MARK=<mark>, not both` · `CROSSING has MARK only with BODY` · `START is after or contains, not "<x>"` · `INDEX is <a>/<c>/<L>` | A `CROSSING` line in the wrong form. |
 | `unit "<u>": crossing follows body "<b>", which is not declared` | `BODY=` names a missing body. |
 | `unit "<u>": crossing following body "<b>": mark must be a rational n/d in lowest terms in [0, 1)` | `MARK` is 1 or more, or negative. |
-| `unit "<u>": crossing follows body "<b>", whose period <p> is shorter than one day (V8)` · `… crossing period <p> is shorter than one day (V8)` | Occurrences would be shorter than a day. |
+| `unit "<u>": crossing follows body "<b>", whose period <p> is shorter than one day` · `… crossing period <p> is shorter than one day` | Occurrences would be shorter than a day. |
 | `unit "<u>": crossing instant <x> is outside ±10000000` | The first crossing is off the day line. |
-| `unit "<u>": … is too fine for exact integer days within ±10000000 (V5): use a coarser period or instant` · `… puts its instant past safe integers (V5): …` | The fractions are too fine to compute exactly; use fewer digits. |
+| `unit "<u>": … is too fine for exact integer days within ±10000000: use a coarser period or instant` · `… puts its instant past safe integers: …` | The fractions are too fine to compute exactly; use fewer digits. |
 
 #### Seasons
 
@@ -1179,7 +1191,7 @@ ignored. Below, `<…>` stands for the name or number in the message.
 | --- | --- |
 | `a calendar has one VSEASONS block` | Two `VSEASONS` blocks. |
 | `seasons: no unit "<u>"` · `seasons: "<u>" is a slot unit; seasons follow a cycle unit's phase` | `UNIT` is missing or a slot unit. |
-| `"<value>" is not a season mark (a fraction, DAY:<n> or <unit>:<slot>.<day>)` | A mark in another form (for example `month\:3.1`, with an escaped colon). |
+| `"<value>" is not a season mark (a fraction, DAY:<n> or <unit>:<slot>.<day>)` | A mark in another form (for example `month:3`, with no day). |
 | `seasons: mark "<n>" must be at a phase in [0, 1)` | A fraction of 1 or more, or negative. |
 | `seasons: mark "<n>" must be on a whole day of the year from 1` | `DAY:0` or less. |
 | `seasons: mark "<n>": "<u>" is not a slot unit directly in the seasons unit "<y>"` · `… "<u>" has no slot <k>` · `… slot <k> of "<u>" is a filler slot; a season cannot start in one` · `… the day in the slot must be a whole number from 1` | A month mark names the wrong unit, a missing or filler slot, or day 0. |
@@ -1198,7 +1210,7 @@ Most begin `unit "<u>": ledger entry <i>: …` (the *i*-th `STARTS`, `SLOTS` or 
 | `unit "<x>" is not a slot unit under "<u>"` · `path must name one non-filler slot of each of the <n> slot unit(s) between …` · `lengths must be <n> whole numbers of days ≥ 0, one per slot of "<x>"` · `occurrence <k> of "<x>" is overridden twice` | A `SLOTS` line names the wrong unit, a wrong `PATH`, the wrong number of lengths, or repeats. |
 | `unit "<u>": the ledger's slot lengths total <a> days but its parent occurrence is <b> …` | A `SLOTS` line's lengths do not fill the occurrence. |
 | `unit "<u>": occurrence <k> is both pinned and a switch's first occurrence; pin the next one instead` | A `STARTS` and a `VSWITCH` on the same occurrence. |
-| `unit "<u>": occurrence <k> would be <n> days long (it starts on day <a>, the next on day <b>); every occurrence needs at least one day (V7)` | A pinned start or a switch makes an occurrence end before it starts. |
+| `unit "<u>": occurrence <k> would be <n> days long (it starts on day <a>, the next on day <b>); every occurrence needs at least one day` | A pinned start or a switch makes an occurrence end before it starts. |
 | `<n> ledger switches; at most 1000` | Too many `VSWITCH` blocks. |
 | `day label <i>: …` | An `RDATE` line's name or tags (the *i*-th `RDATE`). |
 

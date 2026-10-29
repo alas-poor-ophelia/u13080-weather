@@ -5,7 +5,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
-import { DAY_LIMIT, definitionContent, Engine, epochEditK, parse, print, resolve, resolveCrossing, seasonAtPhase, translate, validate, type BodyAst, type CalendarAst, type CrossingAst, type LiteralCrossingAst, type UnitAst } from "../src/seshat";
+import { DAY_LIMIT, definitionContent, Engine, epochEditK, parse, print, problems, resolve, resolveCrossing, seasonAtPhase, translate, validate, type BodyAst, type CalendarAst, type CrossingAst, type LiteralCrossingAst, type UnitAst } from "../src/seshat";
 import { canonicalJson } from "../src/core/profile";
 import { migrateSettings } from "../src/plugin/settings";
 import { startNewWorld } from "../src/plugin/new-world";
@@ -302,16 +302,20 @@ describe("P4 step 1: validation of a body reference", () => {
   test("V5 on resolved numbers names the body and the unit", () => {
     const e = errs({ body: { id: "moon-1", mark: { n: 1, d: 1_000_000_007 } } });
     expect(e).toHaveLength(1);
-    expect(e[0]).toMatch(/^unit "month": crossing following body "moon-1" .* is too fine .* \(V5\)/);
+    expect(e[0]).toMatch(/^unit "month": crossing following body "moon-1" .* is too fine /);
+    expect(e[0]).not.toMatch(/\(V\d+\)/);
+    expect(problems(lunar({ body: { id: "moon-1", mark: { n: 1, d: 1_000_000_007 } } }, [MOON]))[0]!.code).toBe("V5");
   });
 
   test("a START=after literal: lowest terms is asked for by name, and V5/V8 name START=after and the instant as written", () => {
     expect(validate(lunar({ period: { n: 60, d: 2 }, at: { n: 0, d: 1 }, start: "after" }, []))[0]).toMatch(/unit "month".*lowest terms/);
     const v8 = validate(lunar({ period: { n: 1, d: 2 }, at: { n: 1, d: 3 }, start: "after" }, []))[0];
     expect(v8).toMatch(/unit "month"/);
-    expect(v8).toMatch(/at 1\/3;START=after .*shorter than one day \(V8\)/);
+    expect(v8).toMatch(/at 1\/3;START=after .*shorter than one day$/);
+    expect(problems(lunar({ period: { n: 1, d: 2 }, at: { n: 1, d: 3 }, start: "after" }, []))[0]!.code).toBe("V8");
     const v5 = validate(lunar({ period: { n: 2953, d: 100 }, at: { n: 1, d: 999_999_937 }, start: "after" }, []))[0];
-    expect(v5).toMatch(/unit "month": crossing 2953\/100 at 1\/999999937;START=after \(instant .*\) is too fine .*\(V5\)/);
+    expect(v5).toMatch(/unit "month": crossing 2953\/100 at 1\/999999937;START=after \(instant .*\) is too fine for exact integer days within ±\d+: use a coarser period or instant$/);
+    expect(problems(lunar({ period: { n: 2953, d: 100 }, at: { n: 1, d: 999_999_937 }, start: "after" }, []))[0]!.code).toBe("V5");
   });
 
   test("a ledger switch rule resolves the same way", () => {

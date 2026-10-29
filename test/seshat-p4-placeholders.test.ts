@@ -141,11 +141,11 @@ describe("a Gregorian world with a long format", () => {
       rules: [{ id: "market", name: "Market day", tags: ["market"], rule: SATURDAY }],
       formats: [GREGORIAN.formats![0]!, { name: "long", pattern: "{weekday:name} {month:day} {month:name} {year}, {@season}, {@phase:moon-1}{@name}" }],
     });
-    // commas are escaped too, as in every text value; §16.3's spelling without "\," is refused by the strict reader
+    // the printer escapes commas too, as in every text value; §16.3's spelling without "\," means the same (wadjet-cqb: a comma separates nothing in a format)
     const LINE = "FORMAT:long={weekday\\:name} {month\\:day} {month\\:name} {year}, {@season}, {@phase\\:moon-1}{@name}";
     const PRINTED = LINE.replaceAll(", ", "\\, ");
     expect(text).toContain(PRINTED);
-    expect(() => parse(text.replace(PRINTED, LINE))).toThrow('"," must be escaped as "\\,"');
+    expect(print(parse(text.replace(PRINTED, LINE)))).toBe(text);
     const e = new Engine(parse(text));
     expect(validate(parse(text))).toEqual([]);
     // moon-1's phase: 0.3 on day 0, 0.503 on day 6, 0.876 on day 17, 0.011 on day 21 (wrapped to New), 0.908 on 22 October 2026

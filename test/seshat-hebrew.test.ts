@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DAY_LIMIT, Engine, HEBREW, validate, type CalendarAst } from "../src/seshat";
+import { DAY_LIMIT, Engine, HEBREW, problems, validate, type CalendarAst } from "../src/seshat";
 
 const DAY_MS = 86_400_000;
 
@@ -151,7 +151,8 @@ describe("seshat: validator, stages and bounded slack", () => {
     if (year.kind !== "cycle") throw new Error("fixture");
     const v = (stages: unknown) => validate({ name: "t", gears: HEBREW.gears, units: [{ ...year, stages } as typeof year] }).join();
     expect(v([{ rules: [] }])).toContain("no rules");
-    expect(v([{ rules: [{ add: 1, length: { at: 9, is: 356 } }] }])).toContain("V2");
+    expect(v([{ rules: [{ add: 1, length: { at: 9, is: 356 } }] }])).toContain("is not a whole number within");
+    expect(problems({ name: "t", gears: HEBREW.gears, units: [{ ...year, stages: [{ rules: [{ add: 1, length: { at: 9, is: 356 } }] }] }] }).map((p) => p.code)).toContain("V2");
     expect(v([{ rules: [{ add: 1, residue: { mod: 7, in: [7] } }] }])).toContain("residues");
     expect(v([{ rules: [{ add: 1, residue: { mod: 7, in: [1] } }] }])).toEqual("");
   });
