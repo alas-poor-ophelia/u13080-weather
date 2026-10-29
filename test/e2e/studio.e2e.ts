@@ -10403,4 +10403,113 @@ describe("climate studio · calendar orrery", () => {
       await nextFrame();
     }
   });
+
+  test("step 95: the Orrery edits a moon in the draft: the period knob moves the LCD and the text and lights ●, Undo brings the stored period back exactly, ＋ phase saves into data.json, and removing a moon a unit follows is refused with its reason", async () => {
+    // Gregorian with a moon, a month that follows it, and the moon's day in the date (so the LCD reads the moon)
+    const def = String.raw`FORMAT:default={year}-{month\:pad2}-{month\:day\:pad2}`;
+    const lunar = GREGORIAN_TEXT.replace(def, `${def} · moon day {lunar-month\\:day}`).replace(
+      "\nBEGIN:VGEAR",
+      "\nBEGIN:VBODY\nUID:moon\nPERIOD:59/2\nEPOCH:0\nMOON:Lantern\nPHASE:New=0\nPHASE:Full=0.45\nEND:VBODY\n\nBEGIN:VUNIT\nUID:lunar-month\nCROSSING:BODY=moon;MARK=0\nEND:VUNIT\n\nBEGIN:VGEAR",
+    );
+    expect(lunar).toContain("moon day {lunar-month");
+    expect(lunar).toContain("UID:lunar-month");
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), lunar);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const textOf = async (sel: string) => ((await win.locator(sel).first().textContent()) ?? "").trim();
+      const text = () => textOf(".wadjet-studio-orrery-text");
+      const lcd = () => textOf(".wadjet-studio-orrery-lcd");
+      const chip = () => textOf(".wadjet-studio-orrery-chip-label");
+
+      // the moon's inspector: editable, on the stored body
+      await win.locator('.wadjet-studio-orrery-row[data-part="body:moon"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C1 · BODY");
+      expect(await win.locator('[data-editor="body"]').count()).toBe(1);
+      expect(await win.locator(".wadjet-studio-orrery-title-input").inputValue()).toBe("Lantern");
+      expect(await text()).toContain("PERIOD:59/2");
+      expect(await chip()).not.toContain("●");
+      // the ＋ shows on the bodies group only (the other editors are later slices)
+      expect(await win.locator(".wadjet-studio-orrery-add").count()).toBe(1);
+      expect(await win.locator('.wadjet-studio-orrery-add[data-add="body"]').count()).toBe(1);
+      // the fixture world's today is near day 0, where every period puts the same moon day: the Orrery's own day moves
+      // three years on (its transport, never the settings' today)
+      for (let i = 0; i < 3; i++) {
+        const was = await lcd();
+        await win.locator('.wadjet-studio-orrery-key[aria-label="Forward one year"]').click();
+        await expect.poll(lcd).not.toBe(was);
+      }
+      const lcd0 = await lcd();
+      expect(lcd0).toContain("moon day");
+      // a moon a crossing follows also shows its period as a molad: 29 d 12 h 0 parts
+      expect(await win.locator('[data-part="molad-days"] .wadjet-studio-knob-value').textContent()).toBe("29");
+      expect(await win.locator('[data-part="molad-hours"] .wadjet-studio-knob-value').textContent()).toBe("12");
+
+      // drag the period knob (the world confirm, when it comes, is asked first and the drag made after)
+      const dial = '.wadjet-studio-window[data-kind="orrery"] [data-part="body-period"] .wadjet-studio-knob-dial';
+      await dragKnobDial(dial, -8);
+      const confirmed = await passAnyConfirm();
+      if (confirmed) await dragKnobDial(dial, -8);
+      await expect.poll(text, { timeout: 10_000 }).not.toContain("PERIOD:59/2");
+      const moved = await text();
+      const period = /PERIOD:([0-9/]+)/.exec(moved)?.[1] ?? "";
+      expect(period).toMatch(/^\d+\/\d+$|^\d+$/);
+      await expect.poll(lcd).not.toBe(lcd0);
+      const lcd1 = await lcd();
+      await expect.poll(chip).toContain("●");
+      // still the stored text on disk: the edit is in the draft
+      expect(stored()).toContain("PERIOD:59/2");
+
+      // one drag is one undo step: Undo restores the exact stored period text, the LCD and a clean chip
+      const undone: boolean = await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.undo(), VIEW_TYPE);
+      expect(undone).toBe(true);
+      await expect.poll(text).toContain("PERIOD:59/2");
+      await expect.poll(lcd).toBe(lcd0);
+      await expect.poll(chip).not.toContain("●");
+      expect(await win.locator('[data-editor="body"]').count()).toBe(1);
+
+      // ＋ phase, then Save: data.json holds the new phase
+      await win.locator('[data-part="add-phase"]').click();
+      await passAnyConfirm();
+      await expect.poll(text).toContain("PHASE:Phase=");
+      const phaseLine = /PHASE:Phase=[0-9.]+/.exec(await text())![0];
+      await expect.poll(chip).toContain("●");
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
+      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
+      await saveBtn.click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+      await expect.poll(stored, { timeout: 10_000 }).toContain(phaseLine);
+      expect(stored()).toContain("PERIOD:59/2");
+      await expect.poll(chip).not.toContain("●");
+
+      // Remove body on a moon the lunar month follows: refused with the guard's reason, nothing changes
+      await win.locator('[data-part="remove-body"]').click();
+      await passAnyConfirm();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-refusal")).toContain('cannot be removed: the "lunar-month" unit follows it');
+      expect(await text()).toContain("UID:moon");
+      expect(await chip()).not.toContain("●");
+      expect(await win.locator('.wadjet-studio-orrery-row[data-part="body:moon"]').count()).toBe(1);
+      console.log(`  · orrery body: period knob → ${period} (LCD "${lcd0}" → "${lcd1}"), ● lit, Undo → 59/2; ＋ phase saved "${phaseLine}"; Remove body refused${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
 });

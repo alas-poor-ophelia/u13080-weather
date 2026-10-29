@@ -237,11 +237,18 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
   };
   const name = (t: string): string | undefined => (t.trim() === "" ? undefined : t.trim().normalize("NFC"));
 
-  /** The draft's form fields differ from the stored definition's: unsaved Studio edits. */
+  /**
+   * Unsaved Studio edits the text editor would lose or collide with: the draft's form fields differ from the
+   * stored definition's, or the AST layer or the moons (the Orrery's edits, slice 5a) differ from their base.
+   */
   function unsavedFields(): boolean {
     const ast = ctx.plugin.calendars.seshat?.definition() ?? null;
     if (!ast) return false;
-    return canonicalJson(ctx.store.get().world.calendar.form ?? {}) !== canonicalJson(calendarOfDefinition(ast).form ?? {});
+    const s = ctx.store.get();
+    const draft = s.world.calendar;
+    const base = s.calendarBase ?? s.saved.world.calendar;
+    if (draft.ast !== undefined && (canonicalJson(draft.ast) !== canonicalJson(base.ast ?? null) || canonicalJson(draft.moons) !== canonicalJson(base.moons))) return true;
+    return canonicalJson(draft.form ?? {}) !== canonicalJson(calendarOfDefinition(ast).form ?? {});
   }
 
   function asText(parent: HTMLElement, key: string, what: string | null, why: string): void {
@@ -249,7 +256,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
     line(parent, `Written as text: ${why}.`, "wadjet-studio-calendar-why");
     button(parent, key, "Edit as text", "Edit the calendar definition as text", calendarHint("calendar.asText"), () => {
       // the text editor opens on the stored definition; the draft's field edits would be lost or collide there
-      if (unsavedFields()) return void new Notice("Save or undo the calendar's field edits first: Edit as text opens the stored definition.");
+      if (unsavedFields()) return void new Notice("Save or undo the calendar's unsaved edits first: Edit as text opens the stored definition.");
       new DefinitionModal(ctx.plugin.app, ctx.plugin, () => {}).open();
     });
   }
@@ -457,7 +464,7 @@ export const buildCalendarWindow: WindowBuilder = (ctx) => {
 
   function asTextButton(parent: HTMLElement, key: string): void {
     button(parent, key, "Edit as text", "Edit the calendar definition as text", calendarHint("calendar.asText"), () => {
-      if (unsavedFields()) return void new Notice("Save or undo the calendar's field edits first: Edit as text opens the stored definition.");
+      if (unsavedFields()) return void new Notice("Save or undo the calendar's unsaved edits first: Edit as text opens the stored definition.");
       new DefinitionModal(ctx.plugin.app, ctx.plugin, () => {}).open();
     });
   }
