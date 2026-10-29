@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { arcAngles, dragToValue, nudge, nudgeBy, normalise, parseTyped, valueToAngle } from "../src/studio/model/knob";
+import { arcAngles, dragToValue, knobSpecError, nudge, nudgeBy, normalise, parseTyped, valueToAngle, type KnobSpec } from "../src/studio/model/knob";
+import pin from "./fixtures/knob-linear-pin.json";
 
 describe("knob: dragToValue", () => {
   test("dragging up (negative dy) increases the value; dragging down decreases it", () => {
@@ -176,5 +177,116 @@ describe("knob: parseTyped", () => {
     expect(parseTyped("abc", pct)).toBeNull();
     expect(parseTyped("°C", pct)).toBeNull();
     expect(parseTyped("", pct)).toBeNull();
+  });
+});
+
+/** Every output of the knob before the log scale (knob.ts at e39ce77) over a sweep, in the order the generator walked it. */
+function linearSweep(specs: readonly KnobSpec[]): unknown[] {
+  const out: unknown[] = [];
+  for (const s of specs) {
+    for (const v of [s.min - 1, s.min, (s.min + s.max) / 3, s.max * 0.77, s.max, s.max + 1]) {
+      for (const dy of [-200, -37, -1, 0, 3, 61]) for (const f of [false, true]) out.push(dragToValue(v, dy, s, f));
+      for (const st of [-10, -1, 1, 10]) for (const f of [false, true]) out.push(nudgeBy(v, s, st, f));
+      out.push(normalise(v, s), valueToAngle(v, s), arcAngles(v, s));
+    }
+  }
+  return out;
+}
+
+describe("knob: linear scale is unchanged by the log scale", () => {
+  test("every output matches the pinned pre-log values exactly", () => {
+    expect(linearSweep(pin.specs)).toEqual(pin.out);
+  });
+
+  test('an explicit scale: "linear" is the default', () => {
+    expect(linearSweep(pin.specs.map((s) => ({ ...s, scale: "linear" as const })))).toEqual(pin.out);
+  });
+
+  test("a linear spec is never refused, even with min ≤ 0", () => {
+    expect(knobSpecError({ min: -5, max: 5 })).toBeNull();
+    expect(knobSpecError({ min: 0, max: 1, scale: "linear" })).toBeNull();
+  });
+});
+
+describe("knob: log scale", () => {
+  const spec: KnobSpec = { min: 1, max: 10000, scale: "log" };
+
+  test("min must be above 0 and max above min", () => {
+    expect(knobSpecError({ min: 0, max: 10, scale: "log" })).toContain("minimum above 0");
+    expect(knobSpecError({ min: -1, max: 10, scale: "log" })).toContain("minimum above 0");
+    expect(knobSpecError({ min: 5, max: 5, scale: "log" })).toContain("maximum above its minimum");
+    expect(knobSpecError(spec)).toBeNull();
+    expect(() => normalise(1, { min: 0, max: 10, scale: "log" })).toThrow(RangeError);
+    expect(() => dragToValue(1, 0, { min: 0, max: 10, scale: "log" })).toThrow(RangeError);
+  });
+
+  test("endpoints: min and max sit at −135° and +135°, and each decade gets a quarter of the sweep", () => {
+    expect(normalise(1, spec)).toBe(0);
+    expect(normalise(10000, spec)).toBe(1);
+    expect(valueToAngle(1, spec)).toBe(-135);
+    expect(valueToAngle(10000, spec)).toBe(135);
+    expect(normalise(10, spec)).toBeCloseTo(0.25, 12);
+    expect(normalise(100, spec)).toBeCloseTo(0.5, 12);
+    expect(valueToAngle(100, spec)).toBeCloseTo(0, 9);
+    expect(normalise(0.5, spec)).toBe(0); // clamped
+    expect(normalise(1e6, spec)).toBe(1);
+  });
+
+  test("150 px spans the full range, and the ends are exact", () => {
+    expect(dragToValue(1, -150, spec)).toBe(10000);
+    expect(dragToValue(10000, 150, spec)).toBe(1);
+    expect(dragToValue(50, -1000, spec)).toBe(10000);
+    expect(dragToValue(50, 1000, spec)).toBe(1);
+  });
+
+  test("a drag moves by ratio: 37.5 px is one decade anywhere on the dial", () => {
+    expect(dragToValue(1, -37.5, spec)).toBeCloseTo(10, 9);
+    expect(dragToValue(100, -37.5, spec)).toBeCloseTo(1000, 6);
+    expect(dragToValue(1000, 37.5, spec)).toBeCloseTo(100, 7);
+    expect(dragToValue(1, -37.5, spec, true)).toBeCloseTo(10 ** 0.1, 12); // fine: ×0.1 of the travel
+  });
+
+  test("round trips: drag up then down by the same pixels comes back", () => {
+    for (const v of [1.5, 29.530594, 365.2425, 4321]) {
+      const up = dragToValue(v, -10, spec); // under the top, so nothing clamps
+      expect(dragToValue(up, 10, spec)).toBeCloseTo(v, 9);
+    }
+  });
+
+  test("normalise and the drag agree: a drag of t·150 px lands where normalise reads t", () => {
+    for (const t of [0.1, 0.33, 0.8]) expect(normalise(dragToValue(1, -t * 150, spec), spec)).toBeCloseTo(t, 12);
+  });
+
+  test("the power arc follows the log angle", () => {
+    expect(arcAngles(10000, spec)).toEqual({ from: -135, to: 135 });
+    const a = arcAngles(100, spec)!;
+    expect(a.from).toBe(-135);
+    expect(a.to).toBeCloseTo(0, 9);
+    expect(arcAngles(1, spec)).toBeNull();
+  });
+
+  test("steps are a grid in value space: a drag snaps to it and never leaves the range", () => {
+    const stepped: KnobSpec = { min: 1, max: 1000, step: 0.01, scale: "log" };
+    const v = dragToValue(29.53, -1, stepped);
+    expect(Math.round(v * 100)).toBe(v * 100);
+    expect(v.toString()).toMatch(/^\d+(\.\d{1,2})?$/);
+    expect(v).toBeGreaterThan(29.53);
+    expect(dragToValue(29.53, 0, stepped)).toBe(29.53);
+    const whole: KnobSpec = { min: 2, max: 500, step: 1, scale: "log" };
+    expect(dragToValue(2, -37.5, whole)).toBe(8); // 2·250^(1/4) = 7.95…, snapped to the whole-number grid
+    expect(dragToValue(400, -1000, whole)).toBe(500);
+  });
+
+  test("a stepped nudge adds the step in value space; an un-stepped one moves 1% of the log travel", () => {
+    const stepped: KnobSpec = { min: 1, max: 1000, step: 0.01, scale: "log" };
+    expect(nudge(29.53, stepped, 1)).toBe(29.54);
+    expect(nudge(29.53, stepped, -1)).toBe(29.52);
+    expect(nudgeBy(29.53, stepped, 10)).toBe(29.63);
+    expect(nudge(29.53, stepped, 1, true)).toBe(29.531);
+    expect(nudge(1000, stepped, 1)).toBe(1000);
+    expect(nudge(1, stepped, -1)).toBe(1);
+    expect(normalise(nudge(10, spec, 1), spec) - normalise(10, spec)).toBeCloseTo(0.01, 12);
+    expect(nudgeBy(1, spec, 100)).toBe(10000);
+    expect(nudgeBy(10000, spec, -100)).toBe(1);
   });
 });

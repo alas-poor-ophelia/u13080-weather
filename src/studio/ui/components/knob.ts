@@ -14,8 +14,14 @@
  * DOM order is dial → label → value, but the label paints *below* the dial
  * (CSS `order`), matching the prototype's knob · label · value stack while
  * leaving the e2e's element order alone.
+ *
+ * A `scale: "log"` spec needs no code of its own here: the pointer angle,
+ * the power arc, the drag and the keyboard nudges all go through the model
+ * (`valueToAngle`, `arcAngles`, `dragToValue`, `nudge`/`nudgeBy`), which map
+ * through the log travel. The spec is checked (`knobSpecError`) when the
+ * knob is made and whenever `update` hands it a new one.
  */
-import { arcAngles, dragToValue, nudge, nudgeBy, parseTyped, valueToAngle, type KnobSpec } from "../../model/knob";
+import { arcAngles, dragToValue, knobSpecError, nudge, nudgeBy, parseTyped, valueToAngle, type KnobSpec } from "../../model/knob";
 import { beginDrag, markDragTarget, noteTouchPointer } from "../pointer";
 
 export type KnobPhase = "drag" | "end" | "key" | "type";
@@ -109,7 +115,14 @@ export interface KnobComponent {
   destroy(): void;
 }
 
+/** Throw on a spec no knob can run (a log knob whose range is not positive): a programming error, caught before it draws. */
+function checkSpec(spec: KnobSpec): void {
+  const err = knobSpecError(spec);
+  if (err !== null) throw new RangeError(err);
+}
+
 export function createKnob(parent: HTMLElement, initial: KnobProps): KnobComponent {
+  checkSpec(initial.spec);
   let props = initial;
   let cancelDrag: (() => void) | null = null;
 
@@ -233,6 +246,7 @@ export function createKnob(parent: HTMLElement, initial: KnobProps): KnobCompone
   return {
     el,
     update(next) {
+      if (next.spec !== undefined) checkSpec(next.spec);
       props = { ...props, ...next };
       if (next.label !== undefined) label.setText(next.label);
       paint();
