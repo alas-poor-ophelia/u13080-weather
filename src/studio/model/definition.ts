@@ -23,12 +23,18 @@
  * - a draft whose calendar was not edited writes nothing, so saving a zone
  *   never re-prints the definition;
  * - `rewrites` says the stored text was not canonical (a hand edit with
- *   comments), so the Studio asks before the save removes them.
+ *   comments), so the Studio asks before the save removes them;
+ * - on a Seshat world the draft also carries its AST layer (`ast`, §18.6):
+ *   the slices only the AST reaches (ast-edit.ts) are replayed onto the stored
+ *   definition with the same per-part stale check, then the field parts are
+ *   compiled as above (see "the AST layer" below).
  */
 import { canonicalJson } from "../../core/profile";
-import { Body, bodyFor, Engine, parse, print, seasonsUseDates, toNumber, type BodyAst, type CalendarAst, type SeasonMark } from "../../seshat";
+import { Body, bodyFor, Engine, parse, print, rational, seasonsUseDates, toNumber, type BodyAst, type CalendarAst, type Rational, type SeasonMark } from "../../seshat";
 import { prepareDefinition } from "../../plugin/time/seshat";
 import { compile, FormError, recognise, type FormEdits, type MoonForm } from "../../plugin/time/form";
+import { editedSlices, outsideSlices, sliceOf, withSlice, type AstEdit } from "./ast-edit";
+import { moveBody } from "./rational-knob";
 import type { CalendarSource, DraftMoon, FormDraft, WorldDraft } from "./state";
 
 export type CalendarDraft = WorldDraft["calendar"];
@@ -50,6 +56,14 @@ export function calendarOfDefinition(ast: CalendarAst): CalendarDraft {
     ),
     form,
   };
+}
+
+/**
+ * The draft calendar a Seshat world opens as: `calendarOfDefinition`'s fields,
+ * and the definition itself as the draft's AST layer (`ast`, §18.6 item 3).
+ */
+export function seshatDraft(ast: CalendarAst): CalendarDraft {
+  return { ...calendarOfDefinition(ast), ast: structuredClone(ast) };
 }
 
 /**
@@ -149,8 +163,16 @@ function moonsOf(ast: CalendarAst, base: readonly DraftMoon[], draft: readonly D
     const was = b ? baseOf(d) : undefined;
     const keepPeriod = was !== undefined && was.cycleDays === d.cycleDays;
     const keepEpoch = was !== undefined && was.phaseAtEpoch === d.phaseAtEpoch;
-    if (b && keepPeriod && keepEpoch) {
-      out.push({ id: b.id, name: d.name, period: b.period, epoch: b.epoch, ...phases });
+    // an exact editor's rationals (§18.3 D2), each while its number is still the draft's
+    const exactPeriod = d.exact?.period && toNumber(d.exact.period) === d.cycleDays ? d.exact.period : undefined;
+    const exactEpoch = d.exact?.epoch && toNumber(d.exact.epoch) === d.phaseAtEpoch ? d.exact.epoch : undefined;
+    const inexact = `moon "${d.name}": its exact period and epoch cannot run together`;
+    if (b && (exactPeriod || keepPeriod) && (exactEpoch || keepEpoch)) {
+      const pair = { period: exactPeriod ?? b.period, epoch: exactEpoch ?? b.epoch };
+      if (exactPeriod || exactEpoch) {
+        if (!runs(pair)) return inexact; // an exact half is never traded for a float-derived pair
+      }
+      out.push({ id: b.id, name: d.name, ...pair, ...phases });
       continue;
     }
     const r = bodyFor(d.cycleDays, d.phaseAtEpoch);
@@ -165,22 +187,106 @@ function moonsOf(ast: CalendarAst, base: readonly DraftMoon[], draft: readonly D
     }
     given.add(id);
     // a kept rational beside a fresh one can be too fine for safe-integer phases; bodyFor's own pair always runs
-    const mixed = b ? { period: keepPeriod ? b.period : r.period, epoch: keepEpoch ? b.epoch : r.epoch } : r;
+    const mixed = { period: exactPeriod ?? (b && keepPeriod ? b.period : r.period), epoch: exactEpoch ?? (b && keepEpoch ? b.epoch : r.epoch) };
+    if ((exactPeriod || exactEpoch) && !runs(mixed)) return inexact;
     const exact = runs(mixed) ? mixed : { period: r.period, epoch: r.epoch };
     out.push({ id, name: d.name, period: exact.period, epoch: exact.epoch, ...phases });
   }
   return out;
 }
 
+/** mergeCalendar's refusal of a seasons edit on date marks (planCalendarSave says it plainly). */
+const DATED_SEASONS = "the seasons use dates; edit them as text";
+
+type Edits = { -readonly [K in keyof FormEdits]: FormEdits[K] };
+
+/** The form edits for `parts` of the draft, over `ast` (the definition they compile into), or why they cannot be made. */
+function formEdits(ast: CalendarAst, base: CalendarDraft, draft: CalendarDraft, parts: readonly Part[]): Edits | string {
+  const edits: Edits = {};
+  for (const k of parts) {
+    if (k === "seasons" && ast.seasons && seasonsUseDates(ast.seasons)) return DATED_SEASONS;
+    if (k === "seasons") edits.seasons = draft.seasons.map((s) => ({ name: s.name, from: s.from }));
+    else if (k === "moons") {
+      const m = moonsOf(ast, base.moons, draft.moons);
+      if (typeof m === "string") return m;
+      edits.moons = m;
+    } else (edits as Record<string, unknown>)[k] = draft.form![k];
+  }
+  return edits;
+}
+
+/** `compile`, with a refusal as its message. */
+function compiled(ast: CalendarAst, edits: Edits): { ast: CalendarAst } | { error: string } {
+  try {
+    return { ast: compile(ast, edits) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ---- the AST layer (§18.6 items 1-4)
+//
+// On a Seshat world the draft is two layers over the definition it was seeded
+// from (`base.ast`, which lives in `StudioState.calendarBase`, outside undo):
+//  - `draft.ast`, the definition with the edits only the AST reaches (gears,
+//    stages, crossings, dated season marks: ast-edit.ts slices);
+//  - the fields (`seasons`, `moons`, `form`), the editing surface of every part
+//    the form model reads, as every window edits them today.
+// A field part is PENDING when it differs both from the base and from the AST
+// layer's own reading of it (after an AST edit the fields it moved are re-read
+// from the layer, so they are not edits of their own). `draftAst` compiles the
+// pending parts over the layer: the one draft AST. A Save replays the edited
+// slices and then compiles the pending parts onto the definition stored at
+// Save time, each refused when it changed in storage since the seed.
+
+/** Each AST layer's own reading, memoised by the layer object (an edit replaces the layer, never mutates it). */
+const views = new WeakMap<CalendarAst, CalendarDraft>();
+function viewOf(ast: CalendarAst): CalendarDraft {
+  let v = views.get(ast);
+  if (!v) views.set(ast, (v = calendarOfDefinition(ast)));
+  return v;
+}
+
+/** The field parts the draft edited that are its own edits, not the AST layer's reading. */
+function pendingParts(base: CalendarDraft, draft: CalendarDraft, layer: CalendarDraft): Part[] {
+  return editedParts(base, draft).filter((k) => !same(partOf(draft, k), partOf(layer, k)));
+}
+
+type Layered = CalendarDraft & { ast: CalendarAst };
+
+function mergeLayers(stored: string, ast: CalendarAst, base: Layered, draft: Layered): MergeResult {
+  const now = calendarOfDefinition(ast);
+  // a part that moved in storage is stale, unless the draft holds what storage holds now (then there is nothing to write)
+  const parts: Part[] = [];
+  for (const k of pendingParts(base, draft, viewOf(draft.ast))) {
+    if (unchanged(now, base, k)) parts.push(k);
+    else if (!same(partOf(draft, k), partOf(now, k))) return { kind: "stale", stored: seshatDraft(ast) };
+  }
+  const slices = editedSlices(base.ast, draft.ast).filter((k) => !same(sliceOf(draft.ast, k), sliceOf(ast, k)));
+  if (slices.some((k) => !same(sliceOf(ast, k), sliceOf(base.ast, k)))) return { kind: "stale", stored: seshatDraft(ast) };
+  let out = ast;
+  for (const k of slices) {
+    const next = withSlice(out, k, sliceOf(draft.ast, k));
+    if (!next) return { kind: "error", message: `the ${k} cannot be written into the stored definition` };
+    out = next;
+  }
+  const edits = formEdits(out, base, draft, parts);
+  if (typeof edits === "string") return { kind: "error", message: edits };
+  const c = compiled(out, edits);
+  if ("error" in c) return { kind: "error", message: c.error };
+  const prepared = prepareDefinition(print(c.ast));
+  if ("error" in prepared) return { kind: "error", message: prepared.line === undefined ? prepared.error : `line ${prepared.line}: ${prepared.error}` };
+  return { kind: "write", text: prepared.text, rewrites: stored !== print(ast) };
+}
+
 /**
- * Merge the draft's calendar into the stored definition.
+ * Merge the draft's calendar into the stored definition. A draft and base that
+ * both carry the AST layer (a Seshat world, §18.6) replay their edited slices
+ * and pending field parts; any other merges its field parts as before.
  * @param stored the stored definition text
  * @param base the calendar the draft was seeded from (or last saved as)
  * @param draft the draft calendar
  */
-/** mergeCalendar's refusal of a seasons edit on date marks (planCalendarSave says it plainly). */
-const DATED_SEASONS = "the seasons use dates; edit them as text";
-
 export function mergeCalendar(stored: string, base: CalendarDraft, draft: CalendarDraft): MergeResult {
   if (same(draft, base)) return { kind: "unchanged" };
   let ast: CalendarAst;
@@ -189,20 +295,15 @@ export function mergeCalendar(stored: string, base: CalendarDraft, draft: Calend
   } catch (e) {
     return { kind: "error", message: e instanceof Error ? e.message : String(e) };
   }
+  if (draft.ast && base.ast) return mergeLayers(stored, ast, base as Layered, draft as Layered);
+  // one side without the layer (a stash or state from another build): its AST edits cannot be judged, so never dropped as "nothing to save"
+  if (draft.ast || base.ast) return { kind: "stale", stored: seshatDraft(ast) };
   const now = calendarOfDefinition(ast);
   const parts = editedParts(base, draft);
   if (parts.some((k) => !unchanged(now, base, k))) return { kind: "stale", stored: now };
 
-  const edits: { -readonly [K in keyof FormEdits]: FormEdits[K] } = {};
-  for (const k of parts) {
-    if (k === "seasons" && ast.seasons && seasonsUseDates(ast.seasons)) return { kind: "error", message: DATED_SEASONS };
-    if (k === "seasons") edits.seasons = draft.seasons.map((s) => ({ name: s.name, from: s.from }));
-    else if (k === "moons") {
-      const m = moonsOf(ast, base.moons, draft.moons);
-      if (typeof m === "string") return { kind: "error", message: m };
-      edits.moons = m;
-    } else (edits as Record<string, unknown>)[k] = draft.form![k];
-  }
+  const edits = formEdits(ast, base, draft, parts);
+  if (typeof edits === "string") return { kind: "error", message: edits };
   let next: CalendarAst;
   let text: string;
   try {
@@ -216,6 +317,146 @@ export function mergeCalendar(stored: string, base: CalendarDraft, draft: Calend
   if ("error" in prepared) return { kind: "error", message: prepared.line === undefined ? prepared.error : `line ${prepared.line}: ${prepared.error}` };
   return { kind: "write", text: prepared.text, rewrites: stored !== print(ast) };
 }
+
+/**
+ * The draft as one definition AST: the pending field parts compiled over the
+ * AST layer (so through every guard in `compile`), or why they do not compile
+ * (the message a Save would refuse with). `calendar.ast` itself when no field
+ * part is pending. Pure; `problems()` is the caller's (§18.6 item 7).
+ * @param calendar the world draft's calendar (with its `ast` layer)
+ * @param base the calendar it was seeded from (`StudioState.calendarBase`)
+ */
+export function draftAst(calendar: CalendarDraft, base: CalendarDraft): { ast: CalendarAst } | { error: string } {
+  if (!calendar.ast) return { error: "this calendar is not a definition the Studio edits" };
+  const parts = pendingParts(base, calendar, viewOf(calendar.ast));
+  if (parts.length === 0) return { ast: calendar.ast };
+  const edits = formEdits(calendar.ast, base, calendar, parts);
+  return typeof edits === "string" ? { error: edits } : compiled(calendar.ast, edits);
+}
+
+/** A draft calendar after an edit, with its one draft AST (for `problems()`), or a refusal with its reason; a refusal leaves the draft as it was. */
+export type CalendarEdit = { readonly calendar: CalendarDraft; readonly ast: CalendarAst } | { readonly refused: true; readonly reason: string };
+
+const FIELD_PARTS: readonly Part[] = ["seasons", "moons", ...FORM_PARTS];
+const PART_WORDS: Record<Part, string> = { seasons: "seasons", moons: "moons", name: "name", year: "year", months: "months", week: "week", ledger: "exceptions" };
+
+/** `calendar` with field part `k` set to `v` (undefined: the part is not a field, so it is never an edit). */
+function setPart(calendar: CalendarDraft, k: Part, v: unknown): CalendarDraft {
+  if (k === "seasons" || k === "moons") return { ...calendar, [k]: structuredClone(v) };
+  const form: Record<string, unknown> = { ...calendar.form };
+  if (v === undefined) delete form[k];
+  else form[k] = structuredClone(v);
+  return { ...calendar, form };
+}
+
+/**
+ * Apply an AST edit (ast-edit.ts) to the draft's AST layer. The field parts it
+ * moves (a gear edit moves the year's leap years; a mark edit the season
+ * ribbon) are re-read from the new layer, so every window shows the edit. An
+ * edit that moves a part the fields hold an unsaved edit of is refused (one
+ * source per part: either would otherwise drop the other silently), and so is
+ * one that changes the definition outside its slice (a Save replays slices
+ * only). Undo: the caller writes the result in one `store.update`
+ * (`history: true` for a click; a drag updates without history and calls
+ * `snapshot()` when it ends, so it is one step).
+ */
+export function applyAstEdit(calendar: CalendarDraft, base: CalendarDraft, edit: (ast: CalendarAst) => AstEdit): CalendarEdit {
+  const layer = calendar.ast;
+  if (!layer) return { refused: true, reason: "this calendar is not a definition the Studio edits" };
+  const r = edit(layer);
+  if ("refused" in r) return r;
+  if (r.ast === layer || same(r.ast, layer)) {
+    const d = draftAst(calendar, base);
+    return "error" in d ? { refused: true, reason: d.error } : { calendar, ast: d.ast };
+  }
+  if (!same(outsideSlices(r.ast), outsideSlices(layer))) return { refused: true, reason: "this edit reaches past the part it edits" };
+  const before = viewOf(layer);
+  const after = viewOf(r.ast);
+  let next: CalendarDraft = { ...calendar, ast: r.ast };
+  for (const k of FIELD_PARTS) {
+    if (same(partOf(before, k), partOf(after, k))) continue;
+    const mine = partOf(calendar, k);
+    if (mine !== undefined && !same(mine, partOf(base, k)) && !same(mine, partOf(before, k))) {
+      return { refused: true, reason: `the ${PART_WORDS[k]} have an unsaved edit this change would also move; save or undo that edit first` };
+    }
+    next = setPart(next, k, partOf(after, k));
+  }
+  const d = draftAst(next, base);
+  if ("error" in d) return { refused: true, reason: d.error };
+  return { calendar: next, ast: d.ast };
+}
+
+/**
+ * Seat a draft on a newer definition `ast` (a stash from before the AST layer,
+ * §18.6 item 4): both take `ast` as their layer, and every field part the
+ * draft did not edit (equal to the base's) is re-read from it in both, so the
+ * fields and the layer show one calendar. An edited part keeps the draft's
+ * value and the base it was edited against, so a Save still judges it.
+ */
+export function seatOn(draft: CalendarDraft, base: CalendarDraft, ast: CalendarAst): { draft: CalendarDraft; base: CalendarDraft } {
+  const view = viewOf(ast);
+  let d: CalendarDraft = { ...draft, ast: structuredClone(ast) };
+  let b: CalendarDraft = { ...base, ast: structuredClone(ast) };
+  for (const k of FIELD_PARTS) {
+    if (!same(partOf(draft, k), partOf(base, k))) continue;
+    d = setPart(d, k, partOf(view, k));
+    b = setPart(b, k, partOf(view, k));
+  }
+  return { draft: d, base: b };
+}
+
+const sameRational = (a: Rational, b: Rational): boolean => a.n === b.n && a.d === b.d;
+
+/**
+ * Move a moon's period, epoch or both to exact rationals (§18.3 D2): what is
+ * not moved stays exactly as the draft holds it (moveBody), the Body limit is
+ * checked first, and the move is a moons edit like any other, so `compile`'s
+ * guards apply (an epoch move keeps the numbering of the units following the
+ * moon). A pair equal to the stored body's writes the stored moon back, so a
+ * move and its return leave the draft clean.
+ */
+export function moveMoon(calendar: CalendarDraft, base: CalendarDraft, id: string, to: { period?: Rational; epoch?: Rational }): CalendarEdit {
+  const d = draftAst(calendar, base);
+  if ("error" in d) return { refused: true, reason: d.error };
+  const body = (d.ast.bodies ?? []).find((b) => b.id === id && b.moon);
+  const at = calendar.moons.findIndex((m) => m.id === id);
+  if (!body || at < 0) return { refused: true, reason: `there is no moon "${id}"` };
+  // kept reduced, so equal values compare equal in the dirty check and the undo hash (§18.6 item 4)
+  let moved: { period?: Rational; epoch?: Rational };
+  try {
+    moved = { ...(to.period ? { period: rational(to.period.n, to.period.d) } : {}), ...(to.epoch ? { epoch: rational(to.epoch.n, to.epoch.d) } : {}) };
+  } catch {
+    return { refused: true, reason: "a period and an epoch are fractions of whole numbers" };
+  }
+  const w = moveBody(body, moved);
+  if (w.kind === "refused") return { refused: true, reason: w.reason };
+  const stored = (base.ast?.bodies ?? []).find((b) => b.id === id);
+  const storedMoon = stored ? base.moons.find((m) => m.id === id) : undefined;
+  const { exact: _x, ...moon } = calendar.moons[at]!;
+  // each half the stored body already holds is kept by moonsOf from the store; only a moved half is written exactly
+  const exact = {
+    ...(stored && storedMoon && sameRational(stored.period, w.period) ? {} : { period: w.period }),
+    ...(stored && storedMoon && sameRational(stored.epoch, w.epoch) ? {} : { epoch: w.epoch }),
+  };
+  const moon2: DraftMoon = { ...moon, cycleDays: storedMoon && exact.period === undefined ? storedMoon.cycleDays : toNumber(w.period), phaseAtEpoch: storedMoon && exact.epoch === undefined ? storedMoon.phaseAtEpoch : toNumber(w.epoch), ...(exact.period || exact.epoch ? { exact } : {}) };
+  const next: CalendarDraft = { ...calendar, moons: calendar.moons.map((m, i) => (i === at ? moon2 : m)) };
+  const r = draftAst(next, base);
+  if ("error" in r) return { refused: true, reason: r.error };
+  const got = (r.ast.bodies ?? []).find((b) => b.id === id);
+  if (!got || !sameRational(got.period, w.period) || !sameRational(got.epoch, w.epoch)) return { refused: true, reason: "that period and epoch cannot be kept exactly together" };
+  return { calendar: next, ast: r.ast };
+}
+
+/** The draft shape of a calendar (the legacy settings calendar carries more fields: the year length, the format). */
+export function draftOf(c: CalendarDraft): CalendarDraft {
+  return { seasons: c.seasons, moons: c.moons, ...(c.form ? { form: c.form } : {}), ...(c.ast ? { ast: c.ast } : {}) };
+}
+
+/** Whether two calendars are the same as drafts (`draftOf`). */
+export const sameCalendar = (a: CalendarDraft, b: CalendarDraft): boolean => same(draftOf(a), draftOf(b));
+
+/** The way forward after a refusal that shows the stored calendar (undo brings the edits back to read, but they stay judged against the older definition). */
+const AGAIN = "Undo shows your edits again, but they were made over the older calendar and cannot be saved over this one: make them again here, and Save.";
 
 export type CalendarPlan =
   /** write nothing to the calendar; `reseed` is the calendar the draft takes afterwards */
@@ -237,9 +478,11 @@ export function planCalendarSave(current: { source: CalendarSource; calendar: Ca
   const touched = !same(draft.calendar, draft.base);
   if (draft.source !== current.source) {
     if (!touched) return { kind: "none", reseed: current.calendar };
-    return { kind: "refuse", message: "the world switched calendars since you edited its seasons or moons, so they were not saved. The studio now shows the calendar the world runs; undo brings your edits back.", reseed: current.calendar };
+    return { kind: "refuse", message: `the world switched calendars since you edited its seasons or moons, so they were not saved. The studio now shows the calendar the world runs. ${AGAIN}`, reseed: current.calendar };
   }
-  if (!touched) return { kind: "none" };
+  // an untouched draft from an older base (undo past a Save, or past a change in settings) writes nothing to the
+  // calendar, and the rest of the Save goes ahead; the draft then takes the calendar as stored
+  if (!touched) return sameCalendar(draft.base, current.calendar) ? { kind: "none" } : { kind: "none", reseed: structuredClone(draftOf(current.calendar)) };
   if (current.source === "fault") return { kind: "refuse", message: "the calendar definition cannot run, so its seasons and moons cannot be saved. Fix it in settings." };
   if (current.source === "legacy") return { kind: "legacy" };
   const m = mergeCalendar(typeof stored === "string" ? stored : "", draft.base, draft.calendar);
@@ -250,8 +493,43 @@ export function planCalendarSave(current: { source: CalendarSource; calendar: Ca
       if (m.message === DATED_SEASONS) return { kind: "refuse", message: `${DATED_SEASONS} (Edit definition).` };
       return { kind: "refuse", message: `the calendar edits do not make a calendar that runs (${m.message}).` };
     case "stale":
-      return { kind: "refuse", message: "the calendar definition changed outside the studio while you edited the same part of it. The studio now shows the stored calendar; undo brings your edits back, and Save then applies them over it.", reseed: m.stored };
+      return { kind: "refuse", message: `the calendar definition changed outside the studio while you edited the same part of it. The studio now shows the stored calendar. ${AGAIN}`, reseed: m.stored };
     case "write":
       return m.text === stored ? { kind: "none" } : { kind: "definition", text: m.text, rewrites: m.rewrites };
   }
+}
+
+/** The Studio state a Save reads (StudioState satisfies it). */
+interface SaveState {
+  world: { calendar: CalendarDraft };
+  saved: { world: { calendar: CalendarDraft } };
+  calendarBase?: CalendarDraft;
+  calendarSource?: CalendarSource;
+}
+
+/**
+ * A Studio Save's calendar decisions (header.ts `save`), as pure steps: the
+ * plan, and once the rest is written, the calendar the draft is reseeded with
+ * and the base `markSaved` rebases history from (§18.6; Parallax on step 3).
+ * @param current `plugin.studioSettings()` as the Save starts
+ * @param stored the stored definition as the Save starts
+ */
+export function studioSave(state: SaveState, current: { calendarSource?: CalendarSource; calendar: CalendarDraft }, stored: unknown) {
+  const base = state.calendarBase ?? state.saved.world.calendar;
+  const savedFrom = structuredClone(base);
+  const plan = planCalendarSave({ source: current.calendarSource ?? "legacy", calendar: current.calendar }, stored, { calendar: state.world.calendar, base, source: state.calendarSource ?? "legacy" });
+  return {
+    plan,
+    /**
+     * After the write (`text`: the definition written, or null): the calendar the draft takes (null: it keeps its
+     * own, as after a legacy write), and the base whose history `markSaved` rebases (null when the stored calendar
+     * had moved outside the studio before this Save, so that history keeps its own base and a Save of it refuses).
+     */
+    after(text: string | null): { reseed: CalendarDraft | null; rebaseFrom: CalendarDraft | null } {
+      // a written definition: the draft takes its own numbers (a new moon's exact rational reads back); nothing
+      // written: the calendar as stored, so the next Save judges against exactly what is on disk
+      const reseed = text !== null ? seshatDraft(parse(text)) : plan.kind === "none" ? (plan.reseed ?? draftOf(current.calendar)) : null;
+      return { reseed, rebaseFrom: sameCalendar(current.calendar, savedFrom) ? savedFrom : null };
+    },
+  };
 }

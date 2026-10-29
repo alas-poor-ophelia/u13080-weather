@@ -133,8 +133,9 @@ export function checkBody(period: Rational, epoch: Rational): BodyWrite {
  * made here has already passed `checkBody`, so the mixed pair runs and the
  * fallback is not reached; the epoch moves only when the epoch knob moves.
  * (moonsOf reads the period from the draft's float, so a period that is not a
- * short decimal, say n/25920, survives only on a draft that holds rationals:
- * the AST draft of §18.6 step 3, not today's `DraftMoon.cycleDays`.)
+ * short decimal, say n/25920, survives only beside its rational: definition.ts
+ * `moveMoon` writes the pair into `DraftMoon.exact`, which moonsOf uses while
+ * the float still equals it.)
  */
 export function moveBody(stored: BodyPair, next: { period?: Rational; epoch?: Rational }): BodyWrite {
   return checkBody(next.period ?? stored.period, next.epoch ?? stored.epoch);

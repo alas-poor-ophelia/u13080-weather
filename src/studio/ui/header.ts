@@ -42,9 +42,8 @@ import { windowLabel } from "../model/format";
 import { flipHint, flipState, straddlesEquator } from "../model/hemisphere";
 import { hintAttr } from "../model/hints";
 import { zoneForSave } from "../model/json-view";
-import { calendarOfDefinition, planCalendarSave } from "../model/definition";
+import { studioSave } from "../model/definition";
 import { followMoonRenames, moonRenames } from "../model/moon-rename";
-import { parse as parseDefinition } from "../../seshat";
 import { confirmRewrite } from "./rewrite-confirm-modal";
 import { confirmCalendarChange } from "../../plugin/calendar-modals";
 import { askKeptOnCalendarChange, dropKeptIn } from "../../plugin/upgrade-modals";
@@ -397,7 +396,8 @@ export function createHeaderSurface(): Surface {
     const current = c.plugin.studioSettings();
     const source = current.calendarSource ?? "legacy";
     const stored = settings.calendar.definition;
-    const plan = planCalendarSave({ source, calendar: current.calendar }, stored, { calendar: state.world.calendar, base: state.calendarBase ?? state.saved.world.calendar, source: state.calendarSource ?? "legacy" });
+    const decided = studioSave(state, current, stored);
+    const plan = decided.plan;
     const reseed = (calendar: StudioState["world"]["calendar"], history: boolean) =>
       c.store.update(
         (s) => {
@@ -465,7 +465,7 @@ export function createHeaderSurface(): Surface {
     if (plan.kind === "legacy") {
       settings.calendar.seasons = structuredClone(state.world.calendar.seasons);
       // body ids belong to definitions: the legacy calendar's moons never store one
-      settings.calendar.moons = structuredClone(state.world.calendar.moons).map(({ id: _id, ...m }) => m);
+      settings.calendar.moons = structuredClone(state.world.calendar.moons).map(({ id: _id, exact: _x, ...m }) => m);
     }
     settings.devicePresets = structuredClone(state.world.devicePresets);
     settings.regimePresets = structuredClone(state.world.regimePresets);
@@ -482,14 +482,13 @@ export function createHeaderSurface(): Surface {
         throw e;
       }
     }
-    // On a Seshat world the draft takes the stored calendar's own numbers (a new moon's cycle as its exact
-    // rational reads back), so the next save compares against exactly what is on disk; a draft from another
-    // source takes the calendar the world runs now.
-    if (text !== null) reseed(calendarOfDefinition(parseDefinition(text)), false);
-    else if (plan.kind === "none" && plan.reseed) reseed(plan.reseed, false);
+    // the draft takes the calendar as written or as stored, so the next Save compares against what is on disk
+    // (studioSave says which, and which history markSaved rebases)
+    const after = decided.after(text);
+    if (after.reseed) reseed(after.reseed, false);
     // `markSaved` first, so the repaint lands on `Saved ✓` directly
     // instead of flashing `Save ●` on its way there.
-    c.store.markSaved();
+    c.store.markSaved({ rebaseFrom: after.rebaseFrom });
     c.plugin.refreshSettingsTab();
     new Notice(saveSummary(dirtyNames, worldWasDirty));
   }

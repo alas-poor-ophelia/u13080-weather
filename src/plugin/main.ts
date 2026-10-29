@@ -6,7 +6,7 @@ import type { WeatherReport } from "../core/report";
 import { GENERATOR_VERSION, type GeneratorMode } from "../core/version";
 import { ApiController, type WadjetAPI } from "./api";
 import { Calendars } from "./calendars";
-import { calendarOfDefinition } from "../studio/model/definition";
+import { seshatDraft } from "../studio/model/definition";
 import type { StudioSettingsLike } from "../studio/model/state";
 import { blockRepaintOn, parseCodeblock, pickCodeblockZone, resolveDate, type CodeblockSpec } from "./codeblock-parse";
 import { displayFormat, displayWith } from "./date-display";
@@ -341,7 +341,7 @@ export default class WadjetPlugin extends Plugin {
     if (!seshat || this.time.active !== seshat) return { ...this.settings, calendarSource: "legacy" };
     const ast = seshat.definition();
     // a definition that cannot run has no calendar to edit; the legacy fields are shown, never saved (source "fault")
-    return ast ? { ...this.settings, calendar: calendarOfDefinition(ast), calendarSource: "seshat" } : { ...this.settings, calendarSource: "fault" };
+    return ast ? { ...this.settings, calendar: seshatDraft(ast), calendarSource: "seshat" } : { ...this.settings, calendarSource: "fault" };
   }
 
   /**

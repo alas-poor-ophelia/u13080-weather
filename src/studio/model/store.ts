@@ -24,7 +24,7 @@
 import { canonicalJson } from "../../core/profile";
 import { hash32 } from "../../core/rng";
 import type { ZoneProfile } from "../../core/types";
-import type { StudioState, WorldDraft } from "./state";
+import { settleExact, type StudioState, type WorldDraft } from "./state";
 
 /** How many undo steps are kept. Older steps fall off the bottom. */
 export const MAX_HISTORY = 100;
@@ -50,8 +50,15 @@ export interface Store {
   /** Zone ids whose draft differs from the saved copy (added and removed zones count). */
   dirtyZones(): Set<string>;
   worldDirty(): boolean;
-  /** The drafts became the saved copy. Undo history survives a save. */
-  markSaved(): void;
+  /**
+   * The drafts became the saved copy. Undo history survives a save. History
+   * made under the calendar base `rebaseFrom` (default: the base before this
+   * call) is rebased onto the saved calendar, so undoing past this Save and
+   * saving again reverts it; pass null when the stored calendar had moved
+   * outside the studio before this Save (that history stays judged against
+   * its own base, and a Save of it refuses rather than overwrite).
+   */
+  markSaved(opts?: { rebaseFrom?: StudioState["calendarBase"] | null }): void;
   /**
    * Rewrite the live drafts AND every draft the undo and redo stacks hold,
    * taking no undo step: for an edit that follows from another one already in
@@ -64,10 +71,20 @@ export interface Store {
   setZone(zoneId: string): void;
 }
 
-/** The undoable half of the state: drafts only, never `saved`, never `view`. */
+/**
+ * The undoable half of the state: drafts only, never `saved`, never `view`.
+ * The calendar base and source travel with them (docs/SESHAT-v0.md §18.6,
+ * Parallax on step 3): a Save diffs the draft's calendar against the base it
+ * was made under, so an undo that brings back a draft from before a reseed
+ * brings back its base too, and a Save refuses it as stale instead of
+ * writing its old parts over a newer definition. They are not hashed: a
+ * reseed alone is never an undo step.
+ */
 interface Drafts {
   zones: Record<string, ZoneProfile>;
   world: WorldDraft;
+  calendarBase?: StudioState["calendarBase"];
+  calendarSource?: StudioState["calendarSource"];
 }
 
 interface HistoryEntry {
@@ -87,7 +104,7 @@ function draftsHash(s: Pick<StudioState, "zones" | "world">): string {
 }
 
 function cloneDrafts(s: StudioState): Drafts {
-  return structuredClone({ zones: s.zones, world: s.world });
+  return structuredClone({ zones: s.zones, world: s.world, ...(s.calendarBase ? { calendarBase: s.calendarBase } : {}), ...(s.calendarSource ? { calendarSource: s.calendarSource } : {}) });
 }
 
 export function createStore(initial: StudioState, schedule: (flush: () => void) => void = (f) => queueMicrotask(f)): Store {
@@ -126,6 +143,11 @@ export function createStore(initial: StudioState, schedule: (flush: () => void) 
   function restore(entry: HistoryEntry): void {
     state.zones = structuredClone(entry.drafts.zones);
     state.world = structuredClone(entry.drafts.world);
+    const { calendarBase, calendarSource } = entry.drafts;
+    if (calendarBase === undefined) delete state.calendarBase;
+    else state.calendarBase = structuredClone(calendarBase);
+    if (calendarSource === undefined) delete state.calendarSource;
+    else state.calendarSource = calendarSource;
     baseline = entry.drafts;
     baselineHash = entry.hash;
   }
@@ -141,7 +163,12 @@ export function createStore(initial: StudioState, schedule: (flush: () => void) 
   return {
     get: () => state,
 
-    update(fn, opts) {
+    update(edit, opts) {
+      // an exact moon half a float path has since moved is dropped, so the dirty dot never lights with nothing to save
+      const fn = (s: StudioState): void => {
+        edit(s);
+        settleExact(s.world.calendar.moons);
+      };
       if (opts?.history === true) {
         snapshot(); // close anything left open by a drag, so this action is its own step
         const before = baseline;
@@ -215,9 +242,16 @@ export function createStore(initial: StudioState, schedule: (flush: () => void) 
       notify();
     },
 
-    markSaved() {
+    markSaved(opts) {
+      const from = opts?.rebaseFrom === undefined ? state.calendarBase : opts.rebaseFrom;
       state.saved = structuredClone({ zones: state.zones, world: state.world });
       state.calendarBase = structuredClone(state.world.calendar);
+      if (from) {
+        const key = canonicalJson(from);
+        for (const d of [baseline, ...undoStack.map((e) => e.drafts), ...redoStack.map((e) => e.drafts)]) {
+          if (d.calendarBase && canonicalJson(d.calendarBase) === key) d.calendarBase = structuredClone(state.calendarBase);
+        }
+      }
       notify();
     },
 

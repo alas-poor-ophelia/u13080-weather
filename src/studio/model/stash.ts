@@ -17,6 +17,7 @@ import type { ZoneProfile } from "../../core/types";
 import { canonicalJson } from "../../core/profile";
 import type { CalendarSource, StudioState, WorldDraft } from "./state";
 import type { Store } from "./store";
+import { seatOn } from "./definition";
 
 /** What survives a leaf close: dirty zone drafts, and the world draft iff it is dirty. */
 export interface StudioStash {
@@ -81,5 +82,17 @@ export function applyStash(state: StudioState, stash: StudioStash): StudioState 
   const movedSource = (stash.calendarSource ?? "legacy") !== (state.calendarSource ?? "legacy");
   const untouched = stash.calendarBase !== undefined && canonicalJson(stash.world.calendar) === canonicalJson(stash.calendarBase);
   if (movedSource && untouched) return { ...state, zones, world: { ...world, calendar: structuredClone(state.world.calendar) } };
-  return { ...state, zones, world, ...(stash.calendarBase ? { calendarBase: structuredClone(stash.calendarBase) } : {}), calendarSource: stash.calendarSource ?? "legacy" };
+  let calendarBase = stash.calendarBase ? structuredClone(stash.calendarBase) : undefined;
+  // A Seshat draft stashed by a build before the AST layer (docs/SESHAT-v0.md §18.6 item 4) had no AST edits: it is
+  // seated on the definition stored now (seatOn). A part it never touched is re-read from that definition, in the
+  // draft and its base, so the fields and the layer show one calendar; an edited part stays pending against its own
+  // base, so Save still refuses one whose part changed in storage. A stash whose base lacks the layer while its
+  // draft has one is left as it is: Save refuses it as stale (mergeCalendar), never drops its AST edits.
+  const seed = state.world.calendar.ast;
+  if ((stash.calendarSource ?? "legacy") === "seshat" && !movedSource && seed && world.calendar.ast === undefined && calendarBase?.ast === undefined) {
+    const seated = seatOn(world.calendar, calendarBase ?? state.calendarBase ?? state.saved.world.calendar, seed);
+    world.calendar = seated.draft;
+    calendarBase = seated.base;
+  }
+  return { ...state, zones, world, ...(calendarBase ? { calendarBase } : {}), calendarSource: stash.calendarSource ?? "legacy" };
 }

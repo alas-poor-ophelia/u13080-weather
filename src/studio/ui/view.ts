@@ -24,12 +24,11 @@
  * surface is one import and one line in `SURFACES`.
  */
 import { ItemView, Notice, Scope, type IconName, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
-import { canonicalJson } from "../../core/profile";
 import { openingWindow, yearsFor } from "../model/years";
 import type { ZoneProfile } from "../../core/types";
 import type WadjetPlugin from "../../plugin/main";
 import { applyStash, takeStash } from "../model/stash";
-import { initialState } from "../model/state";
+import { adoptSettings, initialState } from "../model/state";
 import { createStore, type Store } from "../model/store";
 import { createAtlasSurface } from "./atlas-surface";
 import { createAuditionSurface } from "./audition";
@@ -404,27 +403,7 @@ export class StudioView extends ItemView {
     const dirty = this.store.dirtyZones();
     const worldDirty = this.store.worldDirty();
     const fresh = initialState(this.plugin.studioSettings(), this.store.get().view.zoneId);
-    this.store.update((s) => {
-      // the stored calendar moved (a switch, an undo, an edit in settings) under a dirty world draft whose calendar
-      // is untouched: that calendar takes the stored one, so the draft never shows or carries a calendar that is gone
-      const base = s.calendarBase ?? s.saved.world.calendar;
-      const untouched = canonicalJson(s.world.calendar) === canonicalJson(base);
-      const moved = (s.calendarSource ?? "legacy") !== fresh.calendarSource || canonicalJson(fresh.world.calendar) !== canonicalJson(base);
-      if (worldDirty && untouched && moved) {
-        s.world.calendar = structuredClone(fresh.world.calendar);
-        s.calendarBase = structuredClone(fresh.world.calendar);
-        s.calendarSource = fresh.calendarSource ?? "legacy";
-      }
-      s.saved = fresh.saved;
-      for (const id of Object.keys(s.zones)) if (!dirty.has(id) && !(id in fresh.zones)) delete s.zones[id];
-      for (const [id, zone] of Object.entries(fresh.zones)) if (!dirty.has(id)) s.zones[id] = zone;
-      if (!worldDirty) {
-        s.world = fresh.world;
-        s.calendarBase = structuredClone(fresh.world.calendar);
-        s.calendarSource = fresh.calendarSource ?? "legacy";
-      }
-      if (s.view.zoneId !== null && !(s.view.zoneId in s.zones)) s.view.zoneId = null;
-    });
+    this.store.update((s) => adoptSettings(s, fresh, dirty, worldDirty));
   }
 
   /**

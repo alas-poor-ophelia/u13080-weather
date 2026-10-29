@@ -16,10 +16,12 @@
  * Pure: no Obsidian imports (PLAN D3). `structuredClone` is available in
  * Obsidian's Electron renderer and in Bun.
  */
+import { canonicalJson } from "../../core/profile";
 import type { Override } from "../../core/report";
 import type { Era, ZoneProfile } from "../../core/types";
 import type { DevicePreset, InternalCalendarConfig, RegimePreset } from "../../plugin/settings";
 import type { LedgerForm, MonthForm, YearForm } from "../../plugin/time/form";
+import { toNumber, type CalendarAst, type Rational } from "../../seshat";
 import type { OrreryTheme } from "./orrery-transport";
 
 /** The world-scoped slice of settings: everything a world edit touches (`world · N zones`). */
@@ -84,7 +86,30 @@ export type CalendarSource = "legacy" | "seshat" | "fault";
  * id, so a rename keeps the body (its exact period, the rules that read it);
  * absent on the legacy calendar and on a moon the draft adds (wadjet-dea).
  */
-export type DraftMoon = InternalCalendarConfig["moons"][number] & { id?: string };
+export type DraftMoon = InternalCalendarConfig["moons"][number] & {
+  id?: string;
+  /**
+   * The exact period and epoch an exact editor wrote (docs/SESHAT-v0.md §18.3
+   * D2): each half is used while `cycleDays` / `phaseAtEpoch` still equal it as
+   * a number, so a float knob that moves the moon afterwards wins. Absent on a
+   * seeded moon (the stored body's rationals are kept as before).
+   */
+  exact?: { period?: Rational; epoch?: Rational };
+};
+
+/**
+ * Drop each exact half whose number the moon no longer shows (a float knob, the
+ * JSON drawer or settings moved it since), and `exact` when no half is left.
+ * In place; the store runs it after every update.
+ */
+export function settleExact(moons: DraftMoon[]): void {
+  for (const m of moons) {
+    if (!m.exact) continue;
+    if (m.exact.period && toNumber(m.exact.period) !== m.cycleDays) delete m.exact.period;
+    if (m.exact.epoch && toNumber(m.exact.epoch) !== m.phaseAtEpoch) delete m.exact.epoch;
+    if (!m.exact.period && !m.exact.epoch) delete m.exact;
+  }
+}
 
 /**
  * The parts of a definition the form model reads as fields (docs/SESHAT-v0.md
@@ -105,6 +130,16 @@ export interface CalendarDraftShape {
   seasons: InternalCalendarConfig["seasons"];
   moons: DraftMoon[];
   form?: FormDraft;
+  /**
+   * The AST layer of a Seshat world's draft (docs/SESHAT-v0.md §18.6 items
+   * 1-4; definition.ts): the stored definition plus the edits only the AST
+   * reaches (gears, stages, crossings, dated season marks; ast-edit.ts). The
+   * fields above stay the editing surface for every part the form model
+   * reads; `draftAst` compiles them over this layer into the one draft AST.
+   * Its base is `StudioState.calendarBase.ast`. Absent on legacy, plugin and
+   * faulted calendars.
+   */
+  ast?: CalendarAst;
 }
 
 /** The slice of `WadjetSettings` the studio opens on. `WadjetSettings` satisfies it. */
@@ -149,11 +184,40 @@ export function initialState(settingsLike: StudioSettingsLike, zoneId: string | 
   for (const z of structuredClone(settingsLike.zones)) zones[z.id] = z;
   const world = structuredClone<WorldDraft>({
     eras: settingsLike.eras,
-    calendar: { seasons: settingsLike.calendar.seasons, moons: settingsLike.calendar.moons, ...(settingsLike.calendar.form ? { form: settingsLike.calendar.form } : {}) },
+    calendar: { seasons: settingsLike.calendar.seasons, moons: settingsLike.calendar.moons, ...(settingsLike.calendar.form ? { form: settingsLike.calendar.form } : {}), ...(settingsLike.calendar.ast ? { ast: settingsLike.calendar.ast } : {}) },
     devicePresets: settingsLike.devicePresets ?? [],
     regimePresets: settingsLike.regimePresets ?? [],
     overrides: settingsLike.overrides,
   });
   const saved = structuredClone({ zones, world });
   return { zones, saved, world, view: defaultView(zoneId !== null && zoneId in zones ? zoneId : null), calendarBase: structuredClone(world.calendar), calendarSource: settingsLike.calendarSource ?? "legacy" };
+}
+
+/**
+ * The plugin's settings changed outside the studio (StudioView.refreshFromSettings,
+ * as one pure step): clean drafts adopt `fresh` (initialState of the new
+ * settings); dirty drafts stay as the user left them, and `saved` always
+ * tracks the plugin. In place.
+ * @param dirty the zone ids dirty before the change; `worldDirty` likewise
+ */
+export function adoptSettings(s: StudioState, fresh: StudioState, dirty: ReadonlySet<string>, worldDirty: boolean): void {
+  // the stored calendar moved (a switch, an undo, an edit in settings) under a dirty world draft whose calendar
+  // is untouched: that calendar takes the stored one, so the draft never shows or carries a calendar that is gone
+  const base = s.calendarBase ?? s.saved.world.calendar;
+  const untouched = canonicalJson(s.world.calendar) === canonicalJson(base);
+  const moved = (s.calendarSource ?? "legacy") !== fresh.calendarSource || canonicalJson(fresh.world.calendar) !== canonicalJson(base);
+  if (worldDirty && untouched && moved) {
+    s.world.calendar = structuredClone(fresh.world.calendar);
+    s.calendarBase = structuredClone(fresh.world.calendar);
+    s.calendarSource = fresh.calendarSource ?? "legacy";
+  }
+  s.saved = fresh.saved;
+  for (const id of Object.keys(s.zones)) if (!dirty.has(id) && !(id in fresh.zones)) delete s.zones[id];
+  for (const [id, zone] of Object.entries(fresh.zones)) if (!dirty.has(id)) s.zones[id] = zone;
+  if (!worldDirty) {
+    s.world = fresh.world;
+    s.calendarBase = structuredClone(fresh.world.calendar);
+    s.calendarSource = fresh.calendarSource ?? "legacy";
+  }
+  if (s.view.zoneId !== null && !(s.view.zoneId in s.zones)) s.view.zoneId = null;
 }
