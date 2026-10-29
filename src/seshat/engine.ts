@@ -4,7 +4,7 @@
  * the mean length corrected by whole steps. Everything is integer arithmetic
  * on safe integers.
  */
-import type { CalendarAst, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
+import type { CalendarAst, CycleRule, CycleUnitAst, LabelAst, SlotsUnitAst } from "./ast";
 import { Body } from "./body";
 import { DAY_LIMIT } from "./day";
 import { SeasonCalendar, seasonIn } from "./seasons";
@@ -14,7 +14,7 @@ import { EngineDays } from "./engine-view";
 import { gearMatcher, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
-import type { StartRule } from "./start";
+import { traceStart, type StartRule, type StartTrace } from "./start";
 import { validate } from "./validate";
 
 /** Where a day falls in one unit: the occurrence (a cycle's index, or a slot's index in its parent) and the days into it. */
@@ -67,6 +67,25 @@ export class Engine {
   /** The day on which occurrence `index` of cycle unit `id` starts. */
   start(id: string, index: number): number {
     return this.rule(id).start(index);
+  }
+
+  /**
+   * How occurrence `index` of cycle unit `id` starts (docs/SESHAT-v0.md §18.3 D8): the base occurrence
+   * read, each level's start and each stage's matching rule, under the rule that governs it (the unit's
+   * own, or the ledger switch in force). `pinned` when a ledger pin sets the start instead; `start` is
+   * always `start(id, index)`.
+   */
+  startTrace(id: string, index: number): StartTrace & { readonly start: number; readonly pinned: boolean; readonly switched: boolean } {
+    const u = this.units.get(id);
+    if (u?.kind !== "cycle") throw new RangeError(`"${id}" is not a cycle unit`);
+    let rule: CycleRule = u;
+    let switched = false;
+    let pinned = false;
+    for (const e of u.ledger ?? []) {
+      if (e.kind === "switch" && e.from <= index) [rule, switched] = [e.rule, true];
+      if (e.kind === "starts" && index >= e.from && index <= e.from + (e.lengths?.length ?? 0)) pinned = true;
+    }
+    return { ...traceStart(rule, this.gears, index), start: this.start(id, index), pinned, switched };
   }
 
   /** Days in occurrence `index` of cycle unit `id`: by definition the gap between two starts, so the two can never disagree. */

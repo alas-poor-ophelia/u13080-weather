@@ -10,6 +10,7 @@ export { baseIndexAt, baseKind, baseLengths, baseStart, isPlainConstant, linearB
 export { DAY_LIMIT } from "./day";
 export { gearBelow, gearDensity, gearDeviation, gearMatches, gearPeriod, type GearAst } from "./gear";
 export { Engine, type Position } from "./engine";
+export type { StartTrace } from "./start";
 export { checkRule, FIRST_WITHIN_MAX, problems, ruleCycles, ruleTagSetters, SHIFT_DAYS_MAX, validate, type Problem } from "./validate";
 export { GREGORIAN } from "./calendars/gregorian";
 export { ISLAMIC_CIVIL, ISLAMIC_TBLA } from "./calendars/islamic";
@@ -24,7 +25,7 @@ export { BAHAI } from "./calendars/bahai";
 export { wrap } from "./phase";
 export { childrenOf, evaluate, inPhase, readsOtherDays, ruleChildren, tagsRead, TimeView, unreachableRule, type By, type DayView, type EvalOptions, type HostKey, type Recur, type RuleAst, type TimeLike } from "./rule";
 export { COUNT_WORK_MAX, EngineDays, RULE_MEMO_DAYS, SETPOS_PERIOD_MAX } from "./engine-view";
-export { ID, parse, print, SeshatSyntaxError } from "./text";
+export { ID, parse, parsePartId, print, printPart, SeshatSyntaxError, type PartId, type PartRef } from "./text";
 export { checkFormats, compileFormat, formatDay, isParseable, parseDay, type CompiledFormat } from "./format";
 export { fractionBoundary, isDateMark, SeasonCalendar, seasonAtPhase, seasonIn, seasonsUseDates, type DateSeasonMark, type DaySeasonMark, type SeasonMark, type SeasonMarkAst, type SlotSeasonMark } from "./seasons";
 export { definitionContent } from "./content";

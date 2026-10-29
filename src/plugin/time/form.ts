@@ -468,7 +468,7 @@ function placeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
 // ---- the ledger
 
 /** A rule in the exclusion form: its base and the days it skips; any other rule skips none. */
-function skipsOf(rule: RuleAst): { base: RuleAst; days: readonly number[] } {
+export function skipsOf(rule: RuleAst): { base: RuleAst; days: readonly number[] } {
   if (rule.kind === "all" && rule.of.length === 2) {
     const [base, last] = rule.of;
     if (last?.kind === "not" && last.of.kind === "dates") return { base: base!, days: last.of.days };

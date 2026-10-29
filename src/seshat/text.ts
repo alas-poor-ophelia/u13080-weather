@@ -26,7 +26,7 @@
  * calendar, and have no spelling.
  */
 import type { SeasonMarkAst } from "./seasons";
-import type { BodyAst, CalendarAst, CycleRule, DayLabelAst, FormatAst, SeasonsAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
+import type { BodyAst, CalendarAst, CrossingAst, CycleRule, DayLabelAst, FormatAst, SeasonsAst, GearTerm, KeyedLength, LabelAst, LedgerEntry, RuleDefAst, SlotAst, StageAst, StageRule, UnitAst } from "./ast";
 import type { GearAst } from "./gear";
 import { gcd, type Rational } from "./rational";
 import { unreachableRule, type By, type RuleAst } from "./rule";
@@ -234,10 +234,10 @@ export function print(ast: CalendarAst): string {
   if (ast.days?.length === 0) head.push("DAYS:");
   if (ast.rules?.length === 0) head.push("RULES:");
   if (ast.formats?.length === 0) head.push("FORMATS:");
-  for (const f of ast.formats ?? []) head.push(`FORMAT:${esc(f.name)}=${esc(f.pattern)}`);
+  for (const f of ast.formats ?? []) head.push(formatLine(f));
   const chunks: string[][] = [head];
-  if (ast.seasons) chunks.push(block("VSEASONS", [`UNIT:${id(ast.seasons.unit)}`, ...seasonLines(ast.seasons.marks, ast.units)]));
-  for (const b of ast.bodies ?? []) chunks.push(block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`, ...(b.moon ? [`MOON:${esc(b.moon.name)}`, ...(b.moon.phases ? markLines(b.moon.phases, "PHASE", "PHASES", "at") : [])] : [])]));
+  if (ast.seasons) chunks.push(seasonsLines(ast.seasons, ast.units));
+  for (const b of ast.bodies ?? []) chunks.push(bodyBlock(b));
   for (const g of ast.gears) chunks.push(block("VGEAR", gearLines(g)));
   for (const u of ast.units) chunks.push(block("VUNIT", unitLines(u)));
   if (ast.days?.length) chunks.push(ast.days.map(dayLine));
@@ -247,6 +247,131 @@ export function print(ast: CalendarAst): string {
 }
 
 const block = (type: string, lines: readonly string[]) => [`BEGIN:${type}`, ...lines, `END:${type}`];
+const formatLine = (f: FormatAst) => `FORMAT:${esc(f.name)}=${esc(f.pattern)}`;
+const seasonsLines = (s: SeasonsAst, units: readonly UnitAst[]) => block("VSEASONS", [`UNIT:${id(s.unit)}`, ...seasonLines(s.marks, units)]);
+const bodyBlock = (b: BodyAst) =>
+  block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`, ...(b.moon ? [`MOON:${esc(b.moon.name)}`, ...(b.moon.phases ? markLines(b.moon.phases, "PHASE", "PHASES", "at") : [])] : [])]);
+
+/**
+ * One part of a calendar, named as the Studio's Orrery names its parts
+ * (docs/SESHAT-v0.md §18.3 D4). Ids are those of the definition; indices are
+ * 0-based.
+ * - `calendar`: the whole definition; `dayline`: the FORMAT lines;
+ * - `unit:<id>`, `gear:<id>`, `body:<id>`, `rule:<id>`: that block;
+ * - `slot:<unit>:<i>`: slot i of a slot unit; `stage:<unit>:<i>`: stage i of a cycle unit;
+ * - `crossing:<unit>` and `train:<unit>`: the unit's CROSSING line (the train is its INDEX);
+ * - `seasons`; `ledger:<unit>:<i>`: entry i of a cycle unit's ledger; `day:<i>`: day label i; `format:<name>`.
+ */
+export type PartId =
+  | "calendar"
+  | "dayline"
+  | "seasons"
+  | `unit:${string}`
+  | `slot:${string}:${number}`
+  | `gear:${string}`
+  | `body:${string}`
+  | `crossing:${string}`
+  | `train:${string}`
+  | `stage:${string}:${number}`
+  | `rule:${string}`
+  | `ledger:${string}:${number}`
+  | `day:${number}`
+  | `format:${string}`;
+
+export type PartRef =
+  | { readonly kind: "calendar" | "dayline" | "seasons" }
+  | { readonly kind: "unit" | "gear" | "body" | "crossing" | "train" | "rule" | "format"; readonly id: string }
+  | { readonly kind: "slot" | "stage" | "ledger"; readonly id: string; readonly index: number }
+  | { readonly kind: "day"; readonly index: number };
+
+const PART = /^(?:(calendar|dayline|seasons)|(unit|gear|body|crossing|train|rule|format):(.+)|(slot|stage|ledger):([^:]+):(0|[1-9]\d*)|day:(0|[1-9]\d*))$/;
+
+/** A part id read back into its kind, id and index; null when it is not one. */
+export function parsePartId(part: string): PartRef | null {
+  const m = PART.exec(part);
+  if (!m) return null;
+  if (m[1]) return { kind: m[1] as "calendar" | "dayline" | "seasons" };
+  if (m[2]) return { kind: m[2] as "unit" | "gear" | "body" | "crossing" | "train" | "rule" | "format", id: m[3]! };
+  const index = Number(m[4] ? m[6] : m[7]);
+  if (!Number.isSafeInteger(index)) return null;
+  if (m[4]) return { kind: m[4] as "slot" | "stage" | "ledger", id: m[5]!, index };
+  return { kind: "day", index };
+}
+
+/**
+ * The canonical text of one part (§18.3 D4), with the printer that `print`
+ * uses for it, so every printed part appears verbatim in `print(ast)`. Null
+ * when the calendar has no such part (or the id is not one); `dayline` of a
+ * calendar without formats is the empty string. It checks only the fields of
+ * the part it prints, not the whole calendar as `print` does: a part can
+ * print while `print(ast)` throws elsewhere. A field with no text form in the
+ * part itself throws as in `print`.
+ */
+export function printPart(ast: CalendarAst, part: PartId): string | null {
+  const p = parsePartId(part);
+  if (!p) return null;
+  const lines = partLines(ast, p);
+  return lines && lines.join("\n");
+}
+
+function partLines(ast: CalendarAst, p: PartRef): readonly string[] | null {
+  const unit = (id: string) => ast.units.find((u) => u.id === id);
+  const cycle = (id: string) => {
+    const u = unit(id);
+    return u?.kind === "cycle" ? u : undefined;
+  };
+  switch (p.kind) {
+    case "calendar":
+      return print(ast).slice(0, -1).split("\n");
+    case "dayline":
+      return ast.formats?.length === 0 ? ["FORMATS:"] : (ast.formats ?? []).map(formatLine);
+    case "seasons":
+      return ast.seasons ? seasonsLines(ast.seasons, ast.units) : null;
+    case "format": {
+      const f = ast.formats?.find((x) => x.name === p.id);
+      return f ? [formatLine(f)] : null;
+    }
+    case "unit": {
+      const u = unit(p.id);
+      return u ? block("VUNIT", unitLines(u)) : null;
+    }
+    case "gear": {
+      const g = ast.gears.find((x) => x.id === p.id);
+      return g ? block("VGEAR", gearLines(g)) : null;
+    }
+    case "body": {
+      const b = ast.bodies?.find((x) => x.id === p.id);
+      return b ? bodyBlock(b) : null;
+    }
+    case "rule": {
+      const r = ast.rules?.find((x) => x.id === p.id);
+      return r ? block("VRULE", ruleDefLines(r)) : null;
+    }
+    case "crossing":
+    case "train": {
+      const u = cycle(p.id);
+      if (u?.crossing === undefined || (p.kind === "train" && !u.crossing.index)) return null;
+      return [crossingLine(u.crossing)];
+    }
+    case "slot": {
+      const u = unit(p.id);
+      const s = u?.kind === "slots" ? u.slots[p.index] : undefined;
+      return s ? slotLines(s) : null;
+    }
+    case "stage": {
+      const s = cycle(p.id)?.stages?.[p.index];
+      return s ? block("VSTAGE", s.rules.map(stageRuleLine)) : null;
+    }
+    case "ledger": {
+      const e = cycle(p.id)?.ledger?.[p.index];
+      return e ? ledgerLines(e) : null;
+    }
+    case "day": {
+      const d = ast.days?.[p.index];
+      return d ? [dayLine(d)] : null;
+    }
+  }
+}
 
 /** Named phase points, one line each (`field` is "from" for season marks, "at" for moon phases); an empty list is the marker alone. */
 function markLines(marks: ReadonlyArray<{ readonly name: string } & Partial<Record<"from" | "at", number>>>, key: string, marker: string, field: "from" | "at"): string[] {
@@ -313,24 +438,26 @@ function gearLines(g: GearAst): string[] {
   return out;
 }
 
+/** A crossing base's one CROSSING line. */
+function crossingLine(c: CrossingAst): string {
+  if (c.start !== undefined && c.start !== "after") throw new RangeError(`a crossing's start ${JSON.stringify(c.start)} has no text form (after, or absent for contains)`);
+  if (c.index) fields(c.index, "a crossing index", "a", "c", "L");
+  const tail = `${c.start ? ";START=after" : ""}${c.index ? `;INDEX=${num(c.index.a)}/${num(c.index.c)}/${num(c.index.L)}` : ""}`;
+  if (c.body !== undefined) {
+    fields(c, "a crossing", "body", "start", "index");
+    const b = c.body;
+    fields(b, "a body reference", "id", "mark", "offset", "k");
+    if (b.k !== undefined && !Number.isSafeInteger(b.k)) throw new RangeError(`K ${b.k} is not a safe integer`);
+    return `CROSSING:BODY=${id(b.id)};MARK=${markText(b.mark)}${b.offset && b.offset.n !== 0 ? `;OFFSET=${ratText(b.offset)}` : ""}${b.k ? `;K=${num(b.k)}` : ""}${tail}`;
+  }
+  fields(c, "a crossing", "period", "at", "start", "index");
+  return `CROSSING:${ratText(c.period)}@${dayRatText(c.at)}${tail}`;
+}
+
 function baseLines(r: CycleRule): string[] {
   const out: string[] = [];
-  if (r.crossing !== undefined) {
-    const c = r.crossing;
-    if (c.start !== undefined && c.start !== "after") throw new RangeError(`a crossing's start ${JSON.stringify(c.start)} has no text form (after, or absent for contains)`);
-    if (c.index) fields(c.index, "a crossing index", "a", "c", "L");
-    const tail = `${c.start ? ";START=after" : ""}${c.index ? `;INDEX=${num(c.index.a)}/${num(c.index.c)}/${num(c.index.L)}` : ""}`;
-    if (c.body !== undefined) {
-      fields(c, "a crossing", "body", "start", "index");
-      const b = c.body;
-      fields(b, "a body reference", "id", "mark", "offset", "k");
-      if (b.k !== undefined && !Number.isSafeInteger(b.k)) throw new RangeError(`K ${b.k} is not a safe integer`);
-      out.push(`CROSSING:BODY=${id(b.id)};MARK=${markText(b.mark)}${b.offset && b.offset.n !== 0 ? `;OFFSET=${ratText(b.offset)}` : ""}${b.k ? `;K=${num(b.k)}` : ""}${tail}`);
-    } else {
-      fields(c, "a crossing", "period", "at", "start", "index");
-      out.push(`CROSSING:${ratText(c.period)}@${dayRatText(c.at)}${tail}`);
-    }
-  } else out.push(`ANCHOR:${day(r.anchor)}`, `LENGTH:${num(r.length)}`);
+  if (r.crossing !== undefined) out.push(crossingLine(r.crossing));
+  else out.push(`ANCHOR:${day(r.anchor)}`, `LENGTH:${num(r.length)}`);
   out.push(...gearTermLines(r.gears));
   if (r.stages?.length === 0) out.push("STAGES:");
   for (const s of r.stages ?? []) out.push(...block("VSTAGE", s.rules.map(stageRuleLine)));

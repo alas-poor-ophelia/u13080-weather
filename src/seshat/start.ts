@@ -34,31 +34,68 @@ export function stageReach(stage: StageAst): { up: number; down: number } {
   return { up, down };
 }
 
-/** Assumes a validated rule and gears; `id` names the unit in messages. A ledger is layered on by piecewise.ts. */
-export function compileStart(u: CycleRule, gears: ReadonlyMap<string, GearAst>, id: string): StartRule {
+/** The rule of stage `stage` that matches occurrence k (its first match), or -1; `below` is the level under the stage. */
+function stageHit(stage: StageAst, below: (k: number) => number, k: number, s: number): number {
+  for (let i = 0; i < stage.rules.length; i++) {
+    const r = stage.rules[i]!;
+    if ("residue" in r ? r.residue.in.includes(mod(s - (r.residue.offset ?? 0), r.residue.mod)) : below(k + r.length.at + 1) - below(k + r.length.at) === r.length.is) return i;
+  }
+  return -1;
+}
+
+/** A start rule's levels: level 0 is the base read at k (or its index) plus the gear terms; level j + 1 is stage j over level j. */
+function startLevels(u: CycleRule, gears: ReadonlyMap<string, GearAst>) {
   const base = linearBase(u);
   const index: LinearBase | null = u.crossing?.index ?? null;
   const terms = (u.gears ?? []).map((t) => ({ add: t.add, g: gears.get(t.gear)! }));
-  const stages = u.stages ?? [];
-
+  const crossingAt = (k: number): number => (index ? floorDiv(k * index.a + index.c, index.L) : k);
   const level0 = (k: number): number => {
-    let s = baseStart(base, index ? floorDiv(k * index.a + index.c, index.L) : k);
+    let s = baseStart(base, crossingAt(k));
     for (const t of terms) s += t.add * gearBelow(t.g, k);
     return s;
   };
   // level j reads level j − 1 only; each stage's window is a few occurrences, so this is O(1)
   const levels: Array<(k: number) => number> = [level0];
-  for (const stage of stages) {
+  for (const stage of u.stages ?? []) {
     const below = levels[levels.length - 1]!;
     levels.push((k) => {
       const s = below(k);
-      for (const r of stage.rules) {
-        const hit = "residue" in r ? r.residue.in.includes(mod(s - (r.residue.offset ?? 0), r.residue.mod)) : below(k + r.length.at + 1) - below(k + r.length.at) === r.length.is;
-        if (hit) return s + r.add;
-      }
-      return s;
+      const hit = stageHit(stage, below, k, s);
+      return hit < 0 ? s : s + stage.rules[hit]!.add;
     });
   }
+  return { base, index, terms, crossingAt, levels };
+}
+
+/** How one occurrence's start is built (the Studio's Orrery draws it): read off the same levels the engine runs. */
+export interface StartTrace {
+  /** the base occurrence read: the crossing number for a crossing base (through INDEX), else k */
+  readonly baseIndex: number;
+  /** the day the base alone gives (the crossing day, before gear terms) */
+  readonly baseStart: number;
+  /** level 0 (base plus gear terms), then each stage's output in order; the last is the rule's start */
+  readonly levels: readonly number[];
+  /** per stage, the index of the rule that matched, or -1 */
+  readonly fired: readonly number[];
+}
+
+/** The trace of occurrence k under a resolved, validated rule (a ledger's pins and switches are not applied). */
+export function traceStart(u: CycleRule, gears: ReadonlyMap<string, GearAst>, k: number): StartTrace {
+  const { base, crossingAt, levels } = startLevels(u, gears);
+  const stages = u.stages ?? [];
+  const baseIndex = crossingAt(k);
+  return {
+    baseIndex,
+    baseStart: baseStart(base, baseIndex),
+    levels: levels.map((f) => f(k)),
+    fired: stages.map((st, j) => stageHit(st, levels[j]!, k, levels[j]!(k))),
+  };
+}
+
+/** Assumes a validated rule and gears; `id` names the unit in messages. A ledger is layered on by piecewise.ts. */
+export function compileStart(u: CycleRule, gears: ReadonlyMap<string, GearAst>, id: string): StartRule {
+  const { base, index, terms, levels } = startLevels(u, gears);
+  const stages = u.stages ?? [];
   const start = levels[levels.length - 1]!;
 
   // occurrence lengths of the base, read through the index map: n index steps of the base, n each floor or ceil of a/L
