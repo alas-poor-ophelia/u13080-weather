@@ -2,89 +2,94 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
-## Unreleased
+## 0.5.0
 
-- **Calendar definitions (Seshat).** *Settings → Calendar → Change calendar…* runs a
-  world on an exact calendar instead of the simple internal one: Gregorian, Hebrew, the tabular
-  Islamic calendars, Coptic, Ethiopian, the French Republican calendar (two leap rules), Baháʼí,
-  Roman (Varronian years) and Harptos, or one you write as Seshat text, with real months, leap
-  years and named holidays whose tags modifiers can match. You can bring the world's seasons and
-  moons along, and either keep day numbers or anchor today to a date. When anchoring, the world's
-  moons stay where they are in the sky, and a definition's own bodies (a sun a rule reads) move
-  with its dates. Starting from *this world's internal calendar* gives the same weather on every
-  day. The internal calendar's settings are kept; choosing *internal* as the calendar source goes
-  back to them, and switching to another definition never replaces a stored one without asking.
-  The Studio edits a definition's seasons and moons and writes them back exactly;
-  the full text is edited in settings. A definition that stops working (a hand edit to
-  `data.json`) is kept as it is, and the world makes no weather until it is fixed, rather than
-  silently switching calendars.
-- **The Studio measures years exactly on worlds that run a calendar definition** (and for calendar
-  plugins whose days carry year numbers). The ruler counts each year's own days, so a leap year's
-  29 February has its tick and its label; lanes, the day card, the playlist and the regimes row
-  place every day where the calendar puts it; a day-of-year lane is drawn only in years that reach
-  its days, and dragging one writes that year's own day numbers. Worlds on the internal calendar
-  are drawn exactly as before.
-- **A world on a calendar definition needs this version or later.** An older version does not
-  know definitions and would run such a world on its internal calendar settings again, without
-  saying so.
-- **Switching calendars no longer hides the next calendar edit from integrations.** After the
-  active calendar changed (choosing another calendar in settings, or a calendar plugin loading or
-  being disabled), the next edit to that calendar's settings fired `profiles-changed` with
-  `all: false`, although every report had moved; an integration that clears its caches only on
-  `all: true` (Windrose) could keep showing stale weather until it reloaded. The edit now fires
-  `all: true`, as any calendar edit does.
-- **Settings → Calendar says what the world runs on.** One row names the calendar in words
-  (the internal calendar's years, a definition's name, a calendar plugin's name) with today's date,
-  and offers *Change calendar…*, *Edit definition* and *Use the internal calendar* as they apply.
-  The old *Calendar source* dropdown, which listed adapter ids, is now a *Calendar plugin* chooser
-  by name, shown only when a calendar plugin is installed.
-- **Choosing another calendar is saved before it takes effect.** If the save fails, the
-  choice is left as it was and a notice says so; before, the switch applied in memory and could be
-  lost on the next restart.
-- **"No calendar is available" now has a code.** `getReport`, `getRange` and `timeAt`
-  throw it with `code: "wadjet-no-calendar"`, so an integration can tell it from
-  other errors.
-- **`registerTimeAdapter` also refuses the id `"seshat"`** (`wadjet-reserved-id`), reserved for
-  the plugin's own calendar alongside `"internal"`.
-- **The generator-change notice no longer promises something the plugin does not do.** Older
-  versions said past weather "stays as it was until you upgrade the world". Only the current
-  generator ships, so a generator change already applies to every report. The notice and the
-  settings row now say that past weather may differ, and the *Upgrade* button is now
-  *Acknowledge*: it records that you've seen the change and changes no weather. Pinned days are
-  kept, as before.
-- **Past weather changes (generator `wadjet-gen/0.0.4`).** This is the one planned change of the
-  internal calendar's rework (Seshat). Who is affected, and how:
-  - **Windows that start or end exactly on a day.** A `yearPhase` or moon window is `[start,
-    end)`, but the old arithmetic nudged some phases that sit exactly on a boundary just below
-    it. Those days now fall on the side the rule says. With boundaries written to two decimals,
-    a 365-day year has two such days (day 73 against 0.2 and day 146 against 0.4), a 360-day
-    year six, and a 400-day year 31. Onset envelopes are sampled the same way.
-  - **Moons on the internal calendar** are now computed exactly instead of in floating point.
-    Phases move by at most about 1e-10 of a cycle, so a day can only change sides of a moon window
-    if its phase sits that close to the window's edge. For the moons and window edges we tested
-    (periods 7.3, 29.53 and 33 days; edges such as 0, 0.05, 0.4, 0.5, 0.95), no day in ten
-    million either side of day 0 changed sides. Numbers that scale with a moon's phase (an onset
-    envelope) can move in their last digit.
-  - **Spells on calendars whose year is not 365 days**, including third-party calendars. A spell's
-    start rate was worked out over a fixed 365 days. It now uses the calendar's own year length,
-    so `meanStartsPerYear` means per year of that calendar.
-  - **Spells whose `when` names an era tag or negates a regime.** The start rate was worked out
-    on year 0, where an era usually does not apply, so a spell gated on an era and a season fell
-    back to the whole year and came out about four times too rare. A spell with `not` around a
-    regime had the same problem. Era and regime terms now count as *unknown* for that estimate,
-    so the window is the season's days in both cases, negated or not.
-  - Moons with a missing, zero, negative or non-numeric cycle are repaired on load (29.53 days)
-    and reported once, instead of producing broken phases. The report (a notice on load, and the
-    developer console) names each value it replaced. A cycle stored as a numeric string (`"30"`) is
-    read as that number and does not change. The moons box in settings now refuses a cycle that
-    is not more than 0 days.
-  - The same load-time repair covers the calendar's days-in-a-year (0, negative or not a number
-    becomes 365) and first year (not a number becomes 1; a numeric string such as `"1"`, which made
-    every year a string, becomes its number), reported the same way. Values
-    the calendar could already use, such as a fractional year length or one longer than the
-    settings row allows, are left as they are.
-  - Pinned days keep the values you pinned. The settings row asks you to *Acknowledge* the new
-    generator version.
+Your world can now run on a real calendar of your own, with months, weeks, leap years, moons and
+named holidays. This release also brings a new weather generator. A world made before this release
+keeps its weather exactly as it was until you choose to upgrade it.
+
+### Calendars
+
+- A world's calendar is now written as a short text in Seshat, the plugin's calendar language. A
+  new world starts on a plain one: 365-day years from year 1, one moon, no seasons. A world made
+  before this release stays on the **legacy calendar** and runs exactly as before.
+- *Settings → Calendar → Change calendar…* switches calendars. *Start from* offers Gregorian,
+  Hebrew, two Islamic calendars, Coptic, Ethiopian, French Republican, Baháʼí, Roman and Harptos,
+  your own text, or your world's current calendar as a starting point. *Bring this world's seasons and moons* carries them
+  over. *Day numbers* either keeps every day's number or pins today to a date you choose. *Edit
+  definition* edits the text, and *Undo the last calendar change* steps back once.
+- In the Studio, the ruler's *Calendar ⚑* button opens the Calendar window, with tabs for Seasons,
+  Year, Months, Week and Exceptions. Exceptions are one-off changes: add a named day, skip one
+  year's festival, move one year's first day, give one year different month lengths, or change a
+  rule from a given year on. Anything the tabs can't show can still be changed with *Edit as text*.
+- Before any calendar change is saved, *Save calendar changes?* tells you which days' weather it
+  can affect. If years would start on different days, it asks whether to keep day numbers.
+- Holidays and seasons give days tags that zone modifiers can match, so weather can follow your
+  calendar. A holiday can be tied to a moon phase, to another holiday (the day after it), or to the
+  first matching day after something else (the first full moon after the spring equinox, like
+  Easter). A month or year can follow a moon, and a season can start on a fixed date. You can't
+  remove a moon or moon phase that your calendar still uses.
+- A calendar can write dates in more than one way. *Settings → Calendar → Date display* picks the
+  style used in weather blocks, messages, inserted lines, the current day and pinned days, and a
+  weather block's `format:` line can choose its own. Dates you type, and the Studio, always use the
+  calendar's main style.
+- The Studio's ruler shows each year at its real length, so a leap year has all its days.
+- The full guide and reference:
+  [docs/CALENDARS.md](https://github.com/alas-poor-ophelia/u13080-weather/blob/0.5.0/docs/CALENDARS.md).
+
+### The new weather generator
+
+Nothing changes for an existing world until you press *Upgrade…* in *Settings → World →
+Generator*. After upgrading, some days come out differently:
+
+- a day that falls exactly on the edge of a modifier's season or moon window is now treated the
+  way the window says;
+- moon phases on the legacy calendar are calculated exactly, a tiny shift that can tip a
+  moon-based modifier on the edge of its window;
+- spells limited to an era, or to when a regime is *not* active, now start as often as their
+  setting says (some came out about four times too rarely);
+- on a calendar whose year isn't 365 days long, a spell's "times per year" now counts that
+  calendar's years.
+
+The *Upgrade…* dialog can keep the weather of the days you've already used: from a start date (a
+year before the current day, unless you change it) up to today. It shows how many days would
+change, then offers *Keep and upgrade*, *Upgrade without keeping* or *Cancel*. Up to 2,000 days can
+be kept. The **Kept weather** row then shows how many days were kept and which dates. Editing a
+zone doesn't change them, and pinned days still win. *Remove* asks first, then gives those days the
+new generator's weather, and can't be undone. A world has to be upgraded before it can change
+calendar. Changing the calendar later offers to remove kept weather, because kept days stay on
+their day numbers and may then fall in a different season.
+
+### Other changes and fixes
+
+- **Sync.** A new world isn't saved until you change something. Opening the vault on a new device
+  before Sync has finished can no longer replace your world with a blank one. A world also picks up
+  settings that Sync brings in from another device straight away, without a restart.
+- *Current day* shows and accepts a date the way your calendar writes it. A day number still works.
+- The Studio header has a *Go to date* box: type a date or a day number to jump there. When the
+  view spans a year or more, scrolling or dragging the ruler stops on whole years. The Studio opens
+  on the current year.
+- Renaming a moon also renames it wherever it's used: zone conditions, the Studio's channels and
+  device presets.
+- The Studio warns when a zone's tag looks the same as a calendar name but is typed with different
+  characters (for example an accent typed as a separate mark), because it would never match.
+- Weather blocks update when the day, the calendar or their zone changes. Obsidian's hotkeys work
+  while the Studio is focused.
+- On iPad, the rings and pointers on Studio knobs sat up and to the left of the knob. They are
+  centred again.
+- A moon cycle or year length that isn't a positive number, or a first year that isn't a number, is
+  repaired when the plugin loads, and you're told once.
+- The *Calendar plugin* setting lists calendar plugins by their names.
+- For plugin developers: "no calendar" errors carry `code: "wadjet-no-calendar"`;
+  `registerTimeAdapter` refuses the id `"seshat"`; the first calendar edit after switching calendar
+  fires `profiles-changed` with `all: true`.
+
+### Before you update
+
+Update every device that shares the vault before you upgrade a world or switch it to a new
+calendar. An older version of the plugin would quietly run that world on its old calendar
+settings, would ignore kept weather, and its *Upgrade* button would put an upgraded world back on
+the old generator.
 
 ## 0.4.0
 
