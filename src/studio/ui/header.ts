@@ -42,9 +42,10 @@ import { windowLabel } from "../model/format";
 import { flipHint, flipState, straddlesEquator } from "../model/hemisphere";
 import { hintAttr } from "../model/hints";
 import { zoneForSave } from "../model/json-view";
-import { studioSave } from "../model/definition";
+import { calendarAfterSave, resolveConflict, studioSave } from "../model/definition";
 import { followMoonRenames, moonRenames } from "../model/moon-rename";
 import { confirmRewrite } from "./rewrite-confirm-modal";
+import { askCalendarConflict } from "./calendar-conflict-modal";
 import { confirmCalendarChange } from "../../plugin/calendar-modals";
 import { askKeptOnCalendarChange, dropKeptIn } from "../../plugin/upgrade-modals";
 import { legacyCalendarMoved } from "../../plugin/upgrade";
@@ -391,13 +392,11 @@ export function createHeaderSurface(): Surface {
   /** The save itself; `commit` owns the busy flag, so every way out of here (a refusal, a throw) ends it. */
   async function save(c: SurfaceContext, state: StudioState, dirtyIds: ReadonlySet<string>, worldWasDirty: boolean, dirtyNames: readonly string[]): Promise<void> {
     const settings = c.plugin.settings;
-    // The calendar goes where the draft's calendar came from, or nowhere: a definition's edits merge into the
-    // stored text, the internal calendar's into its fields, and a draft from another source is refused.
+    // The calendar is written whole, as the draft shows it, or not at all (definition.ts planCalendarSave); a
+    // stored calendar changed since the Studio last loaded or saved it is asked about first.
     const current = c.plugin.studioSettings();
     const source = current.calendarSource ?? "legacy";
     const stored = settings.calendar.definition;
-    const decided = studioSave(state, current, stored);
-    const plan = decided.plan;
     const reseed = (calendar: StudioState["world"]["calendar"], history: boolean) =>
       c.store.update(
         (s) => {
@@ -407,8 +406,25 @@ export function createHeaderSurface(): Surface {
         },
         { history },
       );
+    const first = studioSave(state, current, stored);
+    const plan = first.kind === "conflict" ? resolveConflict(first, await askCalendarConflict(c.plugin.app, first.overwrite.kind === "refuse" ? first.overwrite.message : null)) : first;
+    if (plan === null) return;
+    if (first.kind === "conflict" && settings.calendar.definition !== stored) {
+      new Notice("Not saved: the calendar definition changed again while the question was open. Save again.");
+      return;
+    }
+    if (plan.kind === "none" && plan.reloaded) {
+      // Reload: the calendar edits go (undo brings them back); the other pending edits are saved as usual
+      reseed(plan.reseed, true);
+      dirtyIds = c.store.dirtyZones();
+      dirtyNames = [...dirtyIds].map((id) => state.zones[id]?.name ?? id);
+      worldWasDirty = c.store.worldDirty();
+      if (dirtyIds.size === 0 && !worldWasDirty) {
+        new Notice("Reloaded the calendar from storage");
+        return;
+      }
+    }
     if (plan.kind === "refuse") {
-      if (plan.reseed) reseed(plan.reseed, true); // undo brings the edits back
       new Notice(`Not saved: ${plan.message}`);
       return;
     }
@@ -416,7 +432,7 @@ export function createHeaderSurface(): Surface {
       if (!(await confirmRewrite(c.plugin.app))) return;
       // the question can stay open a while: an edit in settings meanwhile is not overwritten
       if (settings.calendar.definition !== stored) {
-        new Notice("Not saved: the calendar definition changed while the question was open. Save again to merge into it.");
+        new Notice("Not saved: the calendar definition changed while the question was open. Save again.");
         return;
       }
     }
@@ -431,7 +447,7 @@ export function createHeaderSurface(): Surface {
       text = chosen.text;
       removeKept = chosen.removeKept;
       if (settings.calendar.definition !== stored) {
-        new Notice("Not saved: the calendar definition changed while the dialog was open. Save again to merge into it.");
+        new Notice("Not saved: the calendar definition changed while the dialog was open. Save again.");
         return;
       }
     } else if (plan.kind === "legacy" && legacyCalendarMoved(settings.calendar, state.world.calendar)) {
@@ -482,13 +498,11 @@ export function createHeaderSurface(): Surface {
         throw e;
       }
     }
-    // the draft takes the calendar as written or as stored, so the next Save compares against what is on disk
-    // (studioSave says which, and which history markSaved rebases)
-    const after = decided.after(text);
-    if (after.reseed) reseed(after.reseed, false);
+    // the draft takes the calendar as written or as stored: the Studio's "last loaded or saved" (calendarBase)
+    reseed(calendarAfterSave(plan, state.world.calendar, text), false);
     // `markSaved` first, so the repaint lands on `Saved ✓` directly
     // instead of flashing `Save ●` on its way there.
-    c.store.markSaved({ rebaseFrom: after.rebaseFrom });
+    c.store.markSaved();
     c.plugin.refreshSettingsTab();
     new Notice(saveSummary(dirtyNames, worldWasDirty));
   }

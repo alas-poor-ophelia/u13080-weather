@@ -45,13 +45,13 @@ const mod = (a: number, m: number): number => {
 };
 
 /** The draft as one AST, or why it does not compile. */
-function current(calendar: CalendarDraft, base: CalendarDraft): CalendarAst | string {
-  const d = draftAst(calendar, base);
+function current(calendar: CalendarDraft): CalendarAst | string {
+  const d = draftAst(calendar);
   return "error" in d ? d.error : d.ast;
 }
 
-function withDraft(next: CalendarDraft, base: CalendarDraft): CalendarEdit {
-  const d = draftAst(next, base);
+function withDraft(next: CalendarDraft): CalendarEdit {
+  const d = draftAst(next);
   return "error" in d ? refuse(d.error) : { calendar: next, ast: d.ast };
 }
 
@@ -83,42 +83,42 @@ function termsProblem(terms: readonly Term[]): string | null {
 }
 
 /** The form's year with its leap rule's terms (and the days it adds) replaced. */
-function viaForm(calendar: CalendarDraft, base: CalendarDraft, terms: readonly Term[] | null, add?: number): CalendarEdit {
+function viaForm(calendar: CalendarDraft, terms: readonly Term[] | null, add?: number): CalendarEdit {
   const y = calendar.form!.year!;
   const leap = y.leap!;
   const written: LeapTerm[] = terms ? terms.map((t) => ({ every: t.every, at: mod((t.offset ?? 0) + y.firstYear, t.every), sign: t.sign })) : [...leap.terms];
-  return withDraft({ ...calendar, form: { ...calendar.form, year: { ...y, leap: { add: add ?? leap.add, terms: written } } } }, base);
+  return withDraft({ ...calendar, form: { ...calendar.form, year: { ...y, leap: { add: add ?? leap.add, terms: written } } } });
 }
 
 // ---- terms (intervals) and the table (positions)
 
 /** Set an interval gear's terms: through the form's leap rule where it reads the gear, else the gear's slice. */
-export function setTerms(calendar: CalendarDraft, base: CalendarDraft, id: string, terms: readonly Term[]): CalendarEdit {
-  const ast = current(calendar, base);
+export function setTerms(calendar: CalendarDraft, id: string, terms: readonly Term[]): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const g = gearIn(ast, id);
   if (typeof g === "string") return refuse(g);
   if (g.kind !== "intervals") return refuse(`the gear "${id}" is a table of positions, not intervals`);
   const why = termsProblem(terms);
   if (why) return refuse(why);
-  if (formReadsGear(calendar, ast, id)) return viaForm(calendar, base, terms);
-  return applyAstEdit(calendar, base, (a) => setGearIntervals(a, id, terms));
+  if (formReadsGear(calendar, ast, id)) return viaForm(calendar, terms);
+  return applyAstEdit(calendar, (a) => setGearIntervals(a, id, terms));
 }
 
 /** Apply `op` to the draft's terms of gear `id`, then write them (`setTerms`). */
-function editTerms(calendar: CalendarDraft, base: CalendarDraft, id: string, op: (terms: readonly Term[]) => readonly Term[] | string): CalendarEdit {
-  const ast = current(calendar, base);
+function editTerms(calendar: CalendarDraft, id: string, op: (terms: readonly Term[]) => readonly Term[] | string): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const g = gearIn(ast, id);
   if (typeof g === "string") return refuse(g);
   if (g.kind !== "intervals") return refuse(`the gear "${id}" is a table of positions, not intervals`);
   const next = op(g.terms);
-  return typeof next === "string" ? refuse(next) : setTerms(calendar, base, id, next);
+  return typeof next === "string" ? refuse(next) : setTerms(calendar, id, next);
 }
 
 /** Term `i` with `patch` over it (`every`, `offset`, `sign`); an offset is kept within ±(every − 1). */
-export function setTerm(calendar: CalendarDraft, base: CalendarDraft, id: string, i: number, patch: Partial<Term>): CalendarEdit {
-  return editTerms(calendar, base, id, (terms) => {
+export function setTerm(calendar: CalendarDraft, id: string, i: number, patch: Partial<Term>): CalendarEdit {
+  return editTerms(calendar, id, (terms) => {
     const t = terms[i];
     if (!t) return `the gear "${id}" has no term ${i + 1}`;
     const every = patch.every ?? t.every;
@@ -134,8 +134,8 @@ export function setTerm(calendar: CalendarDraft, base: CalendarDraft, id: string
  * (an EXRULE after an RRULE, as Gregorian's −100 follows its +4), so the sum
  * stays 0 or 1 as long as the last term did.
  */
-export function addTerm(calendar: CalendarDraft, base: CalendarDraft, id: string): CalendarEdit {
-  return editTerms(calendar, base, id, (terms) => {
+export function addTerm(calendar: CalendarDraft, id: string): CalendarEdit {
+  return editTerms(calendar, id, (terms) => {
     const last = terms[terms.length - 1];
     const term: Term = last ? { every: last.every * 4, ...(last.offset ? { offset: last.offset } : {}), sign: last.sign === 1 ? -1 : 1 } : { every: NEW_GEAR_EVERY, sign: 1 };
     return [...terms, term];
@@ -143,8 +143,8 @@ export function addTerm(calendar: CalendarDraft, base: CalendarDraft, id: string
 }
 
 /** Remove term `i` (a gear keeps at least one). */
-export function removeTerm(calendar: CalendarDraft, base: CalendarDraft, id: string, i: number): CalendarEdit {
-  return editTerms(calendar, base, id, (terms) => {
+export function removeTerm(calendar: CalendarDraft, id: string, i: number): CalendarEdit {
+  return editTerms(calendar, id, (terms) => {
     if (!terms[i]) return `the gear "${id}" has no term ${i + 1}`;
     if (terms.length === 1) return "a gear needs at least one term; remove the gear instead";
     return terms.filter((_, j) => j !== i);
@@ -152,27 +152,27 @@ export function removeTerm(calendar: CalendarDraft, base: CalendarDraft, id: str
 }
 
 /** Mark or unmark cycle position `cell` (0 to period − 1) of a table gear. */
-export function togglePosition(calendar: CalendarDraft, base: CalendarDraft, id: string, cell: number): CalendarEdit {
-  const ast = current(calendar, base);
+export function togglePosition(calendar: CalendarDraft, id: string, cell: number): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const g = gearIn(ast, id);
   if (typeof g === "string") return refuse(g);
   if (g.kind !== "positions") return refuse(`the gear "${id}" is a sum of intervals, not a table of positions`);
   if (!isInt(cell) || cell < 0 || cell >= g.period) return refuse(`position ${cell} is outside 0 to ${g.period - 1}`);
   const positions = g.positions.includes(cell) ? g.positions.filter((p) => p !== cell) : [...g.positions, cell];
-  return applyAstEdit(calendar, base, (a) => setGearPositions(a, id, { period: g.period, positions, ...(g.offset ? { offset: g.offset } : {}) }));
+  return applyAstEdit(calendar, (a) => setGearPositions(a, id, { period: g.period, positions, ...(g.offset ? { offset: g.offset } : {}) }));
 }
 
 /** Switch gear `id` between intervals and a table of positions in a cycle (the same years match). */
-export function setKind(calendar: CalendarDraft, base: CalendarDraft, id: string, kind: GearAst["kind"]): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setGearKind(a, id, kind));
+export function setKind(calendar: CalendarDraft, id: string, kind: GearAst["kind"]): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setGearKind(a, id, kind));
 }
 
 // ---- name, add, remove
 
 /** Rename gear `id`; every term that names it follows (ast-edit.ts `renameGear`). */
-export function renameGearIn(calendar: CalendarDraft, base: CalendarDraft, id: string, to: string): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => renameGear(a, id, to));
+export function renameGearIn(calendar: CalendarDraft, id: string, to: string): CalendarEdit {
+  return applyAstEdit(calendar, (a) => renameGear(a, id, to));
 }
 
 /** A fresh id from `stem` (stem, stem-2, …) among every declared id. */
@@ -188,22 +188,22 @@ export function freshId(stem: string, ast: CalendarAst): string {
  * calendar without one), feeding nothing until a feed is added. `id` is the
  * new gear's, for the window to select.
  */
-export function addGearPart(calendar: CalendarDraft, base: CalendarDraft): CalendarEdit & { readonly id?: string } {
-  const ast = current(calendar, base);
+export function addGearPart(calendar: CalendarDraft): CalendarEdit & { readonly id?: string } {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const on = yearOf(ast)?.id ?? ast.units.find((u) => u.kind === "cycle")?.id;
   if (on === undefined) return refuse("this calendar has no cycle unit for a gear to count");
   const id = freshId("gear", ast);
-  const r = applyAstEdit(calendar, base, (a) => addGear(a, { id, on, kind: "intervals", terms: [{ every: NEW_GEAR_EVERY, sign: 1 }] }));
+  const r = applyAstEdit(calendar, (a) => addGear(a, { id, on, kind: "intervals", terms: [{ every: NEW_GEAR_EVERY, sign: 1 }] }));
   return "refused" in r ? r : { ...r, id };
 }
 
 /** Remove gear `id` and what it adds: through the form's leap rule where it reads the gear, else every slice that names it. */
-export function removeGearPart(calendar: CalendarDraft, base: CalendarDraft, id: string): CalendarEdit {
-  const ast = current(calendar, base);
+export function removeGearPart(calendar: CalendarDraft, id: string): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
-  if (formReadsGear(calendar, ast, id)) return withDraft({ ...calendar, form: { ...calendar.form, year: { ...calendar.form!.year!, leap: null } } }, base);
-  return applyAstEdit(calendar, base, (a) => removeGear(a, id));
+  if (formReadsGear(calendar, ast, id)) return withDraft({ ...calendar, form: { ...calendar.form, year: { ...calendar.form!.year!, leap: null } } });
+  return applyAstEdit(calendar, (a) => removeGear(a, id));
 }
 
 // ---- feeds: the lengths a gear adds to when it engages
@@ -289,21 +289,21 @@ function setTermIn(terms: readonly GearTerm[] | undefined, id: string, add: numb
  * form where it reads the gear; removing that feed, or feeding anything else,
  * is an AST edit (the gear then stops being the form's simple leap rule).
  */
-export function setFeed(calendar: CalendarDraft, base: CalendarDraft, id: string, target: FeedTarget, add: number | null): CalendarEdit {
+export function setFeed(calendar: CalendarDraft, id: string, target: FeedTarget, add: number | null): CalendarEdit {
   if (add !== null && !isInt(add)) return refuse(`a gear adds ${String(add)} days; write a whole number`);
-  const ast = current(calendar, base);
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const g = gearIn(ast, id);
   if (typeof g === "string") return refuse(g);
   if (target.slot === undefined) {
     if (add !== null && target.unit === "year" && formReadsGear(calendar, ast, id)) {
-      if (calendar.form!.year!.leap!.add === add) return withDraft(calendar, base);
-      return viaForm(calendar, base, null, add);
+      if (calendar.form!.year!.leap!.add === add) return withDraft(calendar);
+      return viaForm(calendar, null, add);
     }
-    return applyAstEdit(calendar, base, (a) => setGearFeed(a, id, target.unit, add));
+    return applyAstEdit(calendar, (a) => setGearFeed(a, id, target.unit, add));
   }
   const i = target.slot;
-  return editSlots(calendar, base, target.unit, (slots, unit) => {
+  return editSlots(calendar, target.unit, (slots, unit) => {
     const s = slots[i];
     if (!s) return `the ${unit.id} has no slot ${i + (unit.number ?? 1)}`;
     if (add !== null) {

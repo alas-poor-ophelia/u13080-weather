@@ -38,8 +38,8 @@ export function yearRange(length: number): { min: number; max: number } {
 }
 
 /** The draft as one AST, or why it does not compile. */
-function current(calendar: CalendarDraft, base: CalendarDraft): CalendarAst | string {
-  const d = draftAst(calendar, base);
+function current(calendar: CalendarDraft): CalendarAst | string {
+  const d = draftAst(calendar);
   return "error" in d ? d.error : d.ast;
 }
 
@@ -49,18 +49,18 @@ function current(calendar: CalendarDraft, base: CalendarDraft): CalendarAst | st
  * Set cycle unit `unitId`'s base length (a leap gear still adds to it): the
  * form's year when it reads the year as fields, else the AST's `length:` slice.
  */
-export function setYearLength(calendar: CalendarDraft, base: CalendarDraft, unitId: string, length: number): CalendarEdit {
+export function setYearLength(calendar: CalendarDraft, unitId: string, length: number): CalendarEdit {
   if (!isInt(length) || length < 1) return refuse(`a ${unitId} of ${length} days; write a whole number of at least 1`);
   const year = calendar.form?.year;
   if (unitId === "year" && year) {
-    if (year.length === length) return withDraft(calendar, base);
-    return withDraft({ ...calendar, form: { ...calendar.form, year: { ...year, length } } }, base);
+    if (year.length === length) return withDraft(calendar);
+    return withDraft({ ...calendar, form: { ...calendar.form, year: { ...year, length } } });
   }
-  return applyAstEdit(calendar, base, (a) => setCycleLength(a, unitId, length));
+  return applyAstEdit(calendar, (a) => setCycleLength(a, unitId, length));
 }
 
-function withDraft(next: CalendarDraft, base: CalendarDraft): CalendarEdit {
-  const d = draftAst(next, base);
+function withDraft(next: CalendarDraft): CalendarEdit {
+  const d = draftAst(next);
   return "error" in d ? refuse(d.error) : { calendar: next, ast: d.ast };
 }
 
@@ -95,8 +95,8 @@ function isMonths(ast: CalendarAst, unitId: string): boolean {
  * form's months when the form reads them and can write the result, else the
  * AST's `slots:` slice.
  */
-export function editSlots(calendar: CalendarDraft, base: CalendarDraft, unitId: string, op: SlotsOp): CalendarEdit {
-  const ast = current(calendar, base);
+export function editSlots(calendar: CalendarDraft, unitId: string, op: SlotsOp): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const u = ast.units.find((x): x is SlotsUnitAst => x.kind === "slots" && x.id === unitId);
   if (!u) return refuse(`there is no slot unit "${unitId}"`);
@@ -112,9 +112,9 @@ export function editSlots(calendar: CalendarDraft, base: CalendarDraft, unitId: 
   const months = calendar.form?.months !== undefined && calendar.form.months !== null && isMonths(ast, unitId) ? asMonths(r.slots) : null;
   if (months) {
     if (r.slots.length === 0) return refuse(`the ${unitId} needs at least one slot`);
-    return withDraft({ ...calendar, form: { ...calendar.form, months } }, base);
+    return withDraft({ ...calendar, form: { ...calendar.form, months } });
   }
-  return applyAstEdit(calendar, base, (a) => setSlotUnit(a, unitId, r.slots, r.from));
+  return applyAstEdit(calendar, (a) => setSlotUnit(a, unitId, r.slots, r.from));
 }
 
 const same = (slots: readonly SlotAst[]): Array<number | null> => slots.map((_, i) => i);
@@ -134,9 +134,9 @@ function fixed(s: SlotAst, days: number): SlotAst {
 }
 
 /** Rename slot `i` (a slot that had a name keeps one; an unnamed slot, a tenday, may take one). */
-export function renameSlot(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, name: string): CalendarEdit {
+export function renameSlot(calendar: CalendarDraft, unitId: string, i: number, name: string): CalendarEdit {
   const n = name.trim().normalize("NFC");
-  return editSlots(calendar, base, unitId, (slots, unit) => {
+  return editSlots(calendar, unitId, (slots, unit) => {
     const s = at(slots, i, unit);
     if (typeof s === "string") return s;
     if (n === "") {
@@ -148,9 +148,9 @@ export function renameSlot(calendar: CalendarDraft, base: CalendarDraft, unitId:
 }
 
 /** Slot `i` takes `days` days (0: absent; a gear on it still adds). A slot that took the rest takes this many instead. */
-export function setSlotDays(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, days: number): CalendarEdit {
+export function setSlotDays(calendar: CalendarDraft, unitId: string, i: number, days: number): CalendarEdit {
   if (!isInt(days) || days < 0) return refuse(`a slot of ${days} days; write a whole number from 0 up`);
-  return editSlots(calendar, base, unitId, (slots, unit) => {
+  return editSlots(calendar, unitId, (slots, unit) => {
     const s = at(slots, i, unit);
     if (typeof s === "string") return s;
     if (typeof s.length === "object") return "this slot's length follows the length of its year, row by row; edit it as text";
@@ -159,8 +159,8 @@ export function setSlotDays(calendar: CalendarDraft, base: CalendarDraft, unitId
 }
 
 /** Slot `i` belongs to its parent but to no slot unit inside it (a festival day outside every tenday), or not. */
-export function setSlotFiller(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, on: boolean): CalendarEdit {
-  return editSlots(calendar, base, unitId, (slots, unit) => {
+export function setSlotFiller(calendar: CalendarDraft, unitId: string, i: number, on: boolean): CalendarEdit {
+  return editSlots(calendar, unitId, (slots, unit) => {
     const s = at(slots, i, unit);
     if (typeof s === "string") return s;
     const { filler: _f, ...rest } = s;
@@ -172,8 +172,8 @@ export function setSlotFiller(calendar: CalendarDraft, base: CalendarDraft, unit
  * Slot `i` takes the rest of its parent (whatever the other slots leave), or
  * a fixed `days` (its length this year, so turning it off moves nothing now).
  */
-export function setSlotRest(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, on: boolean, days: number): CalendarEdit {
-  return editSlots(calendar, base, unitId, (slots, unit) => {
+export function setSlotRest(calendar: CalendarDraft, unitId: string, i: number, on: boolean, days: number): CalendarEdit {
+  return editSlots(calendar, unitId, (slots, unit) => {
     const s = at(slots, i, unit);
     if (typeof s === "string") return s;
     if (on) return put(slots, i, s.length === "slack" ? s : { ...s, length: "slack" });
@@ -184,8 +184,8 @@ export function setSlotRest(calendar: CalendarDraft, base: CalendarDraft, unitId
 }
 
 /** Move slot `i` one place earlier (−1) or later (+1). */
-export function moveSlot(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, by: -1 | 1): CalendarEdit {
-  return editSlots(calendar, base, unitId, (slots, unit) => {
+export function moveSlot(calendar: CalendarDraft, unitId: string, i: number, by: -1 | 1): CalendarEdit {
+  return editSlots(calendar, unitId, (slots, unit) => {
     const s = at(slots, i, unit);
     if (typeof s === "string") return s;
     const j = i + by;
@@ -201,9 +201,9 @@ export function moveSlot(calendar: CalendarDraft, base: CalendarDraft, unitId: s
  * length of the slot before it (30 days when that one has no fixed length),
  * and a fresh name when the unit's slots are named.
  */
-export function addSlot(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number): CalendarEdit & { readonly index?: number } {
+export function addSlot(calendar: CalendarDraft, unitId: string, i: number): CalendarEdit & { readonly index?: number } {
   let index = -1;
-  const r = editSlots(calendar, base, unitId, (slots) => {
+  const r = editSlots(calendar, unitId, (slots) => {
     const after = i < 0 || i >= slots.length ? slots.length - 1 : i;
     const prev = slots[after];
     const named = slots.some((s) => s.name !== undefined);
@@ -217,8 +217,8 @@ export function addSlot(calendar: CalendarDraft, base: CalendarDraft, unitId: st
 }
 
 /** Remove slot `i` (a unit keeps at least one; a season that starts in it refuses, naming it). */
-export function removeSlot(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number): CalendarEdit {
-  return editSlots(calendar, base, unitId, (slots, unit) => {
+export function removeSlot(calendar: CalendarDraft, unitId: string, i: number): CalendarEdit {
+  return editSlots(calendar, unitId, (slots, unit) => {
     const s = at(slots, i, unit);
     if (typeof s === "string") return s;
     if (slots.length === 1) return `the ${unitId} needs at least one slot`;

@@ -39,7 +39,7 @@ export interface CrossingEditorDeps {
   occurrence: number | null;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
 }
 
@@ -106,7 +106,7 @@ function startSwitch(parent: HTMLElement, c: CrossingAst, deps: CrossingEditorDe
       { value: "after", label: "after", hint: orreryHint("orrery.crossingStart") },
     ],
     value: c.start === "after" ? "after" : "contains",
-    onChange: (v) => deps.edit((cal, b) => setStartMode(cal, b, id, v === "after"), "click"),
+    onChange: (v) => deps.edit((cal) => setStartMode(cal, id, v === "after"), "click"),
   });
   sw.el.setAttr("aria-label", "The year starts on the day holding the crossing, or after it");
   parts.push(sw);
@@ -137,7 +137,7 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
             item
               .setTitle(o.why ? `${o.name} · ${o.why}` : o.name)
               .setDisabled(o.why !== null)
-              .onClick(() => deps.edit((cal, b) => followBody(cal, b, id, o.id), "click")),
+              .onClick(() => deps.edit((cal) => followBody(cal, id, o.id), "click")),
           );
         const box = pick.getBoundingClientRect();
         menu.showAtPosition({ x: box.left, y: box.bottom });
@@ -157,7 +157,7 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
         label: "mark",
         fmt: (v) => v.toFixed(2),
         hint: orreryHint("orrery.crossingMark"),
-        onChange: (v, phase) => deps.edit((cal, b) => setMark(cal, b, id, markWrite(v, mark, storedRef?.mark ?? null)), phase),
+        onChange: (v, phase) => deps.edit((cal) => setMark(cal, id, markWrite(v, mark, storedRef?.mark ?? null)), phase),
       }),
     );
     const offset: Rational = ref.offset ?? { n: 0, d: 1 };
@@ -170,7 +170,7 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
         fmt: (v) => `${signed(Math.round(v))} h`,
         parse: (t) => whole(t),
         hint: orreryHint("orrery.crossingOffset"),
-        onChange: (v, phase) => deps.edit((cal, b) => setOffset(cal, b, id, offsetWrite(Math.round(v), offset, storedRef ? (storedRef.offset ?? { n: 0, d: 1 }) : null)), phase),
+        onChange: (v, phase) => deps.edit((cal) => setOffset(cal, id, offsetWrite(Math.round(v), offset, storedRef ? (storedRef.offset ?? { n: 0, d: 1 }) : null)), phase),
       }),
     );
     startSwitch(parent, c, deps, parts);
@@ -199,9 +199,9 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
     ],
     m.molad,
     (next, phase) =>
-      deps.edit((cal, b) => {
+      deps.edit((cal) => {
         const w = periodWrite(next, period, storedLit?.period ?? null);
-        return typeof w === "string" ? fail(w) : setLiteralPeriod(cal, b, id, w, keep);
+        return typeof w === "string" ? fail(w) : setLiteralPeriod(cal, id, w, keep);
       }, phase),
   );
   if (keep !== null) sec.createDiv({ cls: "wadjet-studio-orrery-note", text: `Keeps this ${id} in place: crossing 0 moves instead.`, attr: { "data-part": "period-keeps" } });
@@ -217,9 +217,9 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
     ],
     { days: z.day, hours: z.hours, parts: z.parts },
     (next, phase) =>
-      deps.edit((cal, b) => {
+      deps.edit((cal) => {
         const w = zeroWrite(next.hours, next.parts, at, storedLit?.at ?? null);
-        return typeof w === "string" ? fail(w) : setCrossingZero(cal, b, id, w);
+        return typeof w === "string" ? fail(w) : setCrossingZero(cal, id, w);
       }, phase),
   );
   startSwitch(parent, c, deps, parts);
@@ -244,7 +244,7 @@ export function buildTrainEditor(parent: HTMLElement, deps: CrossingEditorDeps):
         fmt: (v) => String(Math.round(v)),
         parse: (text) => whole(text),
         hint,
-        onChange: (v, phase) => deps.edit((cal, b) => setTrain(cal, b, id, write(Math.round(v))), phase),
+        onChange: (v, phase) => deps.edit((cal) => setTrain(cal, id, write(Math.round(v))), phase),
       }),
     );
   };

@@ -33,7 +33,7 @@ export interface BodyEditorDeps {
   phase: number;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
 }
 
@@ -116,7 +116,7 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
   // ---- name, inline
   title.empty();
   title.addClass("is-editable");
-  input(title, moon.name, "Moon name", orreryHint("orrery.bodyName"), "body-name", "wadjet-studio-orrery-title-input", (text) => deps.edit((c, b) => renameBody(c, b, id, text), "click"));
+  input(title, moon.name, "Moon name", orreryHint("orrery.bodyName"), "body-name", "wadjet-studio-orrery-title-input", (text) => deps.edit((c) => renameBody(c, id, text), "click"));
 
   // ---- period and epoch
   const stored = (deps.baseAst?.bodies ?? []).find((b) => b.id === id) ?? null;
@@ -135,7 +135,7 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
         return Number.isFinite(n) && n > 0 ? n : null;
       },
       hint: orreryHint("orrery.period"),
-      onChange: (v, phase) => deps.edit((c, b) => moveTo(c, b, { period: knobWrite(v, period, stored?.period ?? null, PERIOD_STEP) }), phase),
+      onChange: (v, phase) => deps.edit((c) => moveTo(c, { period: knobWrite(v, period, stored?.period ?? null, PERIOD_STEP) }), phase),
     }),
   );
   const ep = toNumber(epoch) - Math.floor(toNumber(epoch));
@@ -147,7 +147,7 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
       fmt: (v) => v.toFixed(2),
       hint: orreryHint("orrery.epoch"),
       // the knob shows the fraction of a turn; the whole turns of the epoch are kept (5a review)
-      onChange: (v, phase) => deps.edit((c, b) => moveTo(c, b, { epoch: epochWrite(v, epoch, stored?.epoch ?? null, EPOCH_STEP, FRACTION_MAX) }), phase),
+      onChange: (v, phase) => deps.edit((c) => moveTo(c, { epoch: epochWrite(v, epoch, stored?.epoch ?? null, EPOCH_STEP, FRACTION_MAX) }), phase),
     }),
   );
 
@@ -168,15 +168,15 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
           fmt: (v) => String(Math.round(v)),
           hint,
           onChange: (v, phase) =>
-            deps.edit((c, b) => {
+            deps.edit((c) => {
               const next = { ...m.molad, [key]: Math.round(v) };
               // a drag back to where the molad began keeps the period exactly as it was, even one that is no whole
               // number of parts (its knobs show it rounded); one back to the stored molad writes the stored period
-              if (next.days === m.molad.days && next.hours === m.molad.hours && next.parts === m.molad.parts) return moveTo(c, b, { period });
+              if (next.days === m.molad.days && next.hours === m.molad.hours && next.parts === m.molad.parts) return moveTo(c, { period });
               const w = fromMolad(next);
               if (w.kind === "refused") return { refused: true, reason: w.reason };
               const same = (r: Rational | null | undefined): r is Rational => !!r && w.value.n * r.d === r.n * w.value.d;
-              return moveTo(c, b, { period: same(period) ? period : same(stored?.period) ? stored.period : w.value });
+              return moveTo(c, { period: same(period) ? period : same(stored?.period) ? stored.period : w.value });
             }, phase),
         }),
       );
@@ -192,7 +192,7 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
   const list = sec.createDiv({ cls: "wadjet-studio-orrery-phases" });
   const phases = phasesIn(deps.calendar, id);
   const current = phaseName(body, deps.phase);
-  const write = (fn: (ps: Phase[]) => Phase[], phase: EditPhase): void => deps.edit((c, b) => setBodyPhases(c, b, id, fn(phasesIn(c, id))), phase);
+  const write = (fn: (ps: Phase[]) => Phase[], phase: EditPhase): void => deps.edit((c) => setBodyPhases(c, id, fn(phasesIn(c, id))), phase);
   phases.forEach((p, i) => {
     const row = list.createDiv({ cls: "wadjet-studio-orrery-phase", attr: { "data-part": `phase-${i}` } });
     row.toggleClass("is-current", p.name === current);
@@ -221,11 +221,11 @@ export function buildBodyEditor(parent: HTMLElement, title: HTMLElement, deps: B
   });
   if (!phases.length) list.createDiv({ cls: "wadjet-studio-orrery-note", text: "No named phases." });
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
-  button(ops, "＋ phase", "Add a phase", orreryHint("orrery.addPhase"), "add-phase", () => deps.edit((c, b) => addPhase(c, b, id), "click"));
-  button(ops, "Remove body", `Remove the moon ${moon.name}`, orreryHint("orrery.removeBody"), "remove-body", () => deps.edit((c, b) => removeBody(c, b, id), "click")).addClass("is-danger");
+  button(ops, "＋ phase", "Add a phase", orreryHint("orrery.addPhase"), "add-phase", () => deps.edit((c) => addPhase(c, id), "click"));
+  button(ops, "Remove body", `Remove the moon ${moon.name}`, orreryHint("orrery.removeBody"), "remove-body", () => deps.edit((c) => removeBody(c, id), "click")).addClass("is-danger");
   return done;
 
-  function moveTo(c: CalendarDraft, b: CalendarDraft, to: { period?: Rational; epoch?: Rational }): CalendarEdit {
-    return moveMoon(c, b, id, to);
+  function moveTo(c: CalendarDraft, to: { period?: Rational; epoch?: Rational }): CalendarEdit {
+    return moveMoon(c, id, to);
   }
 }

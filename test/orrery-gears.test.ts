@@ -12,18 +12,15 @@
  *     both (Harptos's Shieldmeet), and a ledger switch's rule (Roman);
  *   - a kind switch keeps the same years engaged;
  *   - the sum over the lcm is `problems()`'s to say, on the gear;
- *   - the stale guard covers the new slices.
  */
 import { describe, expect, test } from "bun:test";
-import { canonicalJson } from "../src/core/profile";
-import { editedSlices, kindRoundTrips, renameGear, replayProblem, setGearFeed, setGearKind, type AstEdit } from "../src/studio/model/ast-edit";
+import { editedSlices, kindRoundTrips, renameGear, setGearFeed, setGearKind, type AstEdit } from "../src/studio/model/ast-edit";
 import { mergeCalendar, sameCalendar, seshatDraft, type CalendarDraft, type CalendarEdit, type MergeResult } from "../src/studio/model/definition";
 import { addGearPart, addTerm, feedsOf, feedTargets, formReadsGear, removeGearPart, removeTerm, renameGearIn, setFeed, setKind, setTerm, termEngaged, togglePosition } from "../src/studio/model/orrery-gears";
 import { setYearLength } from "../src/studio/model/orrery-slots";
 import { gearMatches, GREGORIAN, HARPTOS, HEBREW, parse, print, problems, ROMAN, type CalendarAst, type CycleUnitAst, type GearAst, type SlotsUnitAst } from "../src/seshat";
 
 const clone = <T>(v: T): T => structuredClone(v);
-const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
 function done(r: CalendarEdit): { calendar: CalendarDraft; ast: CalendarAst } {
   if ("refused" in r) throw new Error(`refused: ${r.reason}`);
   return r;
@@ -52,7 +49,6 @@ const gearProblems = (ast: CalendarAst, id: string) => problems(ast).filter((p) 
 /** Every gear term id the definition holds, wherever it is. */
 const termIds = (ast: CalendarAst): string[] =>
   ast.units.flatMap((u) => (u.kind === "cycle" ? [...(u.gears ?? []), ...(u.ledger ?? []).flatMap((e) => (e.kind === "switch" ? (e.rule.gears ?? []) : []))] : u.slots.flatMap((s) => s.gears ?? [])).map((t) => t.gear));
-const outside = (text: string, fn: (a: CalendarAst) => CalendarAst) => print(fn(parse(text)));
 const sameYears = (a: GearAst, b: GearAst, from: number, to: number): boolean => {
   for (let n = from; n < to; n++) if (gearMatches(a, n) !== gearMatches(b, n)) return false;
   return true;
@@ -62,7 +58,7 @@ describe("terms through the form (Gregorian)", () => {
   test("every 4 → 5: the form's leap rule, the layer untouched; 2025 is a leap year; back to 4 is clean", () => {
     const { base, draft } = opened(GREGORIAN);
     expect(formReadsGear(draft, draft.ast!, "leap")).toBe(true);
-    const r = done(setTerm(draft, base, "leap", 0, { every: 5 }));
+    const r = done(setTerm(draft, "leap", 0, { every: 5 }));
     expect(r.calendar.ast).toBe(draft.ast);
     expect(r.calendar.form!.year!.leap!.terms[0]).toEqual({ every: 5, at: 0, sign: 1 });
     const g = gear(r.ast, "leap")!;
@@ -70,47 +66,47 @@ describe("terms through the form (Gregorian)", () => {
     expect(gearMatches(g, 2025)).toBe(true);
     expect(gearMatches(g, 2024)).toBe(false);
     expect(problems(r.ast)).toEqual([]);
-    const back = done(setTerm(r.calendar, base, "leap", 0, { every: 4 }));
+    const back = done(setTerm(r.calendar, "leap", 0, { every: 4 }));
     expect(sameCalendar(back.calendar, base)).toBe(true);
   });
   test("a pending year length and a leap edit sit side by side (one form part)", () => {
-    const { base, draft } = opened(GREGORIAN);
-    const a = done(setYearLength(draft, base, "year", 366));
-    const b = done(setTerm(a.calendar, base, "leap", 0, { every: 5 }));
+    const { draft } = opened(GREGORIAN);
+    const a = done(setYearLength(draft, "year", 366));
+    const b = done(setTerm(a.calendar, "leap", 0, { every: 5 }));
     expect(year(b.ast).length).toBe(366);
     const g = gear(b.ast, "leap")!;
     expect(g.kind === "intervals" && g.terms[0]!.every).toBe(5);
   });
   test("＋ term adds an EXRULE that nests; flipping −100 to + breaks the sum, on the gear", () => {
-    const { base, draft } = opened(GREGORIAN);
-    const r = done(addTerm(draft, base, "leap"));
+    const { draft } = opened(GREGORIAN);
+    const r = done(addTerm(draft, "leap"));
     const g = gear(r.ast, "leap")!;
     expect(g.kind === "intervals" && g.terms[3]).toEqual({ every: 1600, sign: -1 });
     expect(problems(r.ast)).toEqual([]);
-    const bad = done(setTerm(draft, base, "leap", 1, { sign: 1 }));
+    const bad = done(setTerm(draft, "leap", 1, { sign: 1 }));
     expect(gearProblems(bad.ast, "leap")[0]?.message).toContain("is counted 3 times");
   });
   test("an offset past the interval wraps into ±(every − 1); the term pin follows", () => {
-    const { base, draft } = opened(HARPTOS);
-    const r = done(setTerm(draft, base, "shieldmeet", 0, { offset: 5 }));
+    const { draft } = opened(HARPTOS);
+    const r = done(setTerm(draft, "shieldmeet", 0, { offset: 5 }));
     const g = gear(r.calendar.ast!, "shieldmeet")!;
     expect(g.kind === "intervals" && g.terms[0]).toEqual({ every: 4, offset: 1, sign: 1 });
     expect(termEngaged({ every: 4, offset: -1, sign: 1 }, 1371)).toBe(true);
     expect(termEngaged({ every: 4, offset: -1, sign: 1 }, 1372)).toBe(false);
   });
   test("refusals: the last term, a missing term, terms on a table", () => {
-    const { base, draft } = opened(HARPTOS);
-    expect(refused(removeTerm(draft, base, "shieldmeet", 0))).toContain("at least one term");
-    expect(refused(setTerm(draft, base, "shieldmeet", 4, { every: 3 }))).toContain("no term 5");
+    const { draft } = opened(HARPTOS);
+    expect(refused(removeTerm(draft, "shieldmeet", 0))).toContain("at least one term");
+    expect(refused(setTerm(draft, "shieldmeet", 4, { every: 3 }))).toContain("no term 5");
     const heb = opened(HEBREW);
-    expect(refused(setTerm(heb.draft, heb.base, "leap", 0, { every: 3 }))).toContain("table of positions");
+    expect(refused(setTerm(heb.draft, "leap", 0, { every: 3 }))).toContain("table of positions");
   });
 });
 
 describe("rename follows every reference", () => {
   test("Gregorian: the gear and the year's term; the year still reads as fields", () => {
     const { text, base, draft } = opened(GREGORIAN);
-    const r = done(renameGearIn(draft, base, "leap", "bissextile"));
+    const r = done(renameGearIn(draft, "leap", "bissextile"));
     expect(gear(r.ast, "leap")).toBeUndefined();
     expect(gear(r.ast, "bissextile")).toBeDefined();
     expect(year(r.ast).gears).toEqual([{ gear: "bissextile", add: 1 }]);
@@ -122,9 +118,9 @@ describe("rename follows every reference", () => {
     expect(saved.gears.map((g) => g.id)).toEqual(["bissextile"]);
   });
   test("Gregorian: a pending leap edit through the form keeps the new id", () => {
-    const { base, draft } = opened(GREGORIAN);
-    const a = done(setTerm(draft, base, "leap", 0, { every: 5 }));
-    const b = done(renameGearIn(a.calendar, base, "leap", "quint"));
+    const { draft } = opened(GREGORIAN);
+    const a = done(setTerm(draft, "leap", 0, { every: 5 }));
+    const b = done(renameGearIn(a.calendar, "leap", "quint"));
     const g = gear(b.ast, "quint")!;
     expect(g.kind === "intervals" && g.terms[0]!.every).toBe(5);
     expect(termIds(b.ast)).toEqual(["quint"]);
@@ -132,7 +128,7 @@ describe("rename follows every reference", () => {
   test("Hebrew: a positions gear of 19 feeding Adar I", () => {
     const { text, base, draft } = opened(HEBREW);
     const month = HEBREW.units.find((u) => u.kind === "slots" && u.slots.some((s) => s.gears?.length))!.id;
-    const r = done(renameGearIn(draft, base, "leap", "embolism"));
+    const r = done(renameGearIn(draft, "leap", "embolism"));
     expect(termIds(r.ast)).toEqual(["embolism"]);
     const adar = slots(r.ast, month).slots.find((s) => s.name === "Adar I")!;
     expect(adar.gears).toEqual([{ gear: "embolism", add: 30 }]);
@@ -144,7 +140,7 @@ describe("rename follows every reference", () => {
   });
   test("Harptos: Shieldmeet's year term and its filler slot", () => {
     const { base, draft } = opened(HARPTOS);
-    const r = done(renameGearIn(draft, base, "shieldmeet", "midsummer-leap"));
+    const r = done(renameGearIn(draft, "shieldmeet", "midsummer-leap"));
     expect(termIds(r.ast)).toEqual(["midsummer-leap", "midsummer-leap"]);
     expect(slots(r.ast, "month").slots.find((s) => s.name === "Shieldmeet")!.gears).toEqual([{ gear: "midsummer-leap", add: 1 }]);
     expect(editedSlices(base.ast!, r.calendar.ast!).sort()).toEqual(["feeds:year", "gear:midsummer-leap", "gear:shieldmeet", "slots:month"]);
@@ -152,7 +148,7 @@ describe("rename follows every reference", () => {
   });
   test("Roman: a ledger switch's rule, as the ledger slice", () => {
     const { base, draft } = opened(ROMAN);
-    const r = done(renameGearIn(draft, base, "leap", "julian"));
+    const r = done(renameGearIn(draft, "leap", "julian"));
     expect(termIds(r.ast)).not.toContain("leap");
     expect(termIds(r.ast)).toContain("julian");
     const sw = year(r.ast).ledger!.find((e) => e.kind === "switch");
@@ -171,8 +167,8 @@ describe("rename follows every reference", () => {
 
 describe("kind", () => {
   test("Hebrew's table becomes one interval per position and back, the same years engaged", () => {
-    const { base, draft } = opened(HEBREW);
-    const r = done(setKind(draft, base, "leap", "intervals"));
+    const { draft } = opened(HEBREW);
+    const r = done(setKind(draft, "leap", "intervals"));
     const g = gear(r.calendar.ast!, "leap")!;
     expect(g.kind === "intervals" && g.terms.length).toBe(7);
     expect(g.kind === "intervals" && g.terms.every((t) => t.every === 19 && t.sign === 1)).toBe(true);
@@ -189,16 +185,16 @@ describe("kind", () => {
   });
   test("Gregorian and Harptos switch to a table and back to the terms they had (the fewest intervals), the form reading Gregorian's year again", () => {
     const g = opened(GREGORIAN);
-    const there = done(setKind(g.draft, g.base, "leap", "positions"));
-    const back = done(setKind(there.calendar, g.base, "leap", "intervals"));
+    const there = done(setKind(g.draft, "leap", "positions"));
+    const back = done(setKind(there.calendar, "leap", "intervals"));
     expect(gear(back.ast, "leap")).toEqual(gear(GREGORIAN, "leap"));
     expect(back.calendar.form?.year).toEqual(g.base.form?.year);
     expect(sameCalendar(back.calendar, g.base)).toBe(true);
     expect(kindRoundTrips(GREGORIAN, "leap")).toBe(true);
     const h = opened(HARPTOS);
-    const t = done(setKind(h.draft, h.base, "shieldmeet", "positions"));
+    const t = done(setKind(h.draft, "shieldmeet", "positions"));
     expect(gear(t.ast, "shieldmeet")).toEqual({ id: "shieldmeet", on: "year", kind: "positions", period: 4, positions: [0], offset: -1 });
-    const hb = done(setKind(t.calendar, h.base, "shieldmeet", "intervals"));
+    const hb = done(setKind(t.calendar, "shieldmeet", "intervals"));
     expect(gear(hb.ast, "shieldmeet")).toEqual(gear(HARPTOS, "shieldmeet"));
     expect(sameCalendar(hb.calendar, h.base)).toBe(true);
     expect(kindRoundTrips(HARPTOS, "shieldmeet")).toBe(true);
@@ -212,44 +208,44 @@ describe("kind", () => {
     expect(kindRoundTrips(HEBREW, "leap")).toBe(true); // a table loses no terms
   });
   test("Gregorian through the AST: the year stops reading as fields, refused while the year holds a field edit", () => {
-    const { base, draft } = opened(GREGORIAN);
-    const r = done(setKind(draft, base, "leap", "positions"));
+    const { draft } = opened(GREGORIAN);
+    const r = done(setKind(draft, "leap", "positions"));
     expect(r.calendar.form?.year).toBeUndefined();
-    const pending = done(setYearLength(draft, base, "year", 366));
-    expect(refused(setKind(pending.calendar, base, "leap", "positions"))).toContain("the year has an unsaved edit");
+    const pending = done(setYearLength(draft, "year", 366));
+    expect(refused(setKind(pending.calendar, "leap", "positions"))).toContain("the year has an unsaved edit");
   });
   test("the cycle-year grid toggles a position", () => {
     const { base, draft } = opened(HEBREW);
-    const r = done(togglePosition(draft, base, "leap", 1));
+    const r = done(togglePosition(draft, "leap", 1));
     const g = gear(r.calendar.ast!, "leap")!;
     expect(g.kind === "positions" && g.positions).toEqual([0, 1, 3, 6, 8, 11, 14, 17]);
     expect(g.kind === "positions" && g.offset).toBe(-1);
-    const back = done(togglePosition(r.calendar, base, "leap", 1));
+    const back = done(togglePosition(r.calendar, "leap", 1));
     expect(sameCalendar(back.calendar, base)).toBe(true);
-    expect(refused(togglePosition(draft, base, "leap", 19))).toContain("outside 0 to 18");
+    expect(refused(togglePosition(draft, "leap", 19))).toContain("outside 0 to 18");
   });
 });
 
 describe("feeds", () => {
   test("Gregorian: the year's leap days through the form; a slot feed through the AST", () => {
-    const { base, draft } = opened(GREGORIAN);
-    const r = done(setFeed(draft, base, "leap", { unit: "year" }, 2));
+    const { draft } = opened(GREGORIAN);
+    const r = done(setFeed(draft, "leap", { unit: "year" }, 2));
     expect(r.calendar.form!.year!.leap!.add).toBe(2);
     expect(r.calendar.ast).toBe(draft.ast);
-    const jan = done(setFeed(draft, base, "leap", { unit: "month", slot: 0 }, 1));
+    const jan = done(setFeed(draft, "leap", { unit: "month", slot: 0 }, 1));
     expect(slots(jan.ast, "month").slots[0]!.gears).toEqual([{ gear: "leap", add: 1 }]);
     expect(feedsOf(jan.ast, "leap").map((f) => f.label)).toEqual(["year length", "January"]);
     expect(problems(jan.ast).some((p) => p.unit === "month")).toBe(false); // February takes the rest
   });
   test("a slot that takes the rest, and a unit the gear does not count, are refused with the reason", () => {
-    const { base, draft } = opened(GREGORIAN);
-    expect(refused(setFeed(draft, base, "leap", { unit: "month", slot: 1 }, 1))).toContain("takes the rest");
+    const { draft } = opened(GREGORIAN);
+    expect(refused(setFeed(draft, "leap", { unit: "month", slot: 1 }, 1))).toContain("takes the rest");
     expect(feedTargets(draft.ast!, "leap").find((t) => t.target.slot === 1)?.why).toContain("takes the rest");
     expect(refused(setGearFeed(GREGORIAN, "leap", "month", 1))).toContain("no cycle unit");
   });
   test("Harptos: removing the year feed is the feeds:year slice; Shieldmeet still carries it", () => {
     const { base, draft } = opened(HARPTOS);
-    const r = done(setFeed(draft, base, "shieldmeet", { unit: "year" }, null));
+    const r = done(setFeed(draft, "shieldmeet", { unit: "year" }, null));
     expect(year(r.calendar.ast!).gears).toBeUndefined();
     expect(editedSlices(base.ast!, r.calendar.ast!)).toEqual(["feeds:year"]);
     expect(feedsOf(r.ast, "shieldmeet").map((f) => f.label)).toEqual(["Shieldmeet"]);
@@ -260,67 +256,26 @@ describe("feeds", () => {
 describe("add and remove", () => {
   test("＋ gear: every 4 on the year, feeding nothing; problems() says nothing of it", () => {
     const { base, draft } = opened(GREGORIAN);
-    const r = done(addGearPart(draft, base));
+    const r = done(addGearPart(draft));
     expect((r as { id?: string }).id).toBe("gear");
     expect(gear(r.ast, "gear")).toEqual({ id: "gear", on: "year", kind: "intervals", terms: [{ every: 4, sign: 1 }] });
     expect(feedsOf(r.ast, "gear")).toEqual([]);
     expect(gearProblems(r.ast, "gear")).toEqual([]);
     expect(editedSlices(base.ast!, r.calendar.ast!)).toEqual(["gear:gear"]);
-    const two = done(addGearPart(r.calendar, base));
+    const two = done(addGearPart(r.calendar));
     expect((two as { id?: string }).id).toBe("gear-2");
   });
   test("remove: Gregorian through the form (the year has no leap rule); Harptos takes its terms along; Roman refuses for its switch", () => {
     const g = opened(GREGORIAN);
-    const r = done(removeGearPart(g.draft, g.base, "leap"));
+    const r = done(removeGearPart(g.draft, "leap"));
     expect(r.ast.gears).toEqual([]);
     expect(year(r.ast).gears).toBeUndefined();
     const h = opened(HARPTOS);
-    const hr = done(removeGearPart(h.draft, h.base, "shieldmeet"));
+    const hr = done(removeGearPart(h.draft, "shieldmeet"));
     expect(termIds(hr.ast)).toEqual([]);
     expect(editedSlices(h.base.ast!, hr.calendar.ast!).sort()).toEqual(["feeds:year", "gear:shieldmeet", "slots:month"]);
     const ro = opened(ROMAN);
-    expect(refused(removeGearPart(ro.draft, ro.base, "leap"))).toContain("rule change from year 754");
+    expect(refused(removeGearPart(ro.draft, "leap"))).toContain("rule change from year 754");
   });
 });
 
-describe("the stale guard on the gear slices (§18.6 item 1)", () => {
-  test("a rename survives an outside edit to a part it never touched", () => {
-    const { text, base, draft } = opened(HARPTOS);
-    const r = done(renameGearIn(draft, base, "shieldmeet", "leapday"));
-    const now = outside(text, (a) => ({ ...a, name: "Harptos (edited elsewhere)" }));
-    const saved = written(mergeCalendar(now, base, r.calendar));
-    expect(saved.name).toBe("Harptos (edited elsewhere)");
-    expect(termIds(saved)).toEqual(["leapday", "leapday"]);
-  });
-  test("an outside edit to the gear, or to a length it feeds, refuses the Save", () => {
-    const { text, base, draft } = opened(HARPTOS);
-    const r = done(renameGearIn(draft, base, "shieldmeet", "leapday"));
-    const gearMoved = outside(text, (a) => ({ ...a, gears: a.gears.map((g) => (g.kind === "intervals" ? { ...g, terms: [{ every: 8, sign: 1 as const }] } : g)) }));
-    expect(mergeCalendar(gearMoved, base, r.calendar).kind).toBe("stale");
-    const feedMoved = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === "year" && u.kind === "cycle" ? { ...u, gears: [{ gear: "shieldmeet", add: 2 }] } : u)) }));
-    expect(mergeCalendar(feedMoved, base, r.calendar).kind).toBe("stale");
-  });
-  test("a feed naming a gear removed outside the studio is stale, with the reason (replayProblem)", () => {
-    const extra: CalendarAst = { ...HARPTOS, gears: [...HARPTOS.gears, { id: "extra", on: "year", kind: "intervals", terms: [{ every: 7, sign: 1 }] }] };
-    const { text, base, draft } = opened(extra);
-    const r = done(setFeed(draft, base, "extra", { unit: "year" }, 1));
-    expect(editedSlices(base.ast!, r.calendar.ast!)).toEqual(["feeds:year"]);
-    const gone = outside(text, (a) => ({ ...a, gears: a.gears.filter((g) => g.id !== "extra") }));
-    const m = mergeCalendar(gone, base, r.calendar);
-    expect(m.kind).toBe("stale");
-    expect(JSON.stringify(m)).toContain('the gear \\"extra\\" that the year reads is gone');
-    const stored = parse(gone);
-    const out = { ...stored, units: stored.units.map((u) => (u.id === "year" ? year(r.calendar.ast!) : u)) };
-    expect(replayProblem("feeds:year", base.ast!, r.calendar.ast!, stored, out)).toContain("is gone");
-  });
-  test("Gregorian's form-path leap edit: an outside month rename survives", () => {
-    const { text, base, draft } = opened(GREGORIAN);
-    const r = done(setTerm(draft, base, "leap", 0, { every: 5 }));
-    const now = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.kind === "slots" ? { ...u, slots: u.slots.map((s, i) => (i === 0 ? { ...s, name: "Janus" } : s)) } : u)) }));
-    const saved = written(mergeCalendar(now, base, r.calendar));
-    expect(slots(saved, "month").slots[0]!.name).toBe("Janus");
-    const g = gear(saved, "leap")!;
-    expect(g.kind === "intervals" && g.terms[0]!.every).toBe(5);
-    expect(same(saved.gears.length, 1)).toBe(true);
-  });
-});

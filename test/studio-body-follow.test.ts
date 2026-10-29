@@ -5,7 +5,7 @@
  * a body-driven year is a text part with a reason and a sentence.
  */
 import { describe, expect, test } from "bun:test";
-import { calendarOfDefinition, mergeCalendar, planCalendarSave } from "../src/studio/model/definition";
+import { calendarOfDefinition, mergeCalendar, planCalendarSave, seshatDraft } from "../src/studio/model/definition";
 import { definitionRowEdit, definitionRows } from "../src/plugin/calendar-rows";
 import { definitionSummary } from "../src/plugin/calendar-row";
 import { compile, followSentence, FormError, recognise } from "../src/plugin/time/form";
@@ -31,7 +31,6 @@ const kOf = (ast: CalendarAst): number | undefined => (ast.units.find((u) => u.i
 
 describe("D2: a moon a unit follows cannot be removed", () => {
   const text = print(world());
-  const base = calendarOfDefinition(parse(text));
 
   test("the form refuses by body id, naming the unit, whatever slot the moon sits in", () => {
     const ast = parse(text);
@@ -44,14 +43,12 @@ describe("D2: a moon a unit follows cannot be removed", () => {
   });
 
   test("Studio Save refuses and leaves the draft as it was", () => {
-    const draft = { ...base, moons: base.moons.filter((m) => m.id !== "luna") };
+    const seeded = seshatDraft(parse(text));
+    const draft = { ...seeded, moons: seeded.moons.filter((m) => m.id !== "luna") };
     const before = structuredClone(draft);
-    const plan = planCalendarSave({ source: "seshat", calendar: base }, text, { calendar: draft, base, source: "seshat" });
+    const plan = planCalendarSave({ source: "seshat", calendar: seeded }, text, { calendar: draft, base: seeded, source: "seshat" });
     expect(plan.kind).toBe("refuse");
-    if (plan.kind === "refuse") {
-      expect(plan.message).toContain('"lunation"');
-      expect(plan.reseed).toBeUndefined();
-    }
+    if (plan.kind === "refuse") expect(plan.message).toContain('"lunation"');
     expect(draft).toEqual(before);
   });
 

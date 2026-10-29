@@ -2,7 +2,7 @@
  * The settings Calendar group's Days in a year, Moons and Seasons rows on a
  * world that runs a calendar definition (docs/SESHAT-v0.md §15.2, §15.1 R2).
  * Pure: no Obsidian imports. Each row reads its part of the stored definition
- * through the form model; an edit goes through the Studio's merge
+ * through the form model; an edit goes through the field merge
  * (studio/model/definition.ts mergeCalendar), so it writes only that part and
  * every other part of the stored definition passes through untouched. The
  * settings tab then asks the Save dialog before storing the text.
@@ -118,8 +118,6 @@ export function definitionRowEdit(stored: string, row: DefinitionRowKey, value: 
     case "error":
       // a refused edit (a FormError) is already a sentence that says what to do; anything else is the checker's words
       return { error: /[.!?]$/.test(m.message) ? m.message : `Not a calendar that runs: ${m.message}.` };
-    case "stale":
-      return { error: "The calendar definition changed while you edited it. Close and reopen settings to see it." };
     case "write":
       return m.text === stored ? { unchanged: true } : { text: m.text, renames };
   }

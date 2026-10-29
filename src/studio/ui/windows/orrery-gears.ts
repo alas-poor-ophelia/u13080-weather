@@ -38,7 +38,7 @@ export interface GearEditorDeps {
   index: number | null;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
   /** the part the window selects once the edit in hand lands (set inside `make`, so a refused or cancelled edit selects nothing) */
   selectAfter(part: PartId): void;
@@ -78,8 +78,8 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
   title.empty();
   title.addClass("is-editable");
   input(title, id, "Gear id", orreryHint("orrery.gearName"), "gear-name", "wadjet-studio-orrery-title-input", (text) =>
-    deps.edit((c, b) => {
-      const r = renameGearIn(c, b, id, text);
+    deps.edit((c) => {
+      const r = renameGearIn(c, id, text);
       if (!("refused" in r)) deps.selectAfter(`gear:${text.trim()}`);
       return r;
     }, "click"),
@@ -95,7 +95,7 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
     ],
     value: g.kind,
     onChange: (v) => {
-      const switchTo = (): void => deps.edit((c, b) => setKind(c, b, id, v as GearAst["kind"]), "click");
+      const switchTo = (): void => deps.edit((c) => setKind(c, id, v as GearAst["kind"]), "click");
       // a sum the table cannot give back as written: ask first (Undo restores it; switching back does not)
       if (v !== "positions" || kindRoundTrips(deps.ast, id)) return switchTo();
       new KindConfirmModal(deps.app, id, (ok) => (ok ? switchTo() : kind.update({ value: g.kind }))).open();
@@ -133,10 +133,10 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
         fmt: (v) => `${signed(Math.round(v))} d`,
         parse: (text) => whole(text.replace(/^\+/, ""), -Number.MAX_SAFE_INTEGER),
         hint: orreryHint("orrery.feedAdd"),
-        onChange: (v, phase) => deps.edit((c, b) => setFeed(c, b, id, t, Math.round(v)), phase),
+        onChange: (v, phase) => deps.edit((c) => setFeed(c, id, t, Math.round(v)), phase),
       }),
     );
-    button(row, "×", `Stop feeding ${f.label}`, orreryHint("orrery.feedRemove"), `feed-${i}-remove`, () => deps.edit((c, b) => setFeed(c, b, id, t, null), "click"));
+    button(row, "×", `Stop feeding ${f.label}`, orreryHint("orrery.feedRemove"), `feed-${i}-remove`, () => deps.edit((c) => setFeed(c, id, t, null), "click"));
   });
   const switches = switchesReading(deps.ast, id);
   if (switches.length) sec.createDiv({ cls: "wadjet-studio-orrery-note", text: `Also read by the rule change${switches.length === 1 ? "" : "s"} from ${switches.join(", ")} (Exceptions).` });
@@ -152,14 +152,14 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
         item
           .setTitle(x.why ? `${x.label} · ${x.why}` : x.label)
           .setDisabled(x.why !== null)
-          .onClick(() => deps.edit((c, b) => setFeed(c, b, id, x.target, 1), "click")),
+          .onClick(() => deps.edit((c) => setFeed(c, id, x.target, 1), "click")),
       );
     const box = plusFeed.getBoundingClientRect();
     menu.showAtPosition({ x: box.left, y: box.bottom });
   });
   button(ops, "Remove gear", `Remove the gear ${id}`, orreryHint("orrery.removeGear"), "remove-gear", () =>
-    deps.edit((c, b) => {
-      const r = removeGearPart(c, b, id);
+    deps.edit((c) => {
+      const r = removeGearPart(c, id);
       if (!("refused" in r)) deps.selectAfter(`unit:${g.on}`);
       return r;
     }, "click"),
@@ -216,7 +216,7 @@ function buildTerms(parent: HTMLElement, g: GearAst & { kind: "intervals" }, n: 
         { value: "-1", label: "EXRULE −", hint: orreryHint("orrery.termSign") },
       ],
       value: String(t.sign),
-      onChange: (v) => deps.edit((c, b) => setTerm(c, b, id, i, { sign: v === "1" ? 1 : -1 }), "click"),
+      onChange: (v) => deps.edit((c) => setTerm(c, id, i, { sign: v === "1" ? 1 : -1 }), "click"),
     });
     sign.el.setAttr("aria-label", `Term ${i + 1} adds or takes away`);
     parts.push(sign);
@@ -229,7 +229,7 @@ function buildTerms(parent: HTMLElement, g: GearAst & { kind: "intervals" }, n: 
         fmt: (v) => String(Math.round(v)),
         parse: (text) => whole(text, 1),
         hint: orreryHint("orrery.termEvery"),
-        onChange: (v, phase) => deps.edit((c, b) => setTerm(c, b, id, i, { every: Math.round(v) }), phase),
+        onChange: (v, phase) => deps.edit((c) => setTerm(c, id, i, { every: Math.round(v) }), phase),
       }),
     );
     const range = offsetRange(t.every);
@@ -243,13 +243,13 @@ function buildTerms(parent: HTMLElement, g: GearAst & { kind: "intervals" }, n: 
         fmt: (v) => signed(Math.round(v)),
         parse: (text) => whole(text.replace(/^\+/, ""), -Number.MAX_SAFE_INTEGER),
         hint: orreryHint("orrery.termOffset"),
-        onChange: (v, phase) => deps.edit((c, b) => setTerm(c, b, id, i, { offset: Math.round(v) }), phase),
+        onChange: (v, phase) => deps.edit((c) => setTerm(c, id, i, { offset: Math.round(v) }), phase),
       }),
     );
-    button(row, "×", `Remove term ${i + 1}`, orreryHint("orrery.termRemove"), `term-${i}-remove`, () => deps.edit((c, b) => removeTerm(c, b, id, i), "click"));
+    button(row, "×", `Remove term ${i + 1}`, orreryHint("orrery.termRemove"), `term-${i}-remove`, () => deps.edit((c) => removeTerm(c, id, i), "click"));
   });
   const ops = sec.createDiv({ cls: "wadjet-studio-orrery-ops" });
-  button(ops, "＋ term", `Add a term to ${id}`, orreryHint("orrery.addTerm"), "add-term", () => deps.edit((c, b) => addTerm(c, b, id), "click"));
+  button(ops, "＋ term", `Add a term to ${id}`, orreryHint("orrery.addTerm"), "add-term", () => deps.edit((c) => addTerm(c, id), "click"));
 }
 
 /** The cycle-year grid of a table gear: gold cells are its positions, the white border is this year. */
@@ -265,7 +265,7 @@ function buildGrid(parent: HTMLElement, g: GearAst & { kind: "positions" }, n: n
     const cell = grid.createDiv({ cls: "wadjet-studio-orrery-cell", text: String(c), attr: { role: "button", tabindex: "0", "aria-pressed": on ? "true" : "false", "aria-label": `position ${c}${c === now ? ", this year" : ""}`, "data-part": `cell-${c}`, "data-hint": orreryHint("orrery.gearCell") } });
     cell.toggleClass("is-leap", on);
     cell.toggleClass("is-now", c === now);
-    const flip = (): void => deps.edit((cal, b) => togglePosition(cal, b, id, c), "click");
+    const flip = (): void => deps.edit((cal) => togglePosition(cal, id, c), "click");
     cell.addEventListener("click", flip);
     cell.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter" && ev.key !== " ") return;

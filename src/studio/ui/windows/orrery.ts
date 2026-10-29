@@ -2,8 +2,8 @@
  * Seshat · ORRERY (docs/SESHAT-v0.md §18; bead wadjet-b6x, slices 1a-ii and
  * 5a): the world's calendar definition drawn as a machine.
  *
- * - On a Seshat world it draws the DRAFT: `draftAst(world.calendar,
- *   calendarBase)` (model/orrery-body.ts `draftReader`), so an edit anywhere
+ * - On a Seshat world it draws the DRAFT: `draftAst(world.calendar)`
+ *   (model/orrery-body.ts `draftReader`), so an edit anywhere
  *   in the Studio shows here, and the Orrery's own edits go into the same
  *   draft, Save and undo. A draft without the AST layer (another build's
  *   state) draws the stored definition, read-only.
@@ -429,7 +429,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
    * A click or typed value is one undo step; drag frames update without history and the drag's end snapshots,
    * so a drag is one step (store.ts); the end also runs `problems()` at once.
    */
-  function edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase, subject: WorldSubject = selected?.startsWith("body:") ? "moons" : "calendar"): void {
+  function edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase, subject: WorldSubject = selected?.startsWith("body:") ? "moons" : "calendar"): void {
     if (tearing || closed) {
       // a knob destroyed mid-drag closes its gesture: its frames are already in the store, so they become one step
       if (phase === "end" && dragging) {
@@ -457,7 +457,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     }
     if (asking) return;
     const st = ctx.store.get();
-    const r = make(st.world.calendar, baseOf(st));
+    const r = make(st.world.calendar);
     if ((phase === "drag" || phase === "end") && !dragging) {
       // a drag's first frame: anything left uncommitted (a refresh from settings updates without history) becomes
       // its own step first, so undoing the drag goes back to where it began, not past that
@@ -509,8 +509,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   }
   /** ＋ body: a new moon, selected (also when the edit waits for the world confirm). */
   function addBodyPart(): void {
-    edit((c, b) => {
-      const r = addBody(c, b, c.ast ?? ast!);
+    edit((c) => {
+      const r = addBody(c, c.ast ?? ast!);
       if (!("refused" in r) && r.id !== undefined) {
         selected = `body:${r.id}`;
         listKey = "";
@@ -521,8 +521,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
 
   /** ＋ gear: a new gear that feeds nothing, selected (also when the edit waits for the world confirm). */
   function addGearRow(): void {
-    edit((c, b) => {
-      const r = addGearPart(c, b);
+    edit((c) => {
+      const r = addGearPart(c);
       if (!("refused" in r) && r.id !== undefined) {
         selected = `gear:${r.id}`;
         listKey = "";
@@ -535,8 +535,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   function addStageRow(): void {
     const unit = model?.year.unit;
     if (unit === undefined) return;
-    edit((c, b) => {
-      const r = addStage(c, b, unit);
+    edit((c) => {
+      const r = addStage(c, unit);
       if (!("refused" in r) && r.index !== undefined) {
         selected = `stage:${unit}:${r.index}`;
         listKey = "";
@@ -548,8 +548,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   /** ＋ mark: a season at the middle of the longest, the seasons selected (also when the edit waits for the world confirm). */
   function addSeasonRow(): void {
     const phases = model && !behind && model.ast === ast ? model.year.seasons.map((x) => x.phase) : [];
-    edit((c, b) => {
-      const r = addMark(c, b, phases);
+    edit((c) => {
+      const r = addMark(c, phases);
       if (!("refused" in r)) {
         selected = "seasons";
         listKey = "";

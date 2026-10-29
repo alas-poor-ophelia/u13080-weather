@@ -4,9 +4,9 @@
  *
  *   - a Seshat draft carries `ast` (the stored definition plus AST-only edits);
  *     legacy drafts carry none and behave as before;
- *   - Save replays the edited slices and the pending field parts onto the
- *     definition stored at Save time: an outside edit to a part the draft never
- *     touched survives, one to a part it did touch is refused;
+ *   - Save writes the draft whole (print(draftAst)) when storage is as the
+ *     Studio last loaded or saved it, and asks first when it is not
+ *     (ruling 2026-10-30): Overwrite, Reload or Cancel;
  *   - nothing edited writes nothing; a field edit writes exactly what the
  *     field-only path wrote; an exact period survives a name edit and a move;
  *   - an older stash is seeded with the layer; undo covers both kinds of edit;
@@ -17,7 +17,6 @@ import { canonicalJson } from "../src/core/profile";
 import {
   addSeasonMark,
   editedSlices,
-  outsideSlices,
   removeSeasonMark,
   setCrossingBody,
   setCrossingMark,
@@ -30,7 +29,8 @@ import {
   setStages,
   type AstEdit,
 } from "../src/studio/model/ast-edit";
-import { applyAstEdit, calendarOfDefinition, draftAst, mergeCalendar, moveMoon, planCalendarSave, seshatDraft, studioSave, type CalendarDraft, type CalendarEdit, type MergeResult } from "../src/studio/model/definition";
+import { applyAstEdit, calendarAfterSave, calendarOfDefinition, draftAst, mergeCalendar, moveMoon, planCalendarSave, resolveConflict, seshatDraft, studioSave, type CalendarDraft, type CalendarEdit, type ConflictChoice, type MergeResult } from "../src/studio/model/definition";
+import { prepareDefinition } from "../src/plugin/time/seshat";
 import { adoptSettings, initialState, type StudioSettingsLike } from "../src/studio/model/state";
 import { SeshatCalendar } from "../src/plugin/time/seshat";
 import { applyStash, takeStash } from "../src/studio/model/stash";
@@ -117,16 +117,16 @@ describe("open, change nothing, Save: nothing is written", () => {
     test(name, () => {
       const { text, base, draft } = opened(ast);
       expect(mergeCalendar(text, base, draft)).toEqual({ kind: "unchanged" });
-      expect(planCalendarSave({ source: "seshat", calendar: base }, text, { calendar: draft, base, source: "seshat" })).toEqual({ kind: "none" });
-      expect(draftAst(draft, base)).toEqual({ ast: draft.ast! });
+      expect(planCalendarSave({ source: "seshat", calendar: base }, text, { calendar: draft, base, source: "seshat" })).toEqual({ kind: "none", reseed: base });
+      expect(draftAst(draft)).toEqual({ ast: draft.ast! });
     });
   }
 
   test("an AST edit and its reverse leave the draft equal to the base", () => {
     const { text, base, draft } = opened(LUNAR);
-    const there = done(applyAstEdit(draft, base, (a) => setCrossingStart(a, "year", true))).calendar;
+    const there = done(applyAstEdit(draft, (a) => setCrossingStart(a, "year", true))).calendar;
     expect(same(there, base)).toBe(false);
-    const back = done(applyAstEdit(there, base, (a) => setCrossingStart(a, "year", false))).calendar;
+    const back = done(applyAstEdit(there, (a) => setCrossingStart(a, "year", false))).calendar;
     expect(same(back, base)).toBe(true);
     expect(mergeCalendar(text, base, back)).toEqual({ kind: "unchanged" });
   });
@@ -158,7 +158,7 @@ describe("exact periods (§18.3 D2)", () => {
   test("an exact move keeps its period through Save, a later name edit and a float-free round trip", () => {
     const { text, base, draft } = opened(LUNAR);
     const molad = { n: 765_433, d: 25_920 };
-    const moved = done(moveMoon(draft, base, "moon", { period: molad }));
+    const moved = done(moveMoon(draft, "moon", { period: molad }));
     expect(moved.ast.bodies![0]!.period).toEqual(molad);
     expect(moved.ast.bodies![0]!.epoch).toEqual({ n: 1, d: 4 }); // the unmoved half, exactly
     const cal = moved.calendar;
@@ -169,94 +169,30 @@ describe("exact periods (§18.3 D2)", () => {
 
   test("a move back to the stored pair leaves the draft clean", () => {
     const { base, draft } = opened(LUNAR);
-    const there = done(moveMoon(draft, base, "moon", { period: { n: 3, d: 1 } })).calendar;
-    const back = done(moveMoon(there, base, "moon", { period: { n: 2953059, d: 100000 } })).calendar;
+    const there = done(moveMoon(draft, "moon", { period: { n: 3, d: 1 } })).calendar;
+    const back = done(moveMoon(there, "moon", { period: { n: 2953059, d: 100000 } })).calendar;
     expect(same(back, base)).toBe(true);
   });
 
   test("an epoch move goes through compile: the year that follows the moon keeps its numbering", () => {
-    const { base, draft } = opened(LUNAR);
+    const { draft } = opened(LUNAR);
     const epoch = { n: 9, d: 10 };
-    const r = done(moveMoon(draft, base, "moon", { epoch }));
+    const r = done(moveMoon(draft, "moon", { epoch }));
     expect(unit(r.ast, "year").crossing!.body!.k ?? 0).toBe(epochEditK({ n: 1, d: 4 }, epoch));
     expect(problems(r.ast)).toEqual([]);
   });
 
   test("a pair past the Body limit is refused with the reason, and so is a missing moon", () => {
-    const { base, draft } = opened(LUNAR);
-    expect(reason(moveMoon(draft, base, "moon", { period: { n: 94906267, d: 94906265 }, epoch: { n: 1, d: 94906263 } }))).toContain("too large");
-    expect(reason(moveMoon(draft, base, "nope", { period: { n: 30, d: 1 } }))).toContain("no moon");
-  });
-});
-
-describe("the stale guard (§18.6 item 1)", () => {
-  /** The stored text after an edit made outside the Studio (settings, Edit definition). */
-  const outside = (text: string, fn: (a: CalendarAst) => CalendarAst) => print(fn(parse(text)));
-
-  test("an outside edit to parts the draft never touched survives a Save of an AST edit", () => {
-    const { text, base, draft } = opened(LUNAR);
-    const cal = done(applyAstEdit(draft, base, (a) => setCrossingStart(a, "year", true))).calendar;
-    const now = outside(text, (a) => ({
-      ...a,
-      rules: a.rules!.map((r) => ({ ...r, tags: ["full", "bright"] })),
-      days: [{ day: 11, name: "Founding" }],
-      units: a.units.map((u) => (u.kind === "slots" ? { ...u, slots: u.slots.map((s, i) => (i === 0 ? { ...s, name: "Firstmonth" } : s)) } : u)),
-    }));
-    const got = written(mergeCalendar(now, base, cal));
-    expect(unit(got, "year").crossing!.start).toBe("after");
-    expect(got.rules![0]!.tags).toEqual(["full", "bright"]);
-    expect(got.days).toEqual([{ day: 11, name: "Founding" }]);
-    expect((got.units[1] as { slots: ReadonlyArray<{ name?: string }> }).slots[0]!.name).toBe("Firstmonth");
-  });
-
-  test("an outside edit to the year's length survives a Save of a leap-gear edit (the slices are finer than the year part)", () => {
-    const { text, base, draft } = opened(GREGORIAN);
-    const cal = done(applyAstEdit(draft, base, (a) => setGearIntervals(a, "leap", [{ every: 4, sign: 1 }]))).calendar;
-    const now = outside(text, (a) => ({ ...a, units: a.units.map((u) => (u.id === "year" ? { ...u, number: 5 } : u)) }));
-    const got = written(mergeCalendar(now, base, cal));
-    expect(unit(got, "year").number).toBe(5);
-    expect(got.gears[0]).toEqual({ id: "leap", on: "year", kind: "intervals", terms: [{ every: 4, sign: 1 }] });
-  });
-
-  test("an outside edit to a rule survives a Save of a field edit", () => {
-    const { text, base, draft } = opened(LUNAR);
-    draft.form = { ...draft.form, name: "Renamed" };
-    const now = outside(text, (a) => ({ ...a, rules: a.rules!.map((r) => ({ ...r, tags: ["bright"] })) }));
-    const got = written(mergeCalendar(now, base, draft));
-    expect([got.name, got.rules![0]!.tags]).toEqual(["Renamed", ["bright"]]);
-  });
-
-  test("an outside edit to the slice the draft edited refuses, showing the stored calendar", () => {
-    const { text, base, draft } = opened(LUNAR);
-    const cal = done(applyAstEdit(draft, base, (a) => setCrossingStart(a, "year", true))).calendar;
-    const now = outside(text, (a) => ok(setCrossingOffset(a, "year", { n: 1, d: 4 })));
-    const m = mergeCalendar(now, base, cal);
-    expect(m.kind).toBe("stale");
-    if (m.kind === "stale") expect(same(m.stored.ast, parse(now))).toBe(true);
-    const plan = planCalendarSave({ source: "seshat", calendar: seshatDraft(parse(now)) }, now, { calendar: cal, base, source: "seshat" });
-    expect(plan.kind).toBe("refuse");
-  });
-
-  test("an outside edit to the gear the draft edited refuses", () => {
-    const { text, base, draft } = opened(GREGORIAN);
-    const cal = done(applyAstEdit(draft, base, (a) => setGearIntervals(a, "leap", [{ every: 4, sign: 1 }]))).calendar;
-    const now = outside(text, (a) => ok(setGearIntervals(a, "leap", [{ every: 4, sign: 1 }, { every: 128, sign: -1 }])));
-    expect(mergeCalendar(now, base, cal).kind).toBe("stale");
-  });
-
-  test("an outside edit to a field part the draft edited refuses as before", () => {
-    const { text, base, draft } = opened(LUNAR);
-    draft.form = { ...draft.form, name: "Mine" };
-    const now = outside(text, (a) => ({ ...a, name: "Theirs" }));
-    expect(mergeCalendar(now, base, draft).kind).toBe("stale");
-    expect(mergeCalendar(now, withoutAst(base), withoutAst(draft)).kind).toBe("stale");
+    const { draft } = opened(LUNAR);
+    expect(reason(moveMoon(draft, "moon", { period: { n: 94906267, d: 94906265 }, epoch: { n: 1, d: 94906263 } }))).toContain("too large");
+    expect(reason(moveMoon(draft, "nope", { period: { n: 30, d: 1 } }))).toContain("no moon");
   });
 });
 
 describe("applyAstEdit", () => {
   test("the field parts an AST edit moves are re-read, and are not edits of their own", () => {
     const { text, base, draft } = opened(GREGORIAN);
-    const r = done(applyAstEdit(draft, base, (a) => setGearIntervals(a, "leap", [{ every: 4, sign: 1 }])));
+    const r = done(applyAstEdit(draft, (a) => setGearIntervals(a, "leap", [{ every: 4, sign: 1 }])));
     expect(r.calendar.form!.year!.leap!.terms).toEqual([{ every: 4, at: 0, sign: 1 }]);
     expect(same(r.ast, r.calendar.ast)).toBe(true); // nothing pending: the layer is the draft
     expect(written(mergeCalendar(text, base, r.calendar)).gears[0]).toEqual({ id: "leap", on: "year", kind: "intervals", terms: [{ every: 4, sign: 1 }] });
@@ -264,30 +200,28 @@ describe("applyAstEdit", () => {
 
   test("dated season marks: the ribbon's projection follows the mark", () => {
     const { text, base, draft } = opened(LUNAR);
-    const r = done(applyAstEdit(draft, base, (a) => setSeasonMark(a, 1, { name: "Bloom", day: 90 })));
+    const r = done(applyAstEdit(draft, (a) => setSeasonMark(a, 1, { name: "Bloom", day: 90 })));
     expect(same(r.calendar.seasons, base.seasons)).toBe(false);
     expect(same(r.calendar.seasons, calendarOfDefinition(r.ast).seasons)).toBe(true);
     expect(written(mergeCalendar(text, base, r.calendar)).seasons!.marks[1]).toEqual({ name: "Bloom", day: 90 });
   });
 
   test("an AST edit that would move a part with an unsaved field edit is refused", () => {
-    const { base, draft } = opened(GREGORIAN);
+    const { draft } = opened(GREGORIAN);
     draft.form = { ...draft.form, year: { ...draft.form!.year!, length: 360 } };
-    expect(reason(applyAstEdit(draft, base, (a) => setGearIntervals(a, "leap", [{ every: 4, sign: 1 }])))).toContain("year");
+    expect(reason(applyAstEdit(draft, (a) => setGearIntervals(a, "leap", [{ every: 4, sign: 1 }])))).toContain("year");
   });
 
-  test("an edit reaching past its slice is refused; legacy calendars have no layer", () => {
-    const { base, draft } = opened(LUNAR);
-    expect(reason(applyAstEdit(draft, base, (a) => ({ ast: { ...a, name: "x" } })))).toContain("past the part");
+  test("legacy calendars have no layer", () => {
     const legacy: CalendarDraft = { seasons: [], moons: [] };
-    expect(reason(applyAstEdit(legacy, legacy, (a) => ({ ast: a })))).toContain("not a definition");
-    expect("error" in draftAst(legacy, legacy)).toBe(true);
+    expect(reason(applyAstEdit(legacy, (a) => ({ ast: a })))).toContain("not a definition");
+    expect("error" in draftAst(legacy)).toBe(true);
   });
 
   test("a field edit that does not compile is the refusal, as a Save would say it", () => {
     const { text, base, draft } = opened(LUNAR);
     draft.moons = []; // the year follows the moon
-    const d = draftAst(draft, base);
+    const d = draftAst(draft);
     expect("error" in d && d.error).toContain("cannot be removed");
     const m = mergeCalendar(text, base, draft);
     expect(m.kind === "error" && m.message).toBe("error" in d ? d.error : "");
@@ -326,7 +260,7 @@ describe("the stash (§18.6 item 4)", () => {
     const applied = applyStash(initialState(settings(now), null), stash);
     const got = written(mergeCalendar(now, applied.calendarBase!, applied.world.calendar));
     expect([got.name, got.rules![0]!.tags]).toEqual(["Stashed", ["bright"]]);
-    const d = draftAst(applied.world.calendar, applied.calendarBase!);
+    const d = draftAst(applied.world.calendar);
     expect("ast" in d && d.ast.rules![0]!.tags).toEqual(["bright"]); // the draft shows the stored rule, not the stash's base
   });
 
@@ -334,7 +268,7 @@ describe("the stash (§18.6 item 4)", () => {
     const text = print(LUNAR);
     const store = createStore(initialState(settings(text), null), (f) => f());
     const st = store.get();
-    const r = done(applyAstEdit(st.world.calendar, st.calendarBase!, (a) => setCrossingStart(a, "year", true)));
+    const r = done(applyAstEdit(st.world.calendar, (a) => setCrossingStart(a, "year", true)));
     store.update((s) => {
       s.world.calendar = r.calendar;
     });
@@ -352,7 +286,7 @@ describe("undo (§18.6 item 5)", () => {
     const named = canonicalJson(store.get().world);
     store.update(
       (s) => {
-        s.world.calendar = done(applyAstEdit(s.world.calendar, s.calendarBase!, (a) => setCrossingStart(a, "year", true))).calendar;
+        s.world.calendar = done(applyAstEdit(s.world.calendar, (a) => setCrossingStart(a, "year", true))).calendar;
       },
       { history: true },
     );
@@ -374,7 +308,7 @@ describe("undo (§18.6 item 5)", () => {
     const store = createStore(initialState({ zones: [], eras: [], overrides: [], calendar: seshatDraft(LUNAR), calendarSource: "seshat" }, null), (f) => f());
     for (const n of [2960, 2970, 2980]) {
       store.update((s) => {
-        s.world.calendar = done(moveMoon(s.world.calendar, s.calendarBase!, "moon", { period: { n, d: 100 } })).calendar;
+        s.world.calendar = done(moveMoon(s.world.calendar, "moon", { period: { n, d: 100 } })).calendar;
       });
     }
     store.snapshot();
@@ -385,28 +319,14 @@ describe("undo (§18.6 item 5)", () => {
   });
 });
 
-describe("a legacy world is unchanged", () => {
-  test("no layer, and Save writes its fields as before", () => {
-    const st = initialState({ zones: [], eras: [], overrides: [], calendar: { seasons: [{ name: "winter", from: 0 }], moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] } }, null);
-    expect(st.world.calendar.ast).toBeUndefined();
-    const draft = clone(st.world.calendar);
-    draft.moons[0]!.cycleDays = 30;
-    expect(planCalendarSave({ source: "legacy", calendar: st.calendarBase! }, undefined, { calendar: draft, base: st.calendarBase!, source: "legacy" })).toEqual({ kind: "legacy" });
-    // the settings calendar carries more than the draft (the year length): an untouched draft still saves nothing
-    const settingsCalendar = { ...st.calendarBase!, yearLength: 365 } as CalendarDraft;
-    expect(planCalendarSave({ source: "legacy", calendar: settingsCalendar }, undefined, { calendar: st.calendarBase!, base: st.calendarBase!, source: "legacy" })).toEqual({ kind: "none" });
-  });
-});
-
 // ---- the edit functions
 
-/** Each edit keeps everything outside its slice, the result is a valid definition, and a Save replays it exactly. */
+/** Each edit's result is a valid definition, and a Save writes it exactly. */
 function replays(ast: CalendarAst, edit: (a: CalendarAst) => AstEdit): CalendarAst {
   const { text, base, draft } = opened(ast);
   const next = ok(edit(draft.ast!));
-  expect(same(outsideSlices(next), outsideSlices(draft.ast!))).toBe(true);
   expect(problems(next)).toEqual([]);
-  const r = done(applyAstEdit(draft, base, edit));
+  const r = done(applyAstEdit(draft, edit));
   const m = mergeCalendar(text, base, r.calendar);
   if (m.kind === "unchanged") expect(same(next, draft.ast)).toBe(true);
   else expect(same(written(m), parse(print(r.ast)))).toBe(true);
@@ -562,7 +482,7 @@ describe("dated season marks", () => {
   });
 });
 
-// ---- Parallax pass on step 3: the base travels with history, one-sided layers, seating, exact halves, seams
+// ---- a Studio Save: one check, one dialog (ruling 2026-10-30)
 
 /** Gregorian with a moon and a unit that follows it: a crossing slice and a gear slice to edit. */
 const FOLLOWED: CalendarAst = {
@@ -572,13 +492,14 @@ const FOLLOWED: CalendarAst = {
 };
 const seshatSettings = (text: string): StudioSettingsLike => ({ zones: [], eras: [{ name: "Age", from: 0, to: 10 }], overrides: [], calendar: seshatDraft(parse(text)), calendarSource: "seshat" });
 /**
- * A Studio Save through the code header.ts `save` runs (`studioSave`): the plan; a refusal reseeds with history;
- * otherwise the definition is "written" (returned as the stored text), the draft reseeded and markSaved called
- * with the rebase studioSave decides. The zones, eras and the Save dialog are header.ts's alone.
+ * A Studio Save through the steps header.ts `save` runs: the plan (`studioSave`); a conflict answered with
+ * `choice` (`resolveConflict`); Reload reseeds with history; a refusal saves nothing; otherwise the definition is
+ * "written" (returned as the stored text), the draft reseeded (`calendarAfterSave`) and markSaved called. The
+ * zones, eras and the Save dialog are header.ts's alone.
  */
-function headerSave(store: ReturnType<typeof createStore>, stored: string) {
-  const decided = studioSave(store.get(), { calendarSource: "seshat", calendar: seshatDraft(parse(stored)) }, stored);
-  const plan = decided.plan;
+function headerSave(store: ReturnType<typeof createStore>, stored: string, choice: ConflictChoice = "cancel") {
+  const first = studioSave(store.get(), { calendarSource: "seshat", calendar: seshatDraft(parse(stored)) }, stored);
+  const plan = first.kind === "conflict" ? resolveConflict(first, choice) : first;
   const reseed = (calendar: CalendarDraft, history: boolean) =>
     store.update(
       (x) => {
@@ -588,52 +509,133 @@ function headerSave(store: ReturnType<typeof createStore>, stored: string) {
       },
       { history },
     );
-  if (plan.kind === "refuse") {
-    if (plan.reseed) reseed(plan.reseed, true);
-    return { plan, stored };
-  }
+  if (plan === null || plan.kind === "refuse") return { first, plan, stored };
+  if (plan.kind === "none" && plan.reloaded) reseed(plan.reseed, true);
   const text = plan.kind === "definition" ? plan.text : null;
-  const after = decided.after(text);
-  if (after.reseed) reseed(after.reseed, false);
-  store.markSaved({ rebaseFrom: after.rebaseFrom });
-  return { plan, stored: text ?? stored };
+  reseed(calendarAfterSave(plan, store.get().world.calendar, text), false);
+  store.markSaved();
+  return { first, plan, stored: text ?? stored };
 }
 /** The stored text after an outside edit to the crossing and to gear:leap. */
 const S1 = (text: string) => print(ok(setGearIntervals(ok(setCrossingOffset(parse(text), "lunation", { n: 1, d: 4 })), "leap", [{ every: 4, sign: 1 }])));
+/** What a Save of the draft writes: the draft AST, printed and prepared. */
+const printed = (calendar: CalendarDraft): string => {
+  const d = draftAst(calendar);
+  if ("error" in d) throw new Error(d.error);
+  const p = prepareDefinition(print(d.ast));
+  if ("error" in p) throw new Error(p.error);
+  return p.text;
+};
+/** A store on FOLLOWED with a crossing edit and a name edit made in the Studio. */
+function edited(s0: string) {
+  const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
+  store.update((s) => (s.world.calendar = done(applyAstEdit(s.world.calendar, (a) => setCrossingStart(a, "lunation", true))).calendar), { history: true });
+  store.update((s) => (s.world.calendar.form = { ...s.world.calendar.form, name: "Mine" }), { history: true });
+  return store;
+}
 
-describe("the base travels with undo (Parallax blocker)", () => {
-  test("stale refusal, undo, Save: the outside gear edit is never overwritten", () => {
+describe("a Studio Save writes the draft whole, or asks first (ruling 2026-10-30)", () => {
+  test("unchanged storage: Save writes exactly the draft, and the draft reseeds from what was written", () => {
     const s0 = print(FOLLOWED);
-    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
-    store.update((s) => (s.world.calendar = done(applyAstEdit(s.world.calendar, s.calendarBase!, (a) => setCrossingStart(a, "lunation", true))).calendar), { history: true });
-    const s1 = S1(s0);
-    expect(headerSave(store, s1).plan.kind).toBe("refuse"); // stale: the crossing moved outside
-    expect(store.undo()).toBe(true); // the edit comes back, judged against the base it was made under
-    expect(same(store.get().calendarBase!.ast, parse(s0))).toBe(true);
-    const again = headerSave(store, s1).plan;
-    expect(again.kind).toBe("refuse");
-    expect(again.kind === "refuse" && again.message).toContain("make them again here");
+    const store = edited(s0);
+    const shown = printed(store.get().world.calendar);
+    const r = headerSave(store, s0);
+    expect(r.first.kind).toBe("definition");
+    expect(r.stored).toBe(shown);
+    expect(unit(parse(r.stored), "lunation").crossing!.start).toBe("after");
+    expect(parse(r.stored).name).toBe("Mine");
+    expect(store.worldDirty()).toBe(false);
+    expect(same(store.get().calendarBase, seshatDraft(parse(r.stored)))).toBe(true);
   });
 
-  test("an eras edit, an outside change, a refresh, undo of the eras: the era saves, the calendar is left as stored", () => {
+  test("changed storage and edits: the plan is a conflict; Overwrite writes the draft, Reload reseeds from storage, Cancel saves nothing", () => {
     const s0 = print(FOLLOWED);
-    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
-    store.update((s) => (s.world.eras[0]!.to = 20), { history: true });
-    store.update((s) => (s.world.eras[0]!.name = "Long age"), { history: true });
     const s1 = S1(s0);
-    store.update((s) => adoptSettings(s, initialState(seshatSettings(s1), null), store.dirtyZones(), store.worldDirty()));
-    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true); // the untouched calendar took the stored one
-    expect(store.undo()).toBe(true); // undo the rename: the calendar from before the refresh is back, with its own base
-    expect(same(store.get().world.calendar.ast, parse(s0))).toBe(true);
-    const r = headerSave(store, s1);
-    expect(r.plan.kind).toBe("none"); // nothing written to the calendar
-    expect(r.stored).toBe(s1); // the outside change stays in storage
-    expect(store.get().saved.world.eras[0]).toEqual({ name: "Age", from: 0, to: 20 }); // the era edit saved
-    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true); // the draft shows the stored calendar
+    const store = edited(s0);
+    const shown = printed(store.get().world.calendar);
+    const plan = studioSave(store.get(), { calendarSource: "seshat", calendar: seshatDraft(parse(s1)) }, s1);
+    if (plan.kind !== "conflict") throw new Error(`expected a conflict, got ${plan.kind}`);
+    expect(plan.overwrite).toEqual({ kind: "definition", text: shown, rewrites: false });
+    expect(resolveConflict(plan, "overwrite")).toEqual(plan.overwrite);
+    expect(resolveConflict(plan, "reload")).toEqual({ kind: "none", reseed: seshatDraft(parse(s1)), reloaded: true });
+    expect(resolveConflict(plan, "cancel")).toBeNull();
+  });
+
+  test("Overwrite: the stored calendar becomes what the Studio shows; the outside edit is gone", () => {
+    const s0 = print(FOLLOWED);
+    const store = edited(s0);
+    const shown = printed(store.get().world.calendar);
+    const r = headerSave(store, S1(s0), "overwrite");
+    expect(r.first.kind).toBe("conflict");
+    expect(r.stored).toBe(shown);
+    expect(unit(parse(r.stored), "lunation").crossing!.body!.offset).toBeUndefined();
     expect(store.worldDirty()).toBe(false);
   });
 
-  test("a refresh with a dirty world and an edited calendar keeps the edit and its base", () => {
+  test("Reload: the draft shows the stored calendar, the eras edit is saved; undo brings the calendar edits back, and Save then writes them without asking", () => {
+    const s0 = print(FOLLOWED);
+    const s1 = S1(s0);
+    const store = edited(s0);
+    store.update((s) => (s.world.eras[0]!.to = 20), { history: true });
+    const r = headerSave(store, s1, "reload");
+    expect(r.first.kind).toBe("conflict");
+    expect(r.stored).toBe(s1); // nothing written to the calendar
+    expect(same(store.get().world.calendar, seshatDraft(parse(s1)))).toBe(true);
+    expect(same(store.get().calendarBase, seshatDraft(parse(s1)))).toBe(true);
+    expect(store.get().saved.world.eras[0]).toEqual({ name: "Age", from: 0, to: 20 });
+    expect(store.worldDirty()).toBe(false);
+    expect(store.undo()).toBe(true); // undo changes the draft only: the edits come back over the reloaded base
+    expect(store.get().world.calendar.form!.name).toBe("Mine");
+    expect(same(store.get().calendarBase, seshatDraft(parse(s1)))).toBe(true);
+    const again = headerSave(store, s1);
+    expect(again.first.kind).toBe("definition");
+    expect(parse(again.stored).name).toBe("Mine");
+  });
+
+  test("Cancel: nothing is saved, and the draft and its base stay as they were", () => {
+    const s0 = print(FOLLOWED);
+    const store = edited(s0);
+    const before = canonicalJson(store.get().world);
+    const r = headerSave(store, S1(s0), "cancel");
+    expect(r.plan).toBeNull();
+    expect(canonicalJson(store.get().world)).toBe(before);
+    expect(same(store.get().calendarBase!.ast, parse(s0))).toBe(true);
+    expect(store.worldDirty()).toBe(true);
+  });
+
+  test("no calendar edits and changed storage: nothing is written to the calendar, and the draft reseeds from storage", () => {
+    const s0 = print(FOLLOWED);
+    const s1 = S1(s0);
+    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
+    store.update((s) => (s.world.eras[0]!.name = "Long age"), { history: true });
+    const r = headerSave(store, s1);
+    expect(r.first).toEqual({ kind: "none", reseed: seshatDraft(parse(s1)) });
+    expect(r.stored).toBe(s1);
+    expect(same(store.get().world.calendar, seshatDraft(parse(s1)))).toBe(true);
+    expect(same(store.get().calendarBase, seshatDraft(parse(s1)))).toBe(true);
+    expect(store.get().saved.world.eras[0]!.name).toBe("Long age");
+    expect(store.worldDirty()).toBe(false);
+  });
+
+  test("undo then Save writes what is shown (wadjet-gvk): edit, Save, undo, Save; redo, Save", () => {
+    const s0 = print(FOLLOWED);
+    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
+    store.update((s) => (s.world.calendar = done(applyAstEdit(s.world.calendar, (a) => setCrossingStart(a, "lunation", true))).calendar), { history: true });
+    const t1 = headerSave(store, s0).stored;
+    expect(unit(parse(t1), "lunation").crossing!.start).toBe("after");
+    expect(store.undo()).toBe(true);
+    const shown = printed(store.get().world.calendar);
+    const r = headerSave(store, t1);
+    expect(r.first.kind).toBe("definition"); // storage is what the Studio last wrote: no question
+    expect(r.stored).toBe(shown);
+    expect(unit(parse(r.stored), "lunation").crossing!.start).toBeUndefined();
+    expect(store.redo()).toBe(true);
+    const back = headerSave(store, r.stored);
+    expect(back.first.kind).toBe("definition");
+    expect(unit(parse(back.stored), "lunation").crossing!.start).toBe("after");
+  });
+
+  test("a refresh from settings under an edited calendar keeps the edit and its base, so the Save asks", () => {
     const s0 = print(FOLLOWED);
     const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
     store.update((s) => (s.world.calendar.form = { ...s.world.calendar.form, name: "Mine" }), { history: true });
@@ -641,21 +643,77 @@ describe("the base travels with undo (Parallax blocker)", () => {
     store.update((s) => adoptSettings(s, initialState(seshatSettings(s1), null), store.dirtyZones(), true));
     expect(store.get().world.calendar.form!.name).toBe("Mine");
     expect(same(store.get().calendarBase!.ast, parse(s0))).toBe(true);
+    const r = headerSave(store, s1, "overwrite");
+    expect(r.first.kind).toBe("conflict");
+    expect([parse(r.stored).name, parse(r.stored).rules ?? []]).toEqual(["Mine", []]);
+  });
+
+  test("an untouched calendar under a dirty world takes the stored one on a refresh; an undo past it is an edit like any other", () => {
+    const s0 = print(FOLLOWED);
+    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
+    store.update((s) => (s.world.eras[0]!.to = 20), { history: true });
+    store.update((s) => (s.world.eras[0]!.name = "Long age"), { history: true });
+    const s1 = S1(s0);
+    store.update((s) => adoptSettings(s, initialState(seshatSettings(s1), null), store.dirtyZones(), store.worldDirty()));
+    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true);
+    expect(store.undo()).toBe(true); // the calendar from before the refresh is back in the draft
+    expect(same(store.get().world.calendar.ast, parse(s0))).toBe(true);
+    // the draft now differs from what was last loaded (s1), and storage is still s1: Save writes what is shown
     const r = headerSave(store, s1);
-    expect(r.plan.kind).toBe("definition");
-    expect([parse(r.stored).name, parse(r.stored).rules!.length]).toEqual(["Mine", 1]);
+    expect(r.first.kind).toBe("definition");
+    expect(same(parse(r.stored), parse(printed(seshatDraft(parse(s0)))))).toBe(true);
+    expect(store.get().saved.world.eras[0]).toEqual({ name: "Age", from: 0, to: 20 });
   });
 
   test("Save, reseed, markSaved: clean, and a refresh from the same text stays clean", () => {
     const s0 = print(FOLLOWED);
     const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
-    store.update((s) => (s.world.calendar = done(applyAstEdit(s.world.calendar, s.calendarBase!, (a) => setCrossingStart(a, "lunation", true))).calendar), { history: true });
+    store.update((s) => (s.world.calendar = done(applyAstEdit(s.world.calendar, (a) => setCrossingStart(a, "lunation", true))).calendar), { history: true });
     const r = headerSave(store, s0);
-    expect(r.plan.kind).toBe("definition");
+    expect(r.plan?.kind).toBe("definition");
     expect(store.worldDirty()).toBe(false);
     store.update((s) => adoptSettings(s, initialState(seshatSettings(r.stored), null), store.dirtyZones(), store.worldDirty()));
     expect(store.worldDirty()).toBe(false);
-    expect(headerSave(store, r.stored).plan).toEqual({ kind: "none" });
+    expect(headerSave(store, r.stored).plan?.kind).toBe("none");
+  });
+
+  test("a world that switched calendars since: the question is asked, and Overwrite says why it cannot write", () => {
+    const { text, base, draft } = opened(LUNAR);
+    draft.form = { ...draft.form, name: "Mine" };
+    const legacy: CalendarDraft = { seasons: [], moons: [] };
+    const plan = planCalendarSave({ source: "legacy", calendar: legacy }, text, { calendar: draft, base, source: "seshat" });
+    if (plan.kind !== "conflict") throw new Error(`expected a conflict, got ${plan.kind}`);
+    expect(plan.overwrite.kind === "refuse" && plan.overwrite.message).toContain("now runs the legacy calendar");
+    expect(resolveConflict(plan, "reload")).toEqual({ kind: "none", reseed: legacy, reloaded: true });
+  });
+});
+
+describe("a legacy world: the same check, the legacy fields written", () => {
+  const base: CalendarDraft = { seasons: [{ name: "winter", from: 0 }], moons: [{ name: "Sable", cycleDays: 29.53, phaseAtEpoch: 0 }] };
+  const draft: CalendarDraft = { ...clone(base), moons: [{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0 }] };
+  const moved: CalendarDraft = { ...clone(base), seasons: [{ name: "summer", from: 0 }] };
+
+  test("unchanged storage writes the fields; the settings calendar's other fields are no change", () => {
+    expect(planCalendarSave({ source: "legacy", calendar: base }, undefined, { calendar: draft, base, source: "legacy" })).toEqual({ kind: "legacy" });
+    const settingsCalendar = { ...base, yearLength: 365 } as CalendarDraft;
+    expect(planCalendarSave({ source: "legacy", calendar: settingsCalendar }, undefined, { calendar: draft, base, source: "legacy" })).toEqual({ kind: "legacy" });
+  });
+
+  test("changed storage and edits: a conflict; Overwrite writes the fields, Reload reseeds them, Cancel saves nothing", () => {
+    const plan = planCalendarSave({ source: "legacy", calendar: moved }, undefined, { calendar: draft, base, source: "legacy" });
+    if (plan.kind !== "conflict") throw new Error(`expected a conflict, got ${plan.kind}`);
+    expect(resolveConflict(plan, "overwrite")).toEqual({ kind: "legacy" });
+    expect(resolveConflict(plan, "reload")).toEqual({ kind: "none", reseed: moved, reloaded: true });
+    expect(resolveConflict(plan, "cancel")).toBeNull();
+  });
+
+  test("no edits and changed storage: nothing written, the draft takes the stored fields", () => {
+    expect(planCalendarSave({ source: "legacy", calendar: moved }, undefined, { calendar: base, base, source: "legacy" })).toEqual({ kind: "none", reseed: moved });
+  });
+
+  test("after a legacy write the draft takes the fields as written: no body ids, no exact halves", () => {
+    const withIds: CalendarDraft = { ...draft, moons: [{ ...draft.moons[0]!, id: "moon-1", exact: { period: { n: 30, d: 1 } } }] };
+    expect(calendarAfterSave({ kind: "legacy" }, withIds, null)).toEqual({ seasons: base.seasons, moons: [{ name: "Sable", cycleDays: 30, phaseAtEpoch: 0 }] });
   });
 });
 
@@ -678,18 +736,16 @@ describe("after Save the reseeded draft is what the adapter loads", () => {
 });
 
 describe("one-sided layers and seating", () => {
-  test("a draft with the layer and a base without it is stale, never nothing to save", () => {
-    const { text, base, draft } = opened(LUNAR);
-    const cal = done(applyAstEdit(draft, base, (a) => setCrossingStart(a, "year", true))).calendar;
-    expect(mergeCalendar(text, withoutAst(base), cal).kind).toBe("stale");
-    expect(mergeCalendar(text, base, withoutAst(draft)).kind).toBe("stale");
+  test("a stash whose base lacks the layer is an edit over another calendar: the Save asks first", () => {
+    const { text, draft } = opened(LUNAR);
+    const cal = done(applyAstEdit(draft, (a) => setCrossingStart(a, "year", true))).calendar;
     const store = createStore(initialState(seshatSettings(text), null), (f) => f());
     store.update((s) => (s.world.calendar = cal));
     const stash = takeStash(store.get(), store)!;
     delete stash.calendarBase!.ast;
     const applied = applyStash(initialState(seshatSettings(text), null), stash);
     expect(applied.world.calendar.ast).toBeDefined();
-    expect(planCalendarSave({ source: "seshat", calendar: seshatDraft(parse(text)) }, text, { calendar: applied.world.calendar, base: applied.calendarBase!, source: "seshat" }).kind).toBe("refuse");
+    expect(planCalendarSave({ source: "seshat", calendar: seshatDraft(parse(text)) }, text, { calendar: applied.world.calendar, base: applied.calendarBase!, source: "seshat" }).kind).toBe("conflict");
   });
 
   test("a seeded stash shows the newer definition in every part it never edited, fields and layer alike", () => {
@@ -705,7 +761,7 @@ describe("one-sided layers and seating", () => {
     expect(applied.world.calendar.moons[0]!.name).toBe("Selene");
     expect(applied.calendarBase!.moons[0]!.name).toBe("Selene");
     expect(applied.world.calendar.form!.name).toBe("Stashed");
-    const d = draftAst(applied.world.calendar, applied.calendarBase!);
+    const d = draftAst(applied.world.calendar);
     if ("error" in d) throw new Error(d.error);
     expect(same(withoutAst(applied.world.calendar), calendarOfDefinition(d.ast))).toBe(true); // one calendar
     expect(written(mergeCalendar(now, applied.calendarBase!, applied.world.calendar)).name).toBe("Stashed");
@@ -724,7 +780,7 @@ describe("exact halves", () => {
   test("a float write drops the exact half it moved, so a return to the stored value is clean", () => {
     const store = createStore(initialState(seshatSettings(print(LUNAR)), null), (f) => f());
     const was = store.get().world.calendar.moons[0]!.cycleDays;
-    store.update((s) => (s.world.calendar = done(moveMoon(s.world.calendar, s.calendarBase!, "moon", { period: { n: 765_433, d: 25_920 } })).calendar), { history: true });
+    store.update((s) => (s.world.calendar = done(moveMoon(s.world.calendar, "moon", { period: { n: 765_433, d: 25_920 } })).calendar), { history: true });
     expect(store.get().world.calendar.moons[0]!.exact).toEqual({ period: { n: 765_433, d: 25_920 } });
     store.update((s) => (s.world.calendar.moons[0]!.cycleDays = was), { history: true }); // the float knob
     expect(store.get().world.calendar.moons[0]!.exact).toBeUndefined();
@@ -746,32 +802,3 @@ test("a crossing within a day of day 0: START contains to after moves the start 
   expect(unit(after, "lunation").crossing!.body!.k).toBeUndefined();
 });
 
-describe("undo past a Save (markSaved rebases history made over the base the Save started from)", () => {
-  /** A Save of a crossing edit through studioSave, then undo past it. */
-  function savedOnce(outsideFirst: boolean) {
-    const s0 = print(FOLLOWED);
-    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
-    store.update((s) => (s.world.calendar = done(applyAstEdit(s.world.calendar, s.calendarBase!, (a) => setCrossingStart(a, "lunation", true))).calendar), { history: true });
-    // the stored text this Save starts from: as seeded, or moved outside in a part the draft never touched
-    const stored = outsideFirst ? print(ok(setGearIntervals(parse(s0), "leap", [{ every: 4, sign: 1 }]))) : s0;
-    const r = headerSave(store, stored);
-    expect(r.plan.kind).toBe("definition");
-    expect(store.undo()).toBe(true);
-    return { store, text: r.stored };
-  }
-
-  test("nothing moved outside: undo and Save revert the saved edit", () => {
-    const { store, text } = savedOnce(false);
-    const r = headerSave(store, text);
-    expect(r.plan.kind).toBe("definition");
-    expect(unit(parse(r.stored), "lunation").crossing!.start).toBeUndefined();
-  });
-
-  test("the stored calendar had moved outside: undo and Save write nothing to the calendar, the outside gear stays", () => {
-    const { store, text } = savedOnce(true);
-    const r = headerSave(store, text);
-    expect(r.plan.kind).toBe("none");
-    expect(r.stored).toBe(text);
-    expect(store.get().world.calendar.ast!.gears[0]).toEqual({ id: "leap", on: "year", kind: "intervals", terms: [{ every: 4, sign: 1 }] });
-  });
-});

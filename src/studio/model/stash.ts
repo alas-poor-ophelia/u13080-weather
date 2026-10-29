@@ -23,7 +23,7 @@ import { seatOn } from "./definition";
 export interface StudioStash {
   zones: Record<string, ZoneProfile>;
   world?: WorldDraft;
-  /** the calendar the stashed world draft was seeded from, and its source: they travel with the draft */
+  /** the stored calendar the stashed world draft was last loaded or saved from, and its source */
   calendarBase?: WorldDraft["calendar"];
   calendarSource?: CalendarSource;
 }
@@ -77,19 +77,18 @@ export function applyStash(state: StudioState, stash: StudioStash): StudioState 
   }
   if (stash.world === undefined) return { ...state, zones };
   const world = structuredClone(stash.world);
-  // The calendar source changed while the studio was closed: an untouched stashed calendar takes the current one;
-  // an edited one stays, with its own base and source, and Save refuses it rather than write it into the wrong calendar.
-  const movedSource = (stash.calendarSource ?? "legacy") !== (state.calendarSource ?? "legacy");
+  // An untouched stashed calendar takes the calendar stored now (the draft's "last loaded" is reset to it). An
+  // edited one stays, with the stored calendar it was edited over as its base: when storage differs from that now,
+  // a Save asks whether to overwrite it or reload (definition.ts planCalendarSave).
   const untouched = stash.calendarBase !== undefined && canonicalJson(stash.world.calendar) === canonicalJson(stash.calendarBase);
-  if (movedSource && untouched) return { ...state, zones, world: { ...world, calendar: structuredClone(state.world.calendar) } };
+  if (untouched) return { ...state, zones, world: { ...world, calendar: structuredClone(state.world.calendar) } };
   let calendarBase = stash.calendarBase ? structuredClone(stash.calendarBase) : undefined;
-  // A Seshat draft stashed by a build before the AST layer (docs/SESHAT-v0.md §18.6 item 4) had no AST edits: it is
-  // seated on the definition stored now (seatOn). A part it never touched is re-read from that definition, in the
-  // draft and its base, so the fields and the layer show one calendar; an edited part stays pending against its own
-  // base, so Save still refuses one whose part changed in storage. A stash whose base lacks the layer while its
-  // draft has one is left as it is: Save refuses it as stale (mergeCalendar), never drops its AST edits.
+  // A Seshat draft stashed by a build before the AST layer (docs/SESHAT-v0.md §18.6 item 4) is seated on the
+  // definition stored now (seatOn): a part it never touched is re-read from that definition, in the draft and its
+  // base, so the fields and the layer show one calendar.
   const seed = state.world.calendar.ast;
-  if ((stash.calendarSource ?? "legacy") === "seshat" && !movedSource && seed && world.calendar.ast === undefined && calendarBase?.ast === undefined) {
+  const sameSource = (stash.calendarSource ?? "legacy") === (state.calendarSource ?? "legacy");
+  if ((stash.calendarSource ?? "legacy") === "seshat" && sameSource && seed && world.calendar.ast === undefined && calendarBase?.ast === undefined) {
     const seated = seatOn(world.calendar, calendarBase ?? state.calendarBase ?? state.saved.world.calendar, seed);
     world.calendar = seated.draft;
     calendarBase = seated.base;

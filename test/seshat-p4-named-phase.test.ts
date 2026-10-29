@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test";
 import { definitionContent, Engine, GREGORIAN, parse, phaseSpan, print, validate, type BodyAst, type CalendarAst, type RuleAst } from "../src/seshat";
 import { canonicalJson } from "../src/core/profile";
-import { calendarOfDefinition, planCalendarSave } from "../src/studio/model/definition";
+import { planCalendarSave, seshatDraft } from "../src/studio/model/definition";
 import { definitionRowEdit, definitionRows } from "../src/plugin/calendar-rows";
 import { compile, FormError, recognise } from "../src/plugin/time/form";
 
@@ -96,7 +96,7 @@ describe("P4 step 2: validation of a named phase (P3)", () => {
 describe("P4 step 2: a phase a rule names cannot be renamed or removed (P3)", () => {
   const marks = LAYOUTS[0]![1];
   const text = print(world(marks, named("Full")));
-  const base = calendarOfDefinition(parse(text));
+  const base = seshatDraft(parse(text));
   const renamed = (ms: typeof base.moons) => ms.map((m) => (m.id === "luna" ? { ...m, phases: m.phases!.map((p) => (p.name === "Full" ? { ...p, name: "Bright" } : p)) } : m));
 
   test("the form refuses a rename, a removal and the moon's removal, naming the rule and the phase", () => {

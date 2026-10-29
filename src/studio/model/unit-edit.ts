@@ -9,20 +9,15 @@
  *   are labels, its anchor in step) are a PAIR, as the form reads them
  *   (form.ts `findWeek`): a label count change gives the week the new length,
  *   and an anchor move moves both by the same days, so they stay in step.
- * - `renameUnit` and `removeUnit` change what no slice holds (a unit's id,
- *   the formats and rules that name it), so a Save replays them as
- *   OPERATIONS: `unitOps` reads them off the base and the draft (the Orrery
- *   adds no unit: a unit of the base that the draft lacks was renamed or
- *   removed), and `replayUnitOps` makes them on the definition stored at
- *   Save time first, stale when the unit changed there since the seed, or
- *   when what is stored now refuses them (a rule added outside that reads a
- *   removed unit). The slices are then replayed as before.
+ * - `renameUnit` and `removeUnit` change a unit's id and everything that
+ *   names it (formats, rules, seasons, gears, slot units); a removal is
+ *   refused while anything reads the unit.
  * - Every refusal names what is wrong in on-screen terms; `problems()` is the
  *   caller's.
  */
 import { canonicalJson } from "../../core/profile";
 import { ID, type By, type CalendarAst, type CycleUnitAst, type FormatAst, type LabelAst, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type UnitAst } from "../../seshat";
-import { declaredAs, outsideSlices, weekdayCycle, withSlice, type AstEdit, type SliceKey } from "./ast-edit";
+import { declaredAs, weekdayCycle, withSlice, type AstEdit } from "./ast-edit";
 
 const refuse = (reason: string): AstEdit => ({ refused: true, reason });
 const same = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
@@ -402,146 +397,4 @@ export function anchorFor(anchor: number, length: number, count: number, day: nu
   let shift = mod(label - k, count);
   if (shift > count / 2) shift -= count;
   return anchor - shift * length;
-}
-
-// ---- a Save: renames and removals replayed as operations
-
-/** A change to a unit that no slice holds. */
-export type UnitOp = { readonly kind: "rename"; readonly from: string; readonly to: string } | { readonly kind: "remove"; readonly id: string };
-
-/** How many pairings `unitOps` weighs before it gives up (each is replayed and compared whole). */
-const PAIRINGS_MAX = 256;
-
-/** A unit with its id and the ids it names blanked: two units that differ only by a rename are equal here. */
-const unitShape = (u: UnitAst): unknown => ({ ...u, id: "", ...(u.kind === "slots" ? { in: "" } : {}) });
-
-/**
- * The operations a pairing means, ordered so each one fits when it is made: removals and renames, each as soon as
- * nothing refuses it (a reader of a removed unit renamed or removed first, a rename's new id freed first); null
- * when none fits (a swap of two ids, which needs a third).
- */
-function orderOps(base: CalendarAst, pending: UnitOp[]): UnitOp[] | null {
-  const ops: UnitOp[] = [];
-  let ast = base;
-  let left = pending;
-  while (left.length) {
-    const i = left.findIndex((op) => !("refused" in applyUnitOps(ast, [op])));
-    if (i < 0) return null;
-    const op = left[i]!;
-    ast = (applyUnitOps(ast, [op]) as { ast: CalendarAst }).ast;
-    ops.push(op);
-    left = left.filter((_, j) => j !== i);
-  }
-  return ops;
-}
-
-/**
- * The renames and removals that take `base`'s units to `draft`'s, in order, or null when no such operations give
- * exactly the draft (a unit added, the order changed, two ids swapped, or a removal and a rename the Studio cannot
- * tell apart). A unit keeps its place when renamed, so each pairing of the draft's units with the base's, in order
- * and of the same kind, is a candidate; the pairings are weighed by content (a unit whose id is kept, then one
- * equal to its base unit but for the id, counts first), and the first whose operations, made on the base, give
- * the draft's ids in order and everything the slices do not hold as the draft has it is the answer. A Save then
- * replays the slices, so it writes exactly the draft's meaning or refuses.
- */
-export function unitOps(base: CalendarAst, draft: CalendarAst): UnitOp[] | null {
-  const bs = base.units;
-  const ds = draft.units;
-  if (ds.length > bs.length || new Set(ds.map((u) => u.id)).size !== ds.length) return null;
-  const target = outsideSlices(draft);
-  const fits = (ops: readonly UnitOp[]): boolean => {
-    const made = applyUnitOps(base, ops);
-    return !("refused" in made) && same(made.ast.units.map((u) => u.id), ds.map((u) => u.id)) && same(outsideSlices(made.ast), target);
-  };
-  if (bs.length === ds.length && bs.every((u, i) => u.id === ds[i]!.id)) return fits([]) ? [] : null;
-  // every pairing: draft unit j with base unit pick[j], strictly in order, of one kind; scored by content
-  const score = (d: UnitAst, b: UnitAst): number => (d.id === b.id ? 2 : 0) + (same(unitShape(d), unitShape(b)) ? 1 : 0);
-  const found: Array<{ pick: number[]; score: number }> = [];
-  const pick: number[] = [];
-  const walk = (j: number, from: number, total: number): void => {
-    if (found.length >= PAIRINGS_MAX) return;
-    if (j === ds.length) {
-      found.push({ pick: [...pick], score: total });
-      return;
-    }
-    for (let i = from; i <= bs.length - (ds.length - j); i++) {
-      if (bs[i]!.kind !== ds[j]!.kind) continue;
-      pick.push(i);
-      walk(j + 1, i + 1, total + score(ds[j]!, bs[i]!));
-      pick.pop();
-    }
-  };
-  walk(0, 0, 0);
-  found.sort((a, b) => b.score - a.score);
-  for (const { pick: p } of found) {
-    const paired = new Set(p);
-    const pending: UnitOp[] = [
-      ...bs.flatMap((b, i): UnitOp[] => (paired.has(i) ? [] : [{ kind: "remove", id: b.id }])),
-      ...p.flatMap((i, j): UnitOp[] => (bs[i]!.id === ds[j]!.id ? [] : [{ kind: "rename", from: bs[i]!.id, to: ds[j]!.id }])),
-    ];
-    const ops = orderOps(base, pending);
-    if (ops && fits(ops)) return ops;
-  }
-  return null;
-}
-
-/** What a Save says when `unitOps` finds no operations that give the draft. */
-export const UNIT_OPS_REFUSED = "several units were renamed or removed at once in a way the Studio cannot replay safely; save after each rename, or undo";
-
-/** `ast` with `ops` made in order, or the first refusal. */
-export function applyUnitOps(ast: CalendarAst, ops: readonly UnitOp[]): AstEdit {
-  let out = ast;
-  for (const op of ops) {
-    const r = op.kind === "rename" ? renameUnit(out, op.from, op.to) : removeUnit(out, op.id);
-    if ("refused" in r) return r;
-    out = r.ast;
-  }
-  return { ast: out };
-}
-
-/**
- * Make the draft's renames and removals (`ops`, from `base`) on `stored`, the definition at Save time: each is
- * stale when its unit changed in storage since the seed, or when storage now refuses it (an id taken there, a
- * reader added there). `base` comes back with the same operations made, so the slices compare like with like.
- */
-export function replayUnitOps(stored: CalendarAst, base: CalendarAst, ops: readonly UnitOp[]): { readonly stored: CalendarAst; readonly base: CalendarAst } | { readonly stale: string } {
-  let s = stored;
-  let b = base;
-  for (const op of ops) {
-    const id = op.kind === "rename" ? op.from : op.id;
-    const was = b.units.find((u) => u.id === id);
-    const now = s.units.find((u) => u.id === id);
-    if (!now || !same(now, was)) return { stale: `the ${id} changed outside the studio since this edit` };
-    const rs = op.kind === "rename" ? renameUnit(s, op.from, op.to) : removeUnit(s, op.id);
-    if ("refused" in rs) return { stale: `the ${op.kind === "rename" ? `rename of the ${id}` : `removal of the ${id}`} no longer fits the stored calendar: ${rs.reason}` };
-    const rb = op.kind === "rename" ? renameUnit(b, op.from, op.to) : removeUnit(b, op.id);
-    if ("refused" in rb) return { stale: rb.reason };
-    s = rs.ast;
-    b = rb.ast;
-  }
-  return { stored: s, base: b };
-}
-
-/**
- * What a `cycle:` edit reads outside its slice: the rules that read the unit (a label filter by name, a read by
- * number), the gears that count it, the seasons that divide it, the slot units inside it and the stages whose
- * weekday tests read its days (those tests as they are). A Save replays the edit only while these are as the
- * edit saw them (`cycleReplayProblem`).
- */
-export function cycleReferences(ast: CalendarAst, id: string): unknown {
-  return {
-    rules: unitReads(ast, id).map((r) => [r.rule.id, r.how, r.by ?? null]),
-    gears: ast.gears.filter((g) => g.on === id).map((g) => g.id),
-    seasons: ast.seasons?.unit === id,
-    slots: ast.units.filter((u) => u.kind === "slots" && u.in === id).map((u) => u.id),
-    stages: stageReads(ast, id).map((r) => [r.unit, r.stage, r.mod, cycleUnit(ast, r.unit)?.stages?.[r.stage]?.rules.filter((x) => "residue" in x && x.residue.mod === r.mod) ?? null]),
-  };
-}
-
-/** Why slice `key` (a `cycle:` slice) cannot be replayed onto `stored`, or null (definition.ts `mergeLayers`, beside `replayProblem`). */
-export function cycleReplayProblem(key: SliceKey, base: CalendarAst, stored: CalendarAst): string | null {
-  if (!key.startsWith("cycle:")) return null;
-  const id = key.slice("cycle:".length);
-  if (same(cycleReferences(stored, id), cycleReferences(base, id))) return null;
-  return `a rule, a gear, the seasons, a slot unit or a stage that reads the ${id} changed outside the studio since this edit`;
 }

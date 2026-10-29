@@ -39,7 +39,7 @@ export interface SeasonsEditorDeps {
   phases: readonly number[];
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
 }
 
 const whole = (t: string): number | null => {
@@ -75,13 +75,13 @@ export function buildSeasonsEditor(parent: HTMLElement, deps: SeasonsEditorDeps)
     const row = list.createDiv({ cls: "wadjet-studio-orrery-phase wadjet-studio-orrery-mark", attr: { "data-part": `mark-${i}`, "data-kind": kindOf(m) } });
     const sw = row.createSpan({ cls: "wadjet-studio-orrery-swatch", attr: { "aria-hidden": "true" } });
     sw.setCssProps({ "--wadjet-orrery-swatch": cycleColour(i, SEASON_CYCLE) });
-    input(row, m.name, `Season ${i + 1} name`, orreryHint("orrery.markName"), `mark-${i}-name`, "wadjet-studio-orrery-phase-name", (text) => deps.edit((c, b) => renameMark(c, b, i, text), "click"));
+    input(row, m.name, `Season ${i + 1} name`, orreryHint("orrery.markName"), `mark-${i}-name`, "wadjet-studio-orrery-phase-name", (text) => deps.edit((c) => renameMark(c, i, text), "click"));
     row.createSpan({ cls: "wadjet-studio-orrery-mark-date", text: deps.starts[i] ?? "— this year", attr: { "data-part": `mark-${i}-date` } });
-    button(row, "×", `Remove the season ${m.name}`, orreryHint("orrery.markRemove"), `mark-${i}-remove`, () => deps.edit((c, b) => removeMark(c, b, i), "click"));
+    button(row, "×", `Remove the season ${m.name}`, orreryHint("orrery.markRemove"), `mark-${i}-remove`, () => deps.edit((c) => removeMark(c, i), "click"));
     const kind = createSegmented(row.createDiv({ cls: "wadjet-studio-orrery-mark-kind", attr: { "data-part": `mark-${i}-kind` } }), {
       options: MARK_KINDS.map((k) => ({ value: k.value, label: k.label, hint: orreryHint("orrery.markKind") })),
       value: kindOf(m),
-      onChange: (v) => deps.edit((c, b) => setMarkKind(c, b, i, v as MarkKind, deps.year), "click"),
+      onChange: (v) => deps.edit((c) => setMarkKind(c, i, v as MarkKind, deps.year), "click"),
     });
     kind.el.setAttr("aria-label", `How the season ${m.name} starts`);
     parts.push(kind);
@@ -96,7 +96,7 @@ export function buildSeasonsEditor(parent: HTMLElement, deps: SeasonsEditorDeps)
           fmt: (v) => v.toFixed(3),
           hint: orreryHint("orrery.markFrom"),
           // the list as this editor saw it: a drag past a neighbour reorders the field, never edits the neighbour
-          onChange: (v, phase) => deps.edit((c, b) => setMarkFrom(c, b, i, fractionWrite(v, m.from, FROM.step, FROM.max), marks), phase),
+          onChange: (v, phase) => deps.edit((c) => setMarkFrom(c, i, fractionWrite(v, m.from, FROM.step, FROM.max), marks), phase),
         }),
       );
       return;
@@ -111,7 +111,7 @@ export function buildSeasonsEditor(parent: HTMLElement, deps: SeasonsEditorDeps)
             item
               .setTitle(slotName(k))
               .setChecked(k === m.slot.index)
-              .onClick(() => deps.edit((c, b) => setMarkSlot(c, b, i, { unit: m.slot.unit, index: k, day: m.slot.day }), "click")),
+              .onClick(() => deps.edit((c) => setMarkSlot(c, i, { unit: m.slot.unit, index: k, day: m.slot.day }), "click")),
           ),
         );
         const box = pick.getBoundingClientRect();
@@ -129,11 +129,11 @@ export function buildSeasonsEditor(parent: HTMLElement, deps: SeasonsEditorDeps)
         fmt: (v) => String(Math.round(v)),
         parse: whole,
         hint: orreryHint("orrery.markDay"),
-        onChange: (v, phase) => deps.edit((c, b) => ("slot" in m ? setMarkSlot(c, b, i, { ...m.slot, day: Math.round(v) }) : setMarkDay(c, b, i, Math.round(v))), phase),
+        onChange: (v, phase) => deps.edit((c) => ("slot" in m ? setMarkSlot(c, i, { ...m.slot, day: Math.round(v) }) : setMarkDay(c, i, Math.round(v))), phase),
       }),
     );
   });
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
-  button(ops, "＋ mark", "Add a season", orreryHint("orrery.addMark"), "add-mark", () => deps.edit((c, b) => addMark(c, b, deps.phases), "click"));
+  button(ops, "＋ mark", "Add a season", orreryHint("orrery.addMark"), "add-mark", () => deps.edit((c) => addMark(c, deps.phases), "click"));
   return editor;
 }

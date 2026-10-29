@@ -43,8 +43,8 @@ const refuse = (reason: string): CalendarEdit => ({ refused: true, reason });
 const sameR = (a: Rational | null | undefined, b: Rational): a is Rational => !!a && a.n * b.d === b.n * a.d;
 
 /** The draft as one AST, or why it does not compile. */
-function current(calendar: CalendarDraft, base: CalendarDraft): CalendarAst | string {
-  const d = draftAst(calendar, base);
+function current(calendar: CalendarDraft): CalendarAst | string {
+  const d = draftAst(calendar);
   return "error" in d ? d.error : d.ast;
 }
 
@@ -58,8 +58,8 @@ export function crossingIn(ast: CalendarAst, unitId: string): CrossingAst | stri
 // ---- a unit that follows a body
 
 /** START: the day holding the crossing (`contains`) or the first day that begins at or after it (`after`). K stays. */
-export function setStartMode(calendar: CalendarDraft, base: CalendarDraft, unitId: string, after: boolean): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setCrossingStart(a, unitId, after));
+export function setStartMode(calendar: CalendarDraft, unitId: string, after: boolean): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setCrossingStart(a, unitId, after));
 }
 
 /**
@@ -72,8 +72,8 @@ export function markWrite(value: number, origin: Rational, stored: Rational | nu
 }
 
 /** Set the MARK; K moves so the crossings keep their numbers (ast-edit.ts `setCrossingMark`). */
-export function setMark(calendar: CalendarDraft, base: CalendarDraft, unitId: string, mark: Rational): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setCrossingMark(a, unitId, mark));
+export function setMark(calendar: CalendarDraft, unitId: string, mark: Rational): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setCrossingMark(a, unitId, mark));
 }
 
 /** A day shift as whole hours on the knob: `days` × 24, rounded half up. */
@@ -92,13 +92,13 @@ export function offsetWrite(hours: number, origin: Rational, stored: Rational | 
 }
 
 /** Set the OFFSET (a sunset day start); K moves by the turns the shift crosses. */
-export function setOffset(calendar: CalendarDraft, base: CalendarDraft, unitId: string, offset: Rational): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setCrossingOffset(a, unitId, offset));
+export function setOffset(calendar: CalendarDraft, unitId: string, offset: Rational): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setCrossingOffset(a, unitId, offset));
 }
 
 /** Follow another body (the same mark and shift); K is chosen so crossing 0 falls nearest where it was. */
-export function followBody(calendar: CalendarDraft, base: CalendarDraft, unitId: string, bodyId: string): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setCrossingBody(a, unitId, bodyId));
+export function followBody(calendar: CalendarDraft, unitId: string, bodyId: string): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setCrossingBody(a, unitId, bodyId));
 }
 
 /** The bodies the ＋ follow… menu offers: every other body, each with why it cannot be followed (one turning in less than a day), or null. */
@@ -128,8 +128,8 @@ export function periodWrite(next: Molad, origin: Rational, stored: Rational | nu
  * crossing it reads stays at its instant (crossing 0 moves instead, ast-edit.ts `setLiteralCrossing`), so the
  * present keeps its days and the far past moves. Null (the draft does not run) keeps crossing 0 where it is.
  */
-export function setLiteralPeriod(calendar: CalendarDraft, base: CalendarDraft, unitId: string, period: Rational, keep: number | null = null): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setLiteralCrossing(a, unitId, keep === null ? { period } : { period, keep }));
+export function setLiteralPeriod(calendar: CalendarDraft, unitId: string, period: Rational, keep: number | null = null): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setLiteralCrossing(a, unitId, keep === null ? { period } : { period, keep }));
 }
 
 /** The day crossing 0 falls on and its hour and parts in that day (the knobs show the hour and parts; the day is kept). */
@@ -152,8 +152,8 @@ export function zeroWrite(hours: number, parts: number, origin: Rational, stored
 }
 
 /** Set a literal crossing's crossing 0 (the instant it falls). */
-export function setCrossingZero(calendar: CalendarDraft, base: CalendarDraft, unitId: string, at: Rational): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => setLiteralCrossing(a, unitId, { at }));
+export function setCrossingZero(calendar: CalendarDraft, unitId: string, at: Rational): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setLiteralCrossing(a, unitId, { at }));
 }
 
 // ---- the train
@@ -172,13 +172,13 @@ export function trainIn(ast: CalendarAst, unitId: string): Train | string {
 }
 
 /** Set the train's crossings (`a`), years (`L`) or phase (`c`), each over the draft's; refused with the validator's reason when it would not run. */
-export function setTrain(calendar: CalendarDraft, base: CalendarDraft, unitId: string, patch: Partial<Train>): CalendarEdit {
-  const ast = current(calendar, base);
+export function setTrain(calendar: CalendarDraft, unitId: string, patch: Partial<Train>): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const t = trainIn(ast, unitId);
   if (typeof t === "string") return refuse(t);
   const next = { a: patch.a ?? t.a, c: patch.c ?? t.c, L: patch.L ?? t.L };
-  return applyAstEdit(calendar, base, (a) => setCrossingIndex(a, unitId, next));
+  return applyAstEdit(calendar, (a) => setCrossingIndex(a, unitId, next));
 }
 
 /** The phase knob's travel for a train of `L` years: 0 to L − 1, widened to hold `c`. */

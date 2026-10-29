@@ -183,6 +183,8 @@ describe("Studio Save: the rename and its references in one save, undone togethe
       expect(s.zones.greywold!.modifiers.find((m) => m.id === "ghost")!.when).toEqual(dangling.when);
       expect(s.world.devicePresets[0]!.when).toEqual({ moon: { name: "Selene", phase: [0.9, 0.1] } });
       expect(canonicalJson(s.zones.saltmarsh)).toBe(untouched);
+      // the Save's reseed: the calendar written is what the Studio last saved (header.ts, calendarAfterSave)
+      store.update((x) => (x.calendarBase = structuredClone(x.world.calendar)));
       store.markSaved();
       expect(store.dirtyZones().size).toBe(0);
 

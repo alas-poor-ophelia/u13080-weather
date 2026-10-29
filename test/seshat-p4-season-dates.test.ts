@@ -11,7 +11,7 @@ import { SeshatCalendar, yearAt } from "../src/plugin/time/seshat";
 import { compile, FormError, recognise, type MonthForm } from "../src/plugin/time/form";
 import { SeasonCalendar } from "../src/seshat/seasons";
 import { flipSeasonTags } from "../src/plugin/time/seasons";
-import { calendarOfDefinition, mergeCalendar, planCalendarSave } from "../src/studio/model/definition";
+import { calendarOfDefinition, mergeCalendar, planCalendarSave, seshatDraft } from "../src/studio/model/definition";
 
 const slot = (name: string, index: number, day: number, unit = "month"): SeasonMarkAst => ({ name, slot: { unit, index, day } });
 const greg = (marks: readonly SeasonMarkAst[], extra: Partial<CalendarAst> = {}): CalendarAst => ({ ...GREGORIAN, seasons: { unit: "year", marks }, ...extra });
@@ -291,7 +291,7 @@ describe("review fixes (Steadfast Hale)", () => {
 
   test("a seasons edit on a date world is refused plainly by Studio Save", () => {
     const text = print(greg([{ name: "Spring", day: 80 }, slot("Autumn", 8, 23)]));
-    const base = calendarOfDefinition(parse(text));
+    const base = seshatDraft(parse(text));
     const draft = structuredClone(base);
     draft.seasons[0]!.from = 0.1;
     expect(planCalendarSave({ source: "seshat", calendar: base }, text, { calendar: draft, base, source: "seshat" })).toEqual({ kind: "refuse", message: "the seasons use dates; edit them as text (Edit definition)." });

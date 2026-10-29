@@ -7,13 +7,13 @@
  *     a moon keeps its exact rational unless its numbers changed; a
  *     phases-only edit leaves the hash alone; edits outside the calendar
  *     draft (month names) made in the stored text survive;
- *   - a stored calendar that moved under unsaved calendar work is stale;
+ *   - a Save over a stored calendar that moved since it was loaded asks first;
  *   - a non-canonical stored text is flagged as a rewrite;
- *   - the seed base travels with the draft (initialState, markSaved, stash);
+ *   - the seed base is one value beside the draft (initialState, stash);
  *   - a zone literal equal to a calendar name only after NFC is a warning.
  */
 import { describe, expect, test } from "bun:test";
-import { calendarOfDefinition, mergeCalendar, planCalendarSave, type CalendarDraft } from "../src/studio/model/definition";
+import { calendarOfDefinition, mergeCalendar, planCalendarSave, seshatDraft, studioSave, type CalendarDraft } from "../src/studio/model/definition";
 import { initialState, type StudioSettingsLike } from "../src/studio/model/state";
 import { createStore } from "../src/studio/model/store";
 import { applyStash, takeStash } from "../src/studio/model/stash";
@@ -123,17 +123,6 @@ describe("Save merges into a fresh parse of the stored text", () => {
     expect(ast.seasons!.marks[0]!.name).toBe("Thaw");
   });
 
-  test("a stored calendar that moved under the draft is stale, and says what is stored", () => {
-    const moved = print({ ...DEF, seasons: { unit: "year", marks: SEASONS.slice(0, 2) } });
-    const draft = clone(BASE);
-    draft.seasons[3]!.name = "Frost";
-    const r = mergeCalendar(moved, BASE, draft);
-    expect(r.kind).toBe("stale");
-    if (r.kind === "stale") expect(r.stored.seasons).toEqual(SEASONS.slice(0, 2));
-    // the same move with an untouched draft is no conflict: nothing is written
-    expect(mergeCalendar(moved, BASE, clone(BASE))).toEqual({ kind: "unchanged" });
-  });
-
   test("a non-canonical stored text is a rewrite; a canonical one is not", () => {
     const draft = clone(BASE);
     draft.seasons[1]!.from = 0.3;
@@ -164,53 +153,57 @@ describe("Save merges into a fresh parse of the stored text", () => {
   });
 });
 
-describe("planCalendarSave: the calendar goes where it came from, or nowhere", () => {
+describe("planCalendarSave: the draft written whole, nothing, or a question first", () => {
   const LEGACY: CalendarDraft = { seasons: [{ name: "Wet", from: 0 }], moons: [{ name: "Moon", cycleDays: 29.53, phaseAtEpoch: 0 }] };
+  // the Studio's draft on a definition world carries its AST layer
+  const SBASE = seshatDraft(parse(TEXT));
   const edited = (c: CalendarDraft): CalendarDraft => ({ ...clone(c), seasons: [...clone(c.seasons), { name: "Extra", from: 0.9 }] });
 
-  test("an untouched draft writes nothing, whatever the source", () => {
-    expect(planCalendarSave({ source: "legacy", calendar: LEGACY }, undefined, { calendar: clone(LEGACY), base: LEGACY, source: "legacy" })).toEqual({ kind: "none" });
-    expect(planCalendarSave({ source: "seshat", calendar: BASE }, TEXT, { calendar: clone(BASE), base: BASE, source: "seshat" })).toEqual({ kind: "none" });
-    expect(planCalendarSave({ source: "fault", calendar: LEGACY }, "broken", { calendar: clone(LEGACY), base: LEGACY, source: "fault" })).toEqual({ kind: "none" });
+  test("an untouched draft writes nothing, whatever the source, and takes the calendar as stored", () => {
+    expect(planCalendarSave({ source: "legacy", calendar: LEGACY }, undefined, { calendar: clone(LEGACY), base: LEGACY, source: "legacy" })).toEqual({ kind: "none", reseed: LEGACY });
+    expect(planCalendarSave({ source: "seshat", calendar: SBASE }, TEXT, { calendar: clone(SBASE), base: SBASE, source: "seshat" })).toEqual({ kind: "none", reseed: SBASE });
+    expect(planCalendarSave({ source: "fault", calendar: LEGACY }, "broken", { calendar: clone(LEGACY), base: LEGACY, source: "fault" })).toEqual({ kind: "none", reseed: LEGACY });
   });
 
   test("an edited legacy draft writes the legacy fields; an edited definition draft writes the definition", () => {
     expect(planCalendarSave({ source: "legacy", calendar: LEGACY }, undefined, { calendar: edited(LEGACY), base: LEGACY, source: "legacy" })).toEqual({ kind: "legacy" });
-    const p = planCalendarSave({ source: "seshat", calendar: BASE }, TEXT, { calendar: edited(BASE), base: BASE, source: "seshat" });
+    const p = planCalendarSave({ source: "seshat", calendar: SBASE }, TEXT, { calendar: edited(SBASE), base: SBASE, source: "seshat" });
     expect(p.kind).toBe("definition");
     if (p.kind === "definition") expect(parse(p.text).seasons!.marks.at(-1)).toEqual({ name: "Extra", from: 0.9 });
   });
 
-  test("a draft from another calendar is never written into this one (Brynn's switch case)", () => {
+  test("a draft from another calendar asks first, and its Overwrite cannot write it into this one (Brynn's switch case)", () => {
     // a definition draft, then the world switched back to the internal calendar
-    const fromDefinition = planCalendarSave({ source: "legacy", calendar: LEGACY }, TEXT, { calendar: edited(BASE), base: BASE, source: "seshat" });
-    expect(fromDefinition).toMatchObject({ kind: "refuse", reseed: LEGACY });
+    const fromDefinition = planCalendarSave({ source: "legacy", calendar: LEGACY }, TEXT, { calendar: edited(SBASE), base: SBASE, source: "seshat" });
+    expect(fromDefinition).toMatchObject({ kind: "conflict", overwrite: { kind: "refuse" }, reload: LEGACY });
     // untouched: nothing written, and the draft takes the calendar the world runs
-    expect(planCalendarSave({ source: "legacy", calendar: LEGACY }, TEXT, { calendar: clone(BASE), base: BASE, source: "seshat" })).toEqual({ kind: "none", reseed: LEGACY });
+    expect(planCalendarSave({ source: "legacy", calendar: LEGACY }, TEXT, { calendar: clone(SBASE), base: SBASE, source: "seshat" })).toEqual({ kind: "none", reseed: LEGACY });
     // the other way round
-    expect(planCalendarSave({ source: "seshat", calendar: BASE }, TEXT, { calendar: edited(LEGACY), base: LEGACY, source: "legacy" })).toMatchObject({ kind: "refuse", reseed: BASE });
+    expect(planCalendarSave({ source: "seshat", calendar: SBASE }, TEXT, { calendar: edited(LEGACY), base: LEGACY, source: "legacy" })).toMatchObject({ kind: "conflict", overwrite: { kind: "refuse" }, reload: SBASE });
   });
 
-  test("a faulted definition saves no calendar edit; a stale or broken merge is refused, a stale one with the stored calendar", () => {
+  test("a faulted definition saves no calendar edit; a draft that does not run is refused; a moved stored calendar asks", () => {
     // the fault guard itself refuses (not a later parse error): the stored text here parses, and its own message says so
     const faulted = planCalendarSave({ source: "fault", calendar: LEGACY }, TEXT, { calendar: edited(LEGACY), base: LEGACY, source: "fault" });
     expect(faulted).toMatchObject({ kind: "refuse", message: expect.stringContaining("cannot run, so its seasons and moons cannot be saved") as unknown as string });
     const moved = print({ ...DEF, seasons: { unit: "year", marks: SEASONS.slice(0, 2) } });
-    expect(planCalendarSave({ source: "seshat", calendar: BASE }, moved, { calendar: edited(BASE), base: BASE, source: "seshat" })).toMatchObject({ kind: "refuse", reseed: { seasons: SEASONS.slice(0, 2) } });
-    const bad = clone(BASE);
+    const asked = planCalendarSave({ source: "seshat", calendar: seshatDraft(parse(moved)) }, moved, { calendar: edited(SBASE), base: SBASE, source: "seshat" });
+    expect(asked).toMatchObject({ kind: "conflict", overwrite: { kind: "definition" }, reload: { seasons: SEASONS.slice(0, 2) } });
+    const bad = clone(SBASE);
     bad.moons[1]!.cycleDays = 0;
-    const p = planCalendarSave({ source: "seshat", calendar: BASE }, TEXT, { calendar: bad, base: BASE, source: "seshat" });
+    const p = planCalendarSave({ source: "seshat", calendar: SBASE }, TEXT, { calendar: bad, base: SBASE, source: "seshat" });
     expect(p.kind).toBe("refuse");
-    expect("reseed" in p).toBe(false);
   });
 
-  test("a merge that prints the stored text again writes nothing", () => {
+  test("a draft that prints the stored text again writes nothing", () => {
     // an epoch phase of 1 is an edit to the draft, but it reduces to the same body (phase 0), so the text prints as stored;
     // a "definition" plan here would reach saveDefinition, which skips an unchanged text, and the zones would not be saved
     const same = clone(BASE);
     same.moons[1]!.phaseAtEpoch = 1;
     expect(mergeCalendar(TEXT, BASE, same)).toMatchObject({ kind: "write", text: TEXT });
-    expect(planCalendarSave({ source: "seshat", calendar: BASE }, TEXT, { calendar: same, base: BASE, source: "seshat" })).toEqual({ kind: "none" });
+    const layered = clone(SBASE);
+    layered.moons[1]!.phaseAtEpoch = 1;
+    expect(planCalendarSave({ source: "seshat", calendar: SBASE }, TEXT, { calendar: layered, base: SBASE, source: "seshat" })).toEqual({ kind: "none", reseed: SBASE });
   });
 });
 
@@ -218,13 +211,16 @@ describe("the seed base travels with the world draft", () => {
   const fjord = PRESETS.find((p) => p.id === "fjord-coast")!;
   const settings = (calendar: CalendarDraft): StudioSettingsLike => ({ zones: [zoneFromPreset({ name: "Greywold", preset: fjord, existingIds: new Set() }).zone], eras: [], calendar, devicePresets: [], overrides: [] });
 
-  test("initialState seeds it; edits leave it; markSaved moves it", () => {
+  test("initialState seeds it; edits, undo and markSaved leave it (a Save's reseed sets it, header.ts)", () => {
     const store = createStore(initialState(settings(BASE), null), (f) => f());
     expect(store.get().calendarBase).toEqual(BASE);
     store.update((s) => void (s.world.calendar.seasons[0]!.name = "Thaw"), { history: true });
     expect(store.get().calendarBase).toEqual(BASE);
     store.markSaved();
-    expect(store.get().calendarBase!.seasons[0]!.name).toBe("Thaw");
+    expect(store.get().calendarBase).toEqual(BASE);
+    store.update((s) => (s.calendarBase = clone(s.world.calendar)));
+    expect(store.undo()).toBe(true);
+    expect(store.get().calendarBase!.seasons[0]!.name).toBe("Thaw"); // not part of undo
   });
 
   test("a stash across a calendar switch: an untouched calendar takes the current one, an edited one keeps its source", () => {
@@ -239,10 +235,10 @@ describe("the seed base travels with the world draft", () => {
     store.update((s) => void (s.world.calendar.seasons[0]!.name = "Thaw"), { history: true }); // now the calendar is edited too
     const kept = applyStash(initialState(settings(legacyCal), null), takeStash(store.get(), store)!);
     expect(kept.world.calendar.seasons[0]!.name).toBe("Thaw");
-    expect(kept.calendarSource).toBe("seshat"); // so Save refuses it rather than write it into the internal calendar
+    expect(kept.calendarSource).toBe("seshat"); // so its Save asks, and cannot overwrite the internal calendar with it
   });
 
-  test("a stash of a dirty world carries it, so a reopened studio still detects a stale save", () => {
+  test("a stash of a dirty world carries it, so a reopened studio's Save asks when storage moved", () => {
     const store = createStore(initialState(settings(BASE), null), (f) => f());
     store.update((s) => void (s.world.calendar.seasons[0]!.name = "Thaw"), { history: true });
     const stash = takeStash(store.get(), store)!;
@@ -251,6 +247,9 @@ describe("the seed base travels with the world draft", () => {
     const reopened = applyStash(initialState(settings(moved), null), stash);
     expect(reopened.calendarBase).toEqual(BASE);
     expect(reopened.world.calendar.seasons[0]!.name).toBe("Thaw");
+    expect(studioSave(reopened, { calendar: moved }, undefined).kind).toBe("conflict");
+    const same = applyStash(initialState(settings(BASE), null), takeStash(store.get(), store)!);
+    expect(studioSave(same, { calendar: BASE }, undefined).kind).toBe("legacy");
   });
 });
 

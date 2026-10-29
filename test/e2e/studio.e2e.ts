@@ -8160,6 +8160,9 @@ describe("climate studio · save and drafts", () => {
   test("step 1: editing two zones through a real zone switch marks both dirty in the menu", async () => {
     await revealStudio();
     await closeStudioWindows();
+    // earlier walks leave a calendar draft over a stored calendar they changed directly: a Save would ask about it
+    // (Overwrite or Reload), so these zone-only saves start from the stored world
+    await discardStudioWorldDraft();
 
     await switchZoneViaMenu(zone.id, zone.name);
     await pushTempOffset(zone.id, 4.5);
@@ -10998,6 +11001,70 @@ describe("climate studio · calendar orrery", () => {
       await expect.poll(stored, { timeout: 10_000 }).toContain("=DAY:100");
       await expect.poll(chip).not.toContain("●");
       console.log(`  · orrery seasons: ＋ mark ×2, the second switched to day of year (${date1}) then day 100, saved as DAY:100${confirmed ? " (after the world confirm)" : ""}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+  test("step 101: a calendar edit in the Studio, then the stored definition changed in settings: Save asks Overwrite or Reload, and Reload shows the stored calendar (ruling 2026-10-30)", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const draft = () =>
+      withApp(
+        ob.page,
+        (app, type: string) => {
+          const s = app.workspace.getLeavesOfType(type)[0].view.store.get();
+          return { name: (s.world.calendar.form?.name ?? null) as string | null, seasons: s.world.calendar.seasons.length as number };
+        },
+        VIEW_TYPE,
+      );
+    const EDITED = GREGORIAN_TEXT.replace("NAME:Gregorian", "NAME:Gregorian (edited in settings)");
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+
+      // a calendar edit in the Studio: ＋ mark, one season in the draft, nothing stored
+      await win.locator('.wadjet-studio-orrery-add[data-add="season"]').click();
+      await passAnyConfirm();
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-mark").count(), { timeout: 10_000 }).toBe(1);
+      expect((await draft()).seasons).toBe(1);
+
+      // the stored definition changes outside the Studio (the settings tab's own write)
+      await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.saveDefinition(text), EDITED);
+      await expect.poll(stored, { timeout: 10_000 }).toContain("NAME:Gregorian (edited in settings)");
+      await nextFrame();
+      expect(await draft()).toEqual({ name: "Gregorian", seasons: 1 }); // the dirty draft keeps its edit
+
+      // Save: the question comes first, with Overwrite, Reload and Cancel
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "The calendar changed outside the studio" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      const sentence = ((await dialog.locator("p").first().textContent()) ?? "").trim();
+      expect(sentence).toContain("Overwrite it with the studio's version, or reload the studio from the stored calendar?");
+      for (const b of ["Overwrite", "Reload", "Cancel"]) expect(await dialog.locator(`button:has-text('${b}')`).count()).toBe(1);
+      await dialog.locator("button:has-text('Reload')").click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+
+      // Reload: the draft is the stored calendar, nothing was written, and the Studio is clean
+      await expect.poll(draft, { timeout: 10_000 }).toEqual({ name: "Gregorian (edited in settings)", seasons: 0 });
+      await expect.poll(() => win.locator(".wadjet-studio-orrery-season").count(), { timeout: 10_000 }).toBe(0);
+      expect(stored()).toContain("NAME:Gregorian (edited in settings)");
+      expect(stored()).not.toContain("BEGIN:VSEASONS");
+      await expect.poll(async () => ((await ob.page.locator(".wadjet-studio-header-save").textContent()) ?? "").trim(), { timeout: 10_000 }).toBe("Saved ✓");
+      console.log(`  · conflict: a season added in the Studio, the name changed in settings; Save asked "${sentence.slice(0, 60)}…"; Reload showed the stored calendar, nothing written`);
     } finally {
       await close();
       await discardStudioWorldDraft();

@@ -38,7 +38,7 @@ export interface CycleEditorDeps {
   day: number;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   /** the part the window selects once the edit in hand lands */
   selectAfter(part: PartId): void;
 }
@@ -66,8 +66,8 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
   title.empty();
   title.addClass("is-editable");
   input(title, id, "Cycle id", orreryHint("orrery.cycleName"), "cycle-name", "wadjet-studio-orrery-title-input", (text) =>
-    deps.edit((c, b) => {
-      const r = renameCycle(c, b, id, text);
+    deps.edit((c) => {
+      const r = renameCycle(c, id, text);
       if (!("refused" in r)) deps.selectAfter(`unit:${text.trim()}`);
       return r;
     }, "click"),
@@ -85,11 +85,11 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
     labels.forEach((l, i) => {
       const row = list.createDiv({ cls: "wadjet-studio-orrery-phase wadjet-studio-orrery-label", attr: { "data-part": `label-${i}` } });
       row.toggleClass("is-current", i === today);
-      input(row, l.name ?? "", `Label ${i + 1}`, orreryHint("orrery.labelName"), `label-${i}-name`, "wadjet-studio-orrery-phase-name", (text) => deps.edit((c, b) => renameLabel(c, b, id, i, text), "click"));
-      button(row, "×", `Remove label ${l.name ?? i + 1}`, orreryHint("orrery.labelRemove"), `label-${i}-remove`, () => deps.edit((c, b) => removeLabel(c, b, id, i), "click"));
+      input(row, l.name ?? "", `Label ${i + 1}`, orreryHint("orrery.labelName"), `label-${i}-name`, "wadjet-studio-orrery-phase-name", (text) => deps.edit((c) => renameLabel(c, id, i, text), "click"));
+      button(row, "×", `Remove label ${l.name ?? i + 1}`, orreryHint("orrery.labelRemove"), `label-${i}-remove`, () => deps.edit((c) => removeLabel(c, id, i), "click"));
     });
     const ops = sec.createDiv({ cls: "wadjet-studio-orrery-ops" });
-    button(ops, "＋ label", `Add a label to the ${id}`, orreryHint("orrery.addLabel"), "add-label", () => deps.edit((c, b) => addLabel(c, b, id), "click"));
+    button(ops, "＋ label", `Add a label to the ${id}`, orreryHint("orrery.addLabel"), "add-label", () => deps.edit((c) => addLabel(c, id), "click"));
 
     // ---- today is
     const why = anchorProblem(deps.ast, id);
@@ -111,7 +111,7 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
         },
         disabled: why !== null || labels.length < 2,
         hint: orreryHint("orrery.todayIs"),
-        onChange: (v, phase) => deps.edit((c, b) => setTodayIs(c, b, id, Math.round(v), deps.day, origin), phase),
+        onChange: (v, phase) => deps.edit((c) => setTodayIs(c, id, Math.round(v), deps.day, origin), phase),
       }),
     );
     if (why) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `The anchor stays: ${why}.` });
@@ -124,8 +124,8 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
   const also = form ? removedWith(deps.calendar, deps.ast, id) : null;
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
   button(ops, "Remove cycle", also ? `Remove the ${id} and the ${also}` : `Remove the ${id}`, orreryHint("orrery.removeCycle"), "remove-cycle", () =>
-    deps.edit((c, b) => {
-      const r = removeCycle(c, b, id);
+    deps.edit((c) => {
+      const r = removeCycle(c, id);
       if (!("refused" in r)) deps.selectAfter(`unit:${deps.yearUnit}`);
       return r;
     }, "click"),

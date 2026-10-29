@@ -64,13 +64,14 @@ export interface StudioState {
   world: WorldDraft;
   view: ViewState;
   /**
-   * The calendar the world draft was seeded from or last saved as. Not part
-   * of undo or the dirty check: a Save on a Seshat world compares it with the
-   * stored definition to refuse overwriting an edit made outside the studio
-   * (docs/SESHAT-v0.md §13.11 B3). Absent in hand-built states: `saved` stands in.
+   * The stored calendar the Studio last seeded the world draft from or wrote.
+   * One value, never part of undo or the dirty check (ruling 2026-10-30): a
+   * draft equal to it has no calendar edits, and a Save asks before it writes
+   * over a stored calendar that no longer equals it (definition.ts
+   * `planCalendarSave`). Absent in hand-built states: `saved` stands in.
    */
   calendarBase?: WorldDraft["calendar"];
-  /** where the world draft's calendar came from (absent: "legacy"); travels with `calendarBase` */
+  /** where that calendar came from (absent: "legacy"); set with `calendarBase` */
   calendarSource?: CalendarSource;
 }
 
@@ -197,7 +198,8 @@ export function initialState(settingsLike: StudioSettingsLike, zoneId: string | 
  * The plugin's settings changed outside the studio (StudioView.refreshFromSettings,
  * as one pure step): clean drafts adopt `fresh` (initialState of the new
  * settings); dirty drafts stay as the user left them, and `saved` always
- * tracks the plugin. In place.
+ * tracks the plugin. A dirty world draft with calendar edits keeps them and
+ * its `calendarBase`, so its next Save asks whether to overwrite. In place.
  * @param dirty the zone ids dirty before the change; `worldDirty` likewise
  */
 export function adoptSettings(s: StudioState, fresh: StudioState, dirty: ReadonlySet<string>, worldDirty: boolean): void {

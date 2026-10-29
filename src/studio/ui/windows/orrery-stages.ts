@@ -37,7 +37,7 @@ export interface StageEditorDeps {
   facts: StageFacts | null;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
   /** the part the window selects once the edit in hand lands */
   selectAfter(part: PartId): void;
@@ -81,11 +81,11 @@ export function buildStageEditor(parent: HTMLElement, deps: StageEditorDeps): Pa
     const led = head.createSpan({ cls: "wadjet-studio-orrery-led", attr: { "data-hint": orreryHint("orrery.stageFired"), "aria-label": fired ? "the first rule that matches this year" : "does not decide this year" } });
     led.toggleClass("is-lit", fired);
     head.createSpan({ cls: "wadjet-studio-orrery-rule-text", text: ruleSentence(deps.ast, r), attr: { "data-part": `rule-${j}-text` } });
-    button(head, "↑", `Read rule ${j + 1} earlier`, orreryHint("orrery.stageRuleUp"), `rule-${j}-up`, () => deps.edit((c, b) => moveRule(c, b, id, i, j, -1), "click"));
-    button(head, "↓", `Read rule ${j + 1} later`, orreryHint("orrery.stageRuleDown"), `rule-${j}-down`, () => deps.edit((c, b) => moveRule(c, b, id, i, j, 1), "click"));
-    button(head, "×", `Remove rule ${j + 1}`, orreryHint("orrery.stageRuleRemove"), `rule-${j}-remove`, () => deps.edit((c, b) => removeRule(c, b, id, i, j), "click"));
+    button(head, "↑", `Read rule ${j + 1} earlier`, orreryHint("orrery.stageRuleUp"), `rule-${j}-up`, () => deps.edit((c) => moveRule(c, id, i, j, -1), "click"));
+    button(head, "↓", `Read rule ${j + 1} later`, orreryHint("orrery.stageRuleDown"), `rule-${j}-down`, () => deps.edit((c) => moveRule(c, id, i, j, 1), "click"));
+    button(head, "×", `Remove rule ${j + 1}`, orreryHint("orrery.stageRuleRemove"), `rule-${j}-remove`, () => deps.edit((c) => removeRule(c, id, i, j), "click"));
     const knobRow = row.createDiv({ cls: "wadjet-studio-orrery-knobs" });
-    const addKnob = (write: (add: number) => (c: CalendarDraft, b: CalendarDraft) => CalendarEdit): void => {
+    const addKnob = (write: (add: number) => (c: CalendarDraft) => CalendarEdit): void => {
       knobs.push(
         createKnob(knobRow.createDiv({ cls: "wadjet-studio-orrery-knob", attr: { "data-part": `rule-${j}-add` } }), {
           spec: { min: Math.min(STAGE_ADD.min, r.add), max: Math.max(STAGE_ADD.max, r.add), step: 1 },
@@ -103,7 +103,7 @@ export function buildStageEditor(parent: HTMLElement, deps: StageEditorDeps): Pa
       const win = createSegmented(row.createDiv({ cls: "wadjet-studio-orrery-rule-window", attr: { "data-part": `rule-${j}-window` } }), {
         options: WINDOWS.map((w) => ({ value: String(w.at), label: w.word, hint: orreryHint("orrery.stageWindow") })),
         value: String(r.length.at),
-        onChange: (v) => deps.edit((c, b) => setLengthRule(c, b, id, i, j, { at: Number(v) }), "click"),
+        onChange: (v) => deps.edit((c) => setLengthRule(c, id, i, j, { at: Number(v) }), "click"),
       });
       win.el.setAttr("aria-label", `Rule ${j + 1} reads the last, this or the next year`);
       parts.push(win);
@@ -116,10 +116,10 @@ export function buildStageEditor(parent: HTMLElement, deps: StageEditorDeps): Pa
           fmt: (v) => `${Math.round(v)} d`,
           parse: (t) => whole(t),
           hint: orreryHint("orrery.stageRuns"),
-          onChange: (v, phase) => deps.edit((c, b) => setLengthRule(c, b, id, i, j, { is: Math.round(v) }), phase),
+          onChange: (v, phase) => deps.edit((c) => setLengthRule(c, id, i, j, { is: Math.round(v) }), phase),
         }),
       );
-      addKnob((add) => (c, b) => setLengthRule(c, b, id, i, j, { add }));
+      addKnob((add) => (c) => setLengthRule(c, id, i, j, { add }));
       const actual = facts?.lengths[j] ?? null;
       const w = WINDOWS.find((x) => x.at === r.length.at);
       const out = row.createDiv({ cls: "wadjet-studio-orrery-readout", attr: { "data-part": `rule-${j}-actual`, "data-hint": orreryHint("orrery.stageActual") } });
@@ -138,10 +138,10 @@ export function buildStageEditor(parent: HTMLElement, deps: StageEditorDeps): Pa
           parse: (t) => whole(t),
           hint: orreryHint("orrery.stageMod"),
           // the days kept are the rule's as the editor was built: a drag through a smaller mod and back keeps them all
-          onChange: (v, phase) => deps.edit((c, b) => setResidueRule(c, b, id, i, j, { mod: Math.round(v) }, days), phase),
+          onChange: (v, phase) => deps.edit((c) => setResidueRule(c, id, i, j, { mod: Math.round(v) }, days), phase),
         }),
       );
-      addKnob((add) => (c, b) => setResidueRule(c, b, id, i, j, { add }));
+      addKnob((add) => (c) => setResidueRule(c, id, i, j, { add }));
       const now = facts === null ? -1 : residueOf(r, facts.below);
       const grid = row.createDiv({ cls: "wadjet-studio-orrery-cycle is-residue", attr: { role: "group", "aria-label": `Rule ${j + 1}: the days the start may fall on` } });
       for (const cell of residueCells(deps.ast, r)) {
@@ -150,7 +150,7 @@ export function buildStageEditor(parent: HTMLElement, deps: StageEditorDeps): Pa
         el.toggleClass("is-leap", cell.on);
         el.toggleClass("is-now", cell.residue === now);
         el.toggleClass("is-named", cell.label !== null);
-        const flip = (): void => deps.edit((c, b) => toggleResidue(c, b, id, i, j, cell.residue), "click");
+        const flip = (): void => deps.edit((c) => toggleResidue(c, id, i, j, cell.residue), "click");
         el.addEventListener("click", flip);
         el.addEventListener("keydown", (ev) => {
           if (ev.key !== "Enter" && ev.key !== " ") return;
@@ -163,12 +163,12 @@ export function buildStageEditor(parent: HTMLElement, deps: StageEditorDeps): Pa
 
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
   button(ops, "＋ length rule", `Add a length rule to stage ${i + 1}`, orreryHint("orrery.addLengthRule"), "add-length-rule", () =>
-    deps.edit((c, b) => addRule(c, b, id, i, "length", facts?.lengths.find((x): x is number => x !== null) ?? undefined), "click"),
+    deps.edit((c) => addRule(c, id, i, "length", facts?.lengths.find((x): x is number => x !== null) ?? undefined), "click"),
   );
-  button(ops, "＋ residue rule", `Add a weekday rule to stage ${i + 1}`, orreryHint("orrery.addResidueRule"), "add-residue-rule", () => deps.edit((c, b) => addRule(c, b, id, i, "residue"), "click"));
+  button(ops, "＋ residue rule", `Add a weekday rule to stage ${i + 1}`, orreryHint("orrery.addResidueRule"), "add-residue-rule", () => deps.edit((c) => addRule(c, id, i, "residue"), "click"));
   button(ops, "Remove stage", `Remove stage ${i + 1} of the ${id}`, orreryHint("orrery.removeStage"), "remove-stage", () =>
-    deps.edit((c, b) => {
-      const r = removeStage(c, b, id, i);
+    deps.edit((c) => {
+      const r = removeStage(c, id, i);
       if (!("refused" in r)) deps.selectAfter(i > 0 ? `stage:${id}:${i - 1}` : (u?.stages?.length ?? 0) > 1 ? `stage:${id}:0` : u?.crossing ? `crossing:${id}` : `unit:${id}`);
       return r;
     }, "click"),

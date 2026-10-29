@@ -49,8 +49,8 @@ export const isLength = (r: StageRule): r is LengthRule => "length" in r;
 export const isResidue = (r: StageRule): r is ResidueRule => "residue" in r;
 
 /** The draft as one AST, or why it does not compile. */
-function current(calendar: CalendarDraft, base: CalendarDraft): CalendarAst | string {
-  const d = draftAst(calendar, base);
+function current(calendar: CalendarDraft): CalendarAst | string {
+  const d = draftAst(calendar);
   return "error" in d ? d.error : d.ast;
 }
 
@@ -63,20 +63,20 @@ export function stagesApply(ast: CalendarAst, unitId: string): boolean {
 }
 
 /** Apply `op` to the draft's stages of `unitId`, then write them (`setStages`). */
-function editStages(calendar: CalendarDraft, base: CalendarDraft, unitId: string, op: (stages: readonly StageAst[]) => readonly StageAst[] | string): CalendarEdit {
-  const ast = current(calendar, base);
+function editStages(calendar: CalendarDraft, unitId: string, op: (stages: readonly StageAst[]) => readonly StageAst[] | string): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const u = cycleIn(ast, unitId);
   if (!u) return refuse(`there is no cycle unit "${unitId}"`);
   if (!stagesApply(ast, unitId)) return refuse(`the ${unitId} starts on fixed days; stages move a start that a crossing sets`);
   const next = op(u.stages ?? []);
   if (typeof next === "string") return refuse(next);
-  return applyAstEdit(calendar, base, (a) => setStages(a, unitId, next));
+  return applyAstEdit(calendar, (a) => setStages(a, unitId, next));
 }
 
 /** Apply `op` to rule `j` of stage `i`. */
-function editRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, j: number, op: (rule: StageRule) => StageRule | string): CalendarEdit {
-  return editStages(calendar, base, unitId, (stages) => {
+function editRule(calendar: CalendarDraft, unitId: string, i: number, j: number, op: (rule: StageRule) => StageRule | string): CalendarEdit {
+  return editStages(calendar, unitId, (stages) => {
     const s = stages[i];
     if (!s) return `the ${unitId} has no stage ${i + 1}`;
     const r = s.rules[j];
@@ -88,8 +88,8 @@ function editRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, 
 }
 
 /** A length rule's window (`at`: −1 last, 0 this, +1 next year), `runs` (`is`, days) and `add`. */
-export function setLengthRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, j: number, patch: { at?: number; is?: number; add?: number }): CalendarEdit {
-  return editRule(calendar, base, unitId, i, j, (r) => {
+export function setLengthRule(calendar: CalendarDraft, unitId: string, i: number, j: number, patch: { at?: number; is?: number; add?: number }): CalendarEdit {
+  return editRule(calendar, unitId, i, j, (r) => {
     if (!isLength(r)) return `rule ${j + 1} of stage ${i + 1} tests a weekday, not a length`;
     return { add: patch.add ?? r.add, length: { at: patch.at ?? r.length.at, is: patch.is ?? r.length.is } };
   });
@@ -101,8 +101,8 @@ export function setLengthRule(calendar: CalendarDraft, base: CalendarDraft, unit
  * drag through a smaller mod and back keeps them all), else the draft's. A
  * mod that would leave no day named is refused.
  */
-export function setResidueRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, j: number, patch: { mod?: number; add?: number }, days?: readonly number[]): CalendarEdit {
-  return editRule(calendar, base, unitId, i, j, (r) => {
+export function setResidueRule(calendar: CalendarDraft, unitId: string, i: number, j: number, patch: { mod?: number; add?: number }, days?: readonly number[]): CalendarEdit {
+  return editRule(calendar, unitId, i, j, (r) => {
     if (!isResidue(r)) return `rule ${j + 1} of stage ${i + 1} tests a length, not a weekday`;
     const m = patch.mod ?? r.residue.mod;
     if (!isInt(m) || m < 1) return `a weekday test counts in ${String(m)}s; write a whole number of at least 1`;
@@ -114,8 +114,8 @@ export function setResidueRule(calendar: CalendarDraft, base: CalendarDraft, uni
 }
 
 /** Mark or unmark residue `cell` (0 to mod − 1) of a residue rule; the last marked day is kept (remove the rule instead). */
-export function toggleResidue(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, j: number, cell: number): CalendarEdit {
-  return editRule(calendar, base, unitId, i, j, (r) => {
+export function toggleResidue(calendar: CalendarDraft, unitId: string, i: number, j: number, cell: number): CalendarEdit {
+  return editRule(calendar, unitId, i, j, (r) => {
     if (!isResidue(r)) return `rule ${j + 1} of stage ${i + 1} tests a length, not a weekday`;
     const { mod: m, offset, in: hits } = r.residue;
     if (!isInt(cell) || cell < 0 || cell >= m) return `day ${cell} is outside 0 to ${m - 1}`;
@@ -139,19 +139,19 @@ export function newRule(ast: CalendarAst, kind: "length" | "residue", runs = NEW
 }
 
 /** ＋ length rule / ＋ residue rule on stage `i` (`runs`: this year's length, for a length rule). */
-export function addRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, kind: "length" | "residue", runs?: number): CalendarEdit {
-  const ast = current(calendar, base);
+export function addRule(calendar: CalendarDraft, unitId: string, i: number, kind: "length" | "residue", runs?: number): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const rule = newRule(ast, kind, runs);
-  return editStages(calendar, base, unitId, (stages) => {
+  return editStages(calendar, unitId, (stages) => {
     if (!stages[i]) return `the ${unitId} has no stage ${i + 1}`;
     return stages.map((s, k) => (k === i ? { rules: [...s.rules, rule] } : s));
   });
 }
 
 /** Move rule `j` of stage `i` up (−1) or down (+1): the first rule that matches wins, so order is meaning. */
-export function moveRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, j: number, dir: -1 | 1): CalendarEdit {
-  return editStages(calendar, base, unitId, (stages) => {
+export function moveRule(calendar: CalendarDraft, unitId: string, i: number, j: number, dir: -1 | 1): CalendarEdit {
+  return editStages(calendar, unitId, (stages) => {
     const s = stages[i];
     if (!s?.rules[j]) return `stage ${i + 1} has no rule ${j + 1}`;
     const to = j + dir;
@@ -163,8 +163,8 @@ export function moveRule(calendar: CalendarDraft, base: CalendarDraft, unitId: s
 }
 
 /** Remove rule `j` of stage `i` (a stage keeps at least one rule). */
-export function removeRule(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, j: number): CalendarEdit {
-  return editStages(calendar, base, unitId, (stages) => {
+export function removeRule(calendar: CalendarDraft, unitId: string, i: number, j: number): CalendarEdit {
+  return editStages(calendar, unitId, (stages) => {
     const s = stages[i];
     if (!s?.rules[j]) return `stage ${i + 1} has no rule ${j + 1}`;
     if (s.rules.length === 1) return "a stage needs at least one rule; remove the stage instead";
@@ -173,18 +173,18 @@ export function removeRule(calendar: CalendarDraft, base: CalendarDraft, unitId:
 }
 
 /** ＋ stage: a stage after the others, reading the last one, with one weekday test that moves nothing yet. `index` is the new stage's. */
-export function addStage(calendar: CalendarDraft, base: CalendarDraft, unitId: string): CalendarEdit & { readonly index?: number } {
-  const ast = current(calendar, base);
+export function addStage(calendar: CalendarDraft, unitId: string): CalendarEdit & { readonly index?: number } {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const rule = newRule(ast, "residue");
   const index = cycleIn(ast, unitId)?.stages?.length ?? 0;
-  const r = editStages(calendar, base, unitId, (stages) => [...stages, { rules: [rule] }]);
+  const r = editStages(calendar, unitId, (stages) => [...stages, { rules: [rule] }]);
   return "refused" in r ? r : { ...r, index };
 }
 
 /** Remove stage `i`; the stages after it read the one before it. */
-export function removeStage(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number): CalendarEdit {
-  return editStages(calendar, base, unitId, (stages) => (stages[i] ? stages.filter((_, k) => k !== i) : `the ${unitId} has no stage ${i + 1}`));
+export function removeStage(calendar: CalendarDraft, unitId: string, i: number): CalendarEdit {
+  return editStages(calendar, unitId, (stages) => (stages[i] ? stages.filter((_, k) => k !== i) : `the ${unitId} has no stage ${i + 1}`));
 }
 
 // ---- readouts

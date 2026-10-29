@@ -34,7 +34,7 @@ export interface SlotsEditorDeps {
   lengths: readonly number[] | null;
   /** the inline refusal to show, from the last edit */
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
   /** the part the window selects once the edit in hand lands (set inside `make`, so a refused or cancelled edit selects nothing) */
   selectAfter(part: PartId): void;
@@ -71,7 +71,7 @@ export interface YearEditorDeps {
   ast: CalendarAst;
   unitId: string;
   refusal: string | null;
-  edit(make: (calendar: CalendarDraft, base: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
+  edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
 }
 
@@ -97,7 +97,7 @@ export function buildYearEditor(parent: HTMLElement, deps: YearEditorDeps): Part
         return Number.isSafeInteger(n) && n > 0 ? n : null;
       },
       hint: orreryHint("orrery.yearDays"),
-      onChange: (v, phase) => deps.edit((c, b) => setYearLength(c, b, id, Math.round(v)), phase),
+      onChange: (v, phase) => deps.edit((c) => setYearLength(c, id, Math.round(v)), phase),
     }),
   );
   if (u.gears?.length) {
@@ -137,8 +137,8 @@ export function buildSlotUnitEditor(parent: HTMLElement, deps: SlotsEditorDeps):
   });
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
   button(ops, "＋ slot", `Add a slot to the ${id}`, orreryHint("orrery.addSlot"), "add-slot", () =>
-    deps.edit((c, b) => {
-      const r = addSlot(c, b, id, -1);
+    deps.edit((c) => {
+      const r = addSlot(c, id, -1);
       if (!("refused" in r) && r.index !== undefined) deps.selectAfter(`slot:${id}:${r.index}`);
       return r;
     }, "click"),
@@ -181,7 +181,7 @@ export function buildSlotEditor(parent: HTMLElement, title: HTMLElement, deps: S
   // ---- name, inline
   title.empty();
   title.addClass("is-editable");
-  const name = input(title, s.name ?? "", `Slot ${n} name`, orreryHint("orrery.slotName"), "slot-name", "wadjet-studio-orrery-title-input", (text) => deps.edit((c, b) => renameSlot(c, b, id, i, text), "click"));
+  const name = input(title, s.name ?? "", `Slot ${n} name`, orreryHint("orrery.slotName"), "slot-name", "wadjet-studio-orrery-title-input", (text) => deps.edit((c) => renameSlot(c, id, i, text), "click"));
   if (s.name === undefined) name.setAttr("placeholder", `${id} ${n}`);
 
   // ---- days
@@ -200,7 +200,7 @@ export function buildSlotEditor(parent: HTMLElement, title: HTMLElement, deps: S
       },
       disabled: keyed,
       hint: orreryHint("orrery.slotDays"),
-      onChange: (v, phase) => deps.edit((c, b) => setSlotDays(c, b, id, i, Math.round(v)), phase),
+      onChange: (v, phase) => deps.edit((c) => setSlotDays(c, id, i, Math.round(v)), phase),
     }),
   );
   if (keyed) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: "This slot's length follows its year's length, row by row: edit it as text." });
@@ -208,22 +208,22 @@ export function buildSlotEditor(parent: HTMLElement, title: HTMLElement, deps: S
 
   // ---- switches
   const sw = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
-  parts.push(toggle(sw, "filler", s.filler === true, orreryHint("orrery.slotFiller"), "slot-filler", (on) => deps.edit((c, b) => setSlotFiller(c, b, id, i, on), "click")));
-  parts.push(toggle(sw, "takes the rest", s.length === "slack", orreryHint("orrery.slotRest"), "slot-rest", (on) => deps.edit((c, b) => setSlotRest(c, b, id, i, on, thisYear ?? days), "click")));
+  parts.push(toggle(sw, "filler", s.filler === true, orreryHint("orrery.slotFiller"), "slot-filler", (on) => deps.edit((c) => setSlotFiller(c, id, i, on), "click")));
+  parts.push(toggle(sw, "takes the rest", s.length === "slack", orreryHint("orrery.slotRest"), "slot-rest", (on) => deps.edit((c) => setSlotRest(c, id, i, on, thisYear ?? days), "click")));
 
   // ---- ops
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
-  const op = (text: string, label: string, hint: string, part: string, make: (c: CalendarDraft, b: CalendarDraft) => CalendarEdit & { readonly index?: number }, after: (r: { index?: number }) => PartId): HTMLElement =>
+  const op = (text: string, label: string, hint: string, part: string, make: (c: CalendarDraft) => CalendarEdit & { readonly index?: number }, after: (r: { index?: number }) => PartId): HTMLElement =>
     button(ops, text, label, hint, part, () =>
-      deps.edit((c, b) => {
-        const r = make(c, b);
+      deps.edit((c) => {
+        const r = make(c);
         if (!("refused" in r)) deps.selectAfter(after(r));
         return r;
       }, "click"),
     );
-  op("↑", `Move ${s.name ?? `slot ${n}`} up`, orreryHint("orrery.slotUp"), "slot-up", (c, b) => moveSlot(c, b, id, i, -1), () => `slot:${id}:${i - 1}`);
-  op("↓", `Move ${s.name ?? `slot ${n}`} down`, orreryHint("orrery.slotDown"), "slot-down", (c, b) => moveSlot(c, b, id, i, 1), () => `slot:${id}:${i + 1}`);
-  op("＋ slot after", `Add a slot after ${s.name ?? `slot ${n}`}`, orreryHint("orrery.slotAddAfter"), "slot-add-after", (c, b) => addSlot(c, b, id, i), (r) => `slot:${id}:${r.index ?? i + 1}`);
-  op("Remove slot", `Remove ${s.name ?? `slot ${n}`}`, orreryHint("orrery.slotRemove"), "slot-remove", (c, b) => removeSlot(c, b, id, i), () => `unit:${id}`).addClass("is-danger");
+  op("↑", `Move ${s.name ?? `slot ${n}`} up`, orreryHint("orrery.slotUp"), "slot-up", (c) => moveSlot(c, id, i, -1), () => `slot:${id}:${i - 1}`);
+  op("↓", `Move ${s.name ?? `slot ${n}`} down`, orreryHint("orrery.slotDown"), "slot-down", (c) => moveSlot(c, id, i, 1), () => `slot:${id}:${i + 1}`);
+  op("＋ slot after", `Add a slot after ${s.name ?? `slot ${n}`}`, orreryHint("orrery.slotAddAfter"), "slot-add-after", (c) => addSlot(c, id, i), (r) => `slot:${id}:${r.index ?? i + 1}`);
+  op("Remove slot", `Remove ${s.name ?? `slot ${n}`}`, orreryHint("orrery.slotRemove"), "slot-remove", (c) => removeSlot(c, id, i), () => `unit:${id}`).addClass("is-danger");
   return editor;
 }

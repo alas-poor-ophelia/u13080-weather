@@ -16,15 +16,11 @@
  *   (`feeds:`, slice 5c) or its ledger (`ledger:`), one slot unit's slots, or
  *   the season marks (a slot edit that moves slots also moves the marks that
  *   name them, so it touches two; a gear's rename or removal touches every
- *   slice that names it). Slices are how a Save replays the
- *   draft's edits onto the definition stored at Save time (definition.ts
- *   `mergeCalendar`): a slice the draft did not edit passes through as stored
- *   now, and a slice it did edit is refused when it changed in storage since,
- *   or when a part its edits read without writing did (`replayProblem`).
+ *   slice that names it). A Save writes the whole draft (definition.ts
+ *   `planCalendarSave`), so a slice is only a way to name and set a part.
  * - A crossing's INDEX (the train, slice 5d) sits in its `crossing:` slice.
  * - A cycle unit's ANCHOR and LABELS (slice 5e, the labelled cycle) are its
- *   `cycle:` slice. Renaming or removing a unit is no slice: it is replayed
- *   as an operation before the slices (unit-edit.ts `unitOps`).
+ *   `cycle:` slice. Renaming or removing a unit is no slice (unit-edit.ts).
  * - A crossing that follows a body keeps its occurrence numbers: a moved mark
  *   or offset, or a different body, moves its K by the smallest shift (the
  *   rule `epochEditK` applies to an epoch edit, §16.7 P1). START changes the
@@ -149,15 +145,6 @@ export function withSlice(ast: CalendarAst, key: SliceKey, value: unknown): Cale
   const { [field]: _old, ...rest } = u as CycleUnitAst & Record<string, unknown>;
   const next = (value === undefined ? rest : { ...rest, [field]: value }) as UnitAst;
   return { ...ast, units: ast.units.map((x) => (x === u ? next : x)) };
-}
-
-/** `ast` with every slice taken out: two definitions that differ only in their slices are equal here. */
-export function outsideSlices(ast: CalendarAst): unknown {
-  const { gears: _g, seasons: _s, units, ...rest } = ast;
-  return {
-    ...rest,
-    units: units.map((u) => (u.kind === "cycle" ? (({ stages: _st, crossing: _c, length: _l, gears: _gt, ledger: _lg, anchor: _a, labels: _lb, ...x }) => ({ ...x, base: u.crossing ? "crossing" : "constant" }))(u) : (({ slots: _sl, ...x }) => x)(u))),
-  };
 }
 
 // ---- gears
@@ -766,8 +753,8 @@ const labelled = (s: SlotAst, x: string): boolean => (x.startsWith("#") ? (s.tag
  * Why `unitId`'s slots cannot become `slots` (`from[i]`: the index slot i had, null for a new one), or null: a
  * rule's label filter (BYLABEL) names a slot of the unit, and the edit would change which slots carry that name
  * or tag (a rename away from it or onto it, a removal, a new slot carrying it). A move keeps the matches (the
- * filter follows the name). Refused rather than renaming the filter with it: the rules are no slice a Save
- * replays, and one filter may list several names.
+ * filter follows the name). Refused rather than renaming the filter with it: one filter may list several
+ * names.
  */
 export function slotLabelProblem(ast: CalendarAst, unitId: string, slots: readonly SlotAst[], from: ReadonlyArray<number | null>): string | null {
   const u = slotUnit(ast, unitId);
@@ -780,99 +767,6 @@ export function slotLabelProblem(ast: CalendarAst, unitId: string, slots: readon
       const after = slots.flatMap((s, i) => (labelled(s, x) ? [from[i] ?? -1] : [])).sort((a, b) => a - b);
       if (!same(after, before)) return `the rule "${ruleName(rule)}" reads the ${unitId} named "${x}"; change it first (Edit definition)`;
     }
-  }
-  return null;
-}
-
-/**
- * What outside `unitId`'s own slots depends on their numbers or names: the rules' filters on the unit (or one
- * inside it), the exceptions that set its lengths (or those of one inside it) slot by slot, and (`marks`) the
- * season marks on its days. A Save replays a slot edit only while these are as the edit saw them.
- */
-export function slotReferences(ast: CalendarAst, unitId: string, marks = true): unknown {
-  return {
-    filters: filtersIn(ast)
-      .filter(({ by }) => typeof by.unit === "string" && countsIn(ast, by.unit, unitId))
-      .map(({ rule, by }) => [rule.id, by]),
-    ledger: ast.units.flatMap((u) => (u.kind === "cycle" ? (u.ledger ?? []).filter((e) => e.kind === "slots" && countsIn(ast, e.unit, unitId)).map((e) => [u.id, e]) : [])),
-    marks: marks ? (ast.seasons?.marks ?? []).filter((m) => "slot" in m && m.slot.unit === unitId) : [],
-  };
-}
-
-/** Whether any gear term in `ast` names gear `id`. */
-function termsNaming(ast: CalendarAst, id: string): boolean {
-  let found = false;
-  mapTerms(ast, (t) => {
-    if (t.gear === id) found = true;
-    return t;
-  });
-  return found;
-}
-
-/**
- * Why slice `key`, edited in `draft` from `base`, cannot be replayed onto the definition stored at Save time
- * (`stored`; `out` is it with the draft's slices replayed, this one included), or null. Each slice's edits were
- * checked against what the draft held of parts they read but do not write; when storage moved one of those since
- * the seed, the replay would bind differently (a slot by number, a mark by index, a K by a body's period), so the
- * Save is stale rather than silently wrong. A term naming a missing gear, which `problems()` refuses anyway, is
- * answered here too, so the Save says why.
- *
- * - `slots:u`: the rules, exceptions and season marks that read u's slots (`slotReferences`);
- * - `marks`: the slots of each unit a dated mark names;
- * - `crossing:u`: the bodies its K was chosen against;
- * - `gear:g`: the terms naming g (after a rename or a removal), the other ids (an added gear);
- * - `feeds:u`, `ledger:u`: each term's gear still declared, and still counting u;
- * - `stages:u`: the day cycle that names a weekday test's residues (`weekdayCycle`), while a test counts in its labels;
- * - `length:u`: nothing outside the slice.
- */
-export function replayProblem(key: SliceKey, base: CalendarAst, draft: CalendarAst, stored: CalendarAst, out: CalendarAst): string | null {
-  const moved = "changed outside the studio since this edit";
-  if (key === "marks") {
-    const units = new Set([...(draft.seasons?.marks ?? []), ...(base.seasons?.marks ?? [])].flatMap((m) => ("slot" in m ? [m.slot.unit] : [])));
-    for (const u of units) if (!same(sliceOf(stored, `slots:${u}`), sliceOf(base, `slots:${u}`))) return `a season starts on a day of the ${u}, whose slots ${moved}`;
-    return null;
-  }
-  const at = key.indexOf(":");
-  const kind = key.slice(0, at);
-  const id = key.slice(at + 1);
-  if (kind === "slots") return same(slotReferences(stored, id), slotReferences(base, id)) ? null : `a rule, an exception or a season that reads the ${id} ${moved}`;
-  if (kind === "stages") {
-    // a weekday test is edited cell by weekday: the residues mean those days only while the day cycle stays as it was
-    const mods = new Set((cycleUnit(draft, id)?.stages ?? []).flatMap((s) => s.rules.flatMap((r) => ("residue" in r ? [r.residue.mod] : []))));
-    for (const m of mods) {
-      const w = weekdayCycle(base, m);
-      if (w && !same(weekdayCycle(stored, m), w)) return `a weekday test of the ${id} reads the ${w.id} days, which ${moved}`;
-    }
-    return null;
-  }
-  if (kind === "crossing") {
-    const followed = new Set([base, draft].flatMap((a) => {
-      const b = cycleUnit(a, id)?.crossing?.body;
-      return b ? [b.id] : [];
-    }));
-    const body = (a: CalendarAst, b: string) => (a.bodies ?? []).find((x) => x.id === b);
-    for (const b of followed) if (!same(body(stored, b), body(base, b))) return `the ${id} follows the body "${b}", which ${moved}`;
-    return null;
-  }
-  if (kind === "gear") {
-    const mine = draft.gears.some((g) => g.id === id);
-    if (!mine && termsNaming(out, id)) return `the gear "${id}" is renamed or removed here, and a term naming it was added outside the studio since this edit`;
-    if (mine && !base.gears.some((g) => g.id === id)) {
-      const taken = declaredAs({ ...stored, gears: [] }, id);
-      if (taken) return `the id "${id}" was taken by a ${taken} outside the studio since this edit`;
-    }
-    return null;
-  }
-  if (kind === "feeds" || kind === "ledger") {
-    const u = cycleUnit(out, id);
-    const terms = kind === "feeds" ? (u?.gears ?? []) : (u?.ledger ?? []).flatMap((e) => (e.kind === "switch" ? (e.rule.gears ?? []) : []));
-    const missing = terms.find((t) => !out.gears.some((x) => x.id === t.gear));
-    if (missing) return `the gear "${missing.gear}" that the ${id} reads is gone; it was renamed or removed outside the studio since this edit`;
-    const off = terms.find((t) => {
-      const g = out.gears.find((x) => x.id === t.gear);
-      return g !== undefined && g.on !== id;
-    });
-    if (off) return `the gear "${off.gear}" no longer counts the ${id}; it ${moved}`;
   }
   return null;
 }

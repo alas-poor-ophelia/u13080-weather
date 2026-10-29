@@ -33,13 +33,13 @@ const mod = (a: number, m: number): number => {
 };
 
 /** The draft as one AST, or why it does not compile. */
-function current(calendar: CalendarDraft, base: CalendarDraft): CalendarAst | string {
-  const d = draftAst(calendar, base);
+function current(calendar: CalendarDraft): CalendarAst | string {
+  const d = draftAst(calendar);
   return "error" in d ? d.error : d.ast;
 }
 
-function withDraft(next: CalendarDraft, base: CalendarDraft): CalendarEdit {
-  const d = draftAst(next, base);
+function withDraft(next: CalendarDraft): CalendarEdit {
+  const d = draftAst(next);
   return "error" in d ? refuse(d.error) : { calendar: next, ast: d.ast };
 }
 
@@ -68,8 +68,8 @@ export function inFormWeek(calendar: CalendarDraft, ast: CalendarAst, unitId: st
 // ---- the id
 
 /** Rename cycle `unitId` (an AST edit: the formats' tokens and the rules that read it follow). */
-export function renameCycle(calendar: CalendarDraft, base: CalendarDraft, unitId: string, to: string): CalendarEdit {
-  return applyAstEdit(calendar, base, (a) => renameUnit(a, unitId, to));
+export function renameCycle(calendar: CalendarDraft, unitId: string, to: string): CalendarEdit {
+  return applyAstEdit(calendar, (a) => renameUnit(a, unitId, to));
 }
 
 // ---- labels
@@ -85,8 +85,8 @@ export interface LabelsChange {
  * them and the result is names only, else the AST's `cycle:` slice. A rule that reads a label by name refuses
  * the edit either way (`cycleLabelProblem`).
  */
-export function editLabels(calendar: CalendarDraft, base: CalendarDraft, unitId: string, op: (labels: readonly LabelAst[], unit: CycleUnitAst) => LabelsChange | string): CalendarEdit {
-  const ast = current(calendar, base);
+export function editLabels(calendar: CalendarDraft, unitId: string, op: (labels: readonly LabelAst[], unit: CycleUnitAst) => LabelsChange | string): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const u = cycleIn(ast, unitId);
   if (!u) return refuse(`there is no cycle unit "${unitId}"`);
@@ -98,17 +98,17 @@ export function editLabels(calendar: CalendarDraft, base: CalendarDraft, unitId:
   if (why) return refuse(why);
   const w = formWeek(calendar, ast);
   const names = r.labels.every((l) => typeof l.name === "string" && l.tags === undefined) ? r.labels.map((l) => l.name!) : null;
-  if (w && w.days.id === unitId && names) return withDraft({ ...calendar, form: { ...calendar.form, week: names } }, base);
-  return applyAstEdit(calendar, base, (a) => setCycleLabels(a, unitId, r.labels, r.from));
+  if (w && w.days.id === unitId && names) return withDraft({ ...calendar, form: { ...calendar.form, week: names } });
+  return applyAstEdit(calendar, (a) => setCycleLabels(a, unitId, r.labels, r.from));
 }
 
 const ident = (labels: readonly LabelAst[]): Array<number | null> => labels.map((_, i) => i);
 
 /** Rename label `i` (a name cannot be blank). */
-export function renameLabel(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number, name: string): CalendarEdit {
+export function renameLabel(calendar: CalendarDraft, unitId: string, i: number, name: string): CalendarEdit {
   const n = name.trim().normalize("NFC");
   if (n === "") return refuse("a label's name cannot be blank");
-  return editLabels(calendar, base, unitId, (labels) => {
+  return editLabels(calendar, unitId, (labels) => {
     const l = labels[i];
     if (!l) return `the ${unitId} has no label ${i + 1}`;
     return { labels: labels.map((x, j) => (j === i ? (x.name === n ? x : { ...x, name: n }) : x)), from: ident(labels) };
@@ -116,9 +116,9 @@ export function renameLabel(calendar: CalendarDraft, base: CalendarDraft, unitId
 }
 
 /** ＋ label: a label after the others with a fresh name; the cycle (and the week that runs with it) is one longer. `index` is the new label's. */
-export function addLabel(calendar: CalendarDraft, base: CalendarDraft, unitId: string): CalendarEdit & { readonly index?: number } {
+export function addLabel(calendar: CalendarDraft, unitId: string): CalendarEdit & { readonly index?: number } {
   let index = -1;
-  const r = editLabels(calendar, base, unitId, (labels) => {
+  const r = editLabels(calendar, unitId, (labels) => {
     index = labels.length;
     return { labels: [...labels, { name: freshName("Label", labels.flatMap((l) => (l.name === undefined ? [] : [l.name]))) }], from: [...ident(labels), null] };
   });
@@ -126,8 +126,8 @@ export function addLabel(calendar: CalendarDraft, base: CalendarDraft, unitId: s
 }
 
 /** × on label `i`: the cycle (and its week) is one shorter; the last label stays (remove the cycle instead). */
-export function removeLabel(calendar: CalendarDraft, base: CalendarDraft, unitId: string, i: number): CalendarEdit {
-  return editLabels(calendar, base, unitId, (labels) => {
+export function removeLabel(calendar: CalendarDraft, unitId: string, i: number): CalendarEdit {
+  return editLabels(calendar, unitId, (labels) => {
     if (!labels[i]) return `the ${unitId} has no label ${i + 1}`;
     if (labels.length === 1) return `the ${unitId} needs at least one label; remove the cycle instead`;
     return { labels: labels.filter((_, j) => j !== i), from: ident(labels).filter((f) => f !== i) };
@@ -148,8 +148,8 @@ export function labelOn(u: CycleUnitAst & { readonly anchor: number }, day: numb
  * anchor back exactly). An AST edit (the form holds no anchor); the week that runs with the day names moves by
  * the same days. Refused while a rule reads the unit by number, or a gear counts it.
  */
-export function setTodayIs(calendar: CalendarDraft, base: CalendarDraft, unitId: string, label: number, day: number, origin: number): CalendarEdit {
-  const ast = current(calendar, base);
+export function setTodayIs(calendar: CalendarDraft, unitId: string, label: number, day: number, origin: number): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   const u = cycleIn(ast, unitId);
   if (!u || u.crossing) return refuse(`there is no cycle unit "${unitId}" with an anchor`);
@@ -157,10 +157,10 @@ export function setTodayIs(calendar: CalendarDraft, base: CalendarDraft, unitId:
   if (!n) return refuse(`the ${unitId} has no labels`);
   if (!Number.isSafeInteger(label) || label < 0 || label >= n) return refuse(`the ${unitId} has no label ${label + 1}`);
   const anchor = anchorFor(origin, u.length, n, day, label);
-  if (anchor === u.anchor) return withDraft(calendar, base);
+  if (anchor === u.anchor) return withDraft(calendar);
   const why = anchorProblem(ast, unitId);
   if (why) return refuse(why);
-  return applyAstEdit(calendar, base, (a) => setCycleAnchor(a, unitId, anchor));
+  return applyAstEdit(calendar, (a) => setCycleAnchor(a, unitId, anchor));
 }
 
 // ---- remove
@@ -170,8 +170,8 @@ export function setTodayIs(calendar: CalendarDraft, base: CalendarDraft, unitId:
  * the form writes them), else an AST edit. Refused while anything reads it (formats, rules, seasons, gears, a slot
  * unit inside it, a stage's weekday names), naming the first.
  */
-export function removeCycle(calendar: CalendarDraft, base: CalendarDraft, unitId: string): CalendarEdit {
-  const ast = current(calendar, base);
+export function removeCycle(calendar: CalendarDraft, unitId: string): CalendarEdit {
+  const ast = current(calendar);
   if (typeof ast === "string") return refuse(ast);
   if (!cycleIn(ast, unitId)) return refuse(`there is no cycle unit "${unitId}"`);
   const w = formWeek(calendar, ast);
@@ -181,9 +181,9 @@ export function removeCycle(calendar: CalendarDraft, base: CalendarDraft, unitId
       const readers = unitReaders(ast, u.id);
       if (readers.length) return refuse(`the ${u.id} goes with the week, and ${readers[0]}; change that first`);
     }
-    return withDraft({ ...calendar, form: { ...calendar.form, week: null } }, base);
+    return withDraft({ ...calendar, form: { ...calendar.form, week: null } });
   }
-  return applyAstEdit(calendar, base, (a) => removeUnit(a, unitId));
+  return applyAstEdit(calendar, (a) => removeUnit(a, unitId));
 }
 
 /** What `Remove cycle` takes with it: the week's other unit when the form writes the two together, else nothing. */

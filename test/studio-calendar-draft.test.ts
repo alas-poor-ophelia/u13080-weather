@@ -103,8 +103,8 @@ describe("a moon is its body (wadjet-dea)", () => {
   });
 });
 
-describe("stale is per part (§15.9 S5)", () => {
-  test("an edit outside the studio to another part passes through; one to the same part refuses", () => {
+describe("a field-only merge (the settings rows) writes only the parts it edited", () => {
+  test("a part the draft did not edit passes through as stored now", () => {
     // settings changed the moons while the studio edited only the seasons
     const outside = print({ ...DEF, bodies: [DEF.bodies![0]!, { ...DEF.bodies![1]!, moon: { name: "Cinder" } }] });
     const draft = clone(BASE);
@@ -112,24 +112,15 @@ describe("stale is per part (§15.9 S5)", () => {
     const ast = written(mergeCalendar(outside, BASE, draft));
     expect((ast.seasons!.marks[1] as { from: number }).from).toBe(0.6);
     expect(ast.bodies![1]!.moon!.name).toBe("Cinder");
-    // the studio edited the moons too: that part changed underneath, so it refuses and offers the stored calendar
-    const both = clone(draft);
-    both.moons[0]!.name = "Selene";
-    const r = mergeCalendar(outside, BASE, both);
-    expect(r.kind).toBe("stale");
-    if (r.kind === "stale") expect(r.stored.moons[1]!.name).toBe("Cinder");
   });
 
-  test("the same holds for the form's parts: months changed outside, a name edit passes; a months edit refuses", () => {
-    const months = BASE.form!.months!;
+  test("the same holds for the form's parts: months changed outside, a name edit passes", () => {
     const outside = print(parse(TEXT.replace("SLOT:January=31", "SLOT:Janus=31")));
     expect(outside).not.toBe(TEXT);
     const named = { ...clone(BASE), form: { ...BASE.form, name: "Other" } };
     const ast = written(mergeCalendar(outside, BASE, named));
     expect(ast.name).toBe("Other");
     expect(calendarOfDefinition(ast).form!.months![0]!.name).toBe("Janus");
-    const renamed = { ...clone(BASE), form: { ...BASE.form, months: months.map((m, i) => (i === 1 ? { ...m, name: "Febru" } : m)) } };
-    expect(mergeCalendar(outside, BASE, renamed).kind).toBe("stale");
   });
 });
 
