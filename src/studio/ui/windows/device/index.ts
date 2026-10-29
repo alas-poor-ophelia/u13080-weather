@@ -89,6 +89,8 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
     let live = false;
     let endLive: (() => void) | null = null;
     let cancelDrag: (() => void) | null = null;
+    /** Set in `onClose`: a knob destroyed by the teardown still sends its owed "end", which then writes nothing. */
+    let closed = false;
     /** `＋ mod` opens the MOD section on a device that has neither a gate nor an envelope yet. */
     let modOpen = false;
     /** Which year-window clip the start/length knobs edit (`＋ add window` can make several). */
@@ -195,6 +197,7 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
 
     /** A knob or chart handle moved: update every frame, commit one undo step at the end (SPEC §3.8). */
     function gesture(phase: "drag" | "end" | "key" | "type", fn: (d: Device) => void): void {
+      if (closed) return;
       if (phase === "drag") {
         beginLive();
         mutate(fn, false);
@@ -487,6 +490,9 @@ export function buildDeviceWindow(modifierId: string): WindowBuilder {
       writes,
       issues,
       onClose: () => {
+        // a drag under way when the window closes is still one undo step: its frames are in the store already
+        if (live) ctx.store.snapshot();
+        closed = true;
         unsubscribe?.();
         unsubscribe = null;
         endLive?.();

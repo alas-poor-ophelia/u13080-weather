@@ -33,7 +33,7 @@ import { canonicalJson } from "../../core/profile";
 import { Body, bodyFor, Engine, parse, print, rational, seasonsUseDates, toNumber, type BodyAst, type CalendarAst, type Rational, type SeasonMark } from "../../seshat";
 import { prepareDefinition } from "../../plugin/time/seshat";
 import { compile, FormError, recognise, type FormEdits, type MoonForm } from "../../plugin/time/form";
-import { editedSlices, outsideSlices, sliceOf, withSlice, type AstEdit } from "./ast-edit";
+import { editedSlices, outsideSlices, replayProblem, sliceOf, slotReferences, withSlice, type AstEdit } from "./ast-edit";
 import { moveBody } from "./rational-knob";
 import type { CalendarSource, DraftMoon, FormDraft, WorldDraft } from "./state";
 
@@ -96,7 +96,8 @@ function runs(p: { period: BodyAst["period"]; epoch: BodyAst["epoch"] }): boolea
 
 export type MergeResult =
   | { kind: "unchanged" }
-  | { kind: "stale"; stored: CalendarDraft }
+  /** `reason`: why, when it is more than "the part this draft edited changed in storage" */
+  | { kind: "stale"; stored: CalendarDraft; reason?: string }
   | { kind: "error"; message: string }
   | { kind: "write"; text: string; rewrites: boolean };
 
@@ -254,6 +255,12 @@ function pendingParts(base: CalendarDraft, draft: CalendarDraft, layer: Calendar
 
 type Layered = CalendarDraft & { ast: CalendarAst };
 
+/** The form's months: the one slot unit directly in the year (form.ts `monthUnit`), or undefined. */
+function monthsUnit(ast: CalendarAst): string | undefined {
+  const ms = ast.units.filter((u) => u.kind === "slots" && u.in === "year");
+  return ms.length === 1 ? ms[0]!.id : undefined;
+}
+
 function mergeLayers(stored: string, ast: CalendarAst, base: Layered, draft: Layered): MergeResult {
   const now = calendarOfDefinition(ast);
   // a part that moved in storage is stale, unless the draft holds what storage holds now (then there is nothing to write)
@@ -269,6 +276,20 @@ function mergeLayers(stored: string, ast: CalendarAst, base: Layered, draft: Lay
     const next = withSlice(out, k, sliceOf(draft.ast, k));
     if (!next) return { kind: "error", message: `the ${k} cannot be written into the stored definition` };
     out = next;
+  }
+  // each slice's edits were checked against parts of the draft they read but do not write: when storage moved one, the
+  // replay would bind differently (a slot by number, a mark by index), so the Save is stale, never silently wrong
+  for (const k of slices) {
+    const why = replayProblem(k, base.ast, draft.ast, ast, out);
+    if (why) return { kind: "stale", stored: seshatDraft(ast), reason: why };
+  }
+  // the form's months write over the stored months: the rules and exceptions that read them by number or name must be
+  // as the edit saw them (their marks the compile itself moves by name)
+  if (parts.includes("months")) {
+    const m = monthsUnit(ast) ?? monthsUnit(base.ast);
+    if (m !== undefined && !same(slotReferences(ast, m, false), slotReferences(base.ast, m, false))) {
+      return { kind: "stale", stored: seshatDraft(ast), reason: `a rule or an exception that reads the ${m} changed outside the studio since this edit` };
+    }
   }
   const edits = formEdits(out, base, draft, parts);
   if (typeof edits === "string") return { kind: "error", message: edits };
@@ -493,7 +514,7 @@ export function planCalendarSave(current: { source: CalendarSource; calendar: Ca
       if (m.message === DATED_SEASONS) return { kind: "refuse", message: `${DATED_SEASONS} (Edit definition).` };
       return { kind: "refuse", message: `the calendar edits do not make a calendar that runs (${m.message}).` };
     case "stale":
-      return { kind: "refuse", message: `the calendar definition changed outside the studio while you edited the same part of it. The studio now shows the stored calendar. ${AGAIN}`, reseed: m.stored };
+      return { kind: "refuse", message: `the calendar definition changed outside the studio while you edited the same part of it${m.reason ? ` (${m.reason})` : ""}. The studio now shows the stored calendar. ${AGAIN}`, reseed: m.stored };
     case "write":
       return m.text === stored ? { kind: "none" } : { kind: "definition", text: m.text, rewrites: m.rewrites };
   }

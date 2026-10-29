@@ -23,7 +23,7 @@
  */
 import type { MonthForm } from "../../plugin/time/form";
 import type { CalendarAst, SlotAst, SlotsUnitAst } from "../../seshat";
-import { setCycleLength, setSlotUnit, slotOrderProblem } from "./ast-edit";
+import { setCycleLength, setSlotUnit, slotLabelProblem, slotOrderProblem } from "./ast-edit";
 import { applyAstEdit, draftAst, type CalendarDraft, type CalendarEdit } from "./definition";
 import { freshName } from "./orrery-body";
 
@@ -107,6 +107,8 @@ export function editSlots(calendar: CalendarDraft, base: CalendarDraft, unitId: 
     const why = slotOrderProblem(ast, unitId);
     if (why) return refuse(why);
   }
+  const named = slotLabelProblem(ast, unitId, r.slots, r.from);
+  if (named) return refuse(named);
   const months = calendar.form?.months !== undefined && calendar.form.months !== null && isMonths(ast, unitId) ? asMonths(r.slots) : null;
   if (months) {
     if (r.slots.length === 0) return refuse(`the ${unitId} needs at least one slot`);

@@ -225,14 +225,43 @@ describe("a slack slot", () => {
 });
 
 describe("reordering guards", () => {
-  test("a rule that reads the months by number refuses a move, an add and a remove; a rename goes through", () => {
-    const ruled: CalendarAst = { ...GREGORIAN, rules: [{ id: "spring-month", rule: { kind: "index", unit: "month", from: 2, to: 2 } }] };
+  test("a rule that reads the months by number (BYNTH) refuses a move, an add and a remove; a rename goes through", () => {
+    const ruled: CalendarAst = { ...GREGORIAN, rules: [{ id: "spring-month", tags: ["spring"], rule: { kind: "recur", freq: "year", by: [{ unit: "month", nth: [3] }] } }] };
+    expect(problems(ruled)).toEqual([]); // a rule the validator accepts
     const { base, draft } = opened(ruled);
     expect(slotOrderProblem(ruled, "month")).toContain('"spring-month"');
     expect(refused(moveSlot(draft, base, "month", 0, 1))).toContain("by number");
     expect(refused(addSlot(draft, base, "month", 0))).toContain("by number");
     expect(refused(removeSlot(draft, base, "month", 0))).toContain("by number");
     expect(slotsOf(done(renameSlot(draft, base, "month", 0, "Janus")).ast, "month")[0]!.name).toBe("Janus");
+  });
+  test("a rule nested in all/not, by day (BYDAY), or on the tenday inside the months refuses a reorder of the months", () => {
+    const byDay: CalendarAst = { ...HARPTOS, rules: [{ id: "eve", tags: ["eve"], rule: { kind: "all", of: [{ kind: "not", of: { kind: "tag", tag: "x" } }, { kind: "recur", freq: "month", by: [{ unit: "month", day: [-1] }] }] } }] };
+    const byTenday: CalendarAst = { ...HARPTOS, rules: [{ id: "third", tags: ["third"], rule: { kind: "recur", freq: "year", by: [{ unit: "tenday", nth: [3] }] } }] };
+    for (const a of [byDay, byTenday]) expect(problems(a)).toEqual([]);
+    expect(slotOrderProblem(byDay, "month")).toContain('"eve" reads the month by its days');
+    expect(slotOrderProblem(byTenday, "month")).toContain('"third" reads the tenday by number');
+    const { base, draft } = opened(byDay);
+    expect(refused(moveSlot(draft, base, "month", 2, 1))).toContain("by its days");
+    expect(slotOrderProblem(byTenday, "tenday")).toContain("by number");
+    expect(slotOrderProblem(HARPTOS, "month")).toBeNull();
+  });
+  test("a rule that reads a month by name (BYLABEL) refuses a rename onto or away from it and its removal; a move goes through", () => {
+    const named: CalendarAst = { ...GREGORIAN, rules: [{ id: "march", tags: ["march"], rule: { kind: "recur", freq: "year", by: [{ unit: "month", label: ["March"] }] } }] };
+    expect(problems(named)).toEqual([]);
+    const { base, draft } = opened(named);
+    expect(refused(renameSlot(draft, base, "month", 2, "Mars"))).toContain('"march" reads the month named "March"');
+    expect(refused(renameSlot(draft, base, "month", 3, "March"))).toContain('named "March"');
+    expect(refused(removeSlot(draft, base, "month", 2))).toContain('named "March"');
+    expect(slotsOf(done(renameSlot(draft, base, "month", 0, "Janus")).ast, "month")[0]!.name).toBe("Janus");
+    expect(slotsOf(done(moveSlot(draft, base, "month", 2, 1)).ast, "month")[3]!.name).toBe("March");
+    // the AST path, and a #tag filter: the slot carrying the tag cannot lose it by a rename-free edit either
+    const tagged: CalendarAst = { ...withSlots(HARPTOS, "month", (s) => s.map((x, i) => (i === 1 ? { ...x, tags: ["feast"] } : x))), rules: [{ id: "feast", tags: ["f"], rule: { kind: "recur", freq: "year", by: [{ unit: "month", label: ["#feast", "Ches"] }] } }] };
+    expect(problems(tagged)).toEqual([]);
+    const s = slotsOf(tagged, "month");
+    expect(refused(setSlotUnit(tagged, "month", s.map((x, i) => (i === 1 ? { name: "Midwinter", length: 1, filler: true } : x))))).toContain('"#feast"');
+    expect(refused(setSlotUnit(tagged, "month", s.map((x, i) => (i === 3 ? { ...x, name: "Chess" } : x))))).toContain('"Ches"');
+    expect("ast" in setSlotUnit(tagged, "month", s.map((x, i) => (i === 3 ? { ...x, length: 31 } : x)))).toBe(true);
   });
   test("an exception that sets the tenday's lengths refuses a reorder of the months it sits in", () => {
     const ledgered: CalendarAst = { ...HARPTOS, units: HARPTOS.units.map((u) => (u.id === "year" && u.kind === "cycle" ? { ...u, ledger: [{ kind: "slots", from: 3, unit: "tenday", path: [0], lengths: [9, 10, 11] }] } : u)) };

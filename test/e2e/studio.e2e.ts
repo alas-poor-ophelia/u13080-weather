@@ -9913,6 +9913,7 @@ describe("climate studio · theme", () => {
 /* ── A calendar definition world: the Exceptions tab and the Save calendar changes dialog (bead wadjet-eab) ── */
 
 const GREGORIAN_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "gregorian.seshat"), "utf8");
+const HARPTOS_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "harptos.seshat"), "utf8");
 
 /** Press Continue on whatever world-level or rewrite confirm is up; false when none came. */
 async function passAnyConfirm(): Promise<boolean> {
@@ -10584,6 +10585,13 @@ describe("climate studio · calendar orrery", () => {
       // a press with a 1 px wobble (under the drag threshold) closes its gesture: the inspector rebuilds on the next edit (5a review)
       await dragKnobDial(dial, 1);
       await nextFrame();
+      // ... and directly: selecting another part changes the inspector (a gesture left open would hold the rebuild)
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:month"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOTS");
+      expect(await win.locator('[data-editor="slot"]').count()).toBe(0);
+      await win.locator('[data-part="slot-row-0"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOT");
+      expect(await title()).toBe("January");
 
       // rename: the TEXT and the title follow
       const name = win.locator(".wadjet-studio-orrery-title-input");
@@ -10610,7 +10618,34 @@ describe("climate studio · calendar orrery", () => {
       await expect.poll(async () => (await monthLed().getAttribute("class")) ?? "").not.toContain("is-error");
       await expect.poll(lcd).toBe(lcd0);
       expect(stored()).toContain("SLOT:January=31");
-      console.log(`  · orrery slots: January → ${days} d (LCD "${lcd0}" → "${lcd1}"), renamed, ＋ slot after flagged the months, Undo → clean${confirmed ? " (after the world confirm)" : ""}`);
+
+      // Harptos reads its months as text: a filler's rename is an AST edit (slots:month), and a Save writes it
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app, t: string) => app.plugins.plugins.wadjet.calendars.optIn(t, { replaceStored: true }), HARPTOS_TEXT);
+      await open();
+      await nextFrame();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:month"]').click();
+      await expect.poll(() => textOf(".wadjet-studio-orrery-code")).toBe("C2 · SLOTS");
+      await win.locator('[data-part="slot-row-1"]').click();
+      await expect.poll(title).toBe("Midwinter");
+      await name.fill("Deepwinter");
+      await name.press("Enter");
+      await passAnyConfirm();
+      await expect.poll(chip).toContain("●");
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
+      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
+      await saveBtn.click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+      await expect.poll(stored, { timeout: 10_000 }).toContain("NAME:Deepwinter");
+      expect(stored()).not.toContain("NAME:Midwinter");
+      expect(/NAME:Deepwinter\r?\nLENGTH:1\r?\nFILLER:TRUE/.test(stored())).toBe(true);
+      await expect.poll(chip).not.toContain("●");
+      console.log(`  · orrery slots: January → ${days} d (LCD "${lcd0}" → "${lcd1}"), renamed, ＋ slot after flagged the months, Undo → clean${confirmed ? " (after the world confirm)" : ""}; Harptos Midwinter → Deepwinter saved`);
     } finally {
       await close();
       await discardStudioWorldDraft();

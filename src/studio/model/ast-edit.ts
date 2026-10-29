@@ -19,14 +19,15 @@
  *   slice that names it). Slices are how a Save replays the
  *   draft's edits onto the definition stored at Save time (definition.ts
  *   `mergeCalendar`): a slice the draft did not edit passes through as stored
- *   now, and a slice it did edit is refused when it changed in storage since.
+ *   now, and a slice it did edit is refused when it changed in storage since,
+ *   or when a part its edits read without writing did (`replayProblem`).
  * - A crossing that follows a body keeps its occurrence numbers: a moved mark
  *   or offset, or a different body, moves its K by the smallest shift (the
  *   rule `epochEditK` applies to an epoch edit, §16.7 P1). START changes the
  *   start day by less than one day, so K stays.
  */
 import { canonicalJson } from "../../core/profile";
-import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, type BodyRef, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
+import { childrenOf, epochEditK, gearMatches, gearPeriod, ID, rational, type BodyRef, type By, type CalendarAst, type CrossingAst, type CycleUnitAst, type GearAst, type GearTerm, type LedgerEntry, type Rational, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type SlotAst, type SlotsUnitAst, type StageAst, type UnitAst } from "../../seshat";
 
 export type AstEdit = { readonly ast: CalendarAst } | { readonly refused: true; readonly reason: string };
 
@@ -585,20 +586,149 @@ function inside(ast: CalendarAst, inner: string, outer: string): boolean {
 }
 
 /**
+ * Every `recur` filter in the named rules, with its rule. Named rules are the
+ * only place a definition holds a RuleAst (stages and ledger switches carry
+ * start rules, which read no slot), and `recur` is the only kind that reads a
+ * slot unit by number, by day or by name (`index` reads a cycle unit only:
+ * validate.ts checkRule).
+ */
+function filtersIn(ast: CalendarAst): Array<{ rule: RuleDefAst; by: By }> {
+  const out: Array<{ rule: RuleDefAst; by: By }> = [];
+  const walk = (rule: RuleDefAst, r: RuleAst, depth: number): void => {
+    if (depth > 256 || typeof r !== "object" || r === null) return;
+    if (r.kind === "recur" && Array.isArray(r.by)) for (const by of r.by as readonly By[]) if (typeof by === "object" && by !== null) out.push({ rule, by });
+    for (const c of childrenOf(r)) walk(rule, c, depth + 1);
+  };
+  for (const rule of ast.rules ?? []) walk(rule, rule.rule, 0);
+  return out;
+}
+
+const ruleName = (r: RuleDefAst): string => r.name ?? r.id;
+
+/** Whether a filter or an exception on `unit` counts the slots of `unitId` (the unit itself, or one inside it, whose numbering an order change moves). */
+const countsIn = (ast: CalendarAst, unit: string, unitId: string): boolean => unit === unitId || inside(ast, unit, unitId);
+
+/**
  * Why the slots of `unitId` cannot be added to, removed from or reordered, or
- * null: a rule reads the unit by number (it would then match other slots), or
- * an exception sets the lengths of this unit, or of one inside it, slot by
- * slot. A length, name or flag change keeps every slot's number and is never
- * refused here.
+ * null: a rule reads the unit (or one inside it) by number or by day (BYNTH,
+ * BYDAY: it would then match other slots), or an exception sets the lengths of
+ * this unit, or of one inside it, slot by slot. A length, name or flag change
+ * keeps every slot's number and is never refused here (a name a rule matches
+ * is `slotLabelProblem`'s).
  */
 export function slotOrderProblem(ast: CalendarAst, unitId: string): string | null {
-  const reads = (r: RuleAst): boolean => (r.kind === "index" && r.unit === unitId) || childrenOf(r).some(reads);
-  const rule = (ast.rules ?? []).find((r) => reads(r.rule));
-  if (rule) return `the rule "${rule.name ?? rule.id}" reads the ${unitId} by number; change it first (Edit definition)`;
+  const f = filtersIn(ast).find(({ by }) => !("label" in by) && typeof by.unit === "string" && countsIn(ast, by.unit, unitId));
+  if (f) return `the rule "${ruleName(f.rule)}" reads the ${f.by.unit} ${"nth" in f.by ? "by number" : "by its days"}; change it first (Edit definition)`;
   for (const u of ast.units) {
     if (u.kind !== "cycle") continue;
-    const e = (u.ledger ?? []).find((x) => x.kind === "slots" && (x.unit === unitId || inside(ast, x.unit, unitId)));
+    const e = (u.ledger ?? []).find((x) => x.kind === "slots" && countsIn(ast, x.unit, unitId));
     if (e) return `an exception sets the ${e.kind === "slots" ? e.unit : unitId} lengths slot by slot; change it first (Exceptions)`;
+  }
+  return null;
+}
+
+/** Whether slot `s` carries label `x` as a rule's label filter reads it (a name, or "#tag"). */
+const labelled = (s: SlotAst, x: string): boolean => (x.startsWith("#") ? (s.tags?.includes(x.slice(1)) ?? false) : s.name === x);
+
+/**
+ * Why `unitId`'s slots cannot become `slots` (`from[i]`: the index slot i had, null for a new one), or null: a
+ * rule's label filter (BYLABEL) names a slot of the unit, and the edit would change which slots carry that name
+ * or tag (a rename away from it or onto it, a removal, a new slot carrying it). A move keeps the matches (the
+ * filter follows the name). Refused rather than renaming the filter with it: the rules are no slice a Save
+ * replays, and one filter may list several names.
+ */
+export function slotLabelProblem(ast: CalendarAst, unitId: string, slots: readonly SlotAst[], from: ReadonlyArray<number | null>): string | null {
+  const u = slotUnit(ast, unitId);
+  if (!u) return null;
+  for (const { rule, by } of filtersIn(ast)) {
+    if (!("label" in by) || by.unit !== unitId || !Array.isArray(by.label)) continue;
+    for (const x of by.label) {
+      if (typeof x !== "string") continue;
+      const before = u.slots.flatMap((s, j) => (labelled(s, x) ? [j] : []));
+      const after = slots.flatMap((s, i) => (labelled(s, x) ? [from[i] ?? -1] : [])).sort((a, b) => a - b);
+      if (!same(after, before)) return `the rule "${ruleName(rule)}" reads the ${unitId} named "${x}"; change it first (Edit definition)`;
+    }
+  }
+  return null;
+}
+
+/**
+ * What outside `unitId`'s own slots depends on their numbers or names: the rules' filters on the unit (or one
+ * inside it), the exceptions that set its lengths (or those of one inside it) slot by slot, and (`marks`) the
+ * season marks on its days. A Save replays a slot edit only while these are as the edit saw them.
+ */
+export function slotReferences(ast: CalendarAst, unitId: string, marks = true): unknown {
+  return {
+    filters: filtersIn(ast)
+      .filter(({ by }) => typeof by.unit === "string" && countsIn(ast, by.unit, unitId))
+      .map(({ rule, by }) => [rule.id, by]),
+    ledger: ast.units.flatMap((u) => (u.kind === "cycle" ? (u.ledger ?? []).filter((e) => e.kind === "slots" && countsIn(ast, e.unit, unitId)).map((e) => [u.id, e]) : [])),
+    marks: marks ? (ast.seasons?.marks ?? []).filter((m) => "slot" in m && m.slot.unit === unitId) : [],
+  };
+}
+
+/** Whether any gear term in `ast` names gear `id`. */
+function termsNaming(ast: CalendarAst, id: string): boolean {
+  let found = false;
+  mapTerms(ast, (t) => {
+    if (t.gear === id) found = true;
+    return t;
+  });
+  return found;
+}
+
+/**
+ * Why slice `key`, edited in `draft` from `base`, cannot be replayed onto the definition stored at Save time
+ * (`stored`; `out` is it with the draft's slices replayed, this one included), or null. Each slice's edits were
+ * checked against what the draft held of parts they read but do not write; when storage moved one of those since
+ * the seed, the replay would bind differently (a slot by number, a mark by index, a K by a body's period), so the
+ * Save is stale rather than silently wrong. A term naming a missing gear, which `problems()` refuses anyway, is
+ * answered here too, so the Save says why.
+ *
+ * - `slots:u`: the rules, exceptions and season marks that read u's slots (`slotReferences`);
+ * - `marks`: the slots of each unit a dated mark names;
+ * - `crossing:u`: the bodies its K was chosen against;
+ * - `gear:g`: the terms naming g (after a rename or a removal), the other ids (an added gear);
+ * - `feeds:u`, `ledger:u`: each term's gear still counting u;
+ * - `stages:u`, `length:u`: nothing outside the slice.
+ */
+export function replayProblem(key: SliceKey, base: CalendarAst, draft: CalendarAst, stored: CalendarAst, out: CalendarAst): string | null {
+  const moved = "changed outside the studio since this edit";
+  if (key === "marks") {
+    const units = new Set([...(draft.seasons?.marks ?? []), ...(base.seasons?.marks ?? [])].flatMap((m) => ("slot" in m ? [m.slot.unit] : [])));
+    for (const u of units) if (!same(sliceOf(stored, `slots:${u}`), sliceOf(base, `slots:${u}`))) return `a season starts on a day of the ${u}, whose slots ${moved}`;
+    return null;
+  }
+  const at = key.indexOf(":");
+  const kind = key.slice(0, at);
+  const id = key.slice(at + 1);
+  if (kind === "slots") return same(slotReferences(stored, id), slotReferences(base, id)) ? null : `a rule, an exception or a season that reads the ${id} ${moved}`;
+  if (kind === "crossing") {
+    const followed = new Set([base, draft].flatMap((a) => {
+      const b = cycleUnit(a, id)?.crossing?.body;
+      return b ? [b.id] : [];
+    }));
+    const body = (a: CalendarAst, b: string) => (a.bodies ?? []).find((x) => x.id === b);
+    for (const b of followed) if (!same(body(stored, b), body(base, b))) return `the ${id} follows the body "${b}", which ${moved}`;
+    return null;
+  }
+  if (kind === "gear") {
+    const mine = draft.gears.some((g) => g.id === id);
+    if (!mine && termsNaming(out, id)) return `the gear "${id}" is renamed or removed here, and a term naming it was added outside the studio since this edit`;
+    if (mine && !base.gears.some((g) => g.id === id)) {
+      const taken = declaredAs({ ...stored, gears: [] }, id);
+      if (taken) return `the id "${id}" was taken by a ${taken} outside the studio since this edit`;
+    }
+    return null;
+  }
+  if (kind === "feeds" || kind === "ledger") {
+    const u = cycleUnit(out, id);
+    const terms = kind === "feeds" ? (u?.gears ?? []) : (u?.ledger ?? []).flatMap((e) => (e.kind === "switch" ? (e.rule.gears ?? []) : []));
+    const off = terms.find((t) => {
+      const g = out.gears.find((x) => x.id === t.gear);
+      return g !== undefined && g.on !== id;
+    });
+    if (off) return `the gear "${off.gear}" no longer counts the ${id}; it ${moved}`;
   }
   return null;
 }
@@ -626,6 +756,8 @@ export function setSlotUnit(ast: CalendarAst, unitId: string, slots: readonly Sl
     const why = slotOrderProblem(ast, unitId);
     if (why) return refuse(why);
   }
+  const named = slotLabelProblem(ast, unitId, slots, was);
+  if (named) return refuse(named);
   let out: CalendarAst | null = withSlice(ast, `slots:${unitId}`, slots.map((s) => ({ ...s })));
   if (!out) return refuse(`there is no slot unit "${unitId}"`);
   const seasons = out.seasons;

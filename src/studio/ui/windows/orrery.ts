@@ -624,9 +624,19 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     if (!a || !inspEl.contains(a)) return null;
     return a.closest("[data-part]")?.getAttribute("data-part") ?? null;
   }
-  /** Give focus back to the control with `part` after a rebuild (a knob's dial, else the control itself). */
-  function refocus(part: string | null): void {
+  /**
+   * Give focus back after a rebuild: to the control with `part` (a knob's dial, else the control itself) while the
+   * same part is selected; after a Remove or a move selects another part, to the editor's heading (its name field,
+   * else the title), so a held Enter does not run on into the next part's Remove.
+   */
+  function refocus(part: string | null, sameSelection: boolean): void {
     if (part === null) return;
+    if (!sameSelection) {
+      const head = inspEl.querySelector<HTMLElement>(".wadjet-studio-orrery-title-input") ?? inspEl.querySelector<HTMLElement>(".wadjet-studio-orrery-title");
+      if (head && !head.matches("input, [tabindex]")) head.setAttribute("tabindex", "-1");
+      head?.focus();
+      return;
+    }
     const el = Array.from(inspEl.querySelectorAll<HTMLElement>("[data-part]")).find((x) => x.getAttribute("data-part") === part);
     if (!el) return;
     const target = el.matches("input, [tabindex]") ? el : el.querySelector<HTMLElement>("input, [tabindex='0']");
@@ -634,6 +644,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   }
 
   let inspKey = "";
+  /** the part the inspector was last built for (undefined: never built) */
+  let builtFor: PartId | null | undefined;
   function paintInspector(): void {
     const m = model;
     const k = m ? JSON.stringify([selected, m.today.day, verdictFor === ast, stale, revision, editable, behind]) : "";
@@ -657,8 +669,10 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     dragging = false;
     inspEl.empty();
     if (!m) return;
+    const sameSelection = builtFor === selected;
+    builtFor = selected;
     buildInspector(m);
-    refocus(hadFocus);
+    refocus(hadFocus, sameSelection);
   }
   function buildInspector(m: OrreryModel): void {
     const info = infoOf(m);
