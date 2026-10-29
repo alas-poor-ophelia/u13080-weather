@@ -1,0 +1,630 @@
+/**
+ * Seshat · ORRERY (docs/SESHAT-v0.md §18; bead wadjet-b6x, slice 1a-ii): the
+ * world's calendar definition drawn as a machine. Read-only in this slice:
+ * it draws the STORED definition (`plugin.calendars.seshat.definition()`)
+ * and edits nothing; the editors and the AST draft are later slices.
+ *
+ * - A 3-column body (the handoff's 216 px | scope | 284 px): the parts list,
+ *   the scope (ui/orrery-canvas.ts) with its view switch, hover tag,
+ *   transport, LCD, season strip and scrub bar, and the inspector (NOW from
+ *   `partInfo`, chips to related parts, TEXT from `partText`).
+ * - The window holds its own day (D7), seeded from today and clamped to the
+ *   day line. It never moves `view.window` or the settings.
+ * - `problems()` runs on a 200 ms trailing debounce (§18.6 item 7); the last
+ *   verdict lights the LEDs, and the issue strip shows the first message.
+ * - Fit (§18.6 item 9): the panel is 1200 px wide, which the window CSS caps
+ *   at the box − 16; the body height follows the Studio box between 480 and
+ *   640 px, and below the centre column's 280 px floor the scope is hidden.
+ * - A legacy world, another plugin's calendar and a definition that cannot
+ *   run each show a plain message, never an error (§18.6 item 3). The title
+ *   bar's calendar chip is the way in on every world (item 12): its menu
+ *   opens Change calendar… on the chosen preset, and holds the scope's theme
+ *   and scanlines (§18.4 Q2), remembered per Studio view.
+ */
+import { Menu, type EventRef } from "obsidian";
+import type { CalendarAst, PartId, Problem } from "../../../seshat";
+import { OptInModal } from "../../../plugin/calendar-modals";
+import { WORLD_PRESETS } from "../../../plugin/opt-in";
+import { buildOrrery, clampDay, partInfo, partText, problemsByPart, orreryProblems, type OrreryModel, type ViewName } from "../../model/orrery-geometry";
+import { ORRERY_RATES, ORRERY_THEMES, orreryFit, scrubDay, scrubFraction, scrubSegments, seasonSegments, stepDay, stepYear, type OrreryTheme } from "../../model/orrery-transport";
+import type { StudioIssue } from "../../model/validation";
+import { createSegmented, type SegmentedComponent } from "../components";
+import { createOrreryCanvas, type OrreryCanvas } from "../orrery-canvas";
+import { beginDrag, markDragTarget } from "../pointer";
+import type { SurfaceContext } from "../surfaces";
+import type { WindowBuild, WindowBuilder } from "../windows";
+
+/** The id this window is registered and opened under. */
+export const ORRERY_WINDOW = "orrery";
+
+/** §18.6 item 7: `problems()` runs this long after the last change. */
+export const PROBLEMS_DEBOUNCE_MS = 200;
+
+type Source = "seshat" | "legacy" | "plugin" | "fault";
+
+const VIEW_OPTIONS: ReadonlyArray<{ value: ViewName; label: string }> = [
+  { value: "iso", label: "ISO" },
+  { value: "top", label: "TOP" },
+  { value: "side", label: "SIDE" },
+];
+
+const THEME_LABEL: Readonly<Record<OrreryTheme, string>> = { phosphor: "Phosphor", amber: "Amber", studio: "Studio" };
+
+/** Which calendar the world runs, read from the live adapter (the Orrery draws what is stored). */
+function sourceOf(ctx: SurfaceContext): Source {
+  const id = ctx.plugin.time.active?.id;
+  if (id === "seshat") return ctx.plugin.calendars.fault() !== null || !ctx.plugin.calendars.seshat?.definition() ? "fault" : "seshat";
+  if (id === undefined || id === "internal") return "legacy";
+  return "plugin";
+}
+
+/** A part's text as one line, for the WRITES footer. */
+function oneLine(text: string): string {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "")
+    .join(" ");
+}
+
+/** The parts a part is wired to, for the inspector's chips (cheap: read off the AST). */
+function relatedParts(ast: CalendarAst, part: PartId | null): PartId[] {
+  if (part === null) return [];
+  const [kind, id] = part.split(":") as [string, string | undefined];
+  const out: PartId[] = [];
+  const cycles = ast.units.filter((u) => u.kind === "cycle");
+  if (kind === "body") for (const u of cycles) if (u.kind === "cycle" && u.crossing?.body?.id === id) out.push(`crossing:${u.id}`);
+  if (kind === "crossing" || kind === "train") {
+    const u = cycles.find((x) => x.id === id);
+    if (u?.kind === "cycle" && u.crossing) {
+      if (u.crossing.body) out.push(`body:${u.crossing.body.id}`);
+      if (kind === "crossing" && u.crossing.index) out.push(`train:${u.id}`);
+      if (kind === "train") out.push(`crossing:${u.id}`);
+      (u.stages ?? []).forEach((_, i) => out.push(`stage:${u.id}:${i}`));
+    }
+  }
+  if (kind === "gear") {
+    for (const u of ast.units) {
+      if (u.kind === "slots") u.slots.forEach((s, i) => (s.gears ?? []).some((g) => g.gear === id) && out.push(`slot:${u.id}:${i}`));
+      else if ((u.gears ?? []).some((g) => g.gear === id)) out.push(`unit:${u.id}`);
+    }
+  }
+  if (kind === "slot") {
+    const [, unit, n] = part.split(":") as [string, string, string];
+    const u = ast.units.find((x) => x.id === unit);
+    if (u?.kind === "slots") {
+      out.push(`unit:${u.id}`);
+      for (const g of u.slots[Number(n)]?.gears ?? []) out.push(`gear:${g.gear}`);
+    }
+  }
+  if (kind === "unit") {
+    const u = ast.units.find((x) => x.id === id);
+    if (u?.kind === "cycle") {
+      for (const g of u.gears ?? []) out.push(`gear:${g.gear}`);
+      if (u.crossing) out.push(`crossing:${u.id}`);
+    } else if (u?.kind === "slots") out.push(`unit:${u.in}`);
+  }
+  if (kind === "stage") {
+    if (cycles.some((u) => u.id === id && u.kind === "cycle" && u.crossing)) out.push(`crossing:${id}`);
+  }
+  return out;
+}
+
+export const buildOrreryWindow: WindowBuilder = (ctx) => {
+  const root = createDiv({ cls: "wadjet-studio-orrery" });
+  const empty = root.createDiv({ cls: "wadjet-studio-orrery-empty is-hidden" });
+  const grid = root.createDiv({ cls: "wadjet-studio-orrery-grid" });
+  const listEl = grid.createDiv({ cls: "wadjet-studio-orrery-list", attr: { role: "list", "aria-label": "Calendar parts" } });
+  const scopeEl = grid.createDiv({ cls: "wadjet-studio-orrery-scope" });
+  const inspEl = grid.createDiv({ cls: "wadjet-studio-orrery-inspector" });
+
+  // ---- state (the window's own: never the store's view.window or the settings)
+  let source: Source = sourceOf(ctx);
+  let ast: CalendarAst | null = null;
+  let day = Math.floor(clampDay(ctx.plugin.settings.currentDayOrdinal + 0.5).day);
+  let selected: PartId | null = null;
+  let hover: PartId | null = null;
+  let playing = false;
+  let rate: number = ORRERY_RATES[0];
+  let view: ViewName = "iso";
+  let model: OrreryModel | null = null;
+  let emptyMessage = "";
+  /** the last `problems()` verdict, the AST it is for, and whether a newer one is pending */
+  let verdict: readonly Problem[] = [];
+  let verdictFor: CalendarAst | null = null;
+  let stale = false;
+  let timer: number | null = null;
+  let timerWin: Window | null = null;
+  let errors: ReadonlySet<PartId> = new Set();
+
+  const look = (): { theme: OrreryTheme; scanlines: boolean } => ctx.store.get().view.orrery ?? { theme: "phosphor", scanlines: true };
+
+  // ---- the scope
+  const canvas: OrreryCanvas = createOrreryCanvas(scopeEl, {
+    build: (d) => {
+      if (!ast) return null;
+      const m = buildOrrery(ast, d, { problems: verdict });
+      return m.kind === "orrery" ? m : null;
+    },
+    onHover: (part) => {
+      hover = part;
+      paintHover();
+    },
+    onPick: (part) => select(part),
+    onDay: (d) => {
+      day = Math.floor(clampDay(d + 0.5).day);
+      paint();
+    },
+    onStop: () => {
+      playing = false;
+      paint();
+    },
+  });
+  const scan = canvas.el.createDiv({ cls: "wadjet-studio-orrery-scanlines" });
+  canvas.el.createDiv({ cls: "wadjet-studio-orrery-vignette" });
+  const viewsEl = canvas.el.createDiv({ cls: "wadjet-studio-orrery-views", attr: { "data-hint": "drag · orbit · wheel · zoom · double-click · reset · click a part to inspect it" } });
+  const views: SegmentedComponent = createSegmented(viewsEl, {
+    options: VIEW_OPTIONS.map((o) => ({ ...o })),
+    value: view,
+    onChange: (v) => {
+      view = v as ViewName;
+      canvas.setView(view);
+    },
+  });
+  const hoverTag = canvas.el.createDiv({ cls: "wadjet-studio-orrery-hover is-hidden" });
+  hoverTag.createSpan({ cls: "wadjet-studio-orrery-hover-dot" });
+  const hoverName = hoverTag.createSpan({ cls: "wadjet-studio-orrery-hover-name" });
+  const hoverKind = hoverTag.createSpan({ cls: "wadjet-studio-orrery-hover-kind" });
+
+  const transport = scopeEl.createDiv({ cls: "wadjet-studio-orrery-transport" });
+  const keys = transport.createDiv({ cls: "wadjet-studio-orrery-keys", attr: { "data-hint": "‹ › one day · « » one year · ▶ run the day line" } });
+  function key(text: string, label: string, onClick: () => void): HTMLElement {
+    const el = keys.createDiv({ cls: "wadjet-studio-orrery-key", text, attr: { role: "button", tabindex: "0", "aria-label": label } });
+    el.addEventListener("click", onClick);
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      ev.preventDefault();
+      onClick();
+    });
+    return el;
+  }
+  key("«", "Back one year", () => moveYear(-1));
+  key("‹", "Back one day", () => moveTo(stepDay(day, -1)));
+  const playKey = key("▶", "Play", () => setPlaying(!playing));
+  key("›", "Forward one day", () => moveTo(stepDay(day, 1)));
+  key("»", "Forward one year", () => moveYear(1));
+  const lcd = transport.createSpan({ cls: "wadjet-studio-orrery-lcd" });
+  const dayLbl = transport.createSpan({ cls: "wadjet-studio-orrery-daylbl" });
+  transport.createDiv({ cls: "wadjet-studio-orrery-spring" });
+  transport.createSpan({ cls: "wadjet-studio-orrery-caps", text: "Rate" });
+  const rates = createSegmented(transport.createDiv({ cls: "wadjet-studio-orrery-rates" }), {
+    options: ORRERY_RATES.map((r) => ({ value: String(r), label: String(r) })),
+    value: String(rate),
+    onChange: (v) => {
+      rate = Number(v);
+      if (playing) canvas.setPlaying(rate);
+    },
+  });
+  transport.createSpan({ cls: "wadjet-studio-orrery-unit", text: "d/s" });
+
+  const strips = scopeEl.createDiv({ cls: "wadjet-studio-orrery-strips" });
+  const seasonStrip = strips.createDiv({ cls: "wadjet-studio-orrery-seasons" });
+  const scrub = strips.createDiv({ cls: "wadjet-studio-orrery-scrub", attr: { "data-hint": "this year's slots · drag to move the day", role: "slider", tabindex: "0", "aria-label": "Day of the year" } });
+  markDragTarget(scrub);
+  const scrubSegs = scrub.createDiv({ cls: "wadjet-studio-orrery-scrub-segs" });
+  const playhead = scrub.createDiv({ cls: "wadjet-studio-orrery-playhead" });
+  let cancelScrub: (() => void) | null = null;
+
+  function scrubAt(clientX: number): void {
+    if (!model) return;
+    const r = scrub.getBoundingClientRect();
+    if (r.width <= 0) return;
+    moveTo(scrubDay(model.year, (clientX - r.left) / r.width));
+  }
+  function onScrubDown(ev: PointerEvent): void {
+    if (ev.button !== 0 || !model) return;
+    ev.preventDefault();
+    setPlaying(false);
+    const x0 = ev.clientX;
+    scrubAt(x0);
+    cancelScrub?.();
+    cancelScrub = beginDrag(ev, {
+      capture: scrub,
+      onMove: (_m, dx) => scrubAt(x0 + dx),
+      onEnd: () => (cancelScrub = null),
+    });
+  }
+  function onScrubKey(ev: KeyboardEvent): void {
+    const n = ev.key === "ArrowLeft" || ev.key === "ArrowDown" ? -1 : ev.key === "ArrowRight" || ev.key === "ArrowUp" ? 1 : 0;
+    if (n === 0) return;
+    ev.preventDefault();
+    setPlaying(false);
+    moveTo(stepDay(day, n));
+  }
+  scrub.addEventListener("pointerdown", onScrubDown);
+  scrub.addEventListener("keydown", onScrubKey);
+
+  // ---- the title bar's calendar chip and its menu
+  const chip = createDiv({ cls: "wadjet-studio-orrery-chip is-tail", attr: { role: "button", tabindex: "0", "aria-haspopup": "menu", "aria-label": "Calendar and scope" } });
+  const chipLabel = chip.createSpan({ cls: "wadjet-studio-orrery-chip-label" });
+  chip.createSpan({ cls: "wadjet-studio-orrery-chip-caret", text: "▾" });
+  function openMenu(): void {
+    const menu = new Menu();
+    const current = source === "seshat" ? ast?.name : null;
+    for (const p of WORLD_PRESETS)
+      menu.addItem((item) =>
+        item
+          .setTitle(p.ast.name)
+          .setChecked(p.ast.name === current)
+          .onClick(() => new OptInModal(ctx.plugin.app, ctx.plugin, () => {}, p.id).open()),
+      );
+    menu.addItem((item) => item.setTitle("Change calendar…").onClick(() => new OptInModal(ctx.plugin.app, ctx.plugin, () => {}).open()));
+    menu.addSeparator();
+    const now = look();
+    for (const t of ORRERY_THEMES)
+      menu.addItem((item) =>
+        item
+          .setTitle(`Scope: ${THEME_LABEL[t]}`)
+          .setChecked(t === now.theme)
+          .onClick(() => setLook({ ...look(), theme: t })),
+      );
+    menu.addItem((item) =>
+      item
+        .setTitle("Scanlines")
+        .setChecked(now.scanlines)
+        .onClick(() => setLook({ ...look(), scanlines: !look().scanlines })),
+    );
+    const box = chip.getBoundingClientRect();
+    menu.showAtPosition({ x: box.left, y: box.bottom });
+  }
+  chip.addEventListener("click", openMenu);
+  chip.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    openMenu();
+  });
+
+  function setLook(next: { theme: OrreryTheme; scanlines: boolean }): void {
+    ctx.store.update((s) => {
+      s.view.orrery = next;
+    });
+    paintLook();
+  }
+  function paintLook(): void {
+    const l = look();
+    canvas.setTheme(l.theme);
+    scan.toggleClass("is-hidden", !l.scanlines);
+    root.setAttr("data-theme", l.theme);
+  }
+
+  // ---- the window's chrome reads these
+  function refreshChrome(): void {
+    ctx.windows.renderAll(ctx.store.get());
+  }
+
+  // ---- validation, debounced (§18.6 item 7)
+  function cancelProblems(): void {
+    if (timer !== null && timerWin) timerWin.clearTimeout(timer);
+    timer = null;
+  }
+  function scheduleProblems(of: CalendarAst): void {
+    cancelProblems();
+    stale = true;
+    timerWin = root.ownerDocument.defaultView ?? activeWindow;
+    timer = timerWin.setTimeout(() => {
+      timer = null;
+      if (ast !== of) return;
+      verdict = orreryProblems(of);
+      verdictFor = of;
+      stale = false;
+      errors = new Set(problemsByPart(verdict).keys());
+      canvas.invalidate();
+      paint();
+      refreshChrome();
+    }, PROBLEMS_DEBOUNCE_MS);
+  }
+
+  // ---- moving the day
+  function moveTo(next: number, jump = false): void {
+    const d = Math.floor(clampDay(next + 0.5).day);
+    if (d === day && !jump) return;
+    day = d;
+    canvas.setDay(day, jump);
+    paint();
+  }
+  function moveYear(n: number): void {
+    // read before stopping: the stop repaints, and a repaint may find no model
+    const m = model;
+    if (!m) return;
+    setPlaying(false);
+    moveTo(stepYear(m.ast, m.year, m.today.dayOfYear, n));
+  }
+  function setPlaying(on: boolean): void {
+    if (on === playing) return;
+    playing = on;
+    canvas.setPlaying(on ? rate : null);
+    paintTransport();
+  }
+
+  function select(part: PartId | null): void {
+    selected = part;
+    canvas.setHighlight({ selected, errors });
+    paint();
+    refreshChrome();
+  }
+
+  // ---- painting
+  let listKey = "";
+  function paintList(): void {
+    const m = model;
+    const k = m ? JSON.stringify([m.groups, selected]) : "";
+    if (k === listKey) return;
+    listKey = k;
+    listEl.empty();
+    if (!m) return;
+    for (const g of m.groups) {
+      // a group's empty header is where its ＋ goes; read-only, there is no ＋, so an empty group is left out
+      if (!g.rows.length) continue;
+      const group = listEl.createDiv({ cls: "wadjet-studio-orrery-group" });
+      group.createDiv({ cls: "wadjet-studio-orrery-group-label", text: g.label });
+      // the ＋ buttons belong to the editors (a later slice): read-only, there is nothing to add with
+      for (const r of g.rows) {
+        const row = group.createDiv({ cls: "wadjet-studio-orrery-row", attr: { role: "listitem", tabindex: "0", "data-part": r.id, "aria-selected": r.id === selected ? "true" : "false" } });
+        row.toggleClass("is-selected", r.id === selected);
+        const led = row.createSpan({ cls: "wadjet-studio-orrery-led" });
+        led.toggleClass("is-error", r.issues > 0);
+        led.toggleClass("is-lit", r.issues === 0 && r.lit);
+        if (r.issues > 0) led.setAttr("aria-label", `${r.issues} problem${r.issues === 1 ? "" : "s"}`);
+        row.createSpan({ cls: "wadjet-studio-orrery-row-name", text: r.name });
+        row.createSpan({ cls: "wadjet-studio-orrery-row-spec", text: r.spec });
+        const pick = () => select(r.id === selected ? null : r.id);
+        row.addEventListener("click", pick);
+        row.addEventListener("keydown", (ev) => {
+          if (ev.key !== "Enter" && ev.key !== " ") return;
+          ev.preventDefault();
+          pick();
+        });
+      }
+    }
+  }
+
+  let inspKey = "";
+  function paintInspector(): void {
+    const m = model;
+    const k = m ? JSON.stringify([selected, m.today.day, verdictFor === m.ast, stale]) : "";
+    if (k === inspKey) return;
+    inspKey = k;
+    inspEl.empty();
+    if (!m) return;
+    const info = partInfo(m, selected);
+    const head = inspEl.createDiv({ cls: "wadjet-studio-orrery-insp-head" });
+    head.createSpan({ cls: "wadjet-studio-orrery-code", text: info.code });
+    head.createDiv({ cls: "wadjet-studio-orrery-spring" });
+    if (selected !== null) {
+      const back = head.createSpan({ cls: "wadjet-studio-orrery-clear", text: "×", attr: { role: "button", tabindex: "0", "aria-label": "Back to the whole calendar" } });
+      back.addEventListener("click", () => select(null));
+      back.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        ev.preventDefault();
+        select(null);
+      });
+    }
+    inspEl.createDiv({ cls: "wadjet-studio-orrery-title", text: info.title });
+    inspEl.createDiv({ cls: "wadjet-studio-orrery-sub", text: info.sub });
+    const now = inspEl.createDiv({ cls: "wadjet-studio-orrery-section" });
+    now.createDiv({ cls: "wadjet-studio-orrery-caps", text: "Now" });
+    for (const r of info.now) {
+      const line = now.createDiv({ cls: "wadjet-studio-orrery-now" });
+      line.createSpan({ cls: "wadjet-studio-orrery-now-key", text: r.key });
+      const v = line.createSpan({ cls: "wadjet-studio-orrery-now-value", text: r.value, attr: { title: r.value } });
+      if (r.tone) v.setAttr("data-tone", r.tone);
+    }
+    const related = relatedParts(m.ast, selected);
+    if (related.length) {
+      const chips = inspEl.createDiv({ cls: "wadjet-studio-orrery-chips" });
+      for (const part of related) {
+        const c = chips.createSpan({ cls: "wadjet-studio-orrery-link", attr: { role: "button", tabindex: "0", "data-part": part } });
+        c.createSpan({ cls: "wadjet-studio-orrery-link-dot" }).toggleClass("is-error", errors.has(part));
+        c.createSpan({ text: partInfo(m, part).title });
+        c.addEventListener("click", () => select(part));
+        c.addEventListener("keydown", (ev) => {
+          if (ev.key !== "Enter" && ev.key !== " ") return;
+          ev.preventDefault();
+          select(part);
+        });
+      }
+    }
+    const text = inspEl.createDiv({ cls: "wadjet-studio-orrery-section is-text" });
+    text.createDiv({ cls: "wadjet-studio-orrery-caps", text: "Text" });
+    text.createEl("pre", { cls: "wadjet-studio-orrery-text", text: partText(m.ast, selected) || "(this part writes no text of its own)" });
+  }
+
+  function paintTransport(): void {
+    playKey.setText(playing ? "❚❚" : "▶");
+    playKey.setAttr("aria-label", playing ? "Pause" : "Play");
+    playKey.toggleClass("is-on", playing);
+    const m = model;
+    if (!m) return;
+    lcd.setText(m.today.date);
+    dayLbl.setText(`D${m.today.day} · day ${m.today.dayOfYear + 1} of ${m.year.length}`);
+    playhead.setCssProps({ "--wadjet-orrery-at": `${(scrubFraction(m.year, day + 0.5) * 100).toFixed(3)}%` });
+    scrub.setAttrs({ "aria-valuemin": "1", "aria-valuemax": String(m.year.length), "aria-valuenow": String(m.today.dayOfYear + 1), "aria-valuetext": m.today.date });
+  }
+
+  let stripKey = "";
+  function paintStrips(): void {
+    const m = model;
+    if (!m) return;
+    const segs = scrubSegments(m.ast, m.year, m.today);
+    const seas = seasonSegments(m.year);
+    const k = JSON.stringify([segs, seas]);
+    if (k === stripKey) return;
+    stripKey = k;
+    scrubSegs.empty();
+    for (const s of segs) {
+      const el = scrubSegs.createSpan({ cls: "wadjet-studio-orrery-seg", attr: { "data-kind": s.kind, title: s.name } });
+      el.setCssProps({ "--wadjet-orrery-left": `${(s.left * 100).toFixed(3)}%`, "--wadjet-orrery-width": `${(s.width * 100).toFixed(3)}%` });
+    }
+    seasonStrip.empty();
+    for (const s of seas) {
+      const el = seasonStrip.createSpan({ cls: "wadjet-studio-orrery-season", attr: { title: s.name } });
+      el.setCssProps({ "--wadjet-orrery-left": `${(s.left * 100).toFixed(3)}%`, "--wadjet-orrery-width": `${(s.width * 100).toFixed(3)}%`, "--wadjet-orrery-season": s.colour });
+    }
+  }
+
+  function paintHover(): void {
+    const m = model;
+    hoverTag.toggleClass("is-hidden", hover === null || !m);
+    if (hover === null || !m) return;
+    const info = partInfo(m, hover);
+    hoverName.setText(info.title);
+    hoverKind.setText(info.code.toLowerCase());
+  }
+
+  function paintChip(): void {
+    const label = source === "seshat" ? (ast?.name ?? "calendar definition") : source === "legacy" ? "legacy calendar" : source === "fault" ? "definition · cannot run" : `${ctx.calendar()?.label ?? "calendar plugin"} · read-only`;
+    chipLabel.setText(label);
+  }
+
+  /** Re-read the stored definition; a new one resets what was read off the old. */
+  function resolve(): void {
+    source = sourceOf(ctx);
+    const next = source === "seshat" ? (ctx.plugin.calendars.seshat?.definition() ?? null) : null;
+    if (next === ast) return;
+    ast = next;
+    if (!ast) {
+      selected = null;
+      hover = null;
+    }
+    verdict = [];
+    verdictFor = null;
+    errors = new Set();
+    cancelProblems();
+    if (ast) scheduleProblems(ast);
+    else stale = false;
+    canvas.invalidate();
+  }
+
+  function paint(): void {
+    resolve();
+    model = null;
+    emptyMessage = "";
+    if (source === "legacy") emptyMessage = "This world runs on the legacy calendar, which is not a calendar definition, so there is no machine to draw. Change calendar… in the menu above moves the world onto a definition.";
+    else if (source === "plugin") emptyMessage = `${ctx.calendar()?.label ?? "A calendar plugin"} supplies this world's days. The orrery draws calendar definitions only; that calendar is edited where it comes from.`;
+    else if (source === "fault") emptyMessage = `This world's calendar definition cannot run (${ctx.plugin.calendars.fault() ?? "no definition is loaded"}), so there is nothing to draw. Fix it with Edit definition in the settings, or choose another calendar in the menu above.`;
+    else if (ast) {
+      const m = buildOrrery(ast, day + 0.5, { problems: verdict });
+      if (m.kind === "orrery") model = m;
+      else emptyMessage = `This calendar definition cannot be drawn: ${m.message}.`;
+    }
+    if (model && selected !== null && partInfo(model, selected).code === "—") selected = null;
+    empty.setText(emptyMessage);
+    empty.toggleClass("is-hidden", model !== null);
+    grid.toggleClass("is-hidden", model === null);
+    paintChip();
+    if (!model) {
+      setPlaying(false);
+      return;
+    }
+    canvas.setHighlight({ selected, errors });
+    paintList();
+    // while playing the inspector waits: rebuilding it 16 times a second would also take its chips from under the pointer
+    if (!playing) paintInspector();
+    paintTransport();
+    paintStrips();
+    paintHover();
+  }
+
+  // ---- fit (§18.6 item 9), from the Studio box
+  let fitObserver: ResizeObserver | null = null;
+  let fitWin: Document["defaultView"] = null;
+  let fitKey = "";
+  function fit(): void {
+    const box = ctx.shell.windows;
+    const f = orreryFit(box.clientWidth, box.clientHeight);
+    const k = `${f.bodyHeight}:${f.scope}`;
+    if (k === fitKey) return;
+    fitKey = k;
+    root.setCssProps({ "--wadjet-orrery-body-h": `${f.bodyHeight}px` });
+    grid.toggleClass("is-narrow", !f.scope);
+    // a fluid height change can push the panel out of the box: the manager re-clamps
+    refreshChrome();
+  }
+  function observeBox(): void {
+    const w = ctx.shell.windows.ownerDocument.defaultView;
+    if (w === fitWin) return;
+    fitObserver?.disconnect();
+    fitObserver = null;
+    fitWin = w;
+    if (!w) return;
+    fitObserver = new w.ResizeObserver(() => fit());
+    fitObserver.observe(ctx.shell.windows);
+  }
+  /** The leaf moved to another window: frames and observers follow it. */
+  function rehome(): void {
+    if (closed) return;
+    observeBox();
+    canvas.rehome();
+    fit();
+    // a timer set on a window that has since gone never fires: set it again on this one
+    if (stale && ast && timerWin !== root.ownerDocument.defaultView) scheduleProblems(ast);
+  }
+  const layoutRef: EventRef = ctx.plugin.app.workspace.on("layout-change", rehome);
+
+  const unsubStore = ctx.store.subscribe(() => {
+    paintLook();
+    paint();
+  });
+  const unsubAdapters = ctx.plugin.api.on("adapters-changed", () => paint());
+  paintLook();
+  canvas.setDay(day, true);
+  paint();
+  observeBox();
+  fit();
+  // the builder runs before the manager mounts the panel: once it is in its document (a pop-out's,
+  // when the leaf lives in one), frames, observers and the debounce move to that window
+  let closed = false;
+  queueMicrotask(rehome);
+
+  const build: WindowBuild = {
+    title: "Seshat",
+    badge: "ORRERY",
+    badgeColor: "var(--wadjet-studio-gold)",
+    caption: `world · ${Object.keys(ctx.store.get().zones).length} zones`,
+    // the handoff's 1200 px; the window CSS caps it at the box − 16 (D5)
+    width: 1200,
+    head: (slot) => slot.appendChild(chip),
+    body: root,
+    led: { on: true, hint: "the calendar definition validates (white), or has a problem (red)" },
+    level: () => (verdict.length > 0 ? "error" : "ok"),
+    writes: () => {
+      if (!model) return source === "seshat" || source === "fault" ? "calendar.definition › (cannot run)" : "calendar.definition › (none: this world runs no definition)";
+      if (selected === null) {
+        const a = model.ast;
+        return `calendar.definition › VCALENDAR ${a.name} · ${a.units.length} units · ${a.gears.length} gears · ${(a.bodies ?? []).length} bodies · ${(a.rules ?? []).length} rules`;
+      }
+      return `calendar.definition › ${oneLine(partText(model.ast, selected)) || selected}`;
+    },
+    issues: (): StudioIssue[] => {
+      if (!model || verdict.length === 0) return [];
+      const more = verdict.length > 1 ? ` (+${verdict.length - 1} more)` : "";
+      return [{ level: "error", path: "calendar.definition", message: `${verdict[0]!.message}${more}${stale ? " · checking…" : ""}`, unit: { kind: "zone" }, win: "none" }];
+    },
+    onClose: () => {
+      closed = true;
+      cancelProblems();
+      cancelScrub?.();
+      scrub.removeEventListener("pointerdown", onScrubDown);
+      scrub.removeEventListener("keydown", onScrubKey);
+      ctx.plugin.app.workspace.offref(layoutRef);
+      fitObserver?.disconnect();
+      fitObserver = null;
+      unsubStore();
+      unsubAdapters();
+      views.destroy();
+      rates.destroy();
+      canvas.destroy();
+    },
+  };
+  return build;
+};

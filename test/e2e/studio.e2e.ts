@@ -10095,3 +10095,172 @@ describe("calendar definition · Date display", () => {
     }
   });
 });
+
+/* ── The calendar orrery, read-only (docs/SESHAT-v0.md §18.6 items 10 and 14, bead wadjet-b6x slice 1a) ── */
+
+describe("climate studio · calendar orrery", () => {
+  test("step 93: on a Gregorian definition the Orrery draws, the list selects, ‹ › move its LCD, and 20 opens and closes leave no observers, frames or listeners behind", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const today: number = await withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.currentDayOrdinal);
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    try {
+      // the harness's window is sized for the whole Orrery (§18.3 D5)
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      expect(await win.locator(".wadjet-studio-orrery-empty").isVisible()).toBe(false);
+      expect(await win.locator(".wadjet-studio-orrery-scope").isVisible()).toBe(true);
+
+      // the canvas is not blank: lit pixels from the wireframe
+      const lit = async () =>
+        ob.page.evaluate(() => {
+          const c = document.querySelector<HTMLCanvasElement>('.wadjet-studio-window[data-kind="orrery"] canvas');
+          const g = c?.getContext("2d");
+          if (!c || !g || c.width < 2 || c.height < 2) return { lit: 0, w: c?.width ?? 0, h: c?.height ?? 0 };
+          const px = g.getImageData(0, 0, c.width, c.height).data;
+          let n = 0;
+          for (let i = 0; i < px.length; i += 4) if (Math.max(px[i]!, px[i + 1]!, px[i + 2]!) > 90) n++;
+          return { lit: n, w: c.width, h: c.height };
+        });
+      await expect.poll(async () => (await lit()).lit, { timeout: 10_000 }).toBeGreaterThan(500);
+      const drawn = await lit();
+
+      // selecting a part in the list changes the inspector
+      const title = win.locator(".wadjet-studio-orrery-title");
+      const whole = ((await title.textContent()) ?? "").trim();
+      await win.locator('.wadjet-studio-orrery-row[data-part="gear:leap"]').click();
+      await nextFrame();
+      await expect.poll(async () => ((await title.textContent()) ?? "").trim()).toBe("leap");
+      expect(whole).not.toBe("leap");
+      expect(((await win.locator(".wadjet-studio-orrery-code").textContent()) ?? "").trim()).toBe("C3 · GEAR");
+      expect(await win.locator(".wadjet-studio-orrery-row.is-selected").count()).toBe(1);
+
+      // ‹ › move the Orrery's own day, and its LCD
+      const lcd = win.locator(".wadjet-studio-orrery-lcd");
+      const read = async () => ((await lcd.textContent()) ?? "").trim();
+      const d0 = await read();
+      await win.locator('.wadjet-studio-orrery-key[aria-label="Back one day"]').click();
+      await expect.poll(read).not.toBe(d0);
+      const d1 = await read();
+      await win.locator('.wadjet-studio-orrery-key[aria-label="Forward one day"]').click();
+      await expect.poll(read).toBe(d0);
+      await win.locator('.wadjet-studio-orrery-key[aria-label="Forward one day"]').click();
+      await expect.poll(read).not.toBe(d0);
+      const d2 = await read();
+      // the Orrery's day is its own: the settings' today did not move
+      const todayAfter: number = await withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.currentDayOrdinal);
+      expect(todayAfter).toBe(today);
+      await close();
+      await nextFrame();
+
+      // 20 opens and closes: count live observers, pending frames and window/document listeners
+      await ob.page.evaluate(() => {
+        const w = window as any;
+        const probe = { ro: 0, raf: new Set<number>(), listeners: 0, canvas: 0, restore: [] as Array<() => void> };
+        w.__orreryProbe = probe;
+        const RO = w.ResizeObserver;
+        class Counted extends RO {
+          private on = false;
+          observe(t: Element, o?: ResizeObserverOptions) {
+            if (!this.on) {
+              this.on = true;
+              probe.ro++;
+            }
+            super.observe(t, o);
+          }
+          disconnect() {
+            if (this.on) {
+              this.on = false;
+              probe.ro--;
+            }
+            super.disconnect();
+          }
+        }
+        w.ResizeObserver = Counted;
+        probe.restore.push(() => (w.ResizeObserver = RO));
+        const raf = w.requestAnimationFrame.bind(w);
+        const caf = w.cancelAnimationFrame.bind(w);
+        w.requestAnimationFrame = (cb: FrameRequestCallback) => {
+          const id: number = raf((t: number) => {
+            probe.raf.delete(id);
+            cb(t);
+          });
+          probe.raf.add(id);
+          return id;
+        };
+        w.cancelAnimationFrame = (id: number) => {
+          probe.raf.delete(id);
+          caf(id);
+        };
+        probe.restore.push(() => {
+          w.requestAnimationFrame = raf;
+          w.cancelAnimationFrame = caf;
+        });
+        const proto: any = EventTarget.prototype;
+        const add = proto.addEventListener;
+        const remove = proto.removeEventListener;
+        proto.addEventListener = function (this: EventTarget, ...args: any[]) {
+          if (this === window || this === document) probe.listeners++;
+          if (this instanceof HTMLCanvasElement) probe.canvas++;
+          return add.apply(this, args);
+        };
+        proto.removeEventListener = function (this: EventTarget, ...args: any[]) {
+          if (this === window || this === document) probe.listeners--;
+          if (this instanceof HTMLCanvasElement) probe.canvas--;
+          return remove.apply(this, args);
+        };
+        probe.restore.push(() => {
+          proto.addEventListener = add;
+          proto.removeEventListener = remove;
+        });
+      });
+      const layoutHandlers = () => withApp(ob.page, (app) => app.workspace._?.["layout-change"]?.length ?? 0);
+      const layout0 = await layoutHandlers();
+      let counts: { ro: number; raf: number; listeners: number; canvas: number } = { ro: 0, raf: 0, listeners: 0, canvas: 0 };
+      try {
+        for (let i = 0; i < 20; i++) {
+          await open();
+          await nextFrame();
+          await close();
+          await nextFrame();
+        }
+        await nextFrame();
+        await nextFrame();
+        counts = await ob.page.evaluate(() => {
+          const p = (window as any).__orreryProbe;
+          return { ro: p.ro, raf: p.raf.size, listeners: p.listeners, canvas: p.canvas };
+        });
+      } finally {
+        await ob.page.evaluate(() => {
+          const p = (window as any).__orreryProbe;
+          for (const r of p?.restore ?? []) r();
+          delete (window as any).__orreryProbe;
+        });
+      }
+      expect(counts).toEqual({ ro: 0, raf: 0, listeners: 0, canvas: 0 });
+      expect(await layoutHandlers()).toBe(layout0);
+
+      // a legacy world: a plain message, never an error
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await open();
+      await nextFrame();
+      const message = ((await win.locator(".wadjet-studio-orrery-empty").textContent()) ?? "").trim();
+      expect(message).toContain("legacy calendar");
+      expect(await win.locator(".wadjet-studio-orrery-grid").isVisible()).toBe(false);
+      console.log(`  · orrery: ${drawn.lit} lit px on ${drawn.w}×${drawn.h}; "${whole}" → "leap"; LCD ${d1} ‹ ${d0} › ${d2} (today stays D${todayAfter}); 20 open/close: ${JSON.stringify(counts)}; legacy: "${message.slice(0, 50)}…"`);
+    } finally {
+      await close();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+});

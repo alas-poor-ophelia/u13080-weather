@@ -83,12 +83,15 @@ export interface DragOptions {
 }
 
 /**
- * Start a drag from `start` (a pointerdown). Listeners live on `window` so the
- * gesture keeps working outside the element, and are torn down on pointerup.
+ * Start a drag from `start` (a pointerdown). Listeners live on the event's own
+ * window (`start.view`: a pop-out's, when the leaf is in one) so the gesture
+ * keeps working outside the element, and are torn down on pointerup.
  * Returns a canceller for components that are destroyed mid-drag.
  */
 export function beginDrag(start: PointerEvent, opts: DragOptions): () => void {
   const { pointerId, clientX: x0, clientY: y0 } = start;
+  // the window the gesture happens in: a pop-out's own, not the main one, or the drag never ends there
+  const host: Window = start.view ?? window;
   let moved = false;
   const capture = opts.capture;
   if (capture) {
@@ -100,9 +103,9 @@ export function beginDrag(start: PointerEvent, opts: DragOptions): () => void {
   }
 
   const stop = (): void => {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", up);
-    window.removeEventListener("pointercancel", up);
+    host.removeEventListener("pointermove", move);
+    host.removeEventListener("pointerup", up);
+    host.removeEventListener("pointercancel", up);
     if (capture) {
       try {
         capture.releasePointerCapture(pointerId);
@@ -129,8 +132,8 @@ export function beginDrag(start: PointerEvent, opts: DragOptions): () => void {
     opts.onEnd?.(ev, dx, dy, moved);
   }
 
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", up);
-  window.addEventListener("pointercancel", up);
+  host.addEventListener("pointermove", move);
+  host.addEventListener("pointerup", up);
+  host.addEventListener("pointercancel", up);
   return stop;
 }

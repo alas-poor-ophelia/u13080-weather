@@ -48,6 +48,7 @@ import { createRowsSurface } from "./rows-surface";
 import type { Surface, SurfaceContext } from "./surfaces";
 import { createWindowManager, type WindowManager } from "./windows";
 import { renameMoonsInDrafts, type MoonRenames } from "../model/moon-rename";
+import { ORRERY_THEMES, type OrreryTheme } from "../model/orrery-transport";
 
 export const VIEW_TYPE = "wadjet-studio";
 
@@ -84,6 +85,7 @@ export interface PersistedViewState {
   colours: { seasons: number[]; eras: number[]; regimes: number[] };
   jsonOpen: boolean;
   fixedOpen: Record<string, boolean>;
+  orrery?: { theme: OrreryTheme; scanlines: boolean };
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
@@ -118,6 +120,8 @@ function readPersisted(raw: unknown): Partial<PersistedViewState> {
     for (const [id, v] of Object.entries(fixed)) if (typeof v === "boolean") clean[id] = v;
     out.fixedOpen = clean;
   }
+  const orr = raw["orrery"];
+  if (isRecord(orr) && typeof orr["theme"] === "string" && (ORRERY_THEMES as readonly string[]).includes(orr["theme"]) && typeof orr["scanlines"] === "boolean") out.orrery = { theme: orr["theme"] as OrreryTheme, scanlines: orr["scanlines"] };
   return out;
 }
 
@@ -212,6 +216,7 @@ export class StudioView extends ItemView {
       colours: structuredClone(v.colours),
       jsonOpen: v.jsonOpen,
       fixedOpen: { ...v.fixedOpen },
+      ...(v.orrery ? { orrery: { ...v.orrery } } : {}),
     };
     return { ...state };
   }
@@ -229,6 +234,7 @@ export class StudioView extends ItemView {
       if (next.colours !== undefined) v.colours = next.colours;
       if (next.jsonOpen !== undefined) v.jsonOpen = next.jsonOpen;
       if (next.fixedOpen !== undefined) v.fixedOpen = next.fixedOpen;
+      if (next.orrery !== undefined) v.orrery = next.orrery;
     });
     // The store's notification is a frame away; the tab title and the header
     // are read straight after setViewState, so repaint now as well.

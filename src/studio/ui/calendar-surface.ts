@@ -16,6 +16,7 @@
  * surface stays Seasons-only.
  */
 import { buildCalendarWindow, CALENDAR_WINDOW } from "./windows/calendar";
+import { buildOrreryWindow, ORRERY_WINDOW } from "./windows/orrery";
 import type { Surface, SurfaceContext } from "./surfaces";
 
 export function createCalendarSurface(): Surface {
@@ -23,6 +24,9 @@ export function createCalendarSurface(): Surface {
     mount(ctx: SurfaceContext) {
       // one Calendar window; the Seasons editor is its first tab (ruled 2026-10-21)
       ctx.windows.register(CALENDAR_WINDOW, buildCalendarWindow);
+      // the calendar drawn as a machine (docs/SESHAT-v0.md §18), read-only for now; the Calendar
+      // window's Orrery/Form toggle and the ruler's launcher are slice 1b
+      ctx.windows.register(ORRERY_WINDOW, buildOrreryWindow);
     },
 
     render() {

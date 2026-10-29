@@ -30,6 +30,8 @@ export class OptInModal extends Modal {
     app: App,
     private plugin: WadjetPlugin,
     private onDone: () => void,
+    /** a preset id to start from (the Orrery's preset menu, docs/SESHAT-v0.md §18.4 Q1); otherwise the usual default */
+    private start?: string,
   ) {
     super(app);
   }
@@ -42,7 +44,7 @@ export class OptInModal extends Modal {
     if (this.plugin.generatorMode() === "previous") {
       renderUpgradeFirst(this, this.plugin, () => {
         this.onDone();
-        new OptInModal(this.app, this.plugin, this.onDone).open();
+        new OptInModal(this.app, this.plugin, this.onDone, this.start).open();
       });
       return;
     }
@@ -53,7 +55,7 @@ export class OptInModal extends Modal {
     // from, and, from another calendar, as the way back
     const legacyOrigin = s.calendar.origin !== "definition";
     const canGoBack = legacyOrigin && this.plugin.time.active?.id !== "internal";
-    let source = stored !== null ? "text" : legacyOrigin ? "internal" : (WORLD_PRESETS[0]?.id ?? "text");
+    let source = this.start !== undefined && WORLD_PRESETS.some((p) => p.id === this.start) ? this.start : stored !== null ? "text" : legacyOrigin ? "internal" : (WORLD_PRESETS[0]?.id ?? "text");
     // a stored definition usually has its own seasons and moons already
     let carry = stored === null;
     let replace = false;

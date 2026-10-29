@@ -127,6 +127,8 @@ const DEFAULT_POS: ReadonlyArray<readonly [string, { x: number; y: number }]> = 
   ["regimes", { x: 720, y: 130 }],
   ["seasons", { x: 680, y: 120 }],
   ["atlas", { x: 390, y: 60 }],
+  // the 1200 px Orrery (docs/SESHAT-v0.md §18), centred: (1560 − 1200) / 2
+  ["orrery", { x: 180, y: 40 }],
   ["cycle:", { x: 500, y: 110 }],
   ["era:", { x: 540, y: 110 }],
   ["channel:temperature", { x: 36, y: 64 }],

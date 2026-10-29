@@ -6167,3 +6167,471 @@
 .wadjet-studio .wadjet-studio-window[data-kind="calendar"] input.wadjet-studio-calendar-field.is-short-date {
   width: 110px;
 }
+
+/* ── Seshat · ORRERY (docs/SESHAT-v0.md §18, bead wadjet-b6x): the calendar
+   drawn as a machine. The handoff's inline styles, as classes; the canvas's
+   own colours are passed in JS (ui/orrery-canvas.ts). The body is a
+   216 px | scope | 284 px grid whose height the window computes from the
+   Studio box (480 to 640 px); `is-narrow` drops the scope under its 280 px
+   floor and keeps the list and the inspector. ── */
+.wadjet-studio-window[data-kind="orrery"] .wadjet-studio-window-body {
+  padding: 0;
+}
+.wadjet-studio-orrery {
+  display: flex;
+  flex-direction: column;
+}
+.wadjet-studio-orrery-empty {
+  max-width: 560px;
+  padding: 18px 16px;
+  font-size: var(--wadjet-studio-fs-body);
+  line-height: 1.5;
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-orrery-empty.is-hidden,
+.wadjet-studio-orrery-grid.is-hidden,
+.wadjet-studio-orrery-hover.is-hidden,
+.wadjet-studio-orrery-scanlines.is-hidden {
+  display: none;
+}
+.wadjet-studio-orrery-grid {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) 284px;
+  height: var(--wadjet-orrery-body-h, 640px);
+}
+.wadjet-studio-orrery-grid.is-narrow {
+  grid-template-columns: 216px minmax(0, 1fr);
+}
+.wadjet-studio-orrery-grid.is-narrow .wadjet-studio-orrery-scope {
+  display: none;
+}
+.wadjet-studio-orrery-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 6px;
+  background: #26282c;
+  border-right: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-orrery-group + .wadjet-studio-orrery-group {
+  margin-top: 6px;
+}
+.wadjet-studio-orrery-group-label {
+  padding: 6px 6px 3px;
+  font-size: var(--wadjet-studio-fs-micro);
+  letter-spacing: 0.1em;
+  color: #878d95;
+}
+.wadjet-studio-orrery-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.wadjet-studio-orrery-row:hover {
+  background: #33363a;
+}
+.wadjet-studio-orrery-row.is-selected {
+  background: #3a3e44;
+}
+.wadjet-studio-orrery-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3d4147;
+}
+.wadjet-studio-orrery-led.is-lit {
+  background: #e9ebee;
+  box-shadow: 0 0 4px rgba(233, 235, 238, 0.6);
+}
+.wadjet-studio-orrery-led.is-error {
+  background: var(--wadjet-studio-error);
+  box-shadow: 0 0 4px rgba(224, 96, 92, 0.7);
+}
+.wadjet-studio-orrery-row-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--wadjet-studio-text-block);
+}
+.wadjet-studio-orrery-row.is-selected .wadjet-studio-orrery-row-name {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-orrery-row-spec {
+  font-size: var(--wadjet-studio-fs-chip);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-orrery-scope {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--wadjet-studio-bg-deep);
+}
+.wadjet-studio-orrery-well {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 10px 10px 0;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid #101112;
+  border-radius: 4px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.wadjet-studio-orrery-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: var(--wadjet-orrery-w, 100%);
+  height: var(--wadjet-orrery-h, 100%);
+  cursor: grab;
+}
+.wadjet-studio-orrery-canvas.is-dragging {
+  cursor: grabbing;
+}
+.wadjet-studio-orrery-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.14) 0, rgba(0, 0, 0, 0.14) 1px, transparent 1px, transparent 4px);
+}
+.wadjet-studio-orrery-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, 0) 66%, rgba(0, 0, 0, 0.42) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), inset 0 0 30px rgba(0, 0, 0, 0.7);
+}
+.wadjet-studio-orrery-views {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  display: flex;
+  background: rgba(23, 24, 26, 0.85);
+  border-radius: 2px;
+}
+.wadjet-studio-orrery-views .wadjet-studio-segment,
+.wadjet-studio-orrery-rates .wadjet-studio-segment {
+  padding: 4px 10px;
+  font-size: var(--wadjet-studio-fs-chip);
+  font-variant-numeric: tabular-nums;
+}
+.wadjet-studio-orrery-rates .wadjet-studio-segment {
+  padding: 4px 8px;
+}
+.wadjet-studio-orrery-views .wadjet-studio-segment.is-selected,
+.wadjet-studio-orrery-rates .wadjet-studio-segment.is-selected {
+  color: #17181a;
+  background: #e9ebee;
+}
+.wadjet-studio-orrery-hover {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+  font-size: var(--wadjet-studio-fs-body);
+  background: rgba(23, 24, 26, 0.85);
+  border: 1px solid var(--wadjet-studio-border);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.wadjet-studio-orrery-hover-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e9ebee;
+}
+.wadjet-studio-orrery-hover-name {
+  font-weight: 600;
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-orrery-hover-kind {
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-orrery-transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px 7px;
+}
+.wadjet-studio-orrery-keys {
+  display: flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+}
+.wadjet-studio-orrery-key {
+  padding: 4px 10px;
+  font-size: var(--wadjet-studio-fs-unit);
+  color: var(--wadjet-studio-text-dim);
+  cursor: pointer;
+}
+.wadjet-studio-orrery-key + .wadjet-studio-orrery-key {
+  border-left: 1px solid var(--wadjet-studio-border-bright);
+}
+.wadjet-studio-orrery-key:hover {
+  background: #33363a;
+}
+.wadjet-studio-orrery-key.is-on {
+  color: var(--wadjet-studio-text);
+  background: #3a3e43;
+}
+.wadjet-studio-orrery-lcd {
+  flex: 0 1 auto;
+  min-width: 150px;
+  overflow: hidden;
+  padding: 4px 10px;
+  font-size: var(--wadjet-studio-fs-unit);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--wadjet-studio-readout);
+  background: #17181a;
+  border: 1px solid #101112;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.75), 0 1px 0 rgba(255, 255, 255, 0.05);
+  text-shadow: 0 0 7px rgba(255, 201, 120, 0.4);
+}
+.wadjet-studio-orrery-daylbl {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--wadjet-studio-fs-body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-orrery-spring {
+  flex: 1 1 auto;
+}
+.wadjet-studio-orrery-caps {
+  font-size: var(--wadjet-studio-fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #878d95;
+}
+.wadjet-studio-orrery-unit {
+  font-size: var(--wadjet-studio-fs-chip);
+  color: #878d95;
+}
+.wadjet-studio-orrery-strips {
+  padding: 0 10px 11px;
+}
+.wadjet-studio-orrery-seasons {
+  position: relative;
+  height: 3px;
+  margin-bottom: 2px;
+}
+.wadjet-studio-orrery-season {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wadjet-orrery-left, 0);
+  width: var(--wadjet-orrery-width, 0);
+  background: var(--wadjet-orrery-season, #7fd6a8);
+  opacity: 0.85;
+}
+.wadjet-studio-orrery-scrub {
+  position: relative;
+  height: 14px;
+  cursor: ew-resize;
+  background: var(--wadjet-studio-bg-alt);
+  border-radius: 1px;
+}
+.wadjet-studio-orrery-scrub-segs {
+  position: absolute;
+  inset: 0;
+}
+.wadjet-studio-orrery-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wadjet-orrery-left, 0);
+  width: var(--wadjet-orrery-width, 0);
+  min-width: 2px;
+  box-sizing: border-box;
+  background: #34373b;
+  border-right: 1px solid var(--wadjet-studio-bg-deep);
+}
+.wadjet-studio-orrery-seg[data-kind="odd"] {
+  background: #3d4147;
+}
+.wadjet-studio-orrery-seg[data-kind="filler"] {
+  background: var(--wadjet-studio-gold);
+}
+.wadjet-studio-orrery-seg[data-kind="rest"] {
+  background: #4d5359;
+}
+.wadjet-studio-orrery-seg[data-kind="current"] {
+  background: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-orrery-playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: var(--wadjet-orrery-at, 0);
+  width: 2px;
+  margin-left: -1px;
+  background: #e9ebee;
+  box-shadow: 0 0 4px rgba(233, 235, 238, 0.6);
+  pointer-events: none;
+}
+.wadjet-studio-orrery-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  background: #26282c;
+  border-left: 1px solid var(--wadjet-studio-border);
+}
+.wadjet-studio-orrery-insp-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wadjet-studio-orrery-code {
+  padding: 1px 6px;
+  font-size: var(--wadjet-studio-fs-caption);
+  white-space: nowrap;
+  color: var(--wadjet-studio-gold);
+  background: #2b2618;
+  border-radius: 3px;
+}
+.wadjet-studio-orrery-clear {
+  padding: 0 2px;
+  font-size: 13px;
+  color: var(--wadjet-studio-text-dim);
+  cursor: pointer;
+}
+.wadjet-studio-orrery-clear:hover {
+  color: var(--wadjet-studio-text);
+}
+.wadjet-studio-orrery-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--wadjet-studio-text);
+  overflow-wrap: anywhere;
+}
+.wadjet-studio-orrery-sub {
+  margin-top: -6px;
+  font-size: var(--wadjet-studio-fs-body);
+  color: var(--wadjet-studio-text-dim);
+}
+.wadjet-studio-orrery-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+}
+.wadjet-studio-orrery-section .wadjet-studio-orrery-caps {
+  margin-bottom: 2px;
+}
+.wadjet-studio-orrery-now {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--wadjet-studio-fs-body);
+}
+.wadjet-studio-orrery-now-key {
+  flex: 0 0 auto;
+  color: var(--wadjet-studio-text-mute);
+}
+.wadjet-studio-orrery-now-value {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  color: #e9ebee;
+}
+.wadjet-studio-orrery-now-value[data-tone="off"] {
+  color: #878d95;
+}
+.wadjet-studio-orrery-now-value[data-tone="err"] {
+  color: var(--wadjet-studio-error-text);
+}
+.wadjet-studio-orrery-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wadjet-studio-orrery-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  font-size: var(--wadjet-studio-fs-chip);
+  color: var(--wadjet-studio-text-block);
+  background: var(--wadjet-studio-bg-alt);
+  border: 1px solid var(--wadjet-studio-border-bright);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.wadjet-studio-orrery-link:hover {
+  border-color: #6b7178;
+}
+.wadjet-studio-orrery-link-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e9ebee;
+}
+.wadjet-studio-orrery-link-dot.is-error {
+  background: var(--wadjet-studio-error);
+}
+.wadjet-studio-orrery-text {
+  max-height: 250px;
+  margin: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  font-family: var(--wadjet-studio-mono);
+  font-size: var(--wadjet-studio-fs-chip);
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--wadjet-studio-text-block);
+  background: #17181a;
+  border: 1px solid #101112;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.wadjet-studio-orrery-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 200px;
+  min-width: 0;
+  padding: 2px 7px;
+  font-size: var(--wadjet-studio-fs-chip);
+  line-height: 14px;
+  color: var(--wadjet-studio-text-dim);
+  border: 1px solid #565b61;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.wadjet-studio-orrery-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.wadjet-studio-orrery-chip-caret {
+  flex: 0 0 auto;
+}

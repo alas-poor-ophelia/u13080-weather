@@ -20,6 +20,7 @@ import type { Override } from "../../core/report";
 import type { Era, ZoneProfile } from "../../core/types";
 import type { DevicePreset, InternalCalendarConfig, RegimePreset } from "../../plugin/settings";
 import type { LedgerForm, MonthForm, YearForm } from "../../plugin/time/form";
+import type { OrreryTheme } from "./orrery-transport";
 
 /** The world-scoped slice of settings: everything a world edit touches (`world · N zones`). */
 export interface WorldDraft {
@@ -47,6 +48,8 @@ export interface ViewState {
   fixedOpen: Record<string, boolean>;
   /** bumped by the audition's re-roll; never touches the world seed (PLAN §5.1) */
   rerollSalt: number;
+  /** the Orrery's scope look, per Studio view (docs/SESHAT-v0.md §18.4 Q2); absent: phosphor with scanlines */
+  orrery?: { theme: OrreryTheme; scanlines: boolean };
 }
 
 export interface StudioState {
