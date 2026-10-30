@@ -28,7 +28,7 @@ import { openingWindow, yearsFor } from "../model/years";
 import type { ZoneProfile } from "../../core/types";
 import type WadjetPlugin from "../../plugin/main";
 import { applyStash, takeStash } from "../model/stash";
-import { adoptSettings, initialState } from "../model/state";
+import { adoptSettings, initialState, type Replacement } from "../model/state";
 import { createStore, type Store } from "../model/store";
 import { createAtlasSurface } from "./atlas-surface";
 import { createAuditionSurface } from "./audition";
@@ -403,7 +403,9 @@ export class StudioView extends ItemView {
     const dirty = this.store.dirtyZones();
     const worldDirty = this.store.worldDirty();
     const fresh = initialState(this.plugin.studioSettings(), this.store.get().view.zoneId);
-    this.store.update((s) => adoptSettings(s, fresh, dirty, worldDirty));
+    let replaced: Replacement[] = [];
+    this.store.update((s) => (replaced = adoptSettings(s, fresh, dirty, worldDirty)));
+    this.store.rebaseHistory(replaced); // undo never brings back what the refresh replaced (ruling 2026-10-30)
   }
 
   /**

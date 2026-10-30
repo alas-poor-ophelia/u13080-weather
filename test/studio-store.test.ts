@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { canonicalJson } from "../src/core/profile";
 import type { Preset, ZoneProfile } from "../src/core/types";
-import { defaultView, initialState, type StudioSettingsLike, type StudioState } from "../src/studio/model/state";
+import { adoptSettings, defaultView, initialState, type Replacement, type StudioSettingsLike, type StudioState } from "../src/studio/model/state";
 import { createStore, MAX_HISTORY, type Store } from "../src/studio/model/store";
 
 const fjord = (await Bun.file(new URL("../presets/fjord-coast.json", import.meta.url)).json()) as Preset;
@@ -463,5 +463,31 @@ describe("undo / redo", () => {
     // the redo branch kept the uncommitted-then-committed value, not a shared reference
     store.redo();
     expect(weight(store.get())).toBe(77);
+  });
+});
+
+describe("rebaseHistory (a refresh from settings; ruling 2026-10-30)", () => {
+  test("zones a refresh removed or added stay so through undo and redo; a zone with Studio edits keeps them", () => {
+    const { store } = harness();
+    store.update((s) => (greywold(s).regimes[0]!.weight = 7), { history: true });
+    store.update((s) => (s.zones.saltmarsh!.name = "Mine"), { history: true });
+    store.undo(); // saltmarsh is clean again; redo holds "Mine"
+    // outside: greywold renamed, saltmarsh removed, a zone added
+    const fresh = { ...settings(), zones: [zone("greywold", "Outside"), zone("new", "New")] };
+    let replaced: Replacement[] = [];
+    store.update((s) => (replaced = adoptSettings(s, initialState(fresh, "greywold"), store.dirtyZones(), store.worldDirty())));
+    store.rebaseHistory(replaced);
+    expect(greywold(store.get()).name).toBe("Greywold"); // dirty: kept
+    expect(Object.keys(store.get().zones).sort()).toEqual(["greywold", "new"]);
+    expect(store.redo()).toBe(true);
+    expect(store.get().zones.saltmarsh!.name).toBe("Mine"); // a Studio edit, not what was removed: it stays
+    expect(store.get().zones.new!.name).toBe("New");
+    expect(store.undo()).toBe(true);
+    expect(store.get().zones.saltmarsh).toBeUndefined();
+    expect(store.undo()).toBe(true); // the weight edit: greywold was never replaced, so it keeps its own history
+    expect(weight(store.get())).not.toBe(7);
+    expect(greywold(store.get()).name).toBe("Greywold");
+    expect(store.get().zones.saltmarsh).toBeUndefined();
+    expect(store.get().zones.new!.name).toBe("New");
   });
 });

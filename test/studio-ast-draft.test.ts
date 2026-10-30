@@ -31,7 +31,7 @@ import {
 } from "../src/studio/model/ast-edit";
 import { applyAstEdit, calendarAfterSave, calendarOfDefinition, draftAst, mergeCalendar, moveMoon, planCalendarSave, resolveConflict, seshatDraft, studioSave, type CalendarDraft, type CalendarEdit, type ConflictChoice, type MergeResult } from "../src/studio/model/definition";
 import { prepareDefinition } from "../src/plugin/time/seshat";
-import { adoptSettings, initialState, type StudioSettingsLike } from "../src/studio/model/state";
+import { adoptSettings, initialState, type Replacement, type StudioSettingsLike } from "../src/studio/model/state";
 import { SeshatCalendar } from "../src/plugin/time/seshat";
 import { applyStash, takeStash } from "../src/studio/model/stash";
 import { createStore } from "../src/studio/model/store";
@@ -648,21 +648,80 @@ describe("a Studio Save writes the draft whole, or asks first (ruling 2026-10-30
     expect([parse(r.stored).name, parse(r.stored).rules ?? []]).toEqual(["Mine", []]);
   });
 
-  test("an untouched calendar under a dirty world takes the stored one on a refresh; an undo past it is an edit like any other", () => {
+  /** StudioView.refreshFromSettings on stored text `text`: adopt, then rebase the history. */
+  const refresh = (store: ReturnType<typeof createStore>, text: string) => {
+    let replaced: Replacement[] = [];
+    store.update((s) => (replaced = adoptSettings(s, initialState(seshatSettings(text), null), store.dirtyZones(), store.worldDirty())));
+    store.rebaseHistory(replaced);
+  };
+
+  test("era edit, refresh, undo (ruling 2026-10-30): the era edit is undone, the calendar stays the stored one, Save writes no calendar", () => {
     const s0 = print(FOLLOWED);
     const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
     store.update((s) => (s.world.eras[0]!.to = 20), { history: true });
     store.update((s) => (s.world.eras[0]!.name = "Long age"), { history: true });
     const s1 = S1(s0);
-    store.update((s) => adoptSettings(s, initialState(seshatSettings(s1), null), store.dirtyZones(), store.worldDirty()));
+    refresh(store, s1);
     expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true);
-    expect(store.undo()).toBe(true); // the calendar from before the refresh is back in the draft
-    expect(same(store.get().world.calendar.ast, parse(s0))).toBe(true);
-    // the draft now differs from what was last loaded (s1), and storage is still s1: Save writes what is shown
+    expect(store.undo()).toBe(true);
+    expect(store.get().world.eras[0]).toEqual({ name: "Age", from: 0, to: 20 });
+    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true);
+    expect(store.undo()).toBe(true);
+    expect(store.get().world.eras[0]).toEqual({ name: "Age", from: 0, to: 10 });
+    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true);
+    expect(store.worldDirty()).toBe(false);
+    expect(store.redo()).toBe(true); // redo after the refresh: the era edit is back, the calendar still the stored one
     const r = headerSave(store, s1);
-    expect(r.first.kind).toBe("definition");
-    expect(same(parse(r.stored), parse(printed(seshatDraft(parse(s0)))))).toBe(true);
+    expect(r.first.kind).toBe("none");
+    expect(r.stored).toBe(s1);
     expect(store.get().saved.world.eras[0]).toEqual({ name: "Age", from: 0, to: 20 });
+  });
+
+  test("a pending calendar edit, refresh, undo: the user's calendar edit survives the undo and Save asks; undoing it shows the stored calendar", () => {
+    const s0 = print(FOLLOWED);
+    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
+    store.update((s) => (s.world.calendar.form = { ...s.world.calendar.form, name: "Mine" }), { history: true });
+    store.update((s) => (s.world.eras[0]!.name = "Long age"), { history: true });
+    const s1 = S1(s0);
+    refresh(store, s1);
+    expect(store.get().world.calendar.form!.name).toBe("Mine");
+    expect(store.undo()).toBe(true); // the era edit
+    expect(store.get().world.eras[0]!.name).toBe("Age");
+    expect(store.get().world.calendar.form!.name).toBe("Mine");
+    expect(same(store.get().calendarBase!.ast, parse(s0))).toBe(true);
+    expect(studioSave(store.get(), { calendarSource: "seshat", calendar: seshatDraft(parse(s1)) }, s1).kind).toBe("conflict");
+    expect(store.undo()).toBe(true); // the calendar edit: back to the calendar as stored now, not as it was
+    expect(same(store.get().world.calendar, seshatDraft(parse(s1)))).toBe(true);
+    expect(store.redo()).toBe(true);
+    expect(store.get().world.calendar.form!.name).toBe("Mine");
+    expect(same(store.get().world.calendar.ast, parse(s0))).toBe(true); // the user's edit, on the calendar it was made on
+    expect(store.redo()).toBe(true);
+    expect(store.get().world.eras[0]!.name).toBe("Long age");
+    const r = headerSave(store, s1, "overwrite");
+    expect(r.first.kind).toBe("conflict");
+    expect(parse(r.stored).name).toBe("Mine");
+  });
+
+  test("a clean world refreshed: redo keeps the Studio edit on the new calendar, undo comes back to the new eras", () => {
+    const s0 = print(FOLLOWED);
+    const s1 = S1(s0);
+    const store = createStore(initialState(seshatSettings(s0), null), (f) => f());
+    store.update((s) => (s.world.eras[0]!.name = "Long age"), { history: true });
+    store.undo(); // clean again; redo holds "Long age" on s0's calendar
+    expect(store.worldDirty()).toBe(false);
+    const fresh = { ...seshatSettings(s1), eras: [{ name: "Outside", from: 0, to: 5 }] };
+    let replaced: Replacement[] = [];
+    store.update((s) => (replaced = adoptSettings(s, initialState(fresh, null), store.dirtyZones(), store.worldDirty())));
+    store.rebaseHistory(replaced);
+    expect(store.get().world.eras[0]!.name).toBe("Outside");
+    expect(store.redo()).toBe(true);
+    expect(store.get().world.eras[0]!.name).toBe("Long age"); // the Studio edit, which differs from what was replaced
+    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true);
+    expect(store.undo()).toBe(true);
+    expect(store.get().world.eras[0]!.name).toBe("Outside");
+    expect(same(store.get().world.calendar.ast, parse(s1))).toBe(true);
+    expect(store.worldDirty()).toBe(false);
+    expect(store.canUndo()).toBe(false);
   });
 
   test("Save, reseed, markSaved: clean, and a refresh from the same text stays clean", () => {

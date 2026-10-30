@@ -194,20 +194,42 @@ export function initialState(settingsLike: StudioSettingsLike, zoneId: string | 
   return { zones, saved, world, view: defaultView(zoneId !== null && zoneId in zones ? zoneId : null), calendarBase: structuredClone(world.calendar), calendarSource: settingsLike.calendarSource ?? "legacy" };
 }
 
+/** A part of the drafts a refresh can replace whole: one zone's draft (absent: no such zone) or one world field. */
+export type DraftPart = { zone: string } | { world: keyof WorldDraft };
+
+/**
+ * One part a refresh replaced: drafts holding `from` there held no Studio edit
+ * of it, so they take `to` (store.ts `rebaseHistory`). `undefined` is a zone
+ * that did not or does not exist.
+ */
+export interface Replacement {
+  part: DraftPart;
+  from: unknown;
+  to: unknown;
+}
+
 /**
  * The plugin's settings changed outside the studio (StudioView.refreshFromSettings,
  * as one pure step): clean drafts adopt `fresh` (initialState of the new
  * settings); dirty drafts stay as the user left them, and `saved` always
  * tracks the plugin. A dirty world draft with calendar edits keeps them and
  * its `calendarBase`, so its next Save asks whether to overwrite. In place.
+ *
+ * Returns what it replaced, for the store's history to follow (ruling
+ * 2026-10-30: undo only rewinds Studio edits): every part of the live drafts
+ * it replaced, and the stored calendar when that moved, so an undo step that
+ * held the old one without edits holds the new one instead.
  * @param dirty the zone ids dirty before the change; `worldDirty` likewise
  */
-export function adoptSettings(s: StudioState, fresh: StudioState, dirty: ReadonlySet<string>, worldDirty: boolean): void {
+export function adoptSettings(s: StudioState, fresh: StudioState, dirty: ReadonlySet<string>, worldDirty: boolean): Replacement[] {
+  const before = structuredClone({ zones: s.zones, world: s.world });
   // the stored calendar moved (a switch, an undo, an edit in settings) under a dirty world draft whose calendar
   // is untouched: that calendar takes the stored one, so the draft never shows or carries a calendar that is gone
   const base = s.calendarBase ?? s.saved.world.calendar;
   const untouched = canonicalJson(s.world.calendar) === canonicalJson(base);
   const moved = (s.calendarSource ?? "legacy") !== fresh.calendarSource || canonicalJson(fresh.world.calendar) !== canonicalJson(base);
+  const out: Replacement[] = [];
+  if (moved) out.push({ part: { world: "calendar" }, from: structuredClone(base), to: structuredClone(fresh.world.calendar) });
   if (worldDirty && untouched && moved) {
     s.world.calendar = structuredClone(fresh.world.calendar);
     s.calendarBase = structuredClone(fresh.world.calendar);
@@ -222,4 +244,10 @@ export function adoptSettings(s: StudioState, fresh: StudioState, dirty: Readonl
     s.calendarSource = fresh.calendarSource ?? "legacy";
   }
   if (s.view.zoneId !== null && !(s.view.zoneId in s.zones)) s.view.zoneId = null;
+  const replaced = (part: DraftPart, from: unknown, to: unknown): void => {
+    if (canonicalJson(from ?? null) !== canonicalJson(to ?? null)) out.push({ part, from, to: structuredClone(to) });
+  };
+  for (const id of new Set([...Object.keys(before.zones), ...Object.keys(s.zones)])) replaced({ zone: id }, before.zones[id], s.zones[id]);
+  for (const key of Object.keys(s.world) as (keyof WorldDraft)[]) replaced({ world: key }, before.world[key], s.world[key]);
+  return out;
 }

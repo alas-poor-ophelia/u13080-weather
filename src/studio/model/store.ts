@@ -24,7 +24,7 @@
 import { canonicalJson } from "../../core/profile";
 import { hash32 } from "../../core/rng";
 import type { ZoneProfile } from "../../core/types";
-import { settleExact, type StudioState, type WorldDraft } from "./state";
+import { settleExact, type Replacement, type StudioState, type WorldDraft } from "./state";
 
 /** How many undo steps are kept. Older steps fall off the bottom. */
 export const MAX_HISTORY = 100;
@@ -64,6 +64,15 @@ export interface Store {
    * on its own and decides what applies there.
    */
   amend(fn: (drafts: { zones: Record<string, ZoneProfile>; world: WorldDraft }) => void): void;
+  /**
+   * A refresh replaced parts of the drafts from outside the Studio (state.ts
+   * `adoptSettings`, ruling 2026-10-30: undo only rewinds Studio edits). Every
+   * undo and redo step, and the last commit, holding a replaced part's `from`
+   * takes its `to`, so neither undo nor a Save after it brings back what was
+   * replaced; a step holding anything else there (the user's own edit) keeps
+   * it. The live drafts are the caller's; takes no undo step.
+   */
+  rebaseHistory(replacements: readonly Replacement[]): void;
   /** Point the view at another zone. Every zone keeps its own draft. */
   setZone(zoneId: string): void;
 }
@@ -226,6 +235,33 @@ export function createStore(initial: StudioState, schedule: (flush: () => void) 
       baseline = cloneDrafts(state);
       baselineHash = draftsHash(state);
       notify();
+    },
+
+    rebaseHistory(replacements) {
+      if (replacements.length === 0) return;
+      const keyed = replacements.map((r) => ({ ...r, key: canonicalJson(r.from ?? null) }));
+      const rebase = (d: Drafts): boolean => {
+        let changed = false;
+        for (const { part, key, to } of keyed) {
+          const held = "zone" in part ? d.zones[part.zone] : d.world[part.world];
+          if (canonicalJson(held ?? null) !== key) continue;
+          changed = true;
+          if ("world" in part) (d.world as unknown as Record<string, unknown>)[part.world] = structuredClone(to);
+          else if (to === undefined) delete d.zones[part.zone];
+          else d.zones[part.zone] = structuredClone(to as ZoneProfile);
+        }
+        return changed;
+      };
+      for (const stack of [undoStack, redoStack])
+        for (const [i, e] of stack.entries()) {
+          const drafts = structuredClone(e.drafts); // a step may share its drafts with the baseline
+          if (rebase(drafts)) stack[i] = { drafts, hash: draftsHash(drafts) };
+        }
+      const drafts = structuredClone(baseline);
+      if (rebase(drafts)) {
+        baseline = drafts;
+        baselineHash = draftsHash(drafts);
+      }
     },
 
     markSaved() {
