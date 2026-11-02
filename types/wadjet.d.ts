@@ -669,6 +669,28 @@ export interface SeshatCalendarView {
   parse: (text: string) => number | null;
 }
 
+/** One plugin's mark on the day line: a day, or a span of days. Weather and calendar rules never read it. */
+export interface SeshatMark {
+  readonly id: string;
+  readonly from: number;
+  /** the last day of a span; absent for one day */
+  readonly to?: number;
+  readonly name?: string;
+  readonly tags?: readonly string[];
+  /** anything JSON can hold; it comes back as a copy */
+  readonly data?: unknown;
+}
+
+/** A plugin's own marks, stored by Wadjet under its name and kept outside the calendar. Writes run one at a time. */
+export interface SeshatMarks {
+  list: () => SeshatMark[];
+  /** resolves to the stored mark with its id. Throws TypeError or RangeError for a bad mark, and rejects when the owner's marks would pass the size limit */
+  add: (mark: Omit<SeshatMark, "id">) => Promise<SeshatMark>;
+  /** resolves false when there is no such mark */
+  remove: (id: string) => Promise<boolean>;
+  clear: () => Promise<void>;
+}
+
 export interface SeshatAPI {
   /** the definition the world runs; null when it runs another calendar or its stored definition cannot run */
   calendar: () => SeshatCalendarView | null;
@@ -681,6 +703,8 @@ export interface SeshatAPI {
   setDefinition: (input: string | CalendarAst) => Promise<{ ok: true } | { ok: false; problems: Problem[] }>;
   /** open the Studio with the calendar editor up, as the ruler's Calendar button does */
   openEditor: () => Promise<void>;
+  /** the marks plugin `owner` keeps here (use your plugin's id), which never move the weather */
+  marks: (owner: string) => SeshatMarks;
 }
 
 // ---------------------------------------------------------------------------

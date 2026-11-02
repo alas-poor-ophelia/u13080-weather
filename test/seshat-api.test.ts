@@ -9,19 +9,20 @@ import { migrateSettings } from "../src/plugin/settings";
 import { TimeRegistry } from "../src/plugin/time/adapter";
 import { InternalCalendar } from "../src/plugin/time/internal";
 import { World } from "../src/plugin/world";
+import { MARKS_BYTES_MAX } from "../src/plugin/seshat-api";
 import { GREGORIAN, HARPTOS, print, type SlotsUnitAst } from "../src/seshat";
 
 const GREGORIAN_TEXT = print(GREGORIAN);
 const HARPTOS_TEXT = print(HARPTOS);
 
-function rig(opts: { openEditor?: () => Promise<void>; save?: () => Promise<void> } = {}) {
-  const settings = migrateSettings({ worldSeed: "seed", zones: [] });
+function rig(opts: { openEditor?: () => Promise<void>; save?: () => Promise<void>; settings?: object } = {}) {
+  const settings = migrateSettings({ worldSeed: "seed", zones: [], ...opts.settings });
   const save = opts.save ?? (() => Promise.resolve());
   const time = new TimeRegistry(settings.activeTimeAdapter);
   time.register(new InternalCalendar(settings.calendar, () => settings.currentDayOrdinal, save));
   const state = () => ({ seed: settings.worldSeed, zones: settings.zones, eras: settings.eras, overrides: settings.overrides });
   const world = new World(state(), time);
-  const controller = new ApiController({ version: "9.9.9", world, time, units: () => "metric", ...(opts.openEditor ? { openCalendarEditor: opts.openEditor } : {}), saveDefinition: (text) => calendars.saveDefinition(text, { renames: "byUid" }) });
+  const controller = new ApiController({ version: "9.9.9", world, time, units: () => "metric", ...(opts.openEditor ? { openCalendarEditor: opts.openEditor } : {}), saveDefinition: (text) => calendars.saveDefinition(text, { renames: "byUid" }), marksStore: { settings: () => settings, save } });
   const calendars = new Calendars({
     settings: () => settings,
     time,
@@ -221,6 +222,155 @@ describe("setDefinition()", () => {
   });
 });
 
+describe("marks()", () => {
+  const OWNER = "gantt-this";
+
+  test("adds, lists, removes and clears, under one owner", async () => {
+    const { api, settings } = rig();
+    const marks = api.seshat.marks(OWNER);
+    expect(marks.list()).toEqual([]);
+    const a = await marks.add({ from: 10, name: "Launch", tags: ["work"], data: { colour: "red" } });
+    const b = await marks.add({ from: 20, to: 30, name: "Third Age" });
+    expect(a).toEqual({ id: a.id, from: 10, name: "Launch", tags: ["work"], data: { colour: "red" } });
+    expect(marks.list().map((m) => m.id)).toEqual([a.id, b.id]);
+    expect(api.seshat.marks("other").list()).toEqual([]);
+    expect(await marks.remove(a.id)).toBe(true);
+    expect(await marks.remove(a.id)).toBe(false);
+    expect(marks.list()).toEqual([b]);
+    // an id is not given again, so a plugin holding an old one cannot remove another mark with it
+    const c = await marks.add({ from: 1 });
+    expect([a.id, b.id]).not.toContain(c.id);
+    expect(await marks.remove(a.id)).toBe(false);
+    await marks.clear();
+    expect(marks.list()).toEqual([]);
+    expect(settings.seshatMarks).toBeUndefined();
+  });
+
+  test("moves no weather: no event, the same hash, the same context", async () => {
+    const { api, calendars, world } = rig();
+    await calendars.optIn(GREGORIAN_TEXT);
+    const hash = api.seshat.calendar()!.hash;
+    const context = JSON.stringify(api.timeAt(100));
+    const events: string[] = [];
+    for (const e of ["profiles-changed", "adapters-changed", "time-changed"] as const) world.on(e, () => events.push(e));
+    await api.seshat.marks(OWNER).add({ from: 100, tags: ["season:Spring"] });
+    expect(events).toEqual([]);
+    expect(api.seshat.calendar()!.hash).toBe(hash);
+    expect(JSON.stringify(api.timeAt(100))).toBe(context);
+  });
+
+  test("what goes in is a copy, what comes out is a copy", async () => {
+    const { api } = rig();
+    const marks = api.seshat.marks(OWNER);
+    const data = { n: 1 };
+    const tags = ["a"];
+    const out = await marks.add({ from: 1, tags, data });
+    data.n = 2;
+    tags.push("b");
+    (out.data as { n: number }).n = 3;
+    (marks.list()[0]!.data as { n: number }).n = 4;
+    expect(marks.list()[0]).toEqual({ id: out.id, from: 1, tags: ["a"], data: { n: 1 } });
+  });
+
+  test("a bad mark throws at the call, and leaves every later save working", async () => {
+    const { api, settings } = rig();
+    const marks = api.seshat.marks(OWNER);
+    const cyclic: Record<string, unknown> = {};
+    cyclic["self"] = cyclic;
+    for (const bad of [{ from: 1.5 }, { from: 1e8 }, { from: 5, to: 4 }, { from: 1, to: 2.5 }, { from: 1, name: 7 }, { from: 1, tags: [1] }, { from: 1, data: cyclic }, { from: 1, data: () => 1 }, null]) {
+      expect(() => marks.add(bad as never)).toThrow();
+    }
+    expect(settings.seshatMarks).toBeUndefined();
+    expect(JSON.stringify(settings)).toBeTruthy();
+    expect((await marks.add({ from: 1 })).from).toBe(1);
+    expect(() => api.seshat.marks("")).toThrow(TypeError);
+    expect(() => api.seshat.marks("x".repeat(201))).toThrow(TypeError);
+  });
+
+  test("overlapping adds all land, each with its own id", async () => {
+    const { api } = rig();
+    const marks = api.seshat.marks(OWNER);
+    const all = await Promise.all([1, 2, 3, 4].map((from) => marks.add({ from })));
+    expect(new Set(all.map((m) => m.id)).size).toBe(4);
+    expect(marks.list().map((m) => m.from)).toEqual([1, 2, 3, 4]);
+  });
+
+  test("past the size limit a mark is refused and the list stays", async () => {
+    const { api } = rig();
+    const marks = api.seshat.marks(OWNER);
+    await marks.add({ from: 1, data: "x".repeat(MARKS_BYTES_MAX - 200) });
+    const e = (await marks.add({ from: 2, data: "y".repeat(500) }).catch((x: unknown) => x)) as Error;
+    expect(e).toBeInstanceOf(RangeError);
+    expect(e.message).toContain("should keep them itself");
+    expect(marks.list()).toHaveLength(1);
+    await api.seshat.marks("other").add({ from: 2, data: "y".repeat(500) }); // the limit is per owner
+  });
+
+  test("the limit is in bytes: text that takes more bytes than characters reaches it sooner", async () => {
+    const { api } = rig();
+    const marks = api.seshat.marks(OWNER);
+    const e = (await marks.add({ from: 1, data: "語".repeat(MARKS_BYTES_MAX / 2) }).catch((x: unknown) => x)) as Error;
+    expect(e).toBeInstanceOf(RangeError);
+    expect(marks.list()).toEqual([]);
+  });
+
+  test("the odd owner names are plain names", async () => {
+    const { api, settings } = rig();
+    for (const owner of ["__proto__", "constructor", "toString"]) {
+      const marks = api.seshat.marks(owner);
+      expect(marks.list()).toEqual([]);
+      await marks.add({ from: 1 });
+      expect(marks.list().length).toBe(1);
+      await marks.clear();
+    }
+    expect(settings.seshatMarks).toBeUndefined();
+    expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
+  });
+
+  test("a write that was waiting when the plugin unloaded rejects instead of reporting success", async () => {
+    const { api, controller } = rig();
+    const pending = api.seshat.marks(OWNER).add({ from: 1 });
+    controller.unload(() => {});
+    const e = (await pending.catch((x: unknown) => x)) as { code?: string };
+    expect(e.code).toBe(UNLOADED_CODE);
+  });
+
+  test("a failed save puts the list back, and the next one works", async () => {
+    let fail = false;
+    const { api, settings } = rig({ save: () => (fail ? ((fail = false), Promise.reject(new Error("disk full"))) : Promise.resolve()) });
+    const marks = api.seshat.marks(OWNER);
+    await marks.add({ from: 1 });
+    fail = true;
+    const e = (await marks.add({ from: 2 }).catch((x: unknown) => x)) as Error;
+    expect(e.message).toBe("disk full");
+    expect(marks.list().map((m) => m.from)).toEqual([1]);
+    expect(Object.keys(settings.seshatMarks!)).toEqual([OWNER]);
+    expect((await marks.add({ from: 3 })).from).toBe(3);
+  });
+
+  test("a stored entry it cannot read is kept but not shown; a stored shape it cannot read at all is dropped on load", async () => {
+    const stored = { [OWNER]: [{ id: "m9", from: 5 }, { later: "shape" }], other: "not a list" };
+    const { api, settings } = rig({ settings: { seshatMarks: stored } });
+    const marks = api.seshat.marks(OWNER);
+    expect(marks.list()).toEqual([{ id: "m9", from: 5 }]);
+    expect(api.seshat.marks("other").list()).toEqual([]);
+    expect((await marks.add({ from: 6 })).from).toBe(6);
+    expect(settings.seshatMarks![OWNER]).toContainEqual({ later: "shape" });
+    expect(settings.seshatMarks!["other"]).toBe("not a list");
+    expect(migrateSettings({ seshatMarks: [1] }).seshatMarks).toBeUndefined();
+    expect(migrateSettings({ seshatMarks: { a: [] } }).seshatMarks).toEqual({ a: [] });
+  });
+
+  test("the doc says what it does: a mark stays on its number when the calendar changes", async () => {
+    const { api, calendars } = rig();
+    await calendars.optIn(GREGORIAN_TEXT);
+    const marks = api.seshat.marks(OWNER);
+    await marks.add({ from: 100 });
+    await api.seshat.setDefinition(HARPTOS);
+    expect(marks.list()[0]!.from).toBe(100);
+  });
+});
+
 describe("openEditor()", () => {
   test("asks the host to open it", async () => {
     let opened = 0;
@@ -248,6 +398,7 @@ describe("after unload", () => {
     };
     expect(code(() => api.seshat.calendar())).toBe(UNLOADED_CODE);
     expect(code(() => api.seshat.compile(GREGORIAN_TEXT))).toBe(UNLOADED_CODE);
+    expect(code(() => api.seshat.marks("x"))).toBe(UNLOADED_CODE);
     const written = (await api.seshat.setDefinition(GREGORIAN_TEXT).catch((x: unknown) => x)) as { code?: string };
     expect(written.code).toBe(UNLOADED_CODE);
     const e = (await api.seshat.openEditor().catch((x: unknown) => x)) as { code?: string };

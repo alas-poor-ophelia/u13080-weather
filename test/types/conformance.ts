@@ -97,6 +97,8 @@ export type Conformance = [
   Expect<Equal<S.Position, D.Position>>,
   Expect<Equal<S.SeshatCalendarView, D.SeshatCalendarView>>,
   Expect<Equal<S.SeshatAPI, D.SeshatAPI>>,
+  Expect<Equal<S.SeshatMark, D.SeshatMark>>,
+  Expect<Equal<S.SeshatMarks, D.SeshatMarks>>,
 ];
 
 /** Every WadjetAPI member, in docs order. */

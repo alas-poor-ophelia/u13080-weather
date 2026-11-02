@@ -2577,6 +2577,23 @@ const regimesWindow = () => ob.page.locator(".wadjet-studio-window", { has: ob.p
  * (`components/window.ts`), not a `<select>`: the offered names only exist in
  * the DOM while the menu is open, so a step that wants them has to open it.
  */
+/**
+ * Escape closes an Obsidian menu, but the first press can do nothing (seen from 2026-11-02 on this box, on builds that
+ * had passed the day before; the press reaches the page and nothing prevents it, and no cause is known), so press again.
+ */
+async function closeMenu(menu: Locator): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await ob.page.keyboard.press("Escape");
+        await ob.page.waitForTimeout(100);
+        return menu.isVisible();
+      },
+      { timeout: 5_000, interval: 100 },
+    )
+    .toBe(false);
+}
+
 async function openPresetMenu(win: Locator): Promise<Locator> {
   await win.locator(".wadjet-studio-window-preset-pick").click();
   const menu = ob.page.locator(".menu").last();
@@ -2592,8 +2609,7 @@ async function presetMenuTitles(win: Locator): Promise<string[]> {
   // it sits inside a window whose own Escape handler closes the panel, and a
   // key pressed while it is focused shut the whole window instead of the menu.
   await ob.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await ob.page.keyboard.press("Escape");
-  await menu.waitFor({ state: "hidden", timeout: 5_000 });
+  await closeMenu(menu);
   return titles;
 }
 
@@ -8127,8 +8143,7 @@ async function zoneMenuMarks(): Promise<Record<string, string>> {
     const row = titles.find((t) => t.includes(z.name));
     marks[z.id] = row ? row.charAt(0) : "?";
   }
-  await ob.page.keyboard.press("Escape");
-  await menu.waitFor({ state: "hidden", timeout: 5_000 });
+  await closeMenu(menu);
   return marks;
 }
 
@@ -11296,5 +11311,24 @@ describe("climate studio · calendar orrery", () => {
       await widenWindow();
       await nextFrame();
     }
+  });
+
+  test("step 106: api.seshat.marks stores a plugin's marks in data.json, under its name, and takes them away again", async () => {
+    const onDisk = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).seshatMarks ?? null) as Record<string, unknown[]> | null;
+    const call = <T,>(what: string, arg?: unknown) =>
+      withApp(
+        ob.page,
+        (_app, a: { what: string; arg: unknown }) => {
+          const marks = (window as unknown as { Wadjet: { seshat: { marks(o: string): Record<string, (x?: unknown) => unknown> } } }).Wadjet.seshat.marks("e2e-plugin");
+          return marks[a.what]!(a.arg);
+        },
+        { what, arg },
+      ) as Promise<T>;
+    const mark = await call<{ id: string }>("add", { from: 10, to: 20, name: "Third Age", data: { colour: "red" } });
+    await expect.poll(onDisk, { timeout: 10_000 }).toEqual({ "e2e-plugin": [{ id: mark.id, from: 10, to: 20, name: "Third Age", data: { colour: "red" } }] });
+    expect(await call("list")).toEqual([{ id: mark.id, from: 10, to: 20, name: "Third Age", data: { colour: "red" } }]);
+    await call("clear");
+    await expect.poll(onDisk, { timeout: 10_000 }).toBeNull();
+    console.log("  · marks: stored in data.json under the plugin's name, read back, cleared");
   });
 });

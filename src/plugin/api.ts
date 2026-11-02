@@ -16,7 +16,7 @@ import { RNG_VERSION, SCHEMA_VERSION } from "../core/version";
 import type { WadjetEvent, WadjetEventPayloads } from "./events";
 import { InterpreterRegistry, codedError, type InterpretContext, type InterpreterInfo, type WeatherInterpreter } from "./interpreters";
 import type { CalendarDescription, TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
-import { makeSeshatApi, type SeshatAPI } from "./seshat-api";
+import { makeSeshatApi, type SeshatAPI, type SeshatApiHost } from "./seshat-api";
 import { assertDayInRange, assertInteger, type World, type ZoneLocator, type ZoneResolver } from "./world";
 
 /** Bumps whenever members are added to WadjetAPI. */
@@ -87,6 +87,8 @@ export interface ApiHost {
   openCalendarEditor?: () => Promise<void>;
   /** store a definition the world runs (main.ts); tests may leave it out */
   saveDefinition?: (text: string) => Promise<void>;
+  /** where `api.seshat.marks` lives (main.ts); tests may leave it out */
+  marksStore?: SeshatApiHost["marksStore"];
 }
 
 export const UNLOADED_CODE = "wadjet-unloaded";
@@ -245,6 +247,14 @@ export class ApiController {
     });
   }
 
+  private marksTurn: Promise<unknown> = Promise.resolve();
+  /** `api.seshat.marks` writes run one at a time: each reads the list when its turn comes, so none is lost. */
+  private inMarksTurn<T>(write: () => Promise<T>): Promise<T> {
+    const run = this.marksTurn.then(write, write);
+    this.marksTurn = run.catch(() => undefined);
+    return run;
+  }
+
   private build(): WadjetAPI {
     const { world, time } = this.host;
     const live = this.assertLive.bind(this);
@@ -358,7 +368,7 @@ export class ApiController {
         return this.interpreters.run(id, copyForInterpreter(report), ctx) as T;
       },
 
-      seshat: makeSeshatApi({ time, live, ...(this.host.openCalendarEditor ? { openEditor: this.host.openCalendarEditor } : {}), ...(this.host.saveDefinition ? { saveDefinition: this.host.saveDefinition } : {}) }),
+      seshat: makeSeshatApi({ time, live, ...(this.host.openCalendarEditor ? { openEditor: this.host.openCalendarEditor } : {}), ...(this.host.saveDefinition ? { saveDefinition: this.host.saveDefinition } : {}), ...(this.host.marksStore ? { marksStore: this.host.marksStore } : {}), inTurn: <T>(write: () => Promise<T>): Promise<T> => this.inMarksTurn(write) }),
 
       on: (event, cb) => (live(), this.once(world.on(event, cb))),
     };

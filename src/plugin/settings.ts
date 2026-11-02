@@ -108,6 +108,8 @@ export interface WadjetSettings {
   devicePresets?: DevicePreset[];
   /** studio regime presets (saved state sets), SPEC §3.4 */
   regimePresets?: RegimePreset[];
+  /** `api.seshat.marks`, by owner (docs/API.md §1b). Outside the calendar and the weather; stored as found, read with care */
+  seshatMarks?: Record<string, unknown>;
   /**
    * Kept weather (SESHAT-v0 §17.2): days kept from the previous generator at an upgrade, by (zone, day).
    * Typed unknown and stored as it was found, like calendar.definition: what Wadjet cannot read is carried
@@ -277,6 +279,7 @@ export function migrateSettings(raw: unknown, warn: (msg: string) => void = () =
     // never rewritten here: a later shape or one bad entry arriving through Sync must survive the save after load
     frozen: r.frozen === undefined ? [] : r.frozen,
   };
+  if (typeof s.seshatMarks !== "object" || s.seshatMarks === null || Array.isArray(s.seshatMarks)) delete s.seshatMarks;
   const kept = keptRepair(s.frozen);
   if (kept !== null) warn(kept);
   if (!s.worldSeed) s.worldSeed = freshSeed();

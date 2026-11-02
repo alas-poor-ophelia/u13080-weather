@@ -506,7 +506,8 @@ What this is not:
 - **It has no editor of its own.** Your plugin can replace the definition with `setDefinition()`, or open the plugin's
   editor with `openEditor()`.
 - **It has no time of day.** The day is the smallest unit. If your plugin needs hours, derive them yourself.
-- **It has no eras.** Eras on a timeline belong to your plugin. (The era timeline in §7b is about weather.)
+- **It has no eras.** Eras on a timeline belong to your plugin, which can keep them itself or in `marks()`. (The era timeline
+  in §7b is about weather.)
 
 ```ts
 interface SeshatAPI {
@@ -514,6 +515,7 @@ interface SeshatAPI {
   compile: (input: string | CalendarAst) => { calendar: SeshatCalendarView } | { problems: Problem[] };
   setDefinition: (input: string | CalendarAst) => Promise<{ ok: true } | { ok: false; problems: Problem[] }>;
   openEditor: () => Promise<void>;
+  marks: (owner: string) => SeshatMarks;
 }
 ```
 
@@ -549,6 +551,45 @@ fires when it does, and a plugin that doesn't use weather can ignore it.
 
 Opens the Studio with the calendar editor up, as the ruler's *Calendar ⚑* button does. It also works in a world with no
 zones.
+
+### `marks(owner)`
+
+```ts
+interface SeshatMarks {
+  list: () => SeshatMark[];
+  add: (mark: Omit<SeshatMark, "id">) => Promise<SeshatMark>;
+  remove: (id: string) => Promise<boolean>;
+  clear: () => Promise<void>;
+}
+
+interface SeshatMark {
+  readonly id: string;
+  readonly from: number;
+  readonly to?: number;
+  readonly name?: string;
+  readonly tags?: readonly string[];
+  readonly data?: unknown;
+}
+```
+
+A small list of your plugin's own days and spans, stored by Wadjet in its `data.json` under `owner`, which should be your
+plugin's id. Use it when you'd rather not keep them yourself: a marked day, or an era if your timeline has them.
+
+A mark is on the day line and nothing reads it but you. It isn't part of the calendar: the Studio doesn't show it, a calendar
+rule can't test it, weather never sees it, and it doesn't change `hash`. To add a day that is part of the calendar, such as a
+festival that zones or rules should match, put it in the definition with `setDefinition()`.
+
+Marks are on day numbers, so they keep their number when the calendar changes and can read as another date. If that matters,
+listen for `adapters-changed`.
+
+`add` throws for a bad mark (`from` and `to` are whole days within ±10,000,000, `to` is not before `from`, `data` is anything
+JSON can hold) and rejects when one owner's marks would pass 100,000 bytes as JSON. That limit protects Sync: **a plugin with
+many records should keep them itself.** `data` comes back as a copy. An `id` is random, so one you held for a removed mark won't match a later one. Writes run one at a time,
+and a failed save leaves the list as it was.
+
+On a new world that nobody has saved yet, `add` resolves and `list` shows the mark, but it reaches `data.json` only with the
+user's first save, the same as `setNow`. That stops a plugin's write at startup from overwriting a world still arriving
+through Sync.
 
 ### `SeshatCalendarView`
 
