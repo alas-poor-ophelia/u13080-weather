@@ -31,7 +31,7 @@ import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
 import { MAX_DAY_ORDINAL } from "./world";
 import { SESHAT_ID, type KeptChoice } from "./calendars";
-import { confirmCalendarChange, DefinitionModal, OptInModal } from "./calendar-modals";
+import { DefinitionModal, OptInModal } from "./calendar-modals";
 import { calendarRow, definitionSummary, type CalendarRow } from "./calendar-row";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
 
@@ -206,7 +206,8 @@ export class WadjetSettingTab extends PluginSettingTab {
               for (const action of row.actions) {
                 if (action === "edit") setting.addButton((b) => b.setButtonText("Edit definition").onClick(() => new DefinitionModal(this.app, this.plugin, () => this.update()).open()));
                 if (action === "change") setting.addButton((b) => b.setButtonText("Change calendar…").onClick(() => new OptInModal(this.app, this.plugin, () => this.update()).open()));
-                if (action === "undo") setting.addButton((b) => b.setButtonText("Undo the last calendar change").onClick(() => void this.undoCalendarChange()));
+                if (action === "undo") setting.addButton((b) => b.setButtonText("Undo the last calendar change").onClick(() => void this.stepCalendarChange("undo")));
+                if (action === "redo") setting.addButton((b) => b.setButtonText("Redo").onClick(() => void this.stepCalendarChange("redo")));
               }
             },
           },
@@ -374,6 +375,7 @@ export class WadjetSettingTab extends PluginSettingTab {
       plugins,
       legacyOrigin: s.calendar.origin !== "definition",
       canUndo: this.plugin.calendars.canUndo(),
+      canRedo: this.plugin.calendars.canRedo(),
     });
   }
 
@@ -393,8 +395,8 @@ export class WadjetSettingTab extends PluginSettingTab {
   /**
    * One definition row: a control when the form model reads its part as
    * fields, else read-only words. The control commits on change (a number on
-   * enter or leaving the field, a textarea on leaving it), so the Save dialog
-   * opens once per edit, never per keystroke.
+   * enter or leaving the field, a textarea on leaving it), so one edit is one
+   * save and one undo step, never one per keystroke.
    */
   private definitionRow(def: DefinitionRows | null, key: DefinitionRowKey, name: string): SettingGroupItem {
     const r: DefinitionRow<number | string> | undefined = def?.[key];
@@ -433,9 +435,8 @@ export class WadjetSettingTab extends PluginSettingTab {
   }
 
   /**
-   * Store one definition row's edit: merge it into the stored definition, ask
-   * the Save dialog (§15.1 R6, R7), then save. A refused edit shows its reason
-   * under the row and stores nothing; a cancelled dialog shows the stored value again.
+   * Store one definition row's edit: merge it into the stored definition, then
+   * save. A refused edit shows its reason under the row and stores nothing.
    */
   private async commitDefinitionRow(setting: Setting, key: DefinitionRowKey, value: number | string): Promise<void> {
     const stored = this.plugin.settings.calendar.definition;
@@ -445,10 +446,8 @@ export class WadjetSettingTab extends PluginSettingTab {
     setting.setErrorMessage(null);
     if ("unchanged" in edit) return;
     try {
-      const chosen = await confirmCalendarChange(this.app, this.plugin, stored, edit.text);
-      if (chosen === null) return;
       // a moon this row renamed keeps its body, and its references follow in the same save (bead wadjet-zoy)
-      await this.plugin.calendars.saveDefinition(chosen.text, { renames: edit.renames, removeKept: chosen.removeKept });
+      await this.plugin.calendars.saveDefinition(edit.text, { renames: edit.renames });
     } catch (e) {
       new Notice(`The calendar was not saved: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -457,18 +456,20 @@ export class WadjetSettingTab extends PluginSettingTab {
   }
 
   /** "Undo the last calendar change" (bead wadjet-24p): the definition and the active calendar go back to what they were. */
-  private async undoCalendarChange(): Promise<void> {
+  private async stepCalendarChange(way: "undo" | "redo"): Promise<void> {
     // back onto a definition: a world on the previous generator is upgraded first (SESHAT-v0 §17.5 item 9)
-    if (this.plugin.settings.calendar.previous?.activeTimeAdapter === SESHAT_ID && this.plugin.generatorMode() === "previous") {
-      return openUpgradeFirst(this.app, this.plugin, "Undo the last calendar change", () => this.update());
+    const c = this.plugin.settings.calendar;
+    const target = way === "undo" ? c.previous : c.undone?.[c.undone.length - 1];
+    if (target?.activeTimeAdapter === SESHAT_ID && this.plugin.generatorMode() === "previous") {
+      return openUpgradeFirst(this.app, this.plugin, way === "undo" ? "Undo the last calendar change" : "Redo the calendar change", () => this.update());
     }
     const choice = await this.keptChoice();
     if (choice === null) return;
     try {
-      await this.plugin.calendars.undo(choice);
-      new Notice("The last calendar change was undone. Undo it again to redo it.");
+      await (way === "undo" ? this.plugin.calendars.undo(choice) : this.plugin.calendars.redo(choice));
+      new Notice(way === "undo" ? "The last calendar change was undone." : "The calendar change was redone.");
     } catch (e) {
-      new Notice(`The calendar change could not be undone: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(`The calendar change could not be ${way === "undo" ? "undone" : "redone"}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       this.update();
     }

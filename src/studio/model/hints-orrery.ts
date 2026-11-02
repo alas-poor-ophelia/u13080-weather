@@ -85,6 +85,7 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.labelRemove": ["Remove label", "takes the label out; the cycle is one shorter, and so is the week that runs with it"],
   "orrery.addLabel": ["Add label", "adds a label at the end; the cycle is one longer, and so is the week that runs with it"],
   "orrery.todayIs": ["Today is", "moves the anchor so this label falls on the Orrery's day; the week moves with it"],
+  "orrery.yearToday": ["Today is", "type a date and the whole calendar moves so the Orrery's day reads as it; stored day numbers stay where they are"],
   "orrery.cycleSkips": ["Skips filler days", "on: the cycle stops on a filler day and carries on after it, so the days after it move; the week or day names that run with it follow"],
   "orrery.removeCycle": ["Remove cycle", "removes the unit; refused while a format, a rule, a season, a gear or a stage reads it"],
   "orrery.markName": ["Season name", "renames the season; the day line and the weather read the new name"],

@@ -24,7 +24,6 @@ import { PRESETS } from "../src/generated/presets";
 import { GREGORIAN, parse, print, type CalendarAst } from "../src/seshat";
 import { calendarOfDefinition, mergeCalendar, type CalendarDraft } from "../src/studio/model/definition";
 import { SeshatCalendar } from "../src/plugin/time/seshat";
-import { blastRadius, describeBlast } from "../src/plugin/time/blast";
 
 const fjord = PRESETS.find((p) => p.id === "fjord-coast")!;
 const SEASONS = [
@@ -360,8 +359,7 @@ describe("the current day is shared", () => {
 /**
  * P3c acceptance (bead wadjet-01k.4, docs/SESHAT-v0.md §15.5): a ledger edit,
  * made through the Studio's merge, fires profiles-changed all:true exactly
- * once on Save, and the Save dialog's first affected day is the first day a
- * day-by-day comparison of the two calendars finds.
+ * once on Save.
  */
 describe("a ledger edit (P3c acceptance)", () => {
   const ledgerEdit = (stored: string, edit: (l: NonNullable<NonNullable<CalendarDraft["form"]>["ledger"]>) => NonNullable<NonNullable<CalendarDraft["form"]>["ledger"]>): string => {
@@ -371,22 +369,12 @@ describe("a ledger edit (P3c acceptance)", () => {
     if (m.kind !== "write") throw new Error(`expected a write, got ${JSON.stringify(m)}`);
     return m.text;
   };
-  const firstByHand = (a: SeshatCalendar, b: SeshatCalendar, from: number, to: number): number | null => {
-    for (let d = from; d <= to; d++) if (JSON.stringify([a.toContext(d), a.yearOfDay(d)]) !== JSON.stringify([b.toContext(d), b.yearOfDay(d)])) return d;
-    return null;
-  };
 
-  test("a marked day: one profiles-changed all:true on Save; the first affected day is that day", async () => {
+  test("a marked day: one profiles-changed all:true on Save", async () => {
     const r = rig();
     await r.calendars.optIn(TEXT);
     const stored = r.settings.calendar.definition as string;
     const text = ledgerEdit(stored, (l) => ({ ...l, days: [...l.days, { day: 1000, name: "Coronation", tags: ["coronation"] }] }));
-    const before = new SeshatCalendar(stored, () => 0);
-    const after = new SeshatCalendar(text, () => 0);
-    const blast = await blastRadius(before, after, 0, { spells: false, years: 5 });
-    expect(blast.first).toBe(1000);
-    expect(blast.first).toBe(firstByHand(before, after, blast.from, blast.to));
-    expect(describeBlast(blast, (d) => after.format(d), 5)).toContain(`from ${after.format(1000)} through`);
     r.clear();
     await r.calendars.saveDefinition(text);
     expect(r.count("profiles-changed")).toBe(1);
@@ -394,7 +382,7 @@ describe("a ledger edit (P3c acceptance)", () => {
     expect(r.world.timeAt(1000).tags).toContain("coronation");
   });
 
-  test("a year's start moved by a pin: the first affected day is the start of the year before it (§3: from − 1)", async () => {
+  test("a year's start moved by a pin: it starts where the pin says, and the year before it grows", async () => {
     const r = rig();
     await r.calendars.optIn(TEXT);
     const stored = r.settings.calendar.definition as string;
@@ -404,11 +392,8 @@ describe("a ledger edit (P3c acceptance)", () => {
     const text = ledgerEdit(stored, (l) => ({ ...l, units: { ...l.units, year: [...(l.units.year ?? []), { kind: "starts", from: 1973, startsOn: 1097 }] } }));
     const after = new SeshatCalendar(text, () => 0);
     expect(after.yearStart(1973)).toBe(1097);
-    const blast = await blastRadius(before, after, 0, { spells: false, years: 5 });
     // 1972 gets one day longer, and every day of a year carries its length and its phase in it: 1972 starts on day 730
     expect(before.yearStart(1972)).toBe(730);
-    expect(blast.first).toBe(730);
-    expect(blast.first).toBe(firstByHand(before, after, blast.from, blast.to));
     r.clear();
     await r.calendars.saveDefinition(text);
     expect(r.count("profiles-changed")).toBe(1);
@@ -418,20 +403,22 @@ describe("a ledger edit (P3c acceptance)", () => {
 
 /** Undo the last calendar change (bead wadjet-24p, docs/SESHAT-v0.md §15.9 S6). */
 describe("undo the last calendar change", () => {
-  test("undoing an opt-in goes back to the legacy calendar with no definition; undoing again redoes it", async () => {
+  test("undoing an opt-in goes back to the legacy calendar with no definition; redo puts it back", async () => {
     const r = rig();
     await r.calendars.optIn(TEXT);
     r.clear();
     await r.calendars.undo();
     expect(r.settings.activeTimeAdapter).toBe("internal");
     expect(r.settings.calendar).not.toHaveProperty("definition");
-    expect(r.settings.calendar.previous).toEqual({ definition: TEXT, activeTimeAdapter: SESHAT_ID });
+    expect(r.settings.calendar.undone).toEqual([{ definition: TEXT, activeTimeAdapter: SESHAT_ID }]);
+    expect(r.settings.calendar.previous).toBeUndefined();
     expect(r.world.now()!.source).toBe("internal");
     expect([r.count("time-changed"), r.count("adapters-changed")]).toEqual([1, 1]);
     // no definition is left loaded behind the stored value (Parallax, P3c step 5): nothing offers one
     expect(r.calendars.seshat?.definition() ?? null).toBeNull();
     r.clear();
-    await r.calendars.undo();
+    await r.calendars.redo();
+    expect(r.settings.calendar.undone).toBeUndefined();
     expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
     expect(r.settings.calendar.definition).toBe(TEXT);
     expect(r.world.now()!.source).toBe(SESHAT_ID);
@@ -448,10 +435,69 @@ describe("undo the last calendar change", () => {
     expect(r.calendars.canUndo()).toBe(true);
     await r.calendars.undo();
     expect(r.settings.calendar.definition).toBe(TEXT);
-    expect(r.settings.calendar.previous).toEqual({ definition: replaced, activeTimeAdapter: SESHAT_ID });
+    expect(r.settings.calendar.undone).toEqual([{ definition: replaced, activeTimeAdapter: SESHAT_ID }]);
     expect(r.count("profiles-changed")).toBe(1);
     expect(all(r)).toBe(true);
     expect(r.world.timeAt(0).tags).toContain("season:Spring");
+  });
+
+  test("the last 10 changes can be undone in order, and redone; a new change clears what could be redone", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    const named = (n: number) => print({ ...GREGORIAN, name: `Step ${n}` });
+    for (let n = 1; n <= 12; n++) await r.calendars.saveDefinition(named(n));
+    const name = () => /NAME:(.*)/.exec(r.settings.calendar.definition as string)![1];
+    expect(name()).toBe("Step 12");
+    expect(r.settings.calendar.earlier).toHaveLength(9);
+    for (let n = 11; n >= 2; n--) {
+      await r.calendars.undo();
+      expect(name()).toBe(`Step ${n}`);
+    }
+    expect(r.calendars.canUndo()).toBe(false); // ten back, and the older ones are gone
+    expect(await rejection(r.calendars.undo())).toBeInstanceOf(DefinitionError);
+    await r.calendars.redo();
+    await r.calendars.redo();
+    expect(name()).toBe("Step 4");
+    expect(r.calendars.canRedo()).toBe(true);
+    await r.calendars.undo();
+    expect(name()).toBe("Step 3");
+    await r.calendars.saveDefinition(named(99));
+    expect(r.calendars.canRedo()).toBe(false);
+    await r.calendars.undo();
+    expect(name()).toBe("Step 3");
+  });
+
+  test("a plugin's writes cannot erase the user's own calendar", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    await r.calendars.saveDefinition(print({ ...GREGORIAN, name: "Plugin one" }));
+    await r.calendars.saveDefinition(print({ ...GREGORIAN, name: "Plugin two" }));
+    await r.calendars.undo();
+    await r.calendars.undo();
+    expect(r.settings.calendar.definition).toBe(TEXT);
+  });
+
+  test("a failed save puts the whole history back", async () => {
+    const r = rig();
+    await r.calendars.optIn(TEXT);
+    await r.calendars.saveDefinition(print({ ...GREGORIAN, name: "One" }));
+    await r.calendars.undo();
+    const before = JSON.stringify(r.settings.calendar);
+    for (const go of [() => r.calendars.redo(), () => r.calendars.saveDefinition(print({ ...GREGORIAN, name: "Two" }))]) {
+      r.failNextSave();
+      expect(await rejection(go())).toBeInstanceOf(Error);
+      expect(r.settings.calendar).toEqual(JSON.parse(before));
+    }
+  });
+
+  test("the history survives a reload; a stored record that is not one is dropped", () => {
+    const good = { definition: "x", activeTimeAdapter: SESHAT_ID };
+    const m = migrateSettings({ calendar: { yearLength: 365, epochYear: 1, moons: [], seasons: [], previous: good, earlier: [good, { nope: 1 }, { activeTimeAdapter: "internal", definition: 5 }], undone: [good] } });
+    expect(m.calendar.earlier).toEqual([good]);
+    expect(m.calendar.undone).toEqual([good]);
+    expect(migrateSettings({}).calendar.earlier).toBeUndefined();
+    // a chain with no head is no chain: the next change must not lead back into it
+    expect(migrateSettings({ calendar: { previous: { nope: 1 }, earlier: [good] } }, () => undefined).calendar.earlier).toBeUndefined();
   });
 
   test("a save that changes nothing leaves the record alone", async () => {
@@ -468,12 +514,12 @@ describe("undo the last calendar change", () => {
     const before = JSON.stringify(r.settings.calendar);
     r.failNextSave();
     expect(await rejection(r.calendars.undo())).toBeInstanceOf(Error);
-    expect(JSON.stringify(r.settings.calendar)).toBe(before);
+    expect(r.settings.calendar).toEqual(JSON.parse(before));
     expect(r.settings.activeTimeAdapter).toBe(SESHAT_ID);
     // and a failed edit does not touch the record either
     r.failNextSave();
     expect(await rejection(r.calendars.saveDefinition(print({ ...DEF, name: "Other" })))).toBeInstanceOf(Error);
-    expect(JSON.stringify(r.settings.calendar)).toBe(before);
+    expect(r.settings.calendar).toEqual(JSON.parse(before));
   });
 
   test("no record, or a record whose definition cannot run: refused, nothing changed", async () => {

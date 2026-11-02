@@ -70,8 +70,12 @@ export interface CalendarSettings extends InternalCalendarConfig {
    * legacy fields: defaults fill those on every world.
    */
   origin?: "definition";
-  /** the definition and adapter before the last calendar change, for one undo (§15.9 S6) */
+  /** the definition and adapter before the last calendar change, for undo (§15.9 S6) */
   previous?: PreviousCalendar;
+  /** the changes before that, oldest first: with `previous`, the last UNDO_STEPS (§19.6) */
+  earlier?: PreviousCalendar[];
+  /** changes undone, the next to redo last; a new change clears them */
+  undone?: PreviousCalendar[];
   /**
    * Date display (bead wadjet-01k.18): the definition's format that read-only date readouts use; absent is
    * the default format. A name the definition no longer declares reads as the default. Not hashed.
@@ -224,14 +228,27 @@ function sanitizeOrigin(v: unknown, warn: (msg: string) => void): Pick<CalendarS
   return {};
 }
 
+/** How many calendar changes undo can step back through. */
+export const UNDO_STEPS = 10;
+
+/** One undo record as stored, or null when it is not one: it needs an adapter id, and a definition must be text. */
+function undoRecord(v: unknown): PreviousCalendar | null {
+  const ok = typeof v === "object" && v !== null && typeof (v as PreviousCalendar).activeTimeAdapter === "string";
+  if (!ok || ("definition" in v && typeof (v as PreviousCalendar).definition !== "string")) return null;
+  const p = v as PreviousCalendar;
+  return { ...("definition" in p ? { definition: p.definition } : {}), activeTimeAdapter: p.activeTimeAdapter };
+}
+
+/** A list of undo records as stored: what is not one is dropped, and it never grows past the limit. */
+function undoRecords(v: unknown): PreviousCalendar[] {
+  return Array.isArray(v) ? v.map(undoRecord).filter((r): r is PreviousCalendar => r !== null).slice(-UNDO_STEPS) : [];
+}
+
 /** The undo record keeps its definition as stored text; one without an adapter id, or with a definition that is not text, is dropped. */
 function sanitizePrevious(v: unknown, warn: (msg: string) => void): Pick<CalendarSettings, "previous"> {
   if (v === undefined) return {};
-  const ok = typeof v === "object" && v !== null && typeof (v as PreviousCalendar).activeTimeAdapter === "string";
-  if (ok && (!("definition" in v) || typeof (v as PreviousCalendar).definition === "string")) {
-    const p = v as PreviousCalendar;
-    return { previous: { ...("definition" in p ? { definition: p.definition } : {}), activeTimeAdapter: p.activeTimeAdapter } };
-  }
+  const record = undoRecord(v);
+  if (record) return { previous: record };
   warn(`The record of the calendar before its last change was ${shown(v)}, not one Wadjet can restore, so it was dropped; the last calendar change cannot be undone.`);
   return {};
 }
@@ -245,11 +262,13 @@ export function migrateSettings(raw: unknown, warn: (msg: string) => void = () =
   const moons = sanitizeMoons(calendar.moons, warn);
   const yearLength = sanitizeYearLength(calendar.yearLength, warn);
   const epochYear = sanitizeEpochYear(calendar.epochYear, warn);
-  const { origin, previous, display, ...rest } = calendar;
+  const { origin, previous, earlier, undone, display, ...rest } = calendar;
+  // the changes behind `previous` only mean anything while `previous` is there to lead to them
+  const [olderRecords, undoneRecords] = [undoRecord(previous) ? undoRecords(earlier) : [], undoRecords(undone)];
   const s: WadjetSettings = {
     ...DEFAULT_SETTINGS,
     ...r,
-    calendar: { ...rest, yearLength, epochYear, moons, ...sanitizeOrigin(origin, warn), ...sanitizePrevious(previous, warn), ...(typeof display === "string" && display ? { display } : {}) },
+    calendar: { ...rest, yearLength, epochYear, moons, ...sanitizeOrigin(origin, warn), ...sanitizePrevious(previous, warn), ...(olderRecords.length ? { earlier: olderRecords } : {}), ...(undoneRecords.length ? { undone: undoneRecords } : {}), ...(typeof display === "string" && display ? { display } : {}) },
     eras: Array.isArray(r.eras) ? r.eras : [],
     zones: Array.isArray(r.zones) ? r.zones : [],
     overrides: Array.isArray(r.overrides) ? r.overrides : [],

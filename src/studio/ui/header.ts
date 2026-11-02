@@ -46,7 +46,6 @@ import { calendarAfterSave, resolveConflict, studioSave } from "../model/definit
 import { followMoonRenames, moonRenames } from "../model/moon-rename";
 import { confirmRewrite } from "./rewrite-confirm-modal";
 import { askCalendarConflict } from "./calendar-conflict-modal";
-import { confirmCalendarChange } from "../../plugin/calendar-modals";
 import { askKeptOnCalendarChange, dropKeptIn } from "../../plugin/upgrade-modals";
 import { legacyCalendarMoved } from "../../plugin/upgrade";
 import type { StudioState } from "../model/state";
@@ -436,22 +435,11 @@ export function createHeaderSurface(): Surface {
         return;
       }
     }
-    // a definition change goes through the Save dialog: which days' weather it can reach, and, when it moves
-    // year starts, whether day numbers are kept or today is anchored (§15.1 R6, R7). Cancel saves nothing.
-    let text = plan.kind === "definition" ? plan.text : null;
-    // kept weather stays on its day numbers under a changed calendar, or goes with the change (SESHAT-v0 §17.5 item 8)
+    const text = plan.kind === "definition" ? plan.text : null;
+    // kept weather stays on its day numbers under a changed calendar; settings' Remove kept weather takes it away
     let removeKept = false;
-    if (plan.kind === "definition" && typeof stored === "string") {
-      const chosen = await confirmCalendarChange(c.plugin.app, c.plugin, stored, plan.text);
-      if (chosen === null) return;
-      text = chosen.text;
-      removeKept = chosen.removeKept;
-      if (settings.calendar.definition !== stored) {
-        new Notice("Not saved: the calendar definition changed while the dialog was open. Save again.");
-        return;
-      }
-    } else if (plan.kind === "legacy" && legacyCalendarMoved(settings.calendar, state.world.calendar)) {
-      // the legacy calendar's seasons and moons have no Save dialog: a world with kept weather is asked here
+    if (plan.kind === "legacy" && legacyCalendarMoved(settings.calendar, state.world.calendar)) {
+      // a legacy calendar change takes kept weather with it or not: a world with kept weather is asked here
       const kept = await askKeptOnCalendarChange(c.plugin.app, c.plugin);
       if (kept === null) return;
       removeKept = kept.removeKept === true;

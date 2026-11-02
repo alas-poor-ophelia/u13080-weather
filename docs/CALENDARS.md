@@ -49,11 +49,10 @@ A new world starts on a plain definition: 365-day years from year 1, one moon, n
   carries the current ones over. *Day numbers* chooses between *Keep day numbers* and *Anchor today
   to a date*; *Today is* takes that date. *Switch calendar* applies it.
 
-Every change to the definition the world runs goes through the ***Save calendar changes?*** dialog
-(unless the stored definition cannot run, when there is nothing to compare it with).
-It says which days' weather the change can reach and, when the change moves where years start,
-asks again about *Day numbers*. *Undo the last calendar change* (Settings → Calendar) puts the
-previous calendar back.
+A change to the definition just saves, and it can move which days' weather you get: that's what editing a calendar does.
+*Undo the last calendar change* (Settings → Calendar) steps back through the last 10 changes, and *Redo* puts them back.
+If an edit moves where years start, today's date moves with it. To put today back on its date, select the year in the
+Orrery and type the date into *today is*: the whole calendar moves, and stored day numbers stay where they are.
 
 Your weather, pins and the current day are stored as **day numbers**. A definition decides which
 date each day number is. Day numbers appear in the text as `D` followed by the number: `D0`,

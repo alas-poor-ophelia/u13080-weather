@@ -5,7 +5,7 @@
  * through the form model; an edit goes through the field merge
  * (studio/model/definition.ts mergeCalendar), so it writes only that part and
  * every other part of the stored definition passes through untouched. The
- * settings tab then asks the Save dialog before storing the text.
+ * settings tab then stores the text.
  */
 import { YEAR_LENGTH_MAX } from "../core/modifiers";
 import { parse, type CalendarAst } from "../seshat";

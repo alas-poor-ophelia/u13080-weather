@@ -204,7 +204,7 @@ describe("Undo the last calendar change", () => {
     expect(moonsOf(r)).toEqual(["luna=Luna", "ember=Ember"]);
     expect(names(r)).toEqual(["Luna", "Ember", "Luna"]);
     expect(layer(r, "Luna")).toBe(true);
-    await r.calendars.undo();
+    await r.calendars.redo();
     expect(moonsOf(r)).toEqual(["luna=Ember", "ember=Luna"]);
     expect(names(r)).toEqual(["Ember", "Luna", "Ember"]);
     expect(r.saves.length).toBe(3);

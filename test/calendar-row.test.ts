@@ -12,7 +12,7 @@ import { calendarRow, definitionSummary, type CalendarRowInput } from "../src/pl
 import { WORLD_PRESETS } from "../src/plugin/opt-in";
 import { GREGORIAN, ROMAN, type CalendarAst } from "../src/seshat";
 
-const base: CalendarRowInput = { activeId: "internal", internal: { yearLength: 365, epochYear: 1 }, definition: null, fault: null, stored: null, today: "Year 1, day 4", plugins: [], legacyOrigin: true, canUndo: false };
+const base: CalendarRowInput = { canRedo: false, activeId: "internal", internal: { yearLength: 365, epochYear: 1 }, definition: null, fault: null, stored: null, today: "Year 1, day 4", plugins: [], legacyOrigin: true, canUndo: false };
 
 describe("calendarRow says what the world runs on, and offers what can be done from there", () => {
   test("the legacy calendar: named as such, its years and today; Change calendar… is the way to a definition", () => {
@@ -133,5 +133,9 @@ describe("definitionSummary describes a definition by its own structure (not a f
     const r = calendarRow({ ...base, activeId: "seshat", definition: "Gregorian", stored: "Gregorian", structure: "years of 365 or 366 days · 12 months", today: "2024-02-27" });
     expect(r.desc).toBe("Years of 365 or 366 days · 12 months. Today is 2024-02-27.");
     expect(calendarRow({ ...base, activeId: "seshat", definition: "X", stored: "X", structure: "", today: "d" }).desc).toBe("Today is d.");
+  });
+  test("redo is offered once a change was undone", () => {
+    expect(calendarRow({ ...base, canUndo: true, canRedo: true }).actions).toEqual(["change", "undo", "redo"]);
+    expect(calendarRow({ ...base, canUndo: true }).actions).toEqual(["change", "undo"]);
   });
 });

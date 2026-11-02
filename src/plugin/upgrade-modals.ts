@@ -394,7 +394,7 @@ export function askKeptOnCalendarChange(app: App, plugin: WadjetPlugin): Promise
 }
 
 /**
- * The calendar dialogs' kept weather row (Change calendar…, Save calendar changes?): shown on a world with kept
+ * The calendar dialog's kept weather row (Change calendar…): shown on a world with kept
  * weather, beside the pin warning; the toggle removes it in the change's own save. Returns the row, or null.
  */
 export function keptToggleRow(el: HTMLElement, plugin: WadjetPlugin, onChange: (remove: boolean) => void): Setting | null {

@@ -1,16 +1,14 @@
 /**
- * The calendar's dialogs (docs/SESHAT-v0.md §13.11, §15.1 R6 R7): Change
- * calendar…, Edit definition, and the Save dialog every definition change
- * goes through (the Studio's Save, the settings rows, Edit definition). They
- * live here, not in the settings tab, so the Studio can open them too.
+ * The calendar's dialogs (docs/SESHAT-v0.md §13.11): Change calendar… and Edit
+ * definition. They live here, not in the settings tab, so the Studio can open
+ * them too.
  */
-import { Modal, Notice, Setting, type App, type ButtonComponent, type DropdownComponent } from "obsidian";
+import { Modal, Notice, Setting, type App, type ButtonComponent } from "obsidian";
 import type WadjetPlugin from "./main";
-import { prepareDefinition, SeshatCalendar } from "./time/seshat";
+import { prepareDefinition } from "./time/seshat";
 import { buildOptIn, WORLD_PRESETS, type OptInChoice } from "./opt-in";
-import { blastRadius, describeBlast } from "./time/blast";
-import { planChange, worldHasSpells, yearKeyedNote, type ChangePlan } from "./calendar-change";
-import { askKeptOnCalendarChange, keptToggleRow, renderUpgradeFirst } from "./upgrade-modals";
+import { yearKeyedNote } from "./calendar-change";
+import { keptToggleRow, renderUpgradeFirst } from "./upgrade-modals";
 
 /** Validation for the calendar definition: the first error (with its line when known), or nothing. */
 export function badDefinition(text: string): string | undefined {
@@ -263,24 +261,9 @@ export class DefinitionModal extends Modal {
           .onClick(async () => {
             const bad = badDefinition(text);
             if (bad) return void error.setText(bad);
-            // a stored calendar that runs is compared with the edit, and the Save dialog asks (§15.1 R6, R7)
-            let final = text;
-            let removeKept = false;
-            if (typeof stored === "string" && !this.plugin.calendars.fault()) {
-              const chosen = await confirmCalendarChange(this.app, this.plugin, stored, text);
-              if (chosen === null) return;
-              final = chosen.text;
-              removeKept = chosen.removeKept;
-            } else if (this.plugin.onDefinition()) {
-              // no Save dialog (a stored text that cannot run) on the calendar the world runs: kept weather is still
-              // asked about; a stored definition the world does not run changes no weather, so nothing is asked
-              const kept = await askKeptOnCalendarChange(this.app, this.plugin);
-              if (kept === null) return;
-              removeKept = kept.removeKept === true;
-            }
             try {
               // a VBODY that kept its UID and changed its MOON name is a rename: its references follow in this save (bead wadjet-zoy)
-              await this.plugin.calendars.saveDefinition(final, { renames: "byUid", removeKept });
+              await this.plugin.calendars.saveDefinition(text, { renames: "byUid" });
             } catch (e) {
               return void error.setText(`Not saved: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -293,144 +276,4 @@ export class DefinitionModal extends Modal {
   override onClose(): void {
     this.contentEl.empty();
   }
-}
-
-/**
- * Save calendar changes? (§15.1 R6, R7) Compares the stored calendar with the
- * change and says which days' weather it can reach; when the change moves
- * year starts, asks whether day numbers are kept (the default) or today is
- * anchored to a date. Save resolves the text to store; Cancel, Escape and
- * click-outside resolve null.
- */
-class CalendarChangeModal extends Modal {
-  private settled = false;
-  private version = 0;
-
-  constructor(
-    app: App,
-    private readonly plugin: WadjetPlugin,
-    private readonly before: string,
-    private readonly after: string,
-    private readonly done: (choice: CalendarChangeChoice | null) => void,
-  ) {
-    super(app);
-  }
-
-  override onOpen(): void {
-    const { contentEl } = this;
-    this.setTitle("Save calendar changes?");
-    let removeKept = false;
-    const today = this.plugin.settings.currentDayOrdinal;
-    const spells = worldHasSpells(this.plugin.settings.zones);
-    const sentence = contentEl.createEl("p", { text: "Comparing the two calendars…" });
-    let anchor = false;
-    let date = "";
-    let movesYears = false;
-    let plan: ChangePlan | null = null;
-    const dayRow = new Setting(contentEl)
-      .setName("Day numbers")
-      .setDesc(
-        [
-          "This change moves where years start. Today, pinned days and overrides are stored as day numbers. Keep them, and they fall on new dates; or anchor today to a date, and the calendar moves so today reads as that date.",
-          yearKeyedNote(this.plugin.settings.eras, this.plugin.settings.zones),
-        ]
-          .filter(Boolean)
-          .join(" "),
-      )
-      .addDropdown((d: DropdownComponent) =>
-        d
-          .addOptions({ keep: "Keep day numbers", anchor: "Anchor today to a date" })
-          .setValue("keep")
-          .onChange((v) => {
-            anchor = v === "anchor";
-            void recompute();
-          }),
-      );
-    const dateRow = new Setting(contentEl).setName("Today is").addText((t) =>
-      t.setPlaceholder("Written as the calendar writes dates").onChange((v) => {
-        date = v;
-        void recompute();
-      }),
-    );
-    // kept weather stays on its day numbers, like pins; it can go with this change (§17.5 item 8). Only when the
-    // definition is the calendar the world runs: an edit to a stored one it has left changes no weather
-    if (this.plugin.onDefinition()) keptToggleRow(contentEl, this.plugin, (v) => (removeKept = v));
-    const preview = contentEl.createEl("p");
-    const problem = contentEl.createEl("p", { cls: "mod-warning" });
-    let save: ButtonComponent | null = null;
-    new Setting(contentEl)
-      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.settle(null)))
-      .addButton((b) => {
-        save = b;
-        b.setButtonText("Save")
-          .setCta()
-          .setDisabled(true)
-          .onClick(() => {
-            if (plan) this.settle({ text: plan.text, removeKept });
-          });
-      });
-
-    const recompute = async (): Promise<void> => {
-      const v = ++this.version;
-      dayRow.settingEl.toggle(movesYears || anchor);
-      dateRow.settingEl.toggle(anchor);
-      save?.setDisabled(true);
-      plan = null;
-      const p = planChange(this.after, today, anchor ? date : undefined);
-      if ("error" in p) {
-        preview.setText("");
-        problem.setText(p.error);
-        return;
-      }
-      problem.setText("");
-      const moved = p.shift === 0 ? "" : ` The calendar moves ${Math.abs(p.shift).toLocaleString("en")} days ${p.shift > 0 ? "later" : "earlier"} so that it does.`;
-      preview.setText(p.today === null ? "" : `Today (day ${today.toLocaleString("en")}) will read: ${p.today}.${moved}`);
-      sentence.setText("Comparing the two calendars…");
-      const after = new SeshatCalendar(p.text, () => today);
-      const r = await blastRadius(new SeshatCalendar(this.before, () => today), after, today, {
-        spells,
-        tick: () => new Promise<void>((res) => window.setTimeout(res, 0)),
-      });
-      if (v !== this.version) return;
-      // the question stays once a change has shown it moves years, so anchoring does not hide its own row
-      if (r.yearsMoved && !movesYears) {
-        movesYears = true;
-        dayRow.settingEl.toggle(true);
-      }
-      sentence.setText(describeBlast(r, (d) => after.format(d)));
-      plan = p;
-      save?.setDisabled(false);
-    };
-    void recompute();
-  }
-
-  private settle(choice: CalendarChangeChoice | null): void {
-    this.settled = true;
-    this.version++;
-    this.close();
-    this.done(choice);
-  }
-
-  override onClose(): void {
-    this.version++;
-    this.contentEl.empty();
-    if (!this.settled) this.done(null);
-  }
-}
-
-/** What the Save dialog settled on: the text to store, and whether the kept weather goes with the change. */
-export interface CalendarChangeChoice {
-  text: string;
-  removeKept: boolean;
-}
-
-/**
- * The Save dialog for a definition change: the text to store (day numbers
- * kept, or today anchored) and the kept weather choice, or null when the
- * change is cancelled.
- * @param before the stored definition (it runs)
- * @param after the changed definition, as the editor made it
- */
-export function confirmCalendarChange(app: App, plugin: WadjetPlugin, before: string, after: string): Promise<CalendarChangeChoice | null> {
-  return new Promise((resolve) => new CalendarChangeModal(app, plugin, before, after, resolve).open());
 }

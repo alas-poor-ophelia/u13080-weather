@@ -413,8 +413,7 @@ function shiftK(ast: CalendarAst, id: string, dk: number): CalendarAst {
  * setting stays as it was). A moon whose epoch changes and whose period does
  * not moves the K of every unit following it by epochEditK, so occurrence
  * numbering never changes (§16.7 P1). When the period changes too, K is left
- * alone: the crossings land somewhere new anyway, and the Save dialog's blast
- * radius reports what moved.
+ * alone: the crossings land somewhere new anyway.
  */
 function writeMoons(ast: CalendarAst, v: readonly MoonForm[]): CalendarAst {
   const kept = new Set(v.flatMap((m) => (m.id === undefined ? [] : [m.id])));

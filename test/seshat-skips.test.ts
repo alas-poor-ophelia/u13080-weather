@@ -14,10 +14,11 @@ import { World } from "../src/plugin/world";
 import { zoneFromPreset } from "../src/plugin/zones";
 import { PRESETS } from "../src/generated/presets";
 import { SeshatCalendar, worldProblems } from "../src/plugin/time/seshat";
-import { DAY_LIMIT, definitionContent, Engine, formatDay, parse, print, translate, validate, rational, type CalendarAst, type CycleUnitAst, type RuleAst, type SlotAst } from "../src/seshat";
+import { DAY_LIMIT, definitionContent, Engine, formatDay, GREGORIAN, HEBREW, parse, ROMAN, print, translate, validate, rational, type CalendarAst, type CycleUnitAst, type RuleAst, type SlotAst } from "../src/seshat";
 import { addSeasonMark, removeSeasonMark, setSeasonMark } from "../src/studio/model/ast-edit";
 import { seshatDraft, type CalendarEdit } from "../src/studio/model/definition";
 import { labelOn, setCycleSkip } from "../src/studio/model/orrery-cycle";
+import { setYearToday, yearTodayText } from "../src/studio/model/orrery-slots";
 import { addMark, renameMark, seasonsSkipTarget, seasonsWindowLock, setMarkFrom, setSeasonsSkip } from "../src/studio/model/orrery-seasons";
 import { anchorProblem, removeUnit, renameUnit, skipTarget } from "../src/studio/model/unit-edit";
 import { buildOrrery, type OrreryModel } from "../src/studio/model/orrery-geometry";
@@ -554,5 +555,45 @@ describe("the Orrery's switches", () => {
     const onFiller = withUnit(withUnit(PLAIN, "weekday", { anchor: e.dayOf("month", [5], 13, 0) }), "week", { anchor: e.dayOf("month", [5], 13, 0) });
     const c = setCycleSkip(seshatDraft(onFiller), "weekday", true);
     expect("refused" in c && c.reason).toContain("is a filler day");
+  });
+});
+
+describe("today is, on the year", () => {
+  const draft = () => seshatDraft(GREGORIAN);
+  const edit = (r: CalendarEdit) => {
+    if ("refused" in r) throw new Error(r.reason);
+    return r;
+  };
+
+  test("the calendar moves so the day reads as the date typed; undoing the draft puts it back", () => {
+    const day = 20758;
+    expect(yearTodayText(GREGORIAN, day)).toBe("2026-11-01");
+    const r = edit(setYearToday(draft(), day, "2030-03-15"));
+    expect(yearTodayText(r.ast, day)).toBe("2030-03-15");
+    expect(new Engine(r.ast).labelAt("month", day)?.name).toBe("March");
+  });
+
+  test("a date the calendar cannot read is refused with how the day reads", () => {
+    const r = setYearToday(draft(), 20758, "next tuesday");
+    expect("refused" in r && r.reason).toContain("is not a date in this calendar");
+    expect("refused" in r && r.reason).toContain("2026-11-01");
+  });
+
+  test("a calendar that skips, a year on stages and crossings, and one with exceptions all move, and read the date typed", () => {
+    for (const cal of [WORLD, HEBREW, ROMAN]) {
+      const shown = new Engine(cal);
+      const date = formatDay(shown, 1000);
+      const r = edit(setYearToday(seshatDraft(cal), 400, date));
+      expect(formatDay(new Engine(r.ast), 400)).toBe(date);
+      expect(validate(r.ast)).toEqual([]);
+    }
+  });
+
+  test("a day number off the day line is refused, and so is one too big to write", () => {
+    for (const far of ["10000005", "-30000000", "9007199254740993"]) {
+      const r = setYearToday(draft(), 20758, far);
+      expect("refused" in r && r.reason).toContain("too far from today");
+    }
+    expect("refused" in setYearToday(draft(), 20758, "20758")).toBe(false);
   });
 });

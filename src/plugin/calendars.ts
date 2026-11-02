@@ -25,6 +25,7 @@ import { moonRenames, renameMoonReferences, type MoonRenames } from "../studio/m
 import type { TimeRegistry } from "./time/adapter";
 import { prepareDefinition, SeshatCalendar } from "./time/seshat";
 import type { PreviousCalendar, WadjetSettings } from "./settings";
+import { UNDO_STEPS } from "./settings";
 import type { World } from "./world";
 import { UPGRADE_FIRST, worldMode } from "./upgrade";
 
@@ -136,11 +137,31 @@ export class Calendars {
     return { ...("definition" in c ? { definition: c.definition } : {}), activeTimeAdapter: this.host.settings().activeTimeAdapter };
   }
 
-  /** Put the undo record back as it was (a write that failed). */
-  private restorePrevious(was: PreviousCalendar | undefined): void {
+  /**
+   * A calendar change is about to be stored: the calendar as it is now goes on the undo history, and what was undone
+   * can no longer be redone. Returns what puts the records back, for a write that fails.
+   */
+  private record(): () => void {
     const c = this.host.settings().calendar;
-    if (was === undefined) delete c.previous;
-    else c.previous = was;
+    const undo = this.undoRecords();
+    if (c.previous) c.earlier = [...(c.earlier ?? []), c.previous].slice(-(UNDO_STEPS - 1));
+    c.previous = this.snapshot();
+    delete c.undone;
+    return undo;
+  }
+
+  /** What puts the undo records back as they are now. */
+  private undoRecords(): () => void {
+    const c = this.host.settings().calendar;
+    const was = { previous: c.previous, earlier: c.earlier, undone: c.undone };
+    return () => {
+      if (was.previous === undefined) delete c.previous;
+      else c.previous = was.previous;
+      if (was.earlier === undefined) delete c.earlier;
+      else c.earlier = was.earlier;
+      if (was.undone === undefined) delete c.undone;
+      else c.undone = was.undone;
+    };
   }
 
   /**
@@ -181,16 +202,15 @@ export class Calendars {
     const s = this.host.settings();
     const before = this.host.time.active;
     const prevId = s.activeTimeAdapter;
-    const wasPrevious = s.calendar.previous;
     const modeBefore = worldMode(s);
-    if (id !== prevId) s.calendar.previous = this.snapshot();
+    const unrecord = id !== prevId ? this.record() : () => undefined;
     s.activeTimeAdapter = id;
     const undrop = this.dropKept(opts);
     try {
       await this.host.save();
     } catch (e) {
       if (s.activeTimeAdapter === id) s.activeTimeAdapter = prevId;
-      this.restorePrevious(wasPrevious);
+      unrecord();
       undrop();
       throw e;
     }
@@ -220,8 +240,8 @@ export class Calendars {
     const s = this.host.settings();
     const kept = s.calendar.definition;
     if (kept !== undefined && kept !== prepared.text && !opts.replaceStored) throw new DefinitionError("This world already stores a calendar definition; switching to another one replaces it, so it has to be asked for.");
-    const before = { definition: s.calendar.definition, had: "definition" in s.calendar, active: s.activeTimeAdapter, previous: s.calendar.previous };
-    s.calendar.previous = this.snapshot();
+    const before = { definition: s.calendar.definition, had: "definition" in s.calendar, active: s.activeTimeAdapter };
+    const unrecord = this.record();
     s.calendar.definition = prepared.text;
     s.activeTimeAdapter = SESHAT_ID;
     const undrop = this.dropKept(opts);
@@ -229,7 +249,7 @@ export class Calendars {
       await this.host.save();
     } catch (e) {
       undrop();
-      this.restorePrevious(before.previous);
+      unrecord();
       if (s.calendar.definition === prepared.text) {
         if (before.had) s.calendar.definition = before.definition;
         else delete s.calendar.definition;
@@ -281,9 +301,8 @@ export class Calendars {
     const prev = s.calendar.definition;
     if (prev === prepared.text && !this.seshat?.fault) return;
     const hashBefore = this.seshat?.configHash();
-    const wasPrevious = s.calendar.previous;
     const renames = opts.renames === "byUid" ? definitionMoonRenames(prev, prepared.text) : (opts.renames ?? new Map<string, string>());
-    s.calendar.previous = this.snapshot();
+    const unrecord = this.record();
     s.calendar.definition = prepared.text;
     const unrename = this.renameReferences(renames);
     const undrop = this.dropKept(opts);
@@ -291,7 +310,7 @@ export class Calendars {
       await this.host.save();
     } catch (e) {
       if (s.calendar.definition === prepared.text) s.calendar.definition = prev;
-      this.restorePrevious(wasPrevious);
+      unrecord();
       unrename();
       undrop();
       throw e;
@@ -337,9 +356,8 @@ export class Calendars {
     if (active !== was.active || textChanged) this.host.emitAdaptersChanged();
   }
 
-  /** Whether `undo` would succeed: there is a record, and a definition it would run can run. */
-  canUndo(): boolean {
-    const p = this.host.settings().calendar.previous;
+  /** Whether record `p` can be put back: a definition it would run can run. */
+  private runnable(p: PreviousCalendar | undefined): boolean {
     if (!p) return false;
     // a stored definition is text; anything else would be put back as garbage
     if ("definition" in p && typeof p.definition !== "string") return false;
@@ -347,11 +365,22 @@ export class Calendars {
     return typeof p.definition === "string" && !("error" in prepareDefinition(p.definition));
   }
 
+  /** Whether `undo` would succeed: there is a record, and a definition it would run can run. */
+  canUndo(): boolean {
+    return this.runnable(this.host.settings().calendar.previous);
+  }
+
+  /** Whether `redo` would succeed. */
+  canRedo(): boolean {
+    const u = this.host.settings().calendar.undone;
+    return this.runnable(u?.[u.length - 1]);
+  }
+
   /**
    * Undo the last calendar change (bead wadjet-24p, §15.9 S6): the stored
    * definition and the active calendar go back to what they were before it,
-   * and the current pair becomes the record, so undoing again redoes. One
-   * save; a failed save changes nothing. Throws DefinitionError, changing
+   * and the current pair can be redone. Undoing again steps back further, through
+   * the last UNDO_STEPS changes. One save; a failed save changes nothing. Throws DefinitionError, changing
    * nothing, when there is no record or the definition it would run cannot
    * run. Fires time-changed when the running calendar changed, adapters-changed
    * always, and profiles-changed through World when the calendar's key moved.
@@ -360,15 +389,42 @@ export class Calendars {
    * redo (bead wadjet-zoy; derived from the two definitions, nothing stored).
    */
   async undo(opts: KeptChoice = {}): Promise<void> {
-    const s = this.host.settings();
-    const p = s.calendar.previous;
+    const c = this.host.settings().calendar;
+    const p = c.previous;
     if (!p) throw new DefinitionError("there is no calendar change to undo");
+    return this.restore(p, opts, () => {
+      c.undone = [...(c.undone ?? []), this.snapshot()].slice(-UNDO_STEPS);
+      const older = c.earlier?.[c.earlier.length - 1];
+      if (older) c.previous = older;
+      else delete c.previous;
+      if (c.earlier && c.earlier.length > 1) c.earlier = c.earlier.slice(0, -1);
+      else delete c.earlier;
+    });
+  }
+
+  /** Put back the change undone last. The same events as `undo`. */
+  async redo(opts: KeptChoice = {}): Promise<void> {
+    const c = this.host.settings().calendar;
+    const p = c.undone?.[c.undone.length - 1];
+    if (!p) throw new DefinitionError("there is no calendar change to redo");
+    return this.restore(p, opts, () => {
+      if (c.previous) c.earlier = [...(c.earlier ?? []), c.previous].slice(-(UNDO_STEPS - 1));
+      c.previous = this.snapshot();
+      if (c.undone!.length > 1) c.undone = c.undone!.slice(0, -1);
+      else delete c.undone;
+    });
+  }
+
+  /** Store record `p` as the calendar, `move` having moved the records (undo's or redo's way). */
+  private async restore(p: PreviousCalendar, opts: KeptChoice, move: () => void): Promise<void> {
+    const s = this.host.settings();
     if (p.activeTimeAdapter === SESHAT_ID) this.refusePrevious();
-    if (!this.canUndo()) throw new DefinitionError("the calendar before the last change cannot run, so it cannot be restored");
-    const was = { had: "definition" in s.calendar, definition: s.calendar.definition, active: s.activeTimeAdapter, previous: p };
+    if (!this.runnable(p)) throw new DefinitionError("the calendar before the last change cannot run, so it cannot be restored");
+    const was = { had: "definition" in s.calendar, definition: s.calendar.definition, active: s.activeTimeAdapter };
     const activeBefore = this.host.time.active;
     const hashBefore = this.seshat?.configHash();
-    s.calendar.previous = this.snapshot();
+    const unmove = this.undoRecords();
+    move();
     if ("definition" in p) s.calendar.definition = p.definition;
     else delete s.calendar.definition;
     s.activeTimeAdapter = p.activeTimeAdapter;
@@ -382,7 +438,7 @@ export class Calendars {
       if (was.had) s.calendar.definition = was.definition;
       else delete s.calendar.definition;
       s.activeTimeAdapter = was.active;
-      s.calendar.previous = was.previous;
+      unmove();
       unrename();
       throw e;
     }

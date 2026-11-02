@@ -9915,7 +9915,7 @@ describe("climate studio · theme", () => {
   });
 });
 
-/* ── A calendar definition world: the Exceptions tab and the Save calendar changes dialog (bead wadjet-eab) ── */
+/* ── A calendar definition world: the Exceptions tab, and Save with no dialog (bead wadjet-eab) ── */
 
 const GREGORIAN_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "gregorian.seshat"), "utf8");
 const HARPTOS_TEXT = readFileSync(path.join(process.cwd(), "test", "fixtures", "seshat", "harptos.seshat"), "utf8");
@@ -9958,7 +9958,7 @@ async function discardStudioWorldDraft(): Promise<void> {
 }
 
 describe("climate studio · calendar definition", () => {
-  test("step 90: on a Gregorian definition, Exceptions → Name a single day, then Save goes through the Save calendar changes dialog and stores the day", async () => {
+  test("step 90: on a Gregorian definition, Exceptions → Name a single day, then Save just saves and stores the day", async () => {
     await discardStudioWorldDraft();
     // Move the fixture world onto a definition the way Change calendar does.
     await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
@@ -9985,21 +9985,13 @@ describe("climate studio · calendar definition", () => {
       const rows = await win.locator(".wadjet-studio-calendar-panel").textContent();
       expect(rows).toContain("Coronation (festival)");
 
-      // Save: a calendar change on a definition world meets the dialog first.
+      // Save just saves: no dialog on a calendar edit (ruled 2026-11-01).
       await ob.page.locator(".wadjet-studio-header-save").click();
-      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
-      await dialog.waitFor({ state: "visible", timeout: 10_000 });
-      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
-      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
-      const sentence = ((await dialog.locator("p").first().textContent()) ?? "").trim();
-      expect(sentence).not.toBe("Comparing the two calendars…");
-      await saveBtn.click();
-      await dialog.waitFor({ state: "detached", timeout: 5_000 });
 
       await expect
         .poll(() => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string, { timeout: 10_000 })
         .toContain(`RDATE:D${today};NAME=Coronation;TAGS=festival`);
-      console.log(`  · Exceptions: named D${today} Coronation (festival)${confirmed ? " behind the world confirm" : ""}; dialog said "${sentence}"; data.json holds the RDATE line`);
+      console.log(`  · Exceptions: named D${today} Coronation (festival)${confirmed ? " behind the world confirm" : ""}; data.json holds the RDATE line`);
     } finally {
       // Back to the legacy calendar the fixture world came from (the way back inside Change calendar).
       await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
@@ -10497,12 +10489,6 @@ describe("climate studio · calendar orrery", () => {
       const phaseLine = /PHASE:Phase=[0-9.]+/.exec(await text())![0];
       await expect.poll(chip).toContain("●");
       await ob.page.locator(".wadjet-studio-header-save").click();
-      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
-      await dialog.waitFor({ state: "visible", timeout: 10_000 });
-      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
-      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
-      await saveBtn.click();
-      await dialog.waitFor({ state: "detached", timeout: 5_000 });
       await expect.poll(stored, { timeout: 10_000 }).toContain(phaseLine);
       expect(stored()).toContain("PERIOD:59/2");
       await expect.poll(chip).not.toContain("●");
@@ -10644,12 +10630,6 @@ describe("climate studio · calendar orrery", () => {
       await passAnyConfirm();
       await expect.poll(chip).toContain("●");
       await ob.page.locator(".wadjet-studio-header-save").click();
-      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
-      await dialog.waitFor({ state: "visible", timeout: 10_000 });
-      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
-      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
-      await saveBtn.click();
-      await dialog.waitFor({ state: "detached", timeout: 5_000 });
       await expect.poll(stored, { timeout: 10_000 }).toContain("NAME:Deepwinter");
       expect(stored()).not.toContain("NAME:Midwinter");
       expect(/NAME:Deepwinter\r?\nLENGTH:1\r?\nFILLER:TRUE/.test(stored())).toBe(true);
@@ -10992,12 +10972,6 @@ describe("climate studio · calendar orrery", () => {
 
       // Save writes the dated mark
       await ob.page.locator(".wadjet-studio-header-save").click();
-      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
-      await dialog.waitFor({ state: "visible", timeout: 10_000 });
-      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
-      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
-      await saveBtn.click();
-      await dialog.waitFor({ state: "detached", timeout: 5_000 });
       await expect.poll(stored, { timeout: 10_000 }).toContain("=DAY:100");
       await expect.poll(chip).not.toContain("●");
       console.log(`  · orrery seasons: ＋ mark ×2, the second switched to day of year (${date1}) then day 100, saved as DAY:100${confirmed ? " (after the world confirm)" : ""}`);
@@ -11187,12 +11161,6 @@ describe("climate studio · calendar orrery", () => {
 
       // Save writes all three
       await ob.page.locator(".wadjet-studio-header-save").click();
-      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
-      await dialog.waitFor({ state: "visible", timeout: 10_000 });
-      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
-      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
-      await saveBtn.click();
-      await dialog.waitFor({ state: "detached", timeout: 5_000 });
       await expect.poll(() => (stored().match(/SKIPS:month/g) ?? []).length, { timeout: 10_000 }).toBe(3);
 
       // data.json lands before the adapter remounts, so wait for the calendar other plugins read to follow it
@@ -11211,6 +11179,69 @@ describe("climate studio · calendar orrery", () => {
       const week = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
       expect(week[(week.indexOf(read.before!) + 1) % 7]).toBe(read.after);
       console.log(`  · skips: ${read.before}, Thaw, ${read.after}; Thaw has no season and weather reads ${read.tag}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 104: Save just saves a calendar edit, with no dialog; today is on the year moves the calendar and leaves day numbers; undo steps back through two changes and redo returns", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const dayNow = () => withApp(ob.page, (app) => app.plugins.plugins.wadjet.settings.currentDayOrdinal as number);
+    const reads = (d: number) => withApp(ob.page, (_app, day: number) => (window as unknown as { Wadjet: { format(n: number): string } }).Wadjet.format(day), d);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:year"]').click();
+      const date = win.locator('[data-part="year-today"] input');
+      await date.waitFor({ state: "visible", timeout: 10_000 });
+      const today = await dayNow();
+      const was = await date.inputValue();
+      expect(was).toBe(await reads(today));
+
+      // a date it cannot read is refused, with how today reads, and nothing moves
+      await date.fill("next tuesday");
+      await date.press("Enter");
+      await passAnyConfirm();
+      await expect.poll(async () => (await win.locator(".wadjet-studio-orrery-refusal").first().textContent()) ?? "", { timeout: 10_000 }).toContain("is not a date in this calendar");
+
+      // a date it can: the draft moves; Save writes it with no dialog, and today keeps its number
+      await date.fill("2400-03-15");
+      await date.press("Enter");
+      await passAnyConfirm();
+      await expect.poll(() => win.locator('[data-part="year-today"] input').inputValue(), { timeout: 10_000 }).toBe("2400-03-15");
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      await expect.poll(() => stored() !== GREGORIAN_TEXT, { timeout: 10_000 }).toBe(true);
+      expect(await ob.page.locator(".modal-container .modal").count()).toBe(0);
+      await expect.poll(() => reads(today), { timeout: 10_000 }).toBe("2400-03-15");
+      expect(await dayNow()).toBe(today);
+      const moved = stored();
+
+      // a second change, then undo twice and redo once
+      await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.saveDefinition(text), moved.replace("NAME:Gregorian", "NAME:Second"));
+      const step = (way: string) => withApp(ob.page, (app, w: string) => app.plugins.plugins.wadjet.calendars[w](), way);
+      await step("undo");
+      expect(stored()).toBe(moved);
+      await step("undo");
+      expect(stored()).toBe(GREGORIAN_TEXT);
+      await expect.poll(() => reads(today), { timeout: 10_000 }).toBe(was);
+      await step("redo");
+      expect(stored()).toBe(moved);
+      console.log(`  · no dialog on Save; today is: ${was} → 2400-03-15, day ${today} kept; undo twice and redo returned`);
     } finally {
       await close();
       await discardStudioWorldDraft();

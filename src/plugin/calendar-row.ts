@@ -25,7 +25,7 @@
 import { baseKind, Engine, type CalendarAst, type SlotsUnitAst } from "../seshat";
 import { followOf } from "./time/form";
 
-export type CalendarAction = "change" | "edit" | "undo";
+export type CalendarAction = "change" | "edit" | "undo" | "redo";
 
 export interface CalendarRowInput {
   /** the resolved active adapter's id ("internal", "seshat", a plugin's) */
@@ -48,6 +48,8 @@ export interface CalendarRowInput {
   legacyOrigin: boolean;
   /** the last calendar change can be undone */
   canUndo: boolean;
+  /** a change that was undone can be put back */
+  canRedo: boolean;
 }
 
 export interface CalendarRow {
@@ -63,7 +65,7 @@ const lengthOf = (n: number) => (Number.isInteger(n) ? String(n) : String(Number
 
 export function calendarRow(i: CalendarRowInput): CalendarRow {
   const choices = i.plugins.length === 0 ? null : chooser(i);
-  const undo: CalendarAction[] = i.canUndo ? ["undo"] : [];
+  const undo: CalendarAction[] = [...(i.canUndo ? (["undo"] as const) : []), ...(i.canRedo ? (["redo"] as const) : [])];
   if (i.activeId === "seshat") {
     if (i.fault !== null) {
       return {

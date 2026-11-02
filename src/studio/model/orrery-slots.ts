@@ -21,7 +21,10 @@
  * slots still fill their parent every year is `problems()`'s to say: the
  * window runs it after the edit and lights the unit's LED and the issue strip.
  */
+import { anchorToday, todayText } from "../../plugin/opt-in";
+import { prepareDefinition } from "../../plugin/time/seshat";
 import type { MonthForm } from "../../plugin/time/form";
+import { print } from "../../seshat";
 import type { CalendarAst, SlotAst, SlotsUnitAst } from "../../seshat";
 import { setCycleLength, setSlotUnit, slotLabelProblem, slotOrderProblem } from "./ast-edit";
 import { applyAstEdit, draftAst, type CalendarDraft, type CalendarEdit } from "./definition";
@@ -44,6 +47,33 @@ function current(calendar: CalendarDraft): CalendarAst | string {
 }
 
 // ---- the year
+
+/**
+ * `today is` on the year: move the whole calendar so `day` (the Orrery's own day) reads as `date`, written as the
+ * calendar writes dates. Stored day numbers stay; what they read as moves. An AST edit, undone like any other.
+ */
+export function setYearToday(calendar: CalendarDraft, day: number, date: string): CalendarEdit {
+  return applyAstEdit(calendar, (a) => {
+    const moved = anchorToday(a, day, date);
+    if ("error" in moved) return { refused: true, reason: moved.error };
+    // a date can carry the calendar off the day line: refused here, or Save could not write it
+    try {
+      const checked = prepareDefinition(print(moved.ast));
+      return "error" in checked ? { refused: true, reason: `"${date.trim()}" is too far from today for this calendar: ${checked.error}` } : { ast: moved.ast };
+    } catch (e) {
+      return { refused: true, reason: `"${date.trim()}" is too far from today for this calendar: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  });
+}
+
+/** What `setYearToday` would be typed over: how `day` reads now, or null when the draft does not run. */
+export function yearTodayText(ast: CalendarAst, day: number): string | null {
+  try {
+    return todayText(print(ast), day);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Set cycle unit `unitId`'s base length (a leap gear still adds to it): the

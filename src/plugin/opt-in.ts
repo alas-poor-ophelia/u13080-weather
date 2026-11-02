@@ -76,7 +76,7 @@ const errorOf = (r: { error: string; line?: number }) => (r.line === undefined ?
  * Move a definition so that `today` reads as the date `at` (written as the
  * calendar writes dates, or a bare day number): parse `at` against the
  * definition, then translate it by the difference. Used by Change calendar…
- * and by the Save dialog when a change moves year starts (§15.1 R7).
+ * and by today is on the Orrery's year.
  */
 export function anchorToday(ast: CalendarAst, today: number, at: string): { ast: CalendarAst; shift: number } | { error: string } {
   const date = at.trim();

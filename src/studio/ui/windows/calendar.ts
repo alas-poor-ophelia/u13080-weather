@@ -6,7 +6,7 @@
  * - A world that runs a definition: Year (name, length, first year, leap
  *   rules behind "edit rules"), Months, Week. A part the form reads as fields
  *   is edited in the world draft (`world.calendar.form`); Save compiles it
- *   into the stored definition through the Save dialog. A part the form
+ *   into the stored definition. A part the form
  *   cannot show says what it is, why, and offers "Edit as text".
  * - The legacy calendar: a Calendar tab saying what it is, with "Change
  *   calendar…"; a calendar plugin: its `· read-only` chip and hint; a

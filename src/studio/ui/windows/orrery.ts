@@ -747,7 +747,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     const unit = id === undefined ? undefined : draft.units.find((u) => u.id === id);
     if (editable && id !== undefined && (kind === "unit" || kind === "slot") && unit) {
       const deps = { ast: draft, unitId: id, refusal, edit, select: (part: PartId) => select(part), selectAfter };
-      if (unit.kind === "cycle" && kind === "unit" && (unit.id === m.year.unit || unit.id === "year")) editor = buildYearEditor(host("year"), deps);
+      if (unit.kind === "cycle" && kind === "unit" && (unit.id === m.year.unit || unit.id === "year")) editor = buildYearEditor(host("year"), { ...deps, day: m.today.day });
       else if (unit.kind === "cycle" && kind === "unit" && cycleEditable(draft, id, m.year.unit)) editor = buildCycleEditor(host("cycle"), title, { ast: draft, calendar: ctx.store.get().world.calendar, unitId: id, yearUnit: m.year.unit, day: m.today.day, refusal, edit, selectAfter });
       else if (unit.kind === "slots" && kind === "unit") editor = buildSlotUnitEditor(host("slots"), { ...deps, lengths: lengthsOf(m, unit) });
       else if (unit.kind === "slots" && kind === "slot" && n !== undefined) editor = buildSlotEditor(host("slot"), title, { ...deps, index: Number(n), lengths: lengthsOf(m, unit) });

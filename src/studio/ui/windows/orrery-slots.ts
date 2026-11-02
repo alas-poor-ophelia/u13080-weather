@@ -22,7 +22,7 @@
 import type { CalendarAst, CycleUnitAst, PartId, SlotsUnitAst } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
-import { addSlot, moveSlot, removeSlot, renameSlot, setSlotDays, setSlotFiller, setSlotRest, setYearLength, SLOT_DAYS, slotFlag, yearRange } from "../../model/orrery-slots";
+import { setYearToday, yearTodayText, addSlot, moveSlot, removeSlot, renameSlot, setSlotDays, setSlotFiller, setSlotRest, setYearLength, SLOT_DAYS, slotFlag, yearRange } from "../../model/orrery-slots";
 import { createChip, createKnob, createSegmented, type ChipComponent, type KnobComponent, type SegmentedComponent } from "../components";
 import { button, input, type EditPhase, type PartEditor } from "./orrery-body";
 
@@ -70,6 +70,8 @@ function shell(parent: HTMLElement, refusal: string | null): { editor: PartEdito
 export interface YearEditorDeps {
   ast: CalendarAst;
   unitId: string;
+  /** the Orrery's own day (`today is` makes it read as a date) */
+  day: number;
   refusal: string | null;
   edit(make: (calendar: CalendarDraft) => CalendarEdit, phase: EditPhase): void;
   select(part: PartId): void;
@@ -79,6 +81,10 @@ export function buildYearEditor(parent: HTMLElement, deps: YearEditorDeps): Part
   const { editor, knobs, parts } = shell(parent, deps.refusal);
   const u = deps.ast.units.find((x): x is CycleUnitAst => x.kind === "cycle" && x.id === deps.unitId);
   if (!u) return editor;
+  // today is: the whole calendar moves, so it works on any year; a calendar that cannot read a date says so when asked
+  const today = parent.createDiv({ cls: "wadjet-studio-orrery-toggle", attr: { "data-part": "year-today" } });
+  today.createSpan({ cls: "wadjet-studio-orrery-toggle-label", text: "today is" });
+  input(today, yearTodayText(deps.ast, deps.day) ?? "", "Today is", orreryHint("orrery.yearToday"), "year-today-date", "wadjet-studio-orrery-phase-name", (text) => deps.edit((c) => setYearToday(c, deps.day, text), "click"));
   if (u.crossing) {
     parent.createDiv({ cls: "wadjet-studio-orrery-note", text: "This year starts on the day of a crossing, so its length is the days from one crossing to the next: its crossing, train and stages are edited on their own parts (the chips below)." });
     return editor;
