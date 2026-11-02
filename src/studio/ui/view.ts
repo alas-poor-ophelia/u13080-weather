@@ -45,6 +45,7 @@ import { createMoonsSurface } from "./moons-surface";
 import { createPlaylistRegistry, createPlaylistSurface } from "./playlist";
 import { createRowsSurface } from "./rows-surface";
 import type { Surface, SurfaceContext } from "./surfaces";
+import { openCalendarView } from "./windows/calendar-mode";
 import { createWindowManager, type WindowManager } from "./windows";
 import { renameMoonsInDrafts, type MoonRenames } from "../model/moon-rename";
 import { ORRERY_THEMES, type OrreryTheme } from "../model/orrery-transport";
@@ -154,6 +155,9 @@ export class StudioView extends ItemView {
    */
   private headerText: string | null = null;
 
+  /** the context of the current build; null before the first */
+  private surfaceContext: SurfaceContext | null = null;
+
   constructor(
     leaf: WorkspaceLeaf,
     private readonly plugin: WadjetPlugin,
@@ -206,6 +210,11 @@ export class StudioView extends ItemView {
   override getDisplayText(): string {
     const zone = this.zone();
     return zone === null ? "Climate studio" : `Climate studio · ${zone.name}`;
+  }
+
+  /** The ruler's Calendar ⚑, for `api.seshat.openEditor` (open.ts). */
+  openCalendar(): void {
+    if (this.surfaceContext) openCalendarView(this.surfaceContext);
   }
 
   override getState(): Record<string, unknown> {
@@ -312,6 +321,7 @@ export class StudioView extends ItemView {
       rows: createPlaylistRegistry(),
     };
 
+    this.surfaceContext = ctx;
     this.windows.mount(ctx);
     this.surfaces = SURFACES.map((make) => {
       const surface = make();

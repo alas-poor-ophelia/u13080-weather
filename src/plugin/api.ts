@@ -16,15 +16,17 @@ import { RNG_VERSION, SCHEMA_VERSION } from "../core/version";
 import type { WadjetEvent, WadjetEventPayloads } from "./events";
 import { InterpreterRegistry, codedError, type InterpretContext, type InterpreterInfo, type WeatherInterpreter } from "./interpreters";
 import type { CalendarDescription, TimeAdapter, TimeContext, TimeRegistry } from "./time/adapter";
+import { makeSeshatApi, type SeshatAPI } from "./seshat-api";
 import { assertDayInRange, assertInteger, type World, type ZoneLocator, type ZoneResolver } from "./world";
 
 /** Bumps whenever members are added to WadjetAPI. */
-export const API_VERSION = 1 as const;
+export const API_VERSION = 2 as const;
 
 /**
  * Public API. Reachable as `app.plugins.plugins.wadjet.api` and
  * `window.Wadjet`. All returned values are plain serialisable objects except
- * `getInterpreter`, which hands back the registered object.
+ * `getInterpreter`, which hands back the registered object, and `seshat`, whose
+ * calendar views carry their query functions.
  *
  * Load order: check `api.ready`; if false, wait for the `wadjet:ready`
  * workspace event. After `wadjet:unload` the object is dead: get it again
@@ -32,7 +34,7 @@ export const API_VERSION = 1 as const;
  */
 export interface WadjetAPI {
   version: string;
-  apiVersion: 1;
+  apiVersion: 2;
   ready: boolean;
   schemaVersion: 0;
   generatorVersion: string;
@@ -71,6 +73,8 @@ export interface WadjetAPI {
   getInterpreter: (id: string) => WeatherInterpreter | null;
   interpret: <T = unknown>(id: string, report: WeatherReport, options?: Record<string, unknown>) => T;
 
+  seshat: SeshatAPI;
+
   on: <E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => void) => () => void;
 }
 
@@ -79,6 +83,8 @@ export interface ApiHost {
   world: World;
   time: TimeRegistry;
   units: () => Units;
+  /** open the Studio with the calendar editor up (main.ts); tests may leave it out */
+  openCalendarEditor?: () => Promise<void>;
 }
 
 export const UNLOADED_CODE = "wadjet-unloaded";
@@ -349,6 +355,8 @@ export class ApiController {
         };
         return this.interpreters.run(id, copyForInterpreter(report), ctx) as T;
       },
+
+      seshat: makeSeshatApi({ time, live, ...(this.host.openCalendarEditor ? { openEditor: this.host.openCalendarEditor } : {}) }),
 
       on: (event, cb) => (live(), this.once(world.on(event, cb))),
     };

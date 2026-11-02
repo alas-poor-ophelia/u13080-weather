@@ -432,7 +432,7 @@ else this.registerEvent(this.app.workspace.on("wadjet:ready", () => init(wadjet(
 ```ts
 interface WadjetAPI {
   version: string;
-  apiVersion: 1;                                                // bumps when members are added
+  apiVersion: 2;                                                // bumps when members are added
   ready: boolean;
   schemaVersion: 0;
   generatorVersion: string;
@@ -470,6 +470,8 @@ interface WadjetAPI {
   listInterpreters: (facet?: string) => InterpreterInfo[];
   getInterpreter: (id: string) => WeatherInterpreter | null;
   interpret: <T = unknown>(id: string, report: WeatherReport, options?: Record<string, unknown>) => T;
+
+  seshat: SeshatAPI;                                            // the calendar definition: docs/API.md §1b
 
   on: <E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => void) => () => void;
 }

@@ -51,7 +51,7 @@ everything in this document. Copy it into your plugin and `import type { WadjetA
 ```ts
 interface WadjetAPI {
   version: string;
-  apiVersion: 1;
+  apiVersion: 2;
   ready: boolean;
   schemaVersion: 0;
   generatorVersion: string;
@@ -90,6 +90,8 @@ interface WadjetAPI {
   getInterpreter: (id: string) => WeatherInterpreter | null;
   interpret: <T = unknown>(id: string, report: WeatherReport, options?: Record<string, unknown>) => T;
 
+  seshat: SeshatAPI;
+
   on: <E extends WadjetEvent>(event: E, cb: (payload: WadjetEventPayloads[E]) => void) => () => void;
 }
 ```
@@ -104,7 +106,7 @@ generator version.
 
 ### `apiVersion` *(API 1)*
 
-Type: `1`. Increases whenever members are added to this interface. It is absent on plugins older
+Type: `2`. Increases whenever members are added to this interface. It is absent on plugins older
 than API 1. Test for it with `api.apiVersion >= 1`, which is false for `undefined`.
 
 ### `ready`
@@ -491,6 +493,104 @@ written for the old no-argument form still work. Returns an unregister function.
 throws is logged with `console.error` and does not stop other listeners or the emitter. An
 `async` listener (one that returns a promise) is not awaited, and a rejection is logged the same
 way.
+
+---
+
+## 1b. `api.seshat`: the calendar definition *(API 2)*
+
+A world can run on a calendar definition (`docs/CALENDARS.md`). `api.seshat` lets another plugin read that
+calendar's whole structure and ask it any date question, so the plugin doesn't need a calendar of its own.
+
+What this is not:
+
+- **It doesn't edit the calendar in this version.** Users edit in the plugin's own editor, and `openEditor()` opens it.
+- **It has no time of day.** The day is the smallest unit. If your plugin needs hours, derive them yourself.
+- **It has no eras.** Eras on a timeline belong to your plugin. (The era timeline in §7b is about weather.)
+
+```ts
+interface SeshatAPI {
+  calendar: () => SeshatCalendarView | null;
+  compile: (input: string | CalendarAst) => { calendar: SeshatCalendarView } | { problems: Problem[] };
+  openEditor: () => Promise<void>;
+}
+```
+
+### `calendar()`
+
+**Returns:** a view of the definition the world runs. Returns `null` when the world runs the legacy calendar or a
+third-party calendar, or when its stored definition cannot run. The same view comes back until the definition changes.
+A view is a snapshot and never changes under you: when `adapters-changed` fires, call `calendar()` again. Compare
+`hash` to tell whether anything that reaches a date changed (a new calendar name, for example, doesn't change it).
+
+### `compile(input)`
+
+Takes Seshat text or a `CalendarAst`, and returns a view of it without touching the world, or the list of `problems`
+if it fails the checks a world's calendar must pass. It doesn't throw for a bad definition.
+
+### `openEditor()`
+
+Opens the Studio with the calendar editor up, as the ruler's *Calendar ⚑* button does. It also works in a world with no
+zones.
+
+### `SeshatCalendarView`
+
+```ts
+interface SeshatCalendarView {
+  readonly name: string;
+  readonly text: string;
+  readonly definition: CalendarAst;
+  readonly hash: string;
+  start: (unit: string, index: number) => number;
+  length: (unit: string, index: number) => number;
+  indexAt: (unit: string, day: number) => number;
+  occurrenceAt: (unit: string, day: number) => { readonly index: number; readonly start: number; readonly length: number } | null;
+  positionOf: (unit: string, day: number) => Position | null;
+  slotLengths: (unit: string, path: readonly number[]) => number[];
+  dayOf: (unit: string, path: readonly number[], slot: number, offset: number) => number;
+  labelAt: (unit: string, day: number) => LabelAst | null;
+  tagsAt: (day: number) => string[];
+  seasonAt: (day: number) => string | null;
+  moonsAt: (day: number) => Array<{ name: string; phase: number }>;
+  bodyPhase: (body: string, day: number) => number | undefined;
+  holds: (rule: RuleAst, day: number) => boolean;
+  format: (day: number, name?: string) => string;
+  parse: (text: string) => number | null;
+}
+```
+
+`definition` is the whole stored calendar, frozen. Its `units` list every unit: a `cycle` unit stands alone (a year, a
+week) and a `slots` unit divides its parent `in` (a month in a year). `types/wadjet.d.ts` holds every type.
+
+Days are the whole-number `dayOrdinal`s used by the rest of this API. The queries answer from −10,000,000 to 10,000,000
+and throw `RangeError` past that, or for a unit that doesn't exist.
+
+- **`null` is a real answer.** A filler day, such as a festival between months, has no place in the units inside it, so
+  `occurrenceAt`, `positionOf` and `labelAt` can return `null`. A timeline has to draw that gap.
+- **`path`** names a parent occurrence from the cycle down: `[year]` for a month, `[year, month]` for a unit in a month.
+  Indices count from 0. A year's index is not always its number: its printed number is the index plus the unit's `number`
+  (default 0).
+- **`tagsAt`** returns the tags from units, day labels and named rules. A named rule that fails loses only its own tags.
+  The season is separate: `seasonAt`.
+- **`holds`** tests a rule on a day. It throws `RangeError` for a rule that names something the calendar doesn't have, or
+  that reads weather (a `host` leaf: `regime`, `chance`), since a calendar never sees weather.
+- **`format(day, name)`** throws when the definition doesn't declare a format of that name. `parse` returns `null`
+  for text it can't read.
+
+Finding this month's name, the next month's first day and the year, given a view `calendar` and a `day`:
+
+<!-- example -->
+```ts
+const monthUnit = calendar.definition.units.find((u) => u.id === "month");
+const months = monthUnit.slots.map((s) => s.name);
+const thisMonth = calendar.labelAt("month", day)?.name;
+const held = calendar.occurrenceAt("month", day);
+const next = held.start + held.length;
+const year = calendar.indexAt("year", day);
+```
+
+On the Gregorian definition at day 20758, `thisMonth` is `"November"` and `next` is `20788`. A definition doesn't have to
+name its units `month` and `week`: only `year` is required, so read the names from `definition.units` rather than
+assuming them.
 
 ---
 

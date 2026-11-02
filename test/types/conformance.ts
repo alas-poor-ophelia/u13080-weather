@@ -21,6 +21,7 @@ import type * as E from "../../src/plugin/events";
 import type { InterpretContext, InterpreterInfo, WeatherInterpreter } from "../../src/plugin/interpreters";
 import type { CalendarDescription, TimeAdapter, TimeContext } from "../../src/plugin/time/adapter";
 import type { ZoneLocator, ZoneResolver } from "../../src/plugin/world";
+import type * as S from "./seshat-names";
 
 /** Strict type identity (not mere assignability). */
 export type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -55,6 +56,47 @@ export type Conformance = [
   Expect<Equal<E.ResolversChangedPayload, D.ResolversChangedPayload>>,
   Expect<Equal<E.InterpretersChangedPayload, D.InterpretersChangedPayload>>,
   Expect<Equal<E.UnloadPayload, D.UnloadPayload>>,
+  Expect<Equal<S.Rational, D.Rational>>,
+  Expect<Equal<S.GearAst, D.GearAst>>,
+  Expect<Equal<S.SeasonMark, D.SeasonMark>>,
+  Expect<Equal<S.DaySeasonMark, D.DaySeasonMark>>,
+  Expect<Equal<S.SlotSeasonMark, D.SlotSeasonMark>>,
+  Expect<Equal<S.DateSeasonMark, D.DateSeasonMark>>,
+  Expect<Equal<S.SeasonMarkAst, D.SeasonMarkAst>>,
+  Expect<Equal<S.HostKey, D.HostKey>>,
+  Expect<Equal<S.RuleAst, D.RuleAst>>,
+  Expect<Equal<S.Recur, D.Recur>>,
+  Expect<Equal<S.By, D.By>>,
+  Expect<Equal<S.GearTerm, D.GearTerm>>,
+  Expect<Equal<S.CrossingAst, D.CrossingAst>>,
+  Expect<Equal<S.LiteralCrossingAst, D.LiteralCrossingAst>>,
+  Expect<Equal<S.BodyCrossingAst, D.BodyCrossingAst>>,
+  Expect<Equal<S.BodyRef, D.BodyRef>>,
+  Expect<Equal<S.StageAst, D.StageAst>>,
+  Expect<Equal<S.StageRule, D.StageRule>>,
+  Expect<Equal<S.ConstantRule, D.ConstantRule>>,
+  Expect<Equal<S.CrossingRule, D.CrossingRule>>,
+  Expect<Equal<S.CycleRule, D.CycleRule>>,
+  Expect<Equal<S.ConstantCycleAst, D.ConstantCycleAst>>,
+  Expect<Equal<S.CrossingCycleAst, D.CrossingCycleAst>>,
+  Expect<Equal<S.CycleUnitAst, D.CycleUnitAst>>,
+  Expect<Equal<S.LedgerEntry, D.LedgerEntry>>,
+  Expect<Equal<S.LabelAst, D.LabelAst>>,
+  Expect<Equal<S.SlotAst, D.SlotAst>>,
+  Expect<Equal<S.KeyedLength, D.KeyedLength>>,
+  Expect<Equal<S.SlotsUnitAst, D.SlotsUnitAst>>,
+  Expect<Equal<S.UnitAst, D.UnitAst>>,
+  Expect<Equal<S.DayLabelAst, D.DayLabelAst>>,
+  Expect<Equal<S.RuleDefAst, D.RuleDefAst>>,
+  Expect<Equal<S.BodyAst, D.BodyAst>>,
+  Expect<Equal<S.MoonAst, D.MoonAst>>,
+  Expect<Equal<S.SeasonsAst, D.SeasonsAst>>,
+  Expect<Equal<S.FormatAst, D.FormatAst>>,
+  Expect<Equal<S.CalendarAst, D.CalendarAst>>,
+  Expect<Equal<S.Problem, D.Problem>>,
+  Expect<Equal<S.Position, D.Position>>,
+  Expect<Equal<S.SeshatCalendarView, D.SeshatCalendarView>>,
+  Expect<Equal<S.SeshatAPI, D.SeshatAPI>>,
 ];
 
 /** Every WadjetAPI member, in docs order. */
@@ -91,6 +133,7 @@ export const API_KEYS = [
   "listInterpreters",
   "getInterpreter",
   "interpret",
+  "seshat",
   "on",
 ] as const satisfies ReadonlyArray<keyof D.WadjetAPI>;
 

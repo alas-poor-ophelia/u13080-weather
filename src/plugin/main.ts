@@ -1,6 +1,6 @@
 import { MarkdownRenderChild, MarkdownView, Notice, Plugin, type MarkdownPostProcessorContext } from "obsidian";
 import type { StudioStash } from "../studio/model/stash";
-import { openStudioFromCommand } from "../studio/ui/open";
+import { openCalendarEditor, openStudioFromCommand } from "../studio/ui/open";
 import { StudioView, VIEW_TYPE as STUDIO_VIEW_TYPE } from "../studio/ui/view";
 import type { WeatherReport } from "../core/report";
 import { GENERATOR_VERSION, type GeneratorMode } from "../core/version";
@@ -109,7 +109,7 @@ export default class WadjetPlugin extends Plugin {
     this.internalHash = this.internalCalendar.configHash();
     this.time.register(this.internalCalendar);
     this.world = new World(this.worldState(), this.time);
-    this.controller = new ApiController({ version: this.manifest.version, world: this.world, time: this.time, units: () => this.settings.units });
+    this.controller = new ApiController({ version: this.manifest.version, world: this.world, time: this.time, units: () => this.settings.units, openCalendarEditor: () => openCalendarEditor(this) });
     this.api = this.controller.api;
     this.calendars = new Calendars({
       settings: () => this.settings,

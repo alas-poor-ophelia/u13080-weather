@@ -218,14 +218,14 @@ describe("named rules (VRULE) and binding", () => {
     expect(year).toEqual([dayOf(utc(2000, 12, 31))]); // the last week to begin in 2000 begins Sunday 31 December
   });
 
-  test("outside src/seshat only the seshat adapter reads tagsAt, so VRULE tags reach weather only in a world that opted in", async () => {
+  test("outside src/seshat only the seshat adapter reads tagsAt for weather, so VRULE tags reach weather only in a world that opted in; api.seshat's views hand tags to other plugins, not to the generator", async () => {
     const glob = new Bun.Glob("src/**/*.ts");
     const readers: string[] = [];
     for await (const f of glob.scan(".")) {
       if (f.replaceAll("\\", "/").startsWith("src/seshat/")) continue;
       if (readFileSync(f, "utf8").includes("tagsAt(")) readers.push(f.replaceAll("\\", "/"));
     }
-    expect(readers).toEqual(["src/plugin/time/seshat.ts"]);
+    expect(readers.sort()).toEqual(["src/plugin/seshat-api.ts", "src/plugin/time/seshat.ts"]);
   });
 
   test("rrule is a test oracle only: nothing under src imports it", async () => {

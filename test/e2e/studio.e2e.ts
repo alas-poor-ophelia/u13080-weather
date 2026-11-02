@@ -11074,4 +11074,61 @@ describe("climate studio · calendar orrery", () => {
       await nextFrame();
     }
   });
+
+  test("step 102: api.seshat.openEditor opens the calendar editor from another plugin, on a world with zones and on one with none", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const detach = () => withApp(ob.page, (app, type: string) => app.workspace.detachLeavesOfType(type), VIEW_TYPE);
+    const openEditor = () => withApp(ob.page, () => (window as unknown as { Wadjet: { seshat: { openEditor(): Promise<void> } } }).Wadjet.seshat.openEditor());
+    const zoneId = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.store.get().view.zoneId as string | null, VIEW_TYPE);
+    const orrery = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+    try {
+      // with zones, from no Studio at all
+      await detach();
+      await openEditor();
+      await orrery.waitFor({ state: "visible", timeout: 10_000 });
+      console.log("  · openEditor: with zones, the Studio opened with the Orrery up");
+
+      // an open Studio keeps its zone and brings the editor up
+      const zoneBefore = await zoneId();
+      await withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.close("orrery"), VIEW_TYPE);
+      await orrery.waitFor({ state: "detached", timeout: 5_000 });
+      await openEditor();
+      await orrery.waitFor({ state: "visible", timeout: 10_000 });
+      expect(await zoneId()).toBe(zoneBefore);
+
+      // a world with no zones: a plugin that does not use weather (in memory only, restored below)
+      await detach();
+      await withApp(ob.page, (app) => {
+        const p = app.plugins.plugins.wadjet;
+        p.__savedZones = p.settings.zones;
+        p.settings.zones = [];
+      });
+      const errors: string[] = [];
+      const onError = (e: Error) => errors.push(e.message);
+      ob.page.on("pageerror", onError);
+      await openEditor();
+      await orrery.waitFor({ state: "visible", timeout: 10_000 });
+      await nextFrame();
+      ob.page.off("pageerror", onError);
+      expect(errors).toEqual([]);
+      expect(await zoneId()).toBeNull();
+      expect(await orrery.locator("canvas").count()).toBeGreaterThan(0);
+      console.log("  · openEditor: with no zones, the Studio opened with no zone selected and the Orrery drew");
+    } finally {
+      await withApp(ob.page, (app) => {
+        const p = app.plugins.plugins.wadjet;
+        if (p.__savedZones) p.settings.zones = p.__savedZones;
+        delete p.__savedZones;
+      });
+      await detach();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
 });

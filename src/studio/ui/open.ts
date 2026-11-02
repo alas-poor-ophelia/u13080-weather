@@ -10,7 +10,7 @@
 import { Notice, SuggestModal, type App } from "obsidian";
 import type { ZoneProfile } from "../../core/types";
 import type WadjetPlugin from "../../plugin/main";
-import { VIEW_TYPE } from "./view";
+import { StudioView, VIEW_TYPE } from "./view";
 
 /**
  * The button that reaches this from settings lives in Obsidian 1.13's separate
@@ -33,6 +33,22 @@ export async function openStudio(plugin: WadjetPlugin, zoneId: string): Promise<
   const leaf = workspace.getLeavesOfType(VIEW_TYPE)[0] ?? workspace.getLeaf("tab");
   await leaf.setViewState({ type: VIEW_TYPE, state: { zoneId }, active: true });
   await workspace.revealLeaf(leaf);
+}
+
+/**
+ * `api.seshat.openEditor` (docs/API.md §1b): the Studio with the calendar view up. The calendar is the world's,
+ * not a zone's, so a world with no zones opens too (the Studio runs with no zone selected). An open Studio keeps
+ * its zone.
+ */
+export async function openCalendarEditor(plugin: WadjetPlugin): Promise<void> {
+  closeSettingsIfOpen(plugin.app);
+  const workspace = plugin.app.workspace;
+  const open = workspace.getLeavesOfType(VIEW_TYPE)[0];
+  const leaf = open ?? workspace.getLeaf("tab");
+  if (!open) await leaf.setViewState({ type: VIEW_TYPE, state: { zoneId: plugin.settings.zones[0]?.id ?? null }, active: true });
+  await workspace.revealLeaf(leaf);
+  await leaf.loadIfDeferred();
+  if (leaf.view instanceof StudioView) leaf.view.openCalendar();
 }
 
 /**

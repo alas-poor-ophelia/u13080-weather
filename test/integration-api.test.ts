@@ -126,8 +126,8 @@ describe("surface", () => {
   test("Object.keys(api) is exactly the WadjetAPI member list", () => {
     const { api } = harness();
     expect(Object.keys(api).sort()).toEqual([...API_KEYS].sort());
-    expect(api.apiVersion).toBe(1);
-    expect(API_VERSION).toBe(1);
+    expect(api.apiVersion).toBe(2);
+    expect(API_VERSION).toBe(2);
   });
 
   test("docs/API.md and README.md WadjetAPI blocks match the d.ts member for member, signature for signature", async () => {

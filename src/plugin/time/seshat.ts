@@ -296,6 +296,11 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     return this.ast;
   }
 
+  /** The compiled calendar, or null in a fault. `api.seshat` builds its views over it. */
+  running(): Engine | null {
+    return this.engine;
+  }
+
   /** The stored text as it would be written now (canonical), or null in a fault. */
   text(): string | null {
     return this.ast ? print(this.ast) : null;
