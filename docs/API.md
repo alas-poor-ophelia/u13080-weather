@@ -503,7 +503,8 @@ calendar's whole structure and ask it any date question, so the plugin doesn't n
 
 What this is not:
 
-- **It doesn't edit the calendar in this version.** Users edit in the plugin's own editor, and `openEditor()` opens it.
+- **It has no editor of its own.** Your plugin can replace the definition with `setDefinition()`, or open the plugin's
+  editor with `openEditor()`.
 - **It has no time of day.** The day is the smallest unit. If your plugin needs hours, derive them yourself.
 - **It has no eras.** Eras on a timeline belong to your plugin. (The era timeline in §7b is about weather.)
 
@@ -511,6 +512,7 @@ What this is not:
 interface SeshatAPI {
   calendar: () => SeshatCalendarView | null;
   compile: (input: string | CalendarAst) => { calendar: SeshatCalendarView } | { problems: Problem[] };
+  setDefinition: (input: string | CalendarAst) => Promise<{ ok: true } | { ok: false; problems: Problem[] }>;
   openEditor: () => Promise<void>;
 }
 ```
@@ -526,6 +528,22 @@ A view is a snapshot and never changes under you: when `adapters-changed` fires,
 
 Takes Seshat text or a `CalendarAst`, and returns a view of it without touching the world, or the list of `problems`
 if it fails the checks a world's calendar must pass. It doesn't throw for a bad definition.
+
+### `setDefinition(input)`
+
+Replaces the definition the world runs, with text or a `CalendarAst`. To change one thing, read `calendar().definition`,
+copy it, change the copy and pass it back. The definition is stored in canonical form, so comments in text are removed.
+
+There's no confirmation and no preview: the write applies. *Undo the last calendar change* in the plugin's settings steps
+back through it, over the last 10 changes. If the Studio has unsaved calendar edits, its next Save asks whether to overwrite
+your write or reload it. Writes run one at a time, and the last one wins.
+
+It can change the weather: a changed year length, or a tag a zone's modifier matches, moves reports. `profiles-changed`
+fires when it does, and a plugin that doesn't use weather can ignore it.
+
+**Returns:** `{ ok: true }` once the running calendar has changed, so `calendar()` already reads the new one. Otherwise
+`{ ok: false, problems }`, with nothing changed, when the world doesn't run a definition, the definition fails the checks
+`compile` makes, or the save fails.
 
 ### `openEditor()`
 

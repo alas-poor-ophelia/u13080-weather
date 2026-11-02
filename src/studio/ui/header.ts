@@ -46,8 +46,6 @@ import { calendarAfterSave, resolveConflict, studioSave } from "../model/definit
 import { followMoonRenames, moonRenames } from "../model/moon-rename";
 import { confirmRewrite } from "./rewrite-confirm-modal";
 import { askCalendarConflict } from "./calendar-conflict-modal";
-import { askKeptOnCalendarChange, dropKeptIn } from "../../plugin/upgrade-modals";
-import { legacyCalendarMoved } from "../../plugin/upgrade";
 import type { StudioState } from "../model/state";
 import { issuesFor, saveLabel, type StudioIssue } from "../model/validation";
 import { goToWindow, parseGoTo } from "../model/date-nav";
@@ -437,13 +435,6 @@ export function createHeaderSurface(): Surface {
     }
     const text = plan.kind === "definition" ? plan.text : null;
     // kept weather stays on its day numbers under a changed calendar; settings' Remove kept weather takes it away
-    let removeKept = false;
-    if (plan.kind === "legacy" && legacyCalendarMoved(settings.calendar, state.world.calendar)) {
-      // a legacy calendar change takes kept weather with it or not: a world with kept weather is asked here
-      const kept = await askKeptOnCalendarChange(c.plugin.app, c.plugin);
-      if (kept === null) return;
-      removeKept = kept.removeKept === true;
-    }
     // a moon renamed in the draft (same body id; same position on the legacy calendar) carries every reference to
     // its old name, in every zone and device preset, in this same save (bead wadjet-noy); the history's drafts
     // follow too, so undo takes the moon and its references back together
@@ -475,17 +466,8 @@ export function createHeaderSurface(): Surface {
     settings.regimePresets = structuredClone(state.world.regimePresets);
     settings.overrides = structuredClone(state.world.overrides);
     // saveDefinition saves every field above with it, then swaps the running calendar only once the write landed
-    if (text !== null) await c.plugin.calendars.saveDefinition(text, removeKept ? { removeKept: true } : {});
-    else {
-      // the kept weather goes in this same save, and comes back if it fails (commit() reports the failure)
-      const undrop = removeKept ? dropKeptIn(settings) : () => undefined;
-      try {
-        await c.plugin.saveAndRebuild();
-      } catch (e) {
-        undrop();
-        throw e;
-      }
-    }
+    if (text !== null) await c.plugin.calendars.saveDefinition(text);
+    else await c.plugin.saveAndRebuild();
     // the draft takes the calendar as written or as stored: the Studio's "last loaded or saved" (calendarBase)
     reseed(calendarAfterSave(plan, state.world.calendar, text), false);
     // `markSaved` first, so the repaint lands on `Saved ✓` directly

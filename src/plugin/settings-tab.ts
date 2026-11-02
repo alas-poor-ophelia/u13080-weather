@@ -25,12 +25,12 @@ import type WadjetPlugin from "./main";
 import { generatedPatch } from "./pins";
 import { dropKeptZone, keptSpan } from "./keep";
 import { keptChangedNote, keptRowDesc, legacyCalendarKey, PREVIOUS_GENERATOR_DESC } from "./upgrade";
-import { askKeptOnCalendarChange, confirmRemoveKept, dropKeptIn, keptCount, openUpgradeFirst, UpgradeModal } from "./upgrade-modals";
+import { confirmRemoveKept, dropKeptIn, keptCount, openUpgradeFirst, UpgradeModal } from "./upgrade-modals";
 import { parseJsonLenient } from "./json-lenient";
 import { MODIFIER_EXAMPLES, MODIFIER_GRAMMAR } from "./modifier-examples";
 import { generatorMismatch } from "./settings";
 import { MAX_DAY_ORDINAL } from "./world";
-import { SESHAT_ID, type KeptChoice } from "./calendars";
+import { SESHAT_ID } from "./calendars";
 import { DefinitionModal, OptInModal } from "./calendar-modals";
 import { calendarRow, definitionSummary, type CalendarRow } from "./calendar-row";
 import { uniqueId, zoneFromGeography, zoneFromPreset } from "./zones";
@@ -97,13 +97,6 @@ export class WadjetSettingTab extends PluginSettingTab {
       this.update();
     }
     new Notice("The kept weather was removed.");
-  }
-
-  /** A calendar change without a dialog of its own: kept weather asked about first; null when cancelled (the rows show the stored values again). */
-  private async keptChoice(): Promise<KeptChoice | null> {
-    const choice = await askKeptOnCalendarChange(this.app, this.plugin);
-    if (choice === null) this.update();
-    return choice;
   }
 
   private saveAndRefresh(rebuild: boolean): void {
@@ -463,10 +456,8 @@ export class WadjetSettingTab extends PluginSettingTab {
     if (target?.activeTimeAdapter === SESHAT_ID && this.plugin.generatorMode() === "previous") {
       return openUpgradeFirst(this.app, this.plugin, way === "undo" ? "Undo the last calendar change" : "Redo the calendar change", () => this.update());
     }
-    const choice = await this.keptChoice();
-    if (choice === null) return;
     try {
-      await (way === "undo" ? this.plugin.calendars.undo(choice) : this.plugin.calendars.redo(choice));
+      await (way === "undo" ? this.plugin.calendars.undo() : this.plugin.calendars.redo());
       new Notice(way === "undo" ? "The last calendar change was undone." : "The calendar change was redone.");
     } catch (e) {
       new Notice(`The calendar change could not be ${way === "undo" ? "undone" : "redone"}: ${e instanceof Error ? e.message : String(e)}`);
@@ -525,9 +516,7 @@ export class WadjetSettingTab extends PluginSettingTab {
           return openUpgradeFirst(this.app, this.plugin, "Change calendar", () => this.update());
         }
         try {
-          const choice = String(value) === s.activeTimeAdapter ? {} : await this.keptChoice();
-          if (choice === null) return;
-          await this.plugin.calendars.setActive(String(value), choice);
+          await this.plugin.calendars.setActive(String(value));
         } catch (e) {
           new Notice(`The calendar source could not be saved, so it was left as it was: ${e instanceof Error ? e.message : String(e)}`);
         } finally {

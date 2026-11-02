@@ -11251,4 +11251,50 @@ describe("climate studio · calendar orrery", () => {
       await nextFrame();
     }
   });
+
+  test("step 105: api.seshat.setDefinition replaces the calendar with no question; with unsaved edits in the Studio, its Save asks Overwrite or Reload", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    const write = (text: string) => withApp(ob.page, (_app, t: string) => (window as unknown as { Wadjet: { seshat: { setDefinition(x: string): Promise<{ ok: boolean }> } } }).Wadjet.seshat.setDefinition(t), text);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+
+      // no unsaved edits: the write lands, no modal, and the Orrery follows
+      expect(await write(GREGORIAN_TEXT.replace("NAME:Gregorian", "NAME:From a plugin"))).toEqual({ ok: true });
+      expect(stored()).toContain("NAME:From a plugin");
+      expect(await ob.page.locator(".modal-container .modal").count()).toBe(0);
+      await expect.poll(async () => ((await win.locator(".wadjet-studio-orrery-text").first().textContent()) ?? ""), { timeout: 10_000 }).toContain("NAME:From a plugin");
+
+      // an edit in the Studio, then a plugin's write: Save asks, and Reload takes the plugin's
+      await win.locator('.wadjet-studio-orrery-add[data-add="season"]').click();
+      await passAnyConfirm();
+      await expect.poll(async () => ((await win.locator(".wadjet-studio-orrery-chip-label").first().textContent()) ?? ""), { timeout: 10_000 }).toContain("●");
+      expect(await write(GREGORIAN_TEXT.replace("NAME:Gregorian", "NAME:Second plugin write"))).toEqual({ ok: true });
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "The calendar changed outside the studio" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      await dialog.locator("button:has-text('Reload')").click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+      expect(stored()).toContain("NAME:Second plugin write");
+      expect(stored()).not.toContain("BEGIN:VSEASONS");
+      console.log("  · setDefinition: no question; over unsaved Studio edits, Save asked and Reload kept the plugin's write");
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
 });

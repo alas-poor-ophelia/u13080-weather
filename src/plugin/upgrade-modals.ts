@@ -6,7 +6,6 @@
  */
 import { Modal, Notice, Setting, type App, type ButtonComponent, type TextComponent } from "obsidian";
 import type WadjetPlugin from "./main";
-import type { KeptChoice } from "./calendars";
 import { dayFieldText, type DayText } from "./current-day";
 import { keepSourceOf, keptSpan, removeKeptWeather, scanKeep, upgradeWorld, type FrozenDay, type KeepScan } from "./keep";
 import type { WadjetSettings } from "./settings";
@@ -369,28 +368,6 @@ export function confirmRemoveKept(app: App, count: number): Promise<boolean> {
 /** The world's readable kept days, or 0. */
 export function keptCount(plugin: WadjetPlugin): number {
   return keptSpan(plugin.settings)?.count ?? 0;
-}
-
-/**
- * Before a calendar change that has no dialog of its own (the legacy calendar's rows, the Studio's legacy save,
- * the calendar chooser, Undo): on a world with kept weather, ask whether it stays (§17.5 item 8). Resolves the
- * choice, `{}` at once when there is none kept, or null on Cancel.
- */
-export function askKeptOnCalendarChange(app: App, plugin: WadjetPlugin): Promise<KeptChoice | null> {
-  const count = keptCount(plugin);
-  if (count === 0) return Promise.resolve({});
-  return new Promise((resolve) =>
-    new ChoiceModal<KeptChoice>(
-      app,
-      "Change the calendar?",
-      `${keptCalendarNote(count)} They were made under the old calendar's seasons and moons.`,
-      [
-        { label: "Remove kept weather", value: { removeKept: true }, warning: true },
-        { label: "Keep them", value: { removeKept: false }, cta: true },
-      ],
-      resolve,
-    ).open(),
-  );
 }
 
 /**

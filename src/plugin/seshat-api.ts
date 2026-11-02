@@ -53,6 +53,11 @@ export interface SeshatAPI {
   calendar: () => SeshatCalendarView | null;
   /** run any definition without touching the world, under the checks a world's calendar must pass */
   compile: (input: string | CalendarAst) => { calendar: SeshatCalendarView } | { problems: Problem[] };
+  /**
+   * Replace the definition the world runs, with no question: an edit applies, and undo steps back through it. Resolved
+   * once the running calendar has changed. `ok: false` when the world does not run a definition, or this one cannot run.
+   */
+  setDefinition: (input: string | CalendarAst) => Promise<{ ok: true } | { ok: false; problems: Problem[] }>;
   /** open the Studio with the calendar editor up, as the ruler's Calendar button does */
   openEditor: () => Promise<void>;
 }
@@ -62,6 +67,8 @@ export interface SeshatApiHost {
   /** throws once the plugin has unloaded */
   live: () => void;
   openEditor?: () => Promise<void>;
+  /** store a definition the world runs (main.ts); tests may leave it out */
+  saveDefinition?: (text: string) => Promise<void>;
 }
 
 function deepFreeze<T>(v: T): T {
@@ -103,6 +110,20 @@ function viewOf(text: string): SeshatCalendarView | string {
   });
 }
 
+/** The canonical text of a definition that passes the checks a world's calendar must, or its problems. */
+function checkedText(input: string | CalendarAst): string | { problems: Problem[] } {
+  let text: string;
+  try {
+    if (typeof input === "string") text = input;
+    else if (typeof input === "object" && input !== null) text = print(input);
+    else return { problems: [{ message: "a definition is Seshat text or a calendar AST" }] };
+  } catch (e) {
+    return { problems: [{ message: e instanceof Error ? e.message : String(e) }] };
+  }
+  const prepared = prepareDefinition(text);
+  return "error" in prepared ? { problems: prepared.problems } : prepared.text;
+}
+
 export function makeSeshatApi(host: SeshatApiHost): SeshatAPI {
   // the view of the stored text last asked for: plugins may ask on every render
   let cached: { stored: unknown; view: SeshatCalendarView | null } | null = null;
@@ -120,18 +141,23 @@ export function makeSeshatApi(host: SeshatApiHost): SeshatAPI {
     },
     compile: (input) => {
       host.live();
-      let text: string;
-      try {
-        if (typeof input === "string") text = input;
-        else if (typeof input === "object" && input !== null) text = print(input);
-        else return { problems: [{ message: "a definition is Seshat text or a calendar AST" }] };
-      } catch (e) {
-        return { problems: [{ message: e instanceof Error ? e.message : String(e) }] };
-      }
-      const prepared = prepareDefinition(text);
-      if ("error" in prepared) return { problems: prepared.problems };
-      const view = viewOf(prepared.text);
+      const checked = checkedText(input);
+      if (typeof checked !== "string") return checked;
+      const view = viewOf(checked);
       return typeof view === "string" ? { problems: [{ message: view }] } : { calendar: view };
+    },
+    setDefinition: async (input) => {
+      host.live();
+      if (!host.saveDefinition) throw new Error("This host stores no calendar.");
+      if (!(host.time.active instanceof SeshatCalendar)) return { ok: false, problems: [{ message: "this world does not run a calendar definition; openEditor leads to Change calendar" }] };
+      const checked = checkedText(input);
+      if (typeof checked !== "string") return { ok: false, ...checked };
+      try {
+        await host.saveDefinition(checked);
+      } catch (e) {
+        return { ok: false, problems: [{ message: e instanceof Error ? e.message : String(e) }] };
+      }
+      return { ok: true };
     },
     openEditor: async () => {
       host.live();

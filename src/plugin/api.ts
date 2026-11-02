@@ -85,6 +85,8 @@ export interface ApiHost {
   units: () => Units;
   /** open the Studio with the calendar editor up (main.ts); tests may leave it out */
   openCalendarEditor?: () => Promise<void>;
+  /** store a definition the world runs (main.ts); tests may leave it out */
+  saveDefinition?: (text: string) => Promise<void>;
 }
 
 export const UNLOADED_CODE = "wadjet-unloaded";
@@ -356,7 +358,7 @@ export class ApiController {
         return this.interpreters.run(id, copyForInterpreter(report), ctx) as T;
       },
 
-      seshat: makeSeshatApi({ time, live, ...(this.host.openCalendarEditor ? { openEditor: this.host.openCalendarEditor } : {}) }),
+      seshat: makeSeshatApi({ time, live, ...(this.host.openCalendarEditor ? { openEditor: this.host.openCalendarEditor } : {}), ...(this.host.saveDefinition ? { saveDefinition: this.host.saveDefinition } : {}) }),
 
       on: (event, cb) => (live(), this.once(world.on(event, cb))),
     };

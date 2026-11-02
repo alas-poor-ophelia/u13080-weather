@@ -674,6 +674,11 @@ export interface SeshatAPI {
   calendar: () => SeshatCalendarView | null;
   /** run any definition without touching the world, under the checks a world's calendar must pass */
   compile: (input: string | CalendarAst) => { calendar: SeshatCalendarView } | { problems: Problem[] };
+  /**
+   * Replace the definition the world runs, with no question: an edit applies, and undo steps back through it. Resolved
+   * once the running calendar has changed. `ok: false` when the world does not run a definition, or this one cannot run.
+   */
+  setDefinition: (input: string | CalendarAst) => Promise<{ ok: true } | { ok: false; problems: Problem[] }>;
   /** open the Studio with the calendar editor up, as the ruler's Calendar button does */
   openEditor: () => Promise<void>;
 }

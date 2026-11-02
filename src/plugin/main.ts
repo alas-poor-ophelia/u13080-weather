@@ -109,7 +109,7 @@ export default class WadjetPlugin extends Plugin {
     this.internalHash = this.internalCalendar.configHash();
     this.time.register(this.internalCalendar);
     this.world = new World(this.worldState(), this.time);
-    this.controller = new ApiController({ version: this.manifest.version, world: this.world, time: this.time, units: () => this.settings.units, openCalendarEditor: () => openCalendarEditor(this) });
+    this.controller = new ApiController({ version: this.manifest.version, world: this.world, time: this.time, units: () => this.settings.units, openCalendarEditor: () => openCalendarEditor(this), saveDefinition: (text) => this.calendars.saveDefinition(text, { renames: "byUid" }) });
     this.api = this.controller.api;
     this.calendars = new Calendars({
       settings: () => this.settings,

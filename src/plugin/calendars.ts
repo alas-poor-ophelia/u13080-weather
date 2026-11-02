@@ -131,6 +131,17 @@ export class Calendars {
     }
   }
 
+  /**
+   * Calendar writes run one at a time (§19.2): each changes settings, awaits the save, and on a failure puts back what
+   * it changed, so two overlapping would undo each other's work. The last write still wins.
+   */
+  private turn: Promise<unknown> = Promise.resolve();
+  private inTurn(write: () => Promise<void>): Promise<void> {
+    const run = this.turn.then(write, write);
+    this.turn = run.catch(() => undefined);
+    return run;
+  }
+
   /** The calendar as it is now, for the undo record (§15.9 S6): the stored definition (if any) and the active adapter. */
   private snapshot(): PreviousCalendar {
     const c = this.host.settings().calendar;
@@ -197,7 +208,11 @@ export class Calendars {
    * time-changed and adapters-changed once each when the effective calendar
    * changed. A failed save puts the old choice back.
    */
-  async setActive(id: string, opts: KeptChoice = {}): Promise<void> {
+  setActive(id: string, opts: KeptChoice = {}): Promise<void> {
+    return this.inTurn(() => this.doSetActive(id, opts));
+  }
+
+  private async doSetActive(id: string, opts: KeptChoice): Promise<void> {
     if (id === SESHAT_ID) this.refusePrevious();
     const s = this.host.settings();
     const before = this.host.time.active;
@@ -232,9 +247,13 @@ export class Calendars {
    * or a faulted one kept byte for byte) without `replaceStored`. On a world
    * that already runs `seshat` it is a definition edit (saveDefinition).
    */
-  async optIn(text: string, opts: { replaceStored?: boolean } & KeptChoice = {}): Promise<void> {
+  optIn(text: string, opts: { replaceStored?: boolean } & KeptChoice = {}): Promise<void> {
+    return this.inTurn(() => this.doOptIn(text, opts));
+  }
+
+  private async doOptIn(text: string, opts: { replaceStored?: boolean } & KeptChoice): Promise<void> {
     this.refusePrevious();
-    if (this.seshat && this.host.time.active === this.seshat) return this.saveDefinition(text, opts.removeKept ? { removeKept: true } : {});
+    if (this.seshat && this.host.time.active === this.seshat) return this.doSaveDefinition(text, opts.removeKept ? { removeKept: true } : {});
     const prepared = prepareDefinition(text);
     if ("error" in prepared) throw new DefinitionError(prepared.error, prepared.line);
     const s = this.host.settings();
@@ -294,7 +313,11 @@ export class Calendars {
    * stayed and whose MOON name changed). None by default: the Studio Save has
    * renamed them itself, and Change calendar's switch is not a rename.
    */
-  async saveDefinition(text: string, opts: { renames?: MoonRenames | "byUid" } & KeptChoice = {}): Promise<void> {
+  saveDefinition(text: string, opts: { renames?: MoonRenames | "byUid" } & KeptChoice = {}): Promise<void> {
+    return this.inTurn(() => this.doSaveDefinition(text, opts));
+  }
+
+  private async doSaveDefinition(text: string, opts: { renames?: MoonRenames | "byUid" } & KeptChoice): Promise<void> {
     const prepared = prepareDefinition(text);
     if ("error" in prepared) throw new DefinitionError(prepared.error, prepared.line);
     const s = this.host.settings();
@@ -388,7 +411,11 @@ export class Calendars {
    * renamed back with its references in the same save, and forward again on
    * redo (bead wadjet-zoy; derived from the two definitions, nothing stored).
    */
-  async undo(opts: KeptChoice = {}): Promise<void> {
+  undo(opts: KeptChoice = {}): Promise<void> {
+    return this.inTurn(() => this.doUndo(opts));
+  }
+
+  private async doUndo(opts: KeptChoice): Promise<void> {
     const c = this.host.settings().calendar;
     const p = c.previous;
     if (!p) throw new DefinitionError("there is no calendar change to undo");
@@ -403,7 +430,11 @@ export class Calendars {
   }
 
   /** Put back the change undone last. The same events as `undo`. */
-  async redo(opts: KeptChoice = {}): Promise<void> {
+  redo(opts: KeptChoice = {}): Promise<void> {
+    return this.inTurn(() => this.doRedo(opts));
+  }
+
+  private async doRedo(opts: KeptChoice): Promise<void> {
     const c = this.host.settings().calendar;
     const p = c.undone?.[c.undone.length - 1];
     if (!p) throw new DefinitionError("there is no calendar change to redo");
