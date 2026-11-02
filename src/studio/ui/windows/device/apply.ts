@@ -4,7 +4,7 @@
  * (SPEC §5) — or, on the moon path, the one flex row that carries the gate
  * disc and those same knobs together (`0699-vst-stormtide.html` l.21-40).
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../../menus";
 import type { ModifierOp } from "../../../../core/types";
 import { opGloss, paramName } from "../../../model/copy";
 import { addOp, newOpFor, paramsByChannel, removeOp, setOpEnabled, setOpValue } from "../../../model/device-edit";
@@ -267,7 +267,7 @@ export function buildAddTarget(c: DeviceWindowContext, parent: HTMLElement, d: D
 }
 
 function openOpMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): void {
-  const menu = new Menu();
+  const menu = studioMenu();
   const groups = paramsByChannel(
     d.stage,
     d.apply.map((o) => o.param),

@@ -2578,8 +2578,9 @@ const regimesWindow = () => ob.page.locator(".wadjet-studio-window", { has: ob.p
  * the DOM while the menu is open, so a step that wants them has to open it.
  */
 /**
- * Escape closes an Obsidian menu, but the first press can do nothing (seen from 2026-11-02 on this box, on builds that
- * had passed the day before; the press reaches the page and nothing prevents it, and no cause is known), so press again.
+ * Close a menu with focus outside the Studio (the callers blur first). There the Studio's own Escape (menus.ts) does not
+ * apply, and Obsidian's first press can do nothing: seen from 2026-11-02, when the harness began running Obsidian 1.15.0,
+ * on builds that had passed on 1.14.5. So press until it closes.
  */
 async function closeMenu(menu: Locator): Promise<void> {
   await expect
@@ -11330,5 +11331,54 @@ describe("climate studio · calendar orrery", () => {
     await call("clear");
     await expect.poll(onDisk, { timeout: 10_000 }).toBeNull();
     console.log("  · marks: stored in data.json under the plugin's name, read back, cleared");
+  });
+
+  test("step 107: one Escape closes a preset menu and leaves its window; a week and seasons with no filler days say what to do, and with one the switch is there and the inspector scrolls to its end", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const windows = (id: string, how: string) => withApp(ob.page, (app, a: { type: string; id: string; how: string }) => app.workspace.getLeavesOfType(a.type)[0]?.view.windows[a.how](a.id), { type: VIEW_TYPE, id, how });
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(800, work.height));
+      await revealStudio();
+      await windows("regimes", "open");
+      const reg = ob.page.locator('.wadjet-studio-window[data-kind="regimes"]').first();
+      await reg.waitFor({ state: "visible", timeout: 10_000 });
+      await reg.locator(".wadjet-studio-window-preset-pick").click();
+      const menu = ob.page.locator(".menu").last();
+      await menu.waitFor({ state: "visible", timeout: 5_000 });
+      await ob.page.keyboard.press("Escape"); // focus still on the chip, as a person leaves it
+      await menu.waitFor({ state: "hidden", timeout: 2_000 });
+      expect(await reg.isVisible()).toBe(true);
+      await ob.page.keyboard.press("Escape"); // with no menu up, Escape closes the window as ever
+      await reg.waitFor({ state: "detached", timeout: 5_000 });
+
+      await windows("orrery", "open");
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:weekday"]').click();
+      await expect.poll(async () => (await win.locator('[data-part="cycle-skips-none"]').textContent()) ?? "", { timeout: 10_000 }).toContain("No filler days to skip");
+      expect(await win.locator('[data-part="cycle-skips"]').count()).toBe(0);
+
+      // nothing in the inspector shrinks onto what follows it, and all of it can be reached
+      const fits = await win.locator(".wadjet-studio-orrery-inspector").evaluate((el) => {
+        const kids = Array.from(el.children).filter((c) => (c as HTMLElement).offsetHeight > 0) as HTMLElement[];
+        const overlaps = kids.filter((k, i) => i > 0 && k.offsetTop < kids[i - 1]!.offsetTop + kids[i - 1]!.offsetHeight - 1).length;
+        el.scrollTop = el.scrollHeight;
+        const last = kids[kids.length - 1]!.getBoundingClientRect();
+        return { overlaps, reachable: last.bottom <= el.getBoundingClientRect().bottom + 1 };
+      });
+      expect(fits).toEqual({ overlaps: 0, reachable: true });
+      console.log("  · Escape: one press closes the menu only; no filler days: the inspector says so, and scrolls to its end");
+    } finally {
+      await windows("orrery", "close");
+      await windows("regimes", "close");
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
   });
 });

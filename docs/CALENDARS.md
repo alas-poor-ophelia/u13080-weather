@@ -35,12 +35,16 @@ every part of the language, its limits and its messages. To go straight to one t
 A new world starts on a plain definition: 365-day years from year 1, one moon, no seasons, named
 "Calendar". You can change it in three places.
 
-- **The Studio's Calendar window.** The ruler's `Calendar ⚑` button opens it. On a world that runs
-  a definition it has the tabs **Seasons**, **Year**, **Months**, **Week** and **Exceptions**, which
-  edit the definition through fields. Field edits are saved with the Studio's Save. A part the
-  fields cannot show (a year that follows a moon, or a month with a leap rule of its own) says so
-  and offers *Edit as text*. *Edit as text* opens the stored definition, so it does not open while
-  the window has unsaved field edits: it asks you to save or undo them first.
+- **The Studio's Calendar window.** The ruler's `Calendar ⚑` button opens it, in the view you last used. The
+  *Orrery | Form* toggle in its title bar switches between its two views, which edit the same draft. Edits are saved with
+  the Studio's Save.
+  - **The Orrery** draws the calendar as a machine. Select a part from the list on the left or on the drawing, and edit it in
+    the inspector on the right, which also shows the part as text. The transport under the drawing moves the Orrery's own day
+    and can run it; that day isn't the world's current day. See [The Orrery](#the-orrery).
+  - **The Form** has the tabs **Seasons**, **Year**, **Months**, **Week** and **Exceptions**, which edit the definition
+    through fields. A part the fields cannot show (a year that follows a moon, or a month with a leap rule of its own) says
+    so and offers *Edit as text*. *Edit as text* opens the stored definition, so it does not open while the window has unsaved
+    field edits: it asks you to save or undo them first.
 - ***Settings → Calendar → Edit definition.*** Opens the *Calendar definition* dialog: the
   definition as text. *Save* checks it; a problem is shown under the text and nothing is saved.
 - ***Settings → Calendar → Change calendar…*** Opens the *Change calendar* dialog. *Start from*
@@ -57,6 +61,24 @@ Orrery and type the date into *today is*: the whole calendar moves, and stored d
 Your weather, pins and the current day are stored as **day numbers**. A definition decides which
 date each day number is. Day numbers appear in the text as `D` followed by the number: `D0`,
 `D1500`, `D-365`.
+
+### The Orrery
+
+| Select | To edit |
+| --- | --- |
+| The year | Its length; *today is*, which moves the whole calendar so the day the Orrery is showing (today, until you move it) reads as the date you type |
+| A month or other slot unit, or one slot | Slots: add, remove, move, rename, set their days, make one a filler, or the one that takes the days left over |
+| A moon | Its period, its starting phase and its named phases |
+| A leap rule (gear) | Its rule, and what it adds to |
+| A crossing, its train or a stage | Their numbers and rules, on a year or month that follows a crossing |
+| A labelled cycle, such as the weekday | Its name and labels, *today is*, and *skips filler days* |
+| The seasons | Each mark, as a fraction, a day of the year or a day of a month, and *skip filler days* |
+
+A refused edit says why under the part and changes nothing. A draft that can't run keeps the editors open and says the
+drawing is out of date.
+
+The Orrery doesn't do everything the text can. To add a new cycle or slot unit, or to edit a named rule, use *Edit as text*.
+The same goes for switching a crossing between numbers and a body, for a stage's residue offset, and for turning a *train* on or off.
 
 ## How do I…
 
@@ -817,7 +839,7 @@ Limits:
 
 - `SKIPS` names a slot unit directly under a cycle unit (months in a year, not tendays in a month). All its filler days are
   skipped; you can't skip some festivals and count others.
-- Each filler slot it skips has a number of days, with or without leap rules: not `SLACK` and not a table.
+- Each filler slot it skips has a fixed number of days, with or without leap rules: not `SLACK` and not a table.
 - Every year must hold at least one day that isn't a filler day.
 - The unit's `ANCHOR` and any `STARTS` day can't be a filler day it skips.
 - The unit can't have a crossing, stages or a slot unit inside it, and seasons can't run over it.
@@ -973,8 +995,8 @@ Without it, a festival day has the season around it. With it, a festival day has
 rules see none. Weather doesn't change: a zone's season modifiers still apply on that day, using the season around it.
 To give a festival its own weather, tag its slot and match the tag in a modifier.
 
-In the Studio's Orrery, select the seasons and turn on *skip filler days*. While it's on, the Seasons window only shows the
-seasons, and you edit them in the Orrery or as text.
+In the Studio's Orrery, select the seasons and turn on *skip filler days*. While it's on, the Seasons window shows the
+seasons but can't edit them: edit them in the Orrery or as text.
 
 ### Exceptions
 

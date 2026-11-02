@@ -18,7 +18,7 @@
  * origin is the part as the editor was built (and its stored value the
  * base's), and the editor never writes the store itself.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../menus";
 import { followSentence } from "../../../plugin/time/form";
 import type { CalendarAst, CrossingAst, CycleUnitAst, PartId, Rational } from "../../../seshat";
 import { toNumber } from "../../../seshat/rational";
@@ -131,7 +131,7 @@ export function buildCrossingEditor(parent: HTMLElement, deps: CrossingEditorDep
     const others = followable(deps.ast, id);
     if (others.length) {
       const pick = button(holder, "follow…", `Follow another body with the ${id}`, orreryHint("orrery.crossingFollow"), "crossing-follow", () => {
-        const menu = new Menu();
+        const menu = studioMenu();
         for (const o of followable(deps.ast, id))
           menu.addItem((item) =>
             item

@@ -10,7 +10,7 @@
  * `index.ts` reads `curseCollapsed` to know whether to draw APPLY at all. Every
  * other tag device keeps the row *and* everything under it, expanded.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../../menus";
 import type { CalendarDescription } from "../../../../plugin/time/adapter";
 import { paramName } from "../../../model/copy";
 import { setWhen } from "../../../model/device-edit";
@@ -108,7 +108,7 @@ export function buildTag(c: DeviceWindowContext, parent: HTMLElement, d: Device,
     hint: deviceHint("device.when.tagAdd"),
     cls: "wadjet-studio-device-add",
     onClick: (ev) => {
-      const menu = new Menu();
+      const menu = studioMenu();
       const offered = tagSources(seasons, c.ctx.store.get().world.eras).filter((t) => !tags.includes(t));
       for (const tag of offered) menu.addItem((item) => item.setTitle(tag).onClick(() => toggleTag(c, tag, true)));
       if (offered.length === 0) menu.addItem((item) => item.setTitle("No other seasons or eras").setDisabled(true));

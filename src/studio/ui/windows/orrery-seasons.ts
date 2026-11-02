@@ -18,7 +18,7 @@
  * (the Seasons window's draft) while every mark is a fraction, through the
  * AST layer once one is dated. The Seasons window reads the same draft.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../menus";
 import type { CalendarAst, SeasonMarkAst } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
@@ -27,7 +27,7 @@ import { addMark, dayRange, seasonsSkipTarget, setSeasonsSkip, FROM, kindOf, MAR
 import { cycleColour, SEASON_CYCLE } from "../../model/palette";
 import { createKnob, createSegmented, type KnobComponent, type SegmentedComponent } from "../components";
 import { button, input, type EditPhase, type PartEditor } from "./orrery-body";
-import { toggle } from "./orrery-slots";
+import { NO_FILLER_DAYS, toggle } from "./orrery-slots";
 
 export interface SeasonsEditorDeps {
   /** the draft AST (the one the edits read) */
@@ -106,7 +106,7 @@ export function buildSeasonsEditor(parent: HTMLElement, deps: SeasonsEditorDeps)
       const u = units.find((x) => x.id === m.slot.unit);
       const slotName = (k: number): string => u?.slots[k]?.name ?? `${m.slot.unit} ${k + (u?.number ?? 1)}`;
       const pick = button(knobRow, `${slotName(m.slot.index)} ▾`, `The month the season ${m.name} starts in`, orreryHint("orrery.markSlot"), `mark-${i}-slot`, () => {
-        const menu = new Menu();
+        const menu = studioMenu();
         (u?.slots ?? []).forEach((_, k) =>
           menu.addItem((item) =>
             item
@@ -135,8 +135,10 @@ export function buildSeasonsEditor(parent: HTMLElement, deps: SeasonsEditorDeps)
     );
   });
   // a filler day has the season around it unless the seasons skip it; weather reads that season either way
-  if (marks.length && (deps.ast.seasons?.skips !== undefined || seasonsSkipTarget(deps.ast) !== null)) {
-    parts.push(toggle(parent.createDiv({ cls: "wadjet-studio-orrery-section" }), "skip filler days", deps.ast.seasons?.skips !== undefined, orreryHint("orrery.seasonsSkip"), "seasons-skip", (on) => deps.edit((c) => setSeasonsSkip(c, on), "click")));
+  if (marks.length) {
+    const sw = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
+    if (deps.ast.seasons?.skips !== undefined || seasonsSkipTarget(deps.ast) !== null) parts.push(toggle(sw, "skip filler days", deps.ast.seasons?.skips !== undefined, orreryHint("orrery.seasonsSkip"), "seasons-skip", (on) => deps.edit((c) => setSeasonsSkip(c, on), "click")));
+    else sw.createDiv({ cls: "wadjet-studio-orrery-note", text: NO_FILLER_DAYS, attr: { "data-part": "seasons-skip-none" } });
   }
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
   button(ops, "＋ mark", "Add a season", orreryHint("orrery.addMark"), "add-mark", () => deps.edit((c) => addMark(c, deps.phases), "click"));

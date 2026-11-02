@@ -353,7 +353,10 @@ another: a real-world one (Gregorian, Hebrew, tabular Islamic, Coptic, Ethiopian
 Republican, Baháʼí, Roman, Harptos) or your own, written as Seshat text, with months, leap years and
 named holidays that modifiers can match as tags. Keep day numbers or anchor today to a date.
 
-Edit a definition in the Studio's **Calendar** window (the ruler's *Calendar ⚑* button): tabs for
+Edit a definition in the Studio's **Calendar** window (the ruler's *Calendar ⚑* button). It opens on the **Orrery**, the
+calendar drawn as a working machine: select a part, watch it turn, and edit it in the inspector. A week can skip festival days
+there, as can the seasons. The Orrery can't add a new cycle or slot unit or edit a named rule; *Edit as text* does those. The
+window's *Form* view has tabs for
 the seasons, the year (its length, its first year, its leap rules), the months, the week, and the
 **exceptions**, the calendar's one-off corrections: name a single day, cancel one day of a named
 rule, move one year's first day, set one year's month lengths. A part the fields cannot show (a year that follows
@@ -419,6 +422,10 @@ Changing the seed, the year length, a zone's climate, the calendar's moons or th
 > **A**: During the alpha, honestly.... yeah, probably. I'll do my best, but there may be some flex out of necessity. After the alpha, I expect it to be very rare. Pinned days keep the values you pinned through any generator change.
 
 ## Other Plugins (API)
+
+Another plugin can read weather and move the day, and since `apiVersion` 2 it can also use the world's calendar: read its whole
+structure, ask it any date question, replace its definition, open its editor and keep marks of its own. See `api.seshat` in
+[docs/API.md](docs/API.md) §1b. Your plugin's users need U+13080 installed. Seshat isn't a package you can import on its own.
 
 The API is `app.plugins.plugins.wadjet.api` (also `window.Wadjet`). It exists once the plugin has
 loaded and is usable once `ready` is `true`:

@@ -195,6 +195,11 @@ export class WadjetSettingTab extends PluginSettingTab {
             // what the world runs on, in words, and what can be done from there (bead wadjet-44d)
             name: row.name,
             desc: row.desc,
+          },
+          {
+            // on a row of their own: beside the description they squeezed it to one word a line
+            name: "",
+            desc: "",
             render: (setting) => {
               for (const action of row.actions) {
                 if (action === "edit") setting.addButton((b) => b.setButtonText("Edit definition").onClick(() => new DefinitionModal(this.app, this.plugin, () => this.update()).open()));

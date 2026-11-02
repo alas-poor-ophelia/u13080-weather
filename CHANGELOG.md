@@ -2,6 +2,52 @@
 
 Release notes are taken from the matching `## <version>` section by the release workflow.
 
+## Unreleased
+
+### The Orrery
+
+- The Studio's calendar window now opens on the **Orrery**: your calendar drawn as a working machine, with its year, months,
+  weeks, moons and leap rules as parts you can select, watch turn and edit. The *Orrery | Form* toggle in its title bar goes
+  to the fields you already know, and the window remembers which you last used.
+- You can edit moons, the year and its months, leap rules, crossings, stages, labelled cycles and seasons there. Edits go in
+  the Studio's draft, with its undo and Save.
+- Not there yet: adding a new cycle or slot unit, editing named rules, and a few fine controls on crossings and stages. *Edit
+  as text* covers all of these.
+
+### Calendars
+
+- A week can now skip festival days (`SKIPS`). It stops on a filler day and carries on after it, so a calendar like the World
+  Calendar keeps every quarter starting on a Sunday. Weekdays used to run straight through filler days.
+- Seasons can skip them too. A festival day then reads as having no season in dates and calendar rules, while weather
+  carries on with the season around it. Without `SKIPS`, nothing changes.
+- In the Orrery these are the *skips filler days* switch on the weekday and the *skip filler days* switch on the seasons.
+
+### Editing a calendar
+
+- A calendar edit now just saves. *Save calendar changes?* is gone, and kept weather no longer asks a question when the
+  calendar changes: it stays on its day numbers, and *Remove* beside it in settings takes it away.
+- If an edit moves where years start, today's date moves with it. Select the year in the Orrery and type a date into *today is*
+  to put today back: the whole calendar moves, and stored day numbers stay where they are.
+- *Undo the last calendar change* now steps back through the last 10 changes, with a *Redo* button beside it. Undoing twice
+  used to redo.
+
+### Fixes
+
+- Pressing Escape with a menu open in a Studio window now closes the menu. It used to close the window under it.
+- The Orrery's inspector scrolls: its sections no longer squeeze onto each other in a short window.
+- The calendar row in settings puts its buttons on a row of their own, so the description has room.
+
+### For other plugins
+
+- `api.seshat` (`apiVersion` 2) opens the calendar to other plugins, and *docs/API.md* section 1b documents it:
+  - `calendar()` reads the whole structure of the world's calendar and answers any date question.
+  - `compile()` tries a definition without touching the world.
+  - `setDefinition()` replaces the definition.
+  - `openEditor()` opens the calendar editor, on a world with or without zones.
+  - `marks()` keeps a plugin's own days and spans, which never reach the weather.
+- `types/wadjet.d.ts` now holds the calendar's types.
+- `TimeContext` gains an optional `seasonless`.
+
 ## 0.5.0
 
 Your world can now run on a real calendar of your own, with months, weeks, leap years, moons and

@@ -19,7 +19,8 @@
  * every control reads the draft when it commits, a knob's origin is the gear
  * as the editor was built, and the editor never writes the store itself.
  */
-import { Menu, Modal, type App } from "obsidian";
+import { Modal, type App } from "obsidian";
+import { studioMenu } from "../menus";
 import type { CalendarAst, GearAst, PartId } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
 import { kindRoundTrips, switchesReading } from "../../model/ast-edit";
@@ -145,7 +146,7 @@ export function buildGearEditor(parent: HTMLElement, title: HTMLElement, deps: G
   const ops = parent.createDiv({ cls: "wadjet-studio-orrery-ops" });
   const plusFeed = button(ops, "＋ feed…", `Feed another length from ${id}`, orreryHint("orrery.addFeed"), "add-feed", () => {
     const targets = feedTargets(deps.ast, id);
-    const menu = new Menu();
+    const menu = studioMenu();
     if (!targets.length) menu.addItem((item) => item.setTitle("Nothing left to feed").setDisabled(true));
     for (const x of targets)
       menu.addItem((item) =>

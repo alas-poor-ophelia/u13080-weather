@@ -25,7 +25,7 @@ export interface DefinitionRows {
   readonly seasons: DefinitionRow<string>;
 }
 
-export const YEAR_EDIT_DESC = "Changing it moves the seasons. Saving shows which days' weather changes.";
+export const YEAR_EDIT_DESC = "Changing it moves the seasons, so weather can change on any day.";
 export const MOONS_DESC = "One per line: name, cycle in days, phase at day 0 (0–1), then optionally named phases as name@fraction (e.g. Full@0.5), ascending and unique. Only modifiers that mention a moon use them.";
 export const SEASONS_DESC = "One per line: name, start (0–1 through the year). Each becomes a season tag that modifiers can match.";
 

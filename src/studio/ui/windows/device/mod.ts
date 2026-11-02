@@ -8,7 +8,7 @@
  * (gap2 B4) — with their own envelope overlay in `env-moon.ts`. What the two
  * editors share is the point-editing itself (`envelopeEdits`), not the card.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../../menus";
 import type { ModifierOp } from "../../../../core/types";
 import { opGloss, paramName } from "../../../model/copy";
 import { addGate, removeGate, setEnvelope, setGateAmount, setGateSource } from "../../../model/device-edit";
@@ -128,7 +128,7 @@ function gateSources(c: DeviceWindowContext, used: readonly string[]): string[] 
 }
 
 function openGateMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): void {
-  const menu = new Menu();
+  const menu = studioMenu();
   const sources = gateSources(c, d.mods.map((g) => g.source));
   for (const source of sources) menu.addItem((item) => item.setTitle(source).onClick(() => c.mutate((x) => void addGate(x, source, 1), true)));
   if (sources.length === 0) menu.addItem((item) => item.setTitle("No seasons or eras yet").setDisabled(true));
@@ -137,7 +137,7 @@ function openGateMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): void {
 
 /** The ops an envelope could shape: `offset` and `scale` (`shapeable`), and not already carrying one. */
 function openEnvelopeMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): void {
-  const menu = new Menu();
+  const menu = studioMenu();
   const open = d.apply.map((op, i) => ({ op, i })).filter((o) => shapeable(o.op) && o.op.envelope === undefined);
   for (const { op, i } of open) {
     menu.addItem((item) => item.setTitle(`${paramName(op.param)} · ${opGloss(op)}`).onClick(() => c.mutate((x) => setEnvelope(x, i, envelopeShape("Ease in")), true)));
@@ -147,7 +147,7 @@ function openEnvelopeMenu(c: DeviceWindowContext, ev: MouseEvent, d: Device): vo
 }
 
 function openGateSourceMenu(c: DeviceWindowContext, anchor: HTMLElement, index: number): void {
-  const menu = new Menu();
+  const menu = studioMenu();
   for (const source of gateSources(c, [])) menu.addItem((item) => item.setTitle(source).onClick(() => c.mutate((x) => setGateSource(x, index, source), true)));
   const box = anchor.getBoundingClientRect();
   menu.showAtPosition({ x: box.left, y: box.bottom });
@@ -168,7 +168,7 @@ function buildEnvelope(c: DeviceWindowContext, parent: HTMLElement, op: Modifier
     hint: deviceHint("device.envelope.shape"),
     cls: "wadjet-studio-device-toggle",
     onClick: (ev) => {
-      const menu = new Menu();
+      const menu = studioMenu();
       for (const shape of ENVELOPE_SHAPES) menu.addItem((item) => item.setTitle(shape.name).onClick(() => c.mutate((x) => setEnvelope(x, index, envelopeShape(shape.name)), true)));
       menu.showAtMouseEvent(ev);
     },

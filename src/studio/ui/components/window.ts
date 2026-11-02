@@ -5,7 +5,7 @@
  * Dragging clamps the panel inside its parent box; z-index comes from the
  * caller, which raises it on focus.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../menus";
 import { clampRect } from "../../model/clamp";
 import { kindColor } from "../../model/copy";
 import { createLed, type LedComponent, type LedProps } from "./led";
@@ -239,7 +239,7 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
    * l.8, l.12): the options it carried plus the save the `＋` used to own.
    */
   function openPresetMenu(chip: HTMLElement, p: WindowPreset): void {
-    const menu = new Menu();
+    const menu = studioMenu();
     const current = pickedLabel ?? p.name;
     for (const name of presetOptions(p)) {
       menu.addItem((item) =>

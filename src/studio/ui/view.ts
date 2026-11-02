@@ -45,6 +45,7 @@ import { createMoonsSurface } from "./moons-surface";
 import { createPlaylistRegistry, createPlaylistSurface } from "./playlist";
 import { createRowsSurface } from "./rows-surface";
 import type { Surface, SurfaceContext } from "./surfaces";
+import { closeStudioMenu } from "./menus";
 import { openCalendarView } from "./windows/calendar-mode";
 import { createWindowManager, type WindowManager } from "./windows";
 import { renameMoonsInDrafts, type MoonRenames } from "../model/moon-rename";
@@ -331,6 +332,12 @@ export class StudioView extends ItemView {
     // Builders are registered by the surfaces that own their panels, so the
     // restore has to wait until every surface has mounted.
     this.windows.restore();
+    // one Escape closes a menu the Studio opened, and only the menu (menus.ts): caught before a window's own Escape
+    this.registerDomEvent(this.containerEl, "keydown", (ev) => {
+      if (ev.key !== "Escape" || !closeStudioMenu()) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+    }, { capture: true });
 
     this.unsubscribeStore = this.store.subscribe(() => this.render());
     // An edit outside the studio (settings, a pin, a command) rebuilds the world.

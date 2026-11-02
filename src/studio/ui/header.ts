@@ -31,7 +31,8 @@
  */
 import type { YearSeam } from "../model/years";
 import { DEFAULT_YEAR_LENGTH } from "../../seshat/year";
-import { Menu, Notice } from "obsidian";
+import { Notice } from "obsidian";
+import { studioMenu } from "./menus";
 import { koppenOfClimate, type KoppenResult } from "../../core/koppen";
 import { canonicalJson, resolveProfile, validateProfile } from "../../core/profile";
 import type { ZoneProfile } from "../../core/types";
@@ -304,7 +305,7 @@ export function createHeaderSurface(): Surface {
     if (c === null) return;
     const state = c.store.get();
     const dirty = c.store.dirtyZones();
-    const menu = new Menu();
+    const menu = studioMenu();
     menu.setNoIcon();
     // The prototype's dropdown opens with a dim `ZONES · N` caption over the
     // rows (`0025-header.html`); Obsidian's label item is the same affordance.

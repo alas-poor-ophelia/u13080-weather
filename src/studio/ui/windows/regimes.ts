@@ -36,7 +36,7 @@
  * `snapshot()` at pointer-up, so a whole gesture is one undo step; keyboard
  * and typed entry are their own `history: true` action.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../menus";
 import { CURVE_PATHS } from "../../../core/curve-ops";
 import type { ModifierOp, ZoneProfile } from "../../../core/types";
 import { channelOrNull, type Channel } from "../../model/compile";
@@ -333,7 +333,7 @@ export function buildRegimesWindow(ctx: SurfaceContext): WindowBuild {
     const id = selection(z);
     if (id === null) return;
     const present = new Set(applyFor(z, id).map((op) => op.param));
-    const menu = new Menu();
+    const menu = studioMenu();
     let first = true;
     for (const chain of CHAINS) {
       const paths = CURVE_PATHS.filter((p) => chainOf(p) === chain);

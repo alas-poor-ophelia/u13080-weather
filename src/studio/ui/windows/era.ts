@@ -32,7 +32,7 @@
  *    skips the head's own controls instead, which is what keeps the bar
  *    draggable and its close × clickable underneath.
  */
-import { Menu } from "obsidian";
+import { studioMenu } from "../menus";
 import { ERA_TAG_PREFIX } from "../../../core/eras";
 import type { Era, ModifierOp, ZoneProfile } from "../../../core/types";
 import { channelOf, type Channel } from "../../model/compile";
@@ -268,7 +268,7 @@ export function buildEraWindow(name: string): WindowBuilder {
       const applied = new Set((era?.apply ?? []).map((op) => op.param));
       const choices = ERA_APPLY_CHOICES.filter((c) => !applied.has(c.param));
       if (choices.length === 0) return;
-      const menu = new Menu();
+      const menu = studioMenu();
       for (const choice of choices) {
         menu.addItem((item) =>
           item.setTitle(paramName(choice.param)).onClick(() => {

@@ -503,8 +503,8 @@ calendar's whole structure and ask it any date question, so the plugin doesn't n
 
 What this is not:
 
-- **It has no editor of its own.** Your plugin can replace the definition with `setDefinition()`, or open the plugin's
-  editor with `openEditor()`.
+- **It has no editor of its own.** Your plugin can replace the definition with `setDefinition()`, or open Wadjet's
+  calendar editor with `openEditor()`.
 - **It has no time of day.** The day is the smallest unit. If your plugin needs hours, derive them yourself.
 - **It has no eras.** Eras on a timeline belong to your plugin, which can keep them itself or in `marks()`. (The era timeline
   in §7b is about weather.)
@@ -536,8 +536,8 @@ if it fails the checks a world's calendar must pass. It doesn't throw for a bad 
 Replaces the definition the world runs, with text or a `CalendarAst`. To change one thing, read `calendar().definition`,
 copy it, change the copy and pass it back. The definition is stored in canonical form, so comments in text are removed.
 
-There's no confirmation and no preview: the write applies. *Undo the last calendar change* in the plugin's settings steps
-back through it, over the last 10 changes. If the Studio has unsaved calendar edits, its next Save asks whether to overwrite
+There's no confirmation and no preview: the write applies. *Undo the last calendar change* in Wadjet's settings steps
+back through the last 10 changes, including this write. If the Studio has unsaved calendar edits, its next Save asks whether to overwrite
 your write or reload it. Writes run one at a time, and the last one wins.
 
 It can change the weather: a changed year length, or a tag a zone's modifier matches, moves reports. `profiles-changed`
@@ -575,14 +575,14 @@ interface SeshatMark {
 A small list of your plugin's own days and spans, stored by Wadjet in its `data.json` under `owner`, which should be your
 plugin's id. Use it when you'd rather not keep them yourself: a marked day, or an era if your timeline has them.
 
-A mark is on the day line and nothing reads it but you. It isn't part of the calendar: the Studio doesn't show it, a calendar
+A mark is a day or a span of days, and nothing reads it but you. It isn't part of the calendar: the Studio doesn't show it, a calendar
 rule can't test it, weather never sees it, and it doesn't change `hash`. To add a day that is part of the calendar, such as a
 festival that zones or rules should match, put it in the definition with `setDefinition()`.
 
 Marks are on day numbers, so they keep their number when the calendar changes and can read as another date. If that matters,
 listen for `adapters-changed`.
 
-`add` throws for a bad mark (`from` and `to` are whole days within ±10,000,000, `to` is not before `from`, `data` is anything
+`add` throws for a bad mark (`from` and `to` are whole-number day numbers within ±10,000,000, `to` is not before `from`, `data` is anything
 JSON can hold) and rejects when one owner's marks would pass 100,000 bytes as JSON. That limit protects Sync: **a plugin with
 many records should keep them itself.** `data` comes back as a copy. An `id` is random, so one you held for a removed mark won't match a later one. Writes run one at a time,
 and a failed save leaves the list as it was.

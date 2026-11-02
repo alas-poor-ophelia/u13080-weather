@@ -6506,6 +6506,10 @@
   background: #26282c;
   border-left: 1px solid var(--wadjet-studio-border);
 }
+/* the inspector scrolls: its sections keep their height rather than shrink onto each other */
+.wadjet-studio-orrery-inspector > * {
+  flex-shrink: 0;
+}
 .wadjet-studio-orrery-insp-head {
   display: flex;
   align-items: center;

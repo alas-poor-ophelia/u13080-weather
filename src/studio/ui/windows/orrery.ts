@@ -51,7 +51,8 @@
  * - The Orrery | Form toggle before the chip is added by
  *   `calendar-mode.ts` (slice 1b), which wraps this builder.
  */
-import { Menu, type EventRef } from "obsidian";
+import { type EventRef } from "obsidian";
+import { studioMenu } from "../menus";
 import { printPart, type CalendarAst, type PartId, type Problem } from "../../../seshat";
 import { OptInModal } from "../../../plugin/calendar-modals";
 import { WORLD_PRESETS } from "../../../plugin/opt-in";
@@ -330,7 +331,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   const chipLabel = chip.createSpan({ cls: "wadjet-studio-orrery-chip-label" });
   chip.createSpan({ cls: "wadjet-studio-orrery-chip-caret", text: "▾" });
   function openMenu(): void {
-    const menu = new Menu();
+    const menu = studioMenu();
     const current = source === "seshat" ? ast?.name : null;
     for (const p of WORLD_PRESETS)
       menu.addItem((item) =>

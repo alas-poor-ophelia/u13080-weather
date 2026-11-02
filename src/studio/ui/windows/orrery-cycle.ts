@@ -26,7 +26,7 @@ import { addLabel, inFormWeek, labelOn, removeCycle, removedWith, removeLabel, r
 import { anchorProblem, anchorWarnings, skipTarget, unitReaders } from "../../model/unit-edit";
 import { createKnob, type KnobComponent, type SegmentedComponent } from "../components";
 import { button, input, type EditPhase, type PartEditor } from "./orrery-body";
-import { toggle } from "./orrery-slots";
+import { NO_FILLER_DAYS, toggle } from "./orrery-slots";
 
 export interface CycleEditorDeps {
   /** the draft AST (the one the edits read) */
@@ -129,11 +129,10 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
     else for (const w of anchorWarnings(deps.ast, id)) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `Moving it: ${w}.`, attr: { "data-part": "cycle-today-warning" } });
   }
 
-  // ---- filler days: a choice only when some month has them
-  if (u.skips !== undefined || skipTarget(deps.ast) !== null) {
-    const sw = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
-    parts.push(toggle(sw, "skips filler days", u.skips !== undefined, orreryHint("orrery.cycleSkips"), "cycle-skips", (on) => deps.edit((c) => setCycleSkip(c, id, on), "click")));
-  }
+  // ---- filler days: the switch needs a month that has them, and says so when none does
+  const sw = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
+  if (u.skips !== undefined || skipTarget(deps.ast) !== null) parts.push(toggle(sw, "skips filler days", u.skips !== undefined, orreryHint("orrery.cycleSkips"), "cycle-skips", (on) => deps.edit((c) => setCycleSkip(c, id, on), "click")));
+  else sw.createDiv({ cls: "wadjet-studio-orrery-note", text: NO_FILLER_DAYS, attr: { "data-part": "cycle-skips-none" } });
 
   // ---- what reads it, and remove
   const readers = unitReaders(deps.ast, id);
