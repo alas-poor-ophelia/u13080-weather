@@ -16,7 +16,7 @@
  *   caller's.
  */
 import { canonicalJson } from "../../core/profile";
-import { ID, type By, type CalendarAst, type CycleUnitAst, type FormatAst, type LabelAst, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type UnitAst } from "../../seshat";
+import { ID, problems, type By, type CalendarAst, type SlotsUnitAst, type CycleUnitAst, type FormatAst, type LabelAst, type RuleAst, type RuleDefAst, type SeasonMarkAst, type SeasonsAst, type UnitAst } from "../../seshat";
 import { declaredAs, weekdayCycle, withSlice, type AstEdit } from "./ast-edit";
 
 const refuse = (reason: string): AstEdit => ({ refused: true, reason });
@@ -170,8 +170,8 @@ export function unitReaders(ast: CalendarAst, id: string): string[] {
     out.push(`the rule "${ruleName(r.rule)}" reads it`);
   }
   if (ast.seasons?.unit === id) out.push("the seasons divide it");
-  if (ast.seasons?.skips === id) out.push("the seasons skip its festival days");
-  for (const u of ast.units) if (u.kind === "cycle" && u.skips === id) out.push(`the ${u.id} skips its festival days`);
+  if (ast.seasons?.skips === id) out.push("the seasons skip its filler days");
+  for (const u of ast.units) if (u.kind === "cycle" && u.skips === id) out.push(`the ${u.id} skips its filler days`);
   for (const g of ast.gears) if (g.on === id) out.push(`the gear "${g.id}" counts it`);
   for (const u of ast.units) if (u.kind === "slots" && u.in === id) out.push(`the ${u.id} sits in it`);
   for (const r of stageReads(ast, id)) if (r.titled) out.push(`the ${r.unit}'s stages name its days`);
@@ -251,6 +251,34 @@ function renameInSeasons(s: SeasonsAst, from: string, to: string): SeasonsAst {
   const moved = marks.some((m, i) => m !== s.marks[i]);
   if (s.unit !== from && s.skips !== from && !moved) return s;
   return { ...s, ...(s.unit === from ? { unit: to } : {}), ...(s.skips === from ? { skips: to } : {}), ...(moved ? { marks } : {}) };
+}
+
+/**
+ * The slot unit a cycle would skip: the one directly under a cycle whose filler slots are all a number of days, the
+ * year's first, or null when no unit has filler days it can skip.
+ */
+export function skipTarget(ast: CalendarAst): string | null {
+  const fits = ast.units.filter((u): u is SlotsUnitAst => u.kind === "slots" && ast.units.some((p) => p.id === u.in && p.kind === "cycle") && u.slots.some((s) => s.filler) && u.slots.every((s) => !s.filler || typeof s.length === "number"));
+  return (fits.find((u) => u.in === "year") ?? fits[0])?.id ?? null;
+}
+
+/** Whether cycle `id` skips filler days, and the week or day names that run with it follow (they must count the same days). */
+export function setCycleSkips(ast: CalendarAst, id: string, on: boolean): AstEdit {
+  const u = cycleUnit(ast, id);
+  if (!u) return refuse(`there is no cycle unit "${id}"`);
+  const target = on ? skipTarget(ast) : null;
+  if (on && target === null) return refuse("no month has filler days to skip; mark a slot as filler first");
+  // the day names and their week count together, whichever of the two the switch is on
+  const partner = cyclePartner(ast, id)?.id ?? ast.units.find((x) => x.id !== id && cyclePartner(ast, x.id)?.id === id)?.id;
+  const units = ast.units.map((x): UnitAst => {
+    if (x.kind !== "cycle" || (x.id !== id && x.id !== partner)) return x;
+    const { skips: _old, ...rest } = x;
+    return (target === null ? rest : { ...rest, skips: target });
+  });
+  const next = { ...ast, units };
+  // what the validator refuses of the units this moved (an anchor on a filler day), in its words
+  const why = problems(next).find((p) => p.unit === id || p.unit === partner);
+  return why ? refuse(why.message) : { ast: next };
 }
 
 /** Remove unit `id`; refused, naming the first reader, while anything reads it (`unitReaders`). */
@@ -345,7 +373,7 @@ export function anchorProblem(ast: CalendarAst, id: string): string | null {
   const u = cycleUnit(ast, id);
   if (!u) return `there is no cycle unit "${id}"`;
   if (u.crossing) return `the ${id} starts by a crossing, so it has no anchor`;
-  if (u.skips !== undefined) return `the ${id} skips festival days, so its days cannot be counted from here; change its anchor as text (Edit as text)`;
+  if (u.skips !== undefined) return `the ${id} skips filler days, so its days cannot be counted from here; change its anchor as text (Edit as text)`;
   if (u.ledger?.length) return `the ${id} has exceptions written against its occurrences; change them first (Exceptions)`;
   const r = unitReads(ast, id).find((x) => x.how === "number");
   if (r) return `the rule "${ruleName(r.rule)}" reads the ${id} by number; change it first (Edit definition)`;

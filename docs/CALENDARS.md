@@ -807,6 +807,9 @@ END:VUNIT
 The week stops at the festival and carries on after it, so a Saturday, a festival, then a Sunday. This is how the World
 Calendar keeps every 1 January on a Sunday.
 
+In the Studio's Orrery, select the weekday and turn on *skips filler days*: it writes `SKIPS` on the weekday and on the week
+that runs with it. The *Form* view shows a week that skips as a part it can't edit in fields, and offers *Edit as text*.
+
 On a day the unit skips, the unit has nothing to say: `{week}` and `{weekday:name}` print nothing, the day has no
 weekday's tags, and a rule that asks about the week is false that day. A week that spans a festival still has seven days:
 `{week:day}` counts 1 to 7 and doesn't jump.
@@ -970,6 +973,9 @@ END:VSEASONS
 Without it, a festival day has the season around it. With it, a festival day has no season: dates, `{@season}` and calendar
 rules see none. Weather doesn't change: a zone's season modifiers still apply on that day, using the season around it.
 To give a festival its own weather, tag its slot and match the tag in a modifier.
+
+In the Studio's Orrery, select the seasons and turn on *skip filler days*. While it's on, the Seasons window only shows the
+seasons, and you edit them in the Orrery or as text.
 
 ### Exceptions
 

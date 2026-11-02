@@ -149,7 +149,7 @@ export function buildSlotUnitEditor(parent: HTMLElement, deps: SlotsEditorDeps):
 // ---- the slot
 
 /** A labelled off | on switch (the bin's segmented control). */
-function toggle(parent: HTMLElement, label: string, on: boolean, hint: string, part: string, onChange: (on: boolean) => void): SegmentedComponent {
+export function toggle(parent: HTMLElement, label: string, on: boolean, hint: string, part: string, onChange: (on: boolean) => void): SegmentedComponent {
   const row = parent.createDiv({ cls: "wadjet-studio-orrery-toggle", attr: { "data-part": part } });
   row.createSpan({ cls: "wadjet-studio-orrery-toggle-label", text: label });
   const seg = createSegmented(row, {

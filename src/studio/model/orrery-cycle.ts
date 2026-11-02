@@ -24,7 +24,7 @@
 import type { CalendarAst, CycleUnitAst, LabelAst } from "../../seshat";
 import { applyAstEdit, draftAst, type CalendarDraft, type CalendarEdit } from "./definition";
 import { freshName } from "./orrery-body";
-import { anchorFor, anchorProblem, cycleLabelProblem, cyclePartner, removeUnit, renameUnit, setCycleAnchor, setCycleLabels, unitReaders } from "./unit-edit";
+import { anchorFor, anchorProblem, cycleLabelProblem, cyclePartner, removeUnit, renameUnit, setCycleAnchor, setCycleLabels, setCycleSkips, unitReaders } from "./unit-edit";
 
 const refuse = (reason: string): CalendarEdit => ({ refused: true, reason });
 const mod = (a: number, m: number): number => {
@@ -165,6 +165,13 @@ export function setTodayIs(calendar: CalendarDraft, unitId: string, label: numbe
   const why = anchorProblem(ast, unitId);
   if (why) return refuse(why);
   return applyAstEdit(calendar, (a) => setCycleAnchor(a, unitId, anchor));
+}
+
+// ---- filler days
+
+/** Whether cycle `unitId` counts filler days: an AST edit, and the week or day names that run with it follow. */
+export function setCycleSkip(calendar: CalendarDraft, unitId: string, on: boolean): CalendarEdit {
+  return applyAstEdit(calendar, (a) => setCycleSkips(a, unitId, on));
 }
 
 // ---- remove

@@ -85,6 +85,7 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.labelRemove": ["Remove label", "takes the label out; the cycle is one shorter, and so is the week that runs with it"],
   "orrery.addLabel": ["Add label", "adds a label at the end; the cycle is one longer, and so is the week that runs with it"],
   "orrery.todayIs": ["Today is", "moves the anchor so this label falls on the Orrery's day; the week moves with it"],
+  "orrery.cycleSkips": ["Skips filler days", "on: the cycle stops on a filler day and carries on after it, so the days after it move; the week or day names that run with it follow"],
   "orrery.removeCycle": ["Remove cycle", "removes the unit; refused while a format, a rule, a season, a gear or a stage reads it"],
   "orrery.markName": ["Season name", "renames the season; the day line and the weather read the new name"],
   "orrery.markKind": ["From", "how the season's start is written: a fraction of the year, a day of the year, or a day of a month; the start day stays the same this year where it can"],
@@ -92,6 +93,7 @@ export const ORRERY_HINTS: Record<string, Hint> = {
   "orrery.markDay": ["Day", "the day the season starts on: of the year, or of its month"],
   "orrery.markSlot": ["Month", "the month the season starts in; choose another"],
   "orrery.markRemove": ["Remove season", "takes the season out; removing the last removes the seasons"],
+  "orrery.seasonsSkip": ["Skip filler days", "on: a filler day reads as having no season, in dates and rules; weather still uses the season around it"],
   "orrery.addMark": ["Add season", "adds a season at the middle of the longest one, as a fraction of the year"],
 };
 

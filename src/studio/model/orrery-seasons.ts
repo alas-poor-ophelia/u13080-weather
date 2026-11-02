@@ -106,6 +106,28 @@ function write(calendar: CalendarDraft, cur: CalendarAst, next: readonly SeasonM
   });
 }
 
+/** The slot unit in the year whose filler days the seasons can skip, or null. */
+export function seasonsSkipTarget(ast: CalendarAst): string | null {
+  const unit = seasonsUnit(ast);
+  return ast.units.find((u): u is SlotsUnitAst => u.kind === "slots" && u.in === unit && u.slots.some((s) => s.filler))?.id ?? null;
+}
+
+/** Whether filler days have a season (`SKIPS` in the seasons): an AST edit, over the draft's current marks. */
+export function setSeasonsSkip(calendar: CalendarDraft, on: boolean): CalendarEdit {
+  const cur = current(calendar);
+  if (typeof cur === "string") return refuse(cur);
+  if (!cur.seasons) return refuse("this calendar has no seasons yet");
+  const target = on ? seasonsSkipTarget(cur) : null;
+  if (on && target === null) return refuse("no month has filler days to skip; mark a slot as filler first");
+  const layer = calendar.ast;
+  if (!layer) return refuse("this calendar is not a definition the Studio edits");
+  const field: CalendarDraft = { ...calendar, seasons: calendarOfDefinition(layer).seasons };
+  return applyAstEdit(field, (a) => {
+    const { skips: _old, ...seasons } = cur.seasons!;
+    return { ast: { ...a, seasons: target === null ? seasons : { ...seasons, skips: target } } };
+  });
+}
+
 /** The draft's marks, or why there are none to edit. */
 function marksOf(calendar: CalendarDraft): { cur: CalendarAst; marks: readonly SeasonMarkAst[] } | string {
   const cur = current(calendar);

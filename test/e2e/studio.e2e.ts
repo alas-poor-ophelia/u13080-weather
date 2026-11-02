@@ -11131,4 +11131,93 @@ describe("climate studio · calendar orrery", () => {
       await nextFrame();
     }
   });
+
+  test("step 103: the Orrery switches a week and the seasons to skip filler days: the text says SKIPS, Save writes it, a festival day has no weekday and no season, and the weather's tag stays", async () => {
+    const m = (name: string, length: number) => ({ name, length });
+    const F = (name: string) => ({ name, length: 1, filler: true });
+    const CAL = print({
+      name: "Skipping",
+      gears: [],
+      formats: [{ name: "default", pattern: "{month:day} {month:name} {year}" }, { name: "filler", pattern: "{month:name} {year}" }],
+      seasons: { unit: "year", marks: [{ name: "Warm", from: 0 }, { name: "Cold", from: 0.5 }] },
+      units: [
+        { id: "year", kind: "cycle", anchor: 0, length: 365, number: 1 },
+        { id: "month", kind: "slots", in: "year", slots: [m("A", 91), F("Thaw"), m("B", 91), F("Sun"), m("C", 91), F("Fall"), m("D", 89)] },
+        { id: "week", kind: "cycle", anchor: 0, length: 7 },
+        { id: "weekday", kind: "cycle", anchor: 0, length: 1, labels: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((name) => ({ name })) },
+      ],
+    });
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), CAL);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const open = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0].view.windows.open("orrery"), VIEW_TYPE);
+    const close = () => withApp(ob.page, (app, type: string) => app.workspace.getLeavesOfType(type)[0]?.view.windows.close("orrery"), VIEW_TYPE);
+    const stored = () => (JSON.parse(readFileSync(path.join(PLUGIN_DIR, "data.json"), "utf8")).calendar?.definition ?? "") as string;
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await open();
+      await nextFrame();
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      const text = async () => ((await win.locator(".wadjet-studio-orrery-text").first().textContent()) ?? "").trim();
+      const flip = async (part: string) => {
+        await win.locator(`[data-part="${part}"] button:has-text("on"), [data-part="${part}"] [role="radio"]:has-text("on")`).first().click();
+        await passAnyConfirm();
+      };
+
+      // the weekday: the switch is there, and on moves the week with it
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:weekday"]').click();
+      await win.locator('[data-part="cycle-skips"]').waitFor({ state: "visible", timeout: 10_000 });
+      expect(await text()).not.toContain("SKIPS");
+      await flip("cycle-skips");
+      await expect.poll(text, { timeout: 10_000 }).toContain("SKIPS:month");
+      expect(stored()).not.toContain("SKIPS");
+      expect(await win.locator(".wadjet-studio-window-issue").count()).toBe(0);
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:week"]').click();
+      await expect.poll(text).toContain("SKIPS:month");
+
+      // the seasons
+      await win.locator('.wadjet-studio-orrery-row[data-part="seasons"]').click();
+      await win.locator('[data-part="seasons-skip"]').waitFor({ state: "visible", timeout: 10_000 });
+      await flip("seasons-skip");
+      await expect.poll(text, { timeout: 10_000 }).toContain("SKIPS:month");
+      expect(await win.locator(".wadjet-studio-window-issue").count()).toBe(0);
+
+      // Save writes all three
+      await ob.page.locator(".wadjet-studio-header-save").click();
+      const dialog = ob.page.locator(".modal-container .modal").filter({ hasText: "Save calendar changes?" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      const saveBtn = dialog.locator("button.mod-cta:has-text('Save')");
+      await expect.poll(async () => await saveBtn.isDisabled(), { timeout: 10_000 }).toBe(false);
+      await saveBtn.click();
+      await dialog.waitFor({ state: "detached", timeout: 5_000 });
+      await expect.poll(() => (stored().match(/SKIPS:month/g) ?? []).length, { timeout: 10_000 }).toBe(3);
+
+      // data.json lands before the adapter remounts, so wait for the calendar other plugins read to follow it
+      await expect.poll(() => withApp(ob.page, () => (window as unknown as { Wadjet: { seshat: { calendar(): { labelAt(u: string, d: number): unknown } } } }).Wadjet.seshat.calendar().labelAt("weekday", 91)), { timeout: 10_000 }).toBeNull();
+
+      // the calendar other plugins read: Thaw (day 91) has no weekday and no season; weather keeps its tag
+      const read = await withApp(ob.page, () => {
+        const api = (window as unknown as { Wadjet: { seshat: { calendar(): { labelAt(u: string, d: number): { name?: string } | null; seasonAt(d: number): string | null } }; timeAt(d: number): { seasonless?: boolean; tags?: string[] } } }).Wadjet;
+        const c = api.seshat.calendar();
+        return { before: c.labelAt("weekday", 90)?.name, thaw: c.labelAt("weekday", 91), after: c.labelAt("weekday", 92)?.name, season: c.seasonAt(91), seasonless: api.timeAt(91).seasonless, tag: api.timeAt(91).tags?.find((t) => t.startsWith("season:")) };
+      });
+      expect(read.thaw).toBeNull();
+      expect(read.season).toBeNull();
+      expect(read.seasonless).toBe(true);
+      expect(read.tag).toBe("season:Warm");
+      const week = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+      expect(week[(week.indexOf(read.before!) + 1) % 7]).toBe(read.after);
+      console.log(`  · skips: ${read.before}, Thaw, ${read.after}; Thaw has no season and weather reads ${read.tag}`);
+    } finally {
+      await close();
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
 });

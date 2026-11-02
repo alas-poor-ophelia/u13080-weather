@@ -22,10 +22,11 @@ import type { CalendarAst, CycleUnitAst, PartId } from "../../../seshat";
 import { Engine } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
-import { addLabel, inFormWeek, labelOn, removeCycle, removedWith, removeLabel, renameCycle, renameLabel, setTodayIs } from "../../model/orrery-cycle";
-import { anchorProblem, anchorWarnings, unitReaders } from "../../model/unit-edit";
-import { createKnob, type KnobComponent } from "../components";
+import { addLabel, inFormWeek, labelOn, removeCycle, removedWith, removeLabel, renameCycle, renameLabel, setCycleSkip, setTodayIs } from "../../model/orrery-cycle";
+import { anchorProblem, anchorWarnings, skipTarget, unitReaders } from "../../model/unit-edit";
+import { createKnob, type KnobComponent, type SegmentedComponent } from "../components";
 import { button, input, type EditPhase, type PartEditor } from "./orrery-body";
+import { toggle } from "./orrery-slots";
 
 export interface CycleEditorDeps {
   /** the draft AST (the one the edits read) */
@@ -47,6 +48,7 @@ export interface CycleEditorDeps {
 /** Build the labelled cycle editor into `parent`, and the rename input into `title`. */
 export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: CycleEditorDeps): PartEditor {
   const knobs: KnobComponent[] = [];
+  const parts: SegmentedComponent[] = [];
   const refusalEl = parent.createDiv({ cls: "wadjet-studio-orrery-refusal is-hidden", attr: { role: "status", "aria-live": "polite" } });
   const setRefusal = (reason: string | null): void => {
     refusalEl.setText(reason ?? "");
@@ -57,6 +59,7 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
     setRefusal,
     destroy: () => {
       for (const k of knobs) k.destroy();
+      for (const p of parts) p.destroy();
     },
   };
   const u = deps.ast.units.find((x): x is CycleUnitAst => x.kind === "cycle" && x.id === deps.unitId);
@@ -124,6 +127,12 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
     );
     if (why) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `The anchor stays: ${why}.` });
     else for (const w of anchorWarnings(deps.ast, id)) parent.createDiv({ cls: "wadjet-studio-orrery-note", text: `Moving it: ${w}.`, attr: { "data-part": "cycle-today-warning" } });
+  }
+
+  // ---- filler days: a choice only when some month has them
+  if (u.skips !== undefined || skipTarget(deps.ast) !== null) {
+    const sw = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
+    parts.push(toggle(sw, "skips filler days", u.skips !== undefined, orreryHint("orrery.cycleSkips"), "cycle-skips", (on) => deps.edit((c) => setCycleSkip(c, id, on), "click")));
   }
 
   // ---- what reads it, and remove

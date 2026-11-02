@@ -16,10 +16,10 @@ import { PRESETS } from "../src/generated/presets";
 import { SeshatCalendar, worldProblems } from "../src/plugin/time/seshat";
 import { DAY_LIMIT, definitionContent, Engine, formatDay, parse, print, translate, validate, rational, type CalendarAst, type CycleUnitAst, type RuleAst, type SlotAst } from "../src/seshat";
 import { addSeasonMark, removeSeasonMark, setSeasonMark } from "../src/studio/model/ast-edit";
-import { seshatDraft } from "../src/studio/model/definition";
-import { labelOn } from "../src/studio/model/orrery-cycle";
-import { addMark, seasonsWindowLock } from "../src/studio/model/orrery-seasons";
-import { anchorProblem, removeUnit, renameUnit } from "../src/studio/model/unit-edit";
+import { seshatDraft, type CalendarEdit } from "../src/studio/model/definition";
+import { labelOn, setCycleSkip } from "../src/studio/model/orrery-cycle";
+import { addMark, renameMark, seasonsSkipTarget, seasonsWindowLock, setMarkFrom, setSeasonsSkip } from "../src/studio/model/orrery-seasons";
+import { anchorProblem, removeUnit, renameUnit, skipTarget } from "../src/studio/model/unit-edit";
 import { buildOrrery, type OrreryModel } from "../src/studio/model/orrery-geometry";
 
 const fjord = PRESETS.find((p) => p.id === "fjord-coast")!;
@@ -485,7 +485,7 @@ describe("found in review", () => {
     expect(unit(renamed.ast, "weekday").skips).toBe("moon");
     expect(validate(renamed.ast)).toEqual([]);
     const removed = removeUnit({ ...WORLD, formats: [] }, "month");
-    expect("refused" in removed && removed.reason).toContain("skip its festival days");
+    expect("refused" in removed && removed.reason).toContain("skip its filler days");
   });
 
   test("the Orrery's day label on a skipping cycle matches the engine, and 'today is' is refused", () => {
@@ -495,6 +495,64 @@ describe("found in review", () => {
       if (e.skipped("weekday", d)) continue;
       expect(NAMES[labelOn(u, d, (id, day) => e.indexAt(id, day))]).toBe(e.labelAt("weekday", d)!.name);
     }
-    expect(anchorProblem(WORLD, "weekday")).toContain("skips festival days");
+    expect(anchorProblem(WORLD, "weekday")).toContain("skips filler days");
+  });
+});
+
+describe("the Orrery's switches", () => {
+  const stripped = (a: CalendarAst): CalendarAst => ({ ...a, seasons: { unit: "year", marks: a.seasons!.marks }, units: a.units.map((u) => (u.kind === "cycle" ? (({ skips: _s, ...r }) => r)(u) : u)) });
+  const PLAIN = stripped(WORLD);
+  const done = (r: CalendarEdit) => {
+    if ("refused" in r) throw new Error(`refused: ${r.reason}`);
+    return r;
+  };
+
+  test("a cycle: on writes SKIPS on it and on the week that runs with it, off takes both away", () => {
+    const on = done(setCycleSkip(seshatDraft(PLAIN), "weekday", true));
+    expect(unit(on.ast, "weekday").skips).toBe("month");
+    expect(unit(on.ast, "week").skips).toBe("month");
+    expect(validate(on.ast)).toEqual([]);
+    const off = done(setCycleSkip(on.calendar, "week", false));
+    expect(unit(off.ast, "weekday").skips).toBeUndefined();
+    expect(unit(off.ast, "week").skips).toBeUndefined();
+    expect(print(off.ast)).not.toContain("SKIPS");
+  });
+
+  test("the form shows a skipping week as text, and fields again once it stops", () => {
+    const draft = seshatDraft(PLAIN);
+    expect(Array.isArray(draft.form?.week)).toBe(true);
+    const on = done(setCycleSkip(draft, "weekday", true));
+    expect(Array.isArray(on.calendar.form?.week)).toBe(false);
+    const off = done(setCycleSkip(on.calendar, "weekday", false));
+    expect(Array.isArray(off.calendar.form?.week)).toBe(true);
+  });
+
+  test("seasons: on and off keep the marks, including an unsaved fraction edit", () => {
+    const draft = seshatDraft(PLAIN);
+    const moved = done(setMarkFrom(draft, 1, 0.6, PLAIN.seasons!.marks));
+    const on = done(setSeasonsSkip(moved.calendar, true));
+    expect(on.ast.seasons?.skips).toBe("month");
+    expect((on.ast.seasons?.marks[1] as { from: number }).from).toBe(0.6);
+    expect(validate(on.ast)).toEqual([]);
+    const renamed = done(renameMark(on.calendar, 0, "Sprout"));
+    expect(renamed.ast.seasons?.skips).toBe("month");
+    const off = done(setSeasonsSkip(renamed.calendar, false));
+    expect(off.ast.seasons?.skips).toBeUndefined();
+    expect(off.ast.seasons?.marks.map((x) => x.name)).toEqual(["Sprout", "Autumn"]);
+    expect(done(setMarkFrom(off.calendar, 1, 0.7, off.ast.seasons!.marks)).ast.seasons?.marks.length).toBe(2);
+  });
+
+  test("the refusals say what to do", () => {
+    const none: CalendarAst = { name: "x", gears: [], seasons: { unit: "year", marks: [{ name: "A", from: 0 }] }, units: [{ id: "year", kind: "cycle", anchor: 0, length: 30 }, { id: "month", kind: "slots", in: "year", slots: [m("A", 30)] }, { id: "weekday", kind: "cycle", anchor: 0, length: 1, labels: [{ name: "X" }, { name: "Y" }] }] };
+    expect(skipTarget(none)).toBeNull();
+    expect(seasonsSkipTarget(none)).toBeNull();
+    const a = setCycleSkip(seshatDraft(none), "weekday", true);
+    expect("refused" in a && a.reason).toContain("mark a slot as filler");
+    const b = setSeasonsSkip(seshatDraft(none), true);
+    expect("refused" in b && b.reason).toContain("mark a slot as filler");
+    const e = new Engine(WORLD);
+    const onFiller = withUnit(withUnit(PLAIN, "weekday", { anchor: e.dayOf("month", [5], 13, 0) }), "week", { anchor: e.dayOf("month", [5], 13, 0) });
+    const c = setCycleSkip(seshatDraft(onFiller), "weekday", true);
+    expect("refused" in c && c.reason).toContain("is a filler day");
   });
 });
