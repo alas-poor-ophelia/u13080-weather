@@ -124,6 +124,9 @@ function namesAreCoordinates(u: SlotsUnitAst): boolean {
   return names.every((n) => n !== undefined && n !== "") && new Set(names).size === names.length;
 }
 
+/** A cycle that skips filler days places no day on its own (§19.3): its tokens are derived. */
+const isSkipping = (u: UnitAst | undefined): boolean => u?.kind === "cycle" && u.skips !== undefined;
+
 /** Every occurrence of `u` the pattern can serve is one day long (filler patterns serve only filler slots). */
 function oneDay(u: UnitAst, fillerOnly: boolean): boolean {
   if (u.kind === "cycle") return isPlainConstant(u) && u.length === 1;
@@ -143,7 +146,7 @@ export function compileFormat(f: FormatAst, ast: CalendarAst): { compiled: Compi
   if (errors.length) return { compiled: null, errors: errors.map((e) => `format "${f.name}": ${e}`) };
 
   // coordinate levels: a number, or a slot name that names exactly one slot
-  const coord = new Set(tokens.filter((t) => t.field === "num" || (t.field === "name" && isSlots(units.get(t.unit)) && namesAreCoordinates(units.get(t.unit) as SlotsUnitAst))).map((t) => t.unit));
+  const coord = new Set(tokens.filter((t) => !isSkipping(units.get(t.unit))).filter((t) => t.field === "num" || (t.field === "name" && isSlots(units.get(t.unit)) && namesAreCoordinates(units.get(t.unit) as SlotsUnitAst))).map((t) => t.unit));
   // a unit that is its own ancestor (a typo in IN) is the validator's error; here it must only not loop
   const chainOf = (id: string): string[] | null => {
     const out = [id];
@@ -266,7 +269,7 @@ function render(engine: Engine, f: CompiledFormat, day: number): string {
     }
     const o = engine.occurrenceAt(p.unit, day);
     if (!o) continue; // the day has no place in this unit (a filler day of an enclosing unit)
-    const n = p.field === "num" ? o.index + unitNumber(engine, p.unit) : day - o.start + (p.field === "day" ? 1 : 0);
+    const n = p.field === "num" ? o.index + unitNumber(engine, p.unit) : engine.countedOffset(p.unit, day, o.start) + (p.field === "day" ? 1 : 0);
     out += padded(n, p.pad);
   }
   return out;

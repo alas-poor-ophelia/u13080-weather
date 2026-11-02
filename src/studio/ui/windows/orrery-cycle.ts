@@ -19,6 +19,7 @@
  * anchor as the editor was built, and the editor never writes the store.
  */
 import type { CalendarAst, CycleUnitAst, PartId } from "../../../seshat";
+import { Engine } from "../../../seshat";
 import type { CalendarDraft, CalendarEdit } from "../../model/definition";
 import { orreryHint } from "../../model/hints-orrery";
 import { addLabel, inFormWeek, labelOn, removeCycle, removedWith, removeLabel, renameCycle, renameLabel, setTodayIs } from "../../model/orrery-cycle";
@@ -78,7 +79,14 @@ export function buildCycleEditor(parent: HTMLElement, title: HTMLElement, deps: 
   // ---- labels
   const labels = u.labels ?? [];
   if (labels.length) {
-    const today = labelOn(u, deps.day);
+    // a cycle that skips filler days counts on the engine's line; a draft that cannot compile marks no label wrongly, only the first
+    const today = labelOn(u, deps.day, (unit, day) => {
+      try {
+        return new Engine(deps.ast).indexAt(unit, day);
+      } catch {
+        return 0;
+      }
+    });
     const sec = parent.createDiv({ cls: "wadjet-studio-orrery-section" });
     sec.createDiv({ cls: "wadjet-studio-orrery-caps", text: `Labels · ${labels.length}` });
     const list = sec.createDiv({ cls: "wadjet-studio-orrery-phases" });

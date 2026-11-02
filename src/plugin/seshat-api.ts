@@ -23,10 +23,11 @@ export interface SeshatCalendarView {
   /** the day on which occurrence `index` of cycle unit `unit` starts */
   start: (unit: string, index: number) => number;
   length: (unit: string, index: number) => number;
-  /** the occurrence of cycle unit `unit` holding `day` */
+  /** the occurrence of cycle unit `unit` whose span holds `day`, also a filler day it skips */
   indexAt: (unit: string, day: number) => number;
-  /** the occurrence of `unit` holding `day`; null when the day has no place in it (a filler day has no tenday) */
+  /** the occurrence of `unit` holding `day`; null when the day has no place in it (a filler day has no tenday). `start + length` is where the next one starts */
   occurrenceAt: (unit: string, day: number) => { readonly index: number; readonly start: number; readonly length: number } | null;
+  /** like occurrenceAt, with the days into it: on a unit that skips filler days, only the days it counts */
   positionOf: (unit: string, day: number) => Position | null;
   /** the lengths of slot unit `unit` inside one parent occurrence; `path` names it from the cycle down: [year], or [year, month] */
   slotLengths: (unit: string, path: readonly number[]) => number[];

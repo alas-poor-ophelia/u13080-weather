@@ -228,7 +228,7 @@ export function print(ast: CalendarAst): string {
     fields(b, `body "${b.id}"`, "id", "period", "epoch", "moon");
     if (b.moon) fields(b.moon, `moon of "${b.id}"`, "name", "phases");
   }
-  if (ast.seasons) fields(ast.seasons, "the seasons", "unit", "marks");
+  if (ast.seasons) fields(ast.seasons, "the seasons", "unit", "skips", "marks");
   const head = ["BEGIN:VCALENDAR", "SESHAT:1", `NAME:${esc(ast.name)}`];
   if (ast.bodies?.length === 0) head.push("BODIES:");
   if (ast.days?.length === 0) head.push("DAYS:");
@@ -248,7 +248,7 @@ export function print(ast: CalendarAst): string {
 
 const block = (type: string, lines: readonly string[]) => [`BEGIN:${type}`, ...lines, `END:${type}`];
 const formatLine = (f: FormatAst) => `FORMAT:${esc(f.name)}=${esc(f.pattern)}`;
-const seasonsLines = (s: SeasonsAst, units: readonly UnitAst[]) => block("VSEASONS", [`UNIT:${id(s.unit)}`, ...seasonLines(s.marks, units)]);
+const seasonsLines = (s: SeasonsAst, units: readonly UnitAst[]) => block("VSEASONS", [`UNIT:${id(s.unit)}`, ...(s.skips !== undefined ? [`SKIPS:${id(s.skips)}`] : []), ...seasonLines(s.marks, units)]);
 const bodyBlock = (b: BodyAst) =>
   block("VBODY", [`UID:${id(b.id)}`, `PERIOD:${ratText(b.period)}`, `EPOCH:${ratText(b.epoch)}`, ...(b.moon ? [`MOON:${esc(b.moon.name)}`, ...(b.moon.phases ? markLines(b.moon.phases, "PHASE", "PHASES", "at") : [])] : [])]);
 
@@ -486,7 +486,7 @@ function stageRuleLine(r: StageRule): string {
 
 function unitLines(u: UnitAst): string[] {
   if (u.kind === "slots") fields(u, `unit "${u.id}"`, "id", "kind", "number", "in", "slots");
-  else fields(u, `unit "${u.id}"`, "id", "kind", "number", "anchor", "length", "crossing", "gears", "stages", "labels", "ledger");
+  else fields(u, `unit "${u.id}"`, "id", "kind", "number", "anchor", "length", "crossing", "gears", "stages", "labels", "ledger", "skips");
   for (const s of (u.kind === "cycle" ? u.stages : undefined) ?? []) fields(s, `a stage of "${u.id}"`, "rules");
   const out = [`UID:${id(u.id)}`];
   if (u.number !== undefined) out.push(`NUMBER:${num(u.number)}`);
@@ -496,6 +496,7 @@ function unitLines(u: UnitAst): string[] {
     return out;
   }
   out.push(...baseLines(u));
+  if (u.skips !== undefined) out.push(`SKIPS:${id(u.skips)}`);
   if (u.labels?.length === 0) out.push("LABELS:");
   for (const l of u.labels ?? []) out.push(...labelLines(l));
   if (u.ledger?.length === 0) out.push("LEDGER:");
@@ -793,8 +794,9 @@ const DAY_MARK = /^DAY:(-?\d+)$/;
 const SLOT_MARK = /^([a-z][a-z0-9-]*):(-?\d+)\.(-?\d+)$/;
 /** VSEASONS; a slot mark's printed number becomes a 0-based index once the units are read (`slotIndices`). */
 function seasonsBlock(c: Component): SeasonsAst {
-  const p = new Props(c, ["UNIT", "MARK", "MARKS"], []);
+  const p = new Props(c, ["UNIT", "SKIPS", "MARK", "MARKS"], []);
   const u = p.req("UNIT");
+  const skips = p.one("SKIPS");
   const marked = p.marker("MARKS");
   const lines = p.all("MARK");
   if (marked && lines.length) throw new SeshatSyntaxError("MARKS: marks an empty list and stands alone", lines[0]!.no);
@@ -811,7 +813,7 @@ function seasonsBlock(c: Component): SeasonsAst {
     if (/^[A-Za-z]/.test(at)) throw new SeshatSyntaxError(`"${at}" is not a season mark (a fraction, DAY:<n> or <unit>:<slot>.<day>)`, l.no);
     return { name, from: toNum(at, l.no) };
   });
-  return { unit: toId(u.value, u), marks };
+  return { unit: toId(u.value, u), ...(skips ? { skips: toId(skips.value, skips) } : {}), marks };
 }
 function wholeIn(s: string, line: number): number {
   const x = Number(s);
@@ -935,8 +937,9 @@ function unit(c: Component): UnitAst {
     const slots = p.seq(["SLOT"], ["VSLOT"]).map((it) => ("line" in it ? slotLine(it.line) : slotBlock(it.block)));
     return { id: toId(u.value, u), kind: "slots", ...unitNumber(p), in: toId(i.value, i), slots };
   }
-  const p = new Props(c, ["UID", "NUMBER", ...BASE_LINES, "LABEL", "LABELS", "LEDGER", "STARTS", "SLOTS"], ["VSTAGE", "VLABEL", "VSWITCH"]);
+  const p = new Props(c, ["UID", "NUMBER", ...BASE_LINES, "SKIPS", "LABEL", "LABELS", "LEDGER", "STARTS", "SLOTS"], ["VSTAGE", "VLABEL", "VSWITCH"]);
   const u = p.req("UID");
+  const skips = p.one("SKIPS");
   const labelsMarked = p.marker("LABELS");
   const labels = p.seq(["LABEL"], ["VLABEL"]).map((it) => ("line" in it ? { name: unesc(it.line.value, it.line.no) } : labelBlock(it.block)));
   const ledgerMarked = p.marker("LEDGER");
@@ -946,6 +949,7 @@ function unit(c: Component): UnitAst {
     kind: "cycle",
     ...unitNumber(p),
     ...cycleRule(p, c),
+    ...(skips ? { skips: toId(skips.value, skips) } : {}),
     ...(labels.length || labelsMarked ? { labels } : {}),
     ...(ledger.length || ledgerMarked ? { ledger } : {}),
   };

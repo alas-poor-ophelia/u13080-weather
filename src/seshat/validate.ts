@@ -16,7 +16,8 @@ import { baseLengths, linearBase } from "./base";
 import { gearMatcher, gearPeriod, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
-import { stageReach } from "./start";
+import { makeSequence, skippingRule, type Sequence } from "./sequence";
+import { stageReach, type StartRule } from "./start";
 import { Body } from "./body";
 import { checkFormats } from "./format";
 import { gcd } from "./rational";
@@ -168,6 +169,11 @@ export function problems(stored: CalendarAst): Problem[] {
     if (!u) errors.push(`seasons: no unit "${String(ast.seasons.unit)}"`);
     else if (u.kind !== "cycle") errors.push(`seasons: "${u.id}" is a slot unit; seasons follow a cycle unit's phase`);
     seasonMarks(ast.seasons.marks, u);
+    if (ast.seasons.skips !== undefined) {
+      const t = units.get(ast.seasons.skips);
+      if (t?.kind !== "slots" || t.in !== ast.seasons.unit) errors.push(`seasons: SKIPS "${String(ast.seasons.skips)}" is not a slot unit directly in "${String(ast.seasons.unit)}"`);
+      else if (!t.slots.some((s) => s.filler)) errors.push(`seasons: SKIPS "${t.id}" has no filler slot to skip`);
+    }
   }
   // predicates match moons by name, so two moons of one name would be one moon to every rule
   const moonNames = (ast.bodies ?? []).flatMap((b) => (b.moon ? [b.moon.name] : []));
@@ -303,15 +309,33 @@ export function problems(stored: CalendarAst): Problem[] {
     own(n0, { unit: u.id });
   }
 
-  // V7 on the compiled starts: strictly increasing across every pin and switch (one comparison per boundary)
+  // a cycle that skips (§19.3): what it names must be on a closed form, and nothing may need days it does not count
+  const skipTargets = new Map<string, SlotsUnitAst>();
   for (const u of ast.units) {
-    if (u.kind !== "cycle" || !u.ledger?.length || bad.has(u.id)) continue;
-    const read = [u, ...u.ledger.flatMap((e) => (e.kind === "switch" ? [e.rule] : []))].flatMap((r) => r.gears ?? []).map((t) => t.gear);
-    if (read.some((g) => bad.has(g) || !gears.has(g))) continue;
-    const rule = compileUnit(u, gears);
+    if (u.kind !== "cycle" || u.skips === undefined) continue;
+    const n0 = errors.length;
+    const unitFail = (msg: string) => fail(u.id, `unit "${u.id}": ${msg}`);
+    const t = units.get(u.skips);
+    const parent = t?.kind === "slots" ? units.get(t.in) : undefined;
+    if (t?.kind !== "slots" || parent?.kind !== "cycle") unitFail(`SKIPS "${String(u.skips)}" is not a slot unit directly under a cycle unit`);
+    else if (parent === u) unitFail(`SKIPS "${t.id}" is a slot unit inside this unit; a unit cannot skip its own slots`);
+    else if (!t.slots.some((s) => s.filler)) unitFail(`SKIPS "${t.id}" has no filler slot to skip`);
+    else if (t.slots.some((s) => s.filler && typeof s.length !== "number")) unitFail(`SKIPS "${t.id}": a filler slot it skips must have a number of days, not SLACK or a table`);
+    else if (parent.skips !== undefined) unitFail(`SKIPS "${t.id}" is under "${parent.id}", which itself skips`);
+    else skipTargets.set(u.id, t);
+    for (const r of [u, ...(u.ledger ?? []).flatMap((e) => (e.kind === "switch" ? [e.rule] : []))]) {
+      if (r.crossing !== undefined) unitFail("a unit with SKIPS cannot follow a crossing");
+      if (r.stages?.length) unitFail("a unit with SKIPS cannot have stages");
+    }
+    for (const c of ast.units) if (c.kind === "slots" && c.in === u.id) unitFail(`unit "${c.id}" cannot sit inside a unit with SKIPS`);
+    if (ast.seasons?.unit === u.id) unitFail("seasons cannot run over a unit with SKIPS");
+    own(n0, { unit: u.id });
+  }
+  // V7 on the compiled starts: strictly increasing across every pin and switch (one comparison per boundary)
+  const checkStarts = (u: CycleUnitAst, rule: StartRule): void => {
     // each boundary and the entry that puts it there (the first to name it)
     const boundaries = new Map<number, number>();
-    for (const [i, e] of u.ledger.entries()) {
+    for (const [i, e] of u.ledger!.entries()) {
       if (e.kind === "switch" && !boundaries.has(e.from)) boundaries.set(e.from, i);
       if (e.kind === "starts") for (let k = e.from; k <= e.from + (e.lengths?.length ?? 0) + 1; k++) if (!boundaries.has(k)) boundaries.set(k, i);
     }
@@ -321,6 +345,13 @@ export function problems(stored: CalendarAst): Problem[] {
       if (here <= before) fail(u.id, `unit "${u.id}": occurrence ${k - 1} would be ${here - before} days long (it starts on day ${before}, the next on day ${here}); every occurrence needs at least one day (V7)`);
       own(n, { unit: u.id, entry });
     }
+  };
+  const ledgerRead = (u: CycleUnitAst): string[] => [u, ...(u.ledger ?? []).flatMap((e) => (e.kind === "switch" ? [e.rule] : []))].flatMap((r) => r.gears ?? []).map((t) => t.gear);
+  for (const u of ast.units) {
+    // a cycle that skips reads its starts off the counted line, once the slot sums are in (below)
+    if (u.kind !== "cycle" || !u.ledger?.length || bad.has(u.id) || u.skips !== undefined) continue;
+    if (ledgerRead(u).some((g) => bad.has(g) || !gears.has(g))) continue;
+    checkStarts(u, compileUnit(u, gears));
   }
 
   // slot sums need the whole chain clean: the unit, every slot unit above it, the cycle, and every gear they read.
@@ -348,6 +379,42 @@ export function problems(stored: CalendarAst): Problem[] {
     const chain = u.kind === "slots" ? chainOf(u, units) : null;
     if (u.kind === "slots" && Array.isArray(chain)) sums(u, chain);
   }
+  /** the counted line of cycle `u`, once what it reads has passed its own checks */
+  const sequenceOf = (u: CycleUnitAst): Sequence | null => {
+    const t = skipTargets.get(u.id);
+    const parent = t && units.get(t.in);
+    if (!t || parent?.kind !== "cycle" || bad.has(t.id) || bad.has(parent.id) || bad.has(u.id)) return null;
+    const read = [parent, ...(parent.ledger ?? []).flatMap((e) => (e.kind === "switch" ? [e.rule] : []))].flatMap((r) => r.gears ?? []).map((g) => g.gear);
+    if ([...read, ...t.slots.flatMap((s) => (s.gears ?? []).map((g) => g.gear))].some((g) => bad.has(g) || !gears.has(g))) return null;
+    return makeSequence(compileUnit(parent, gears), t, parent.ledger ?? [], gears);
+  };
+  for (const u of ast.units) {
+    if (u.kind !== "cycle" || u.skips === undefined || !skipTargets.has(u.id)) continue;
+    const t = skipTargets.get(u.id)!;
+    const n0 = errors.length;
+    const unitFail = (msg: string) => fail(u.id, `unit "${u.id}": ${msg}`);
+    // every occurrence of the parent holds a counted day, or the counted line stalls
+    const parent = units.get(t.in) as CycleUnitAst;
+    if (t.slots.every((s) => s.filler || (typeof s.length === "number" && s.length + (s.gears ?? []).reduce((a, g) => a + Math.min(0, g.add), 0) < 1) || (s.length === "slack" && (s.min ?? 0) < 1))) unitFail(`SKIPS "${t.id}": some occurrence of "${parent.id}" could hold only filler days`);
+    for (const e of parent.ledger ?? []) {
+      if (e.kind === "slots" && e.unit === t.id && !e.path?.length && e.lengths.every((len, i) => len === 0 || t.slots[i]?.filler)) unitFail(`SKIPS "${t.id}": occurrence ${e.from} of "${parent.id}" holds only filler days`);
+    }
+    own(n0, { unit: u.id });
+    const seq = sequenceOf(u);
+    if (!seq) continue;
+    const n1 = errors.length;
+    if (typeof u.anchor === "number" && seq.isFiller(u.anchor)) unitFail(`the anchor D${u.anchor} is a filler day of "${t.id}", which this unit skips`);
+    for (const [entry, e] of (u.ledger ?? []).entries()) {
+      const day = e.kind === "starts" ? e.startsOn : e.kind === "switch" ? e.rule.anchor : undefined;
+      if (day === undefined || !seq.isFiller(day)) continue;
+      const n = errors.length;
+      unitFail(`ledger entry ${entry + 1}: D${day} is a filler day of "${t.id}", which this unit skips`);
+      own(n, { unit: u.id, entry });
+    }
+    own(n1, { unit: u.id });
+    if (u.ledger?.length && !bad.has(u.id) && !ledgerRead(u).some((g) => bad.has(g) || !gears.has(g))) checkStarts(u, skippingRule(u, seq, gears));
+  }
+
   errors.push(...checkFormats(ast));
   for (const r of ast.rules ?? []) {
     const n = errors.length;

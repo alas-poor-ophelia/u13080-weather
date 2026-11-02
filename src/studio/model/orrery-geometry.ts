@@ -395,7 +395,7 @@ function buildDay(p: Prepared, day: number): DayFacts {
   const positions = new Map<string, { index: number; offset: number; start: number; length: number } | null>();
   for (const u of p.ast.units) {
     const o = e.occurrenceAt(u.id, day);
-    positions.set(u.id, o && { index: o.index, offset: day - o.start, start: o.start, length: o.length });
+    positions.set(u.id, o && { index: o.index, offset: e.countedOffset(u.id, day, o.start), start: o.start, length: e.countedLength(u.id, o) });
   }
   const bodies = new Map<string, number>();
   for (const b of p.ast.bodies ?? []) bodies.set(b.id, e.bodyPhase(b.id, day)!);
@@ -932,7 +932,8 @@ function drawMachine(p: Prepared, year: YearFacts, today: DayFacts, dayF: number
   let wn = 0;
   for (const u of [...others.filter((x) => x.labels?.length), ...others.filter((x) => !x.labels?.length && x !== hub)]) {
     const part: PartId = `unit:${u.id}`;
-    const pos = curOf(u.id)!;
+    const pos = curOf(u.id);
+    if (!pos) continue; // a filler day this unit skips: no wheel turns today
     const N = u.labels?.length || Math.min(60, Math.max(1, pos.length));
     const li = u.labels?.length ? mod(pos.index, N) : pos.offset;
     const yw = 0.72 + wn * 0.13;

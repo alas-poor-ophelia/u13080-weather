@@ -123,6 +123,8 @@ interface CycleCommon {
   readonly labels?: readonly LabelAst[];
   /** C6 (§2.7.1): rule switches, pinned starts and slot overrides, ordered by `from` (V7) */
   readonly ledger?: readonly LedgerEntry[];
+  /** §19.3: a slot unit directly under a cycle whose filler slots this unit does not count: a week that skips Worldsday. A ledger switch's anchor is then the day its `from` occurrence starts */
+  readonly skips?: string;
 }
 
 export type ConstantCycleAst = ConstantRule & CycleCommon;
@@ -247,6 +249,8 @@ export interface MoonAst {
 export interface SeasonsAst {
   readonly unit: string;
   readonly marks: readonly SeasonMarkAst[];
+  /** §19.4: a slot unit in `unit` whose filler slots have no season; weather still reads the season around them */
+  readonly skips?: string;
 }
 
 /** A named format pattern (§4.2): "default" formats a day, "filler" a day in a filler slot. Display data. */

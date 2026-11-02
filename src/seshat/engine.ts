@@ -14,6 +14,7 @@ import { EngineDays } from "./engine-view";
 import { gearMatcher, lcm, mod, type GearAst } from "./gear";
 import { slotLengthsIn } from "./slots";
 import { compileUnit } from "./piecewise";
+import { makeSequence, skippingRule, type Sequence } from "./sequence";
 import { traceStart, type StartRule, type StartTrace } from "./start";
 import { validate } from "./validate";
 
@@ -34,6 +35,8 @@ export class Engine {
   private readonly bodies = new Map<string, Body>();
   /** slot lengths of units that cannot vary (whole-number slots, no gears, no ledger overrides): computed once */
   private readonly fixedLengths = new Map<string, readonly number[]>();
+  /** the counted line of each cycle that skips filler days (§19.3) */
+  private readonly sequences = new Map<string, Sequence>();
   /** rules over this calendar (§3.5); the named rules (VRULE) are bound through it */
   readonly days: EngineDays;
 
@@ -53,13 +56,22 @@ export class Engine {
     for (const u of ast.units) {
       this.units.set(u.id, u);
       if (u.kind !== "cycle") continue;
-      this.rules.set(u.id, compileUnit(u, this.gears));
+      if (u.skips === undefined) this.rules.set(u.id, compileUnit(u, this.gears));
       for (const e of u.ledger ?? []) if (e.kind === "slots") this.overrides.set(overrideKey(e.unit, [e.from, ...(e.path ?? [])]), e.lengths);
     }
     const overridden = new Set(ast.units.flatMap((u) => (u.kind === "cycle" ? (u.ledger ?? []) : [])).flatMap((e) => (e.kind === "slots" ? [e.unit] : [])));
     for (const u of ast.units) {
       if (u.kind !== "slots" || overridden.has(u.id)) continue;
       if (u.slots.every((x) => typeof x.length === "number" && !x.gears?.length)) this.fixedLengths.set(u.id, u.slots.map((x) => x.length as number));
+    }
+    // a cycle that skips reads its parent's rule, wherever the two are declared
+    for (const u of ast.units) {
+      if (u.kind !== "cycle" || u.skips === undefined) continue;
+      const slots = this.slots(u.skips);
+      const parent = this.units.get(slots.in) as CycleUnitAst;
+      const seq = makeSequence(this.rule(parent.id), slots, parent.ledger ?? [], this.gears);
+      this.sequences.set(u.id, seq);
+      this.rules.set(u.id, skippingRule(u, seq, this.gears));
     }
     this.days = new EngineDays(this);
   }
@@ -93,7 +105,7 @@ export class Engine {
     return this.start(id, index + 1) - this.start(id, index);
   }
 
-  /** The occurrence of cycle unit `id` that holds `day` (a whole day within ±DAY_LIMIT). */
+  /** The occurrence of cycle unit `id` whose span holds `day` (a whole day within ±DAY_LIMIT). A filler day a unit skips has no place in it (occurrenceAt says so) but falls in one's span. */
   indexAt(id: string, day: number): number {
     const rule = this.rule(id);
     if (!Number.isSafeInteger(day) || Math.abs(day) > DAY_LIMIT) throw new RangeError(`day ${day} is not a whole day within ±${DAY_LIMIT}`);
@@ -132,12 +144,15 @@ export class Engine {
   /**
    * The occurrence of unit `id` that holds `day`: a cycle's index, or a slot's
    * index in its parent, with its first day and length. Null when the day lies
-   * in a filler slot of an enclosing unit.
+   * in a filler slot of an enclosing unit, or one this unit skips. `start + length`
+   * is always where the next occurrence starts: a week that skips a festival is 8
+   * long here and holds 7 counted days (countedOffset, countedLength).
    */
   occurrenceAt(id: string, day: number): { readonly index: number; readonly start: number; readonly length: number } | null {
     const u = this.units.get(id);
     if (!u) throw new RangeError(`no unit "${id}"`);
     if (u.kind === "cycle") {
+      if (this.skipped(id, day)) return null;
       const index = this.indexAt(id, day);
       const start = this.start(id, index);
       return { index, start, length: this.start(id, index + 1) - start };
@@ -147,8 +162,40 @@ export class Engine {
     return { index: at.path[at.path.length - 1]!, start: day - at.offset, length: at.length };
   }
 
-  /** The season `day` falls in (the legacy rule over the seasons unit's phase), or null with no seasons. */
+  /** Whether `day` is a filler day cycle unit `id` skips (§19.3). */
+  skipped(id: string, day: number): boolean {
+    return this.sequences.get(id)?.isFiller(day) ?? false;
+  }
+
+  /** The days into occurrence `start` of `id` that `day` is: on a cycle that skips, counted days. */
+  countedOffset(id: string, day: number, start: number): number {
+    const seq = this.sequences.get(id);
+    return seq ? seq.counted(day) - seq.counted(start) : day - start;
+  }
+
+  /** The days an occurrence of `id` holds: on a cycle that skips, counted days. */
+  countedLength(id: string, o: { readonly start: number; readonly length: number }): number {
+    const seq = this.sequences.get(id);
+    return seq ? seq.counted(o.start + o.length) - seq.counted(o.start) : o.length;
+  }
+
+  /** Whether `day` lies in a filler slot of slot unit `id`. */
+  inFiller(id: string, day: number): boolean {
+    const at = this.locate(id, day);
+    return !!at && this.isFiller(id, at.path);
+  }
+
+  /**
+   * The season `day` falls in (the legacy rule over the seasons unit's phase), or null with no seasons, or
+   * on a filler day the seasons skip (§19.4). Weather reads seasonAround, which does not skip.
+   */
   seasonAt(day: number): string | null {
+    const skips = this.ast.seasons?.skips;
+    return skips !== undefined && this.inFiller(skips, day) ? null : this.seasonAround(day);
+  }
+
+  /** The season around `day`, whatever the seasons skip. */
+  seasonAround(day: number): string | null {
     const s = this.ast.seasons;
     if (!s) return null;
     return seasonIn(s, this.occurrenceAt(s.unit, day)!, day, this.seasonCalendar());
@@ -222,9 +269,10 @@ export class Engine {
     const u = this.units.get(id);
     if (!u) throw new RangeError(`no unit "${id}"`);
     if (u.kind === "cycle") {
+      if (this.skipped(id, day)) return null;
       const index = this.indexAt(id, day);
       const start = this.start(id, index);
-      return { path: [index], offset: day - start, length: this.start(id, index + 1) - start };
+      return { path: [index], offset: this.countedOffset(id, day, start), length: this.start(id, index + 1) - start };
     }
     const parent = this.locate(u.in, day);
     if (!parent || this.isFiller(u.in, parent.path)) return null;

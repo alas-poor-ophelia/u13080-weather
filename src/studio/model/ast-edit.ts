@@ -657,7 +657,7 @@ export function addSeasonMark(ast: CalendarAst, mark: SeasonMarkAst): AstEdit {
   if (!ast.seasons && !cycleUnit(ast, unit)) return refuse("this calendar has no year for seasons to divide");
   const why = markProblem(ast, unit, mark);
   if (why) return refuse(why);
-  return { ast: { ...ast, seasons: { unit, marks: [...(ast.seasons?.marks ?? []), cleanMark(mark)] } } };
+  return { ast: { ...ast, seasons: { ...ast.seasons, unit, marks: [...(ast.seasons?.marks ?? []), cleanMark(mark)] } } };
 }
 
 /** Remove season mark `index`; removing the last one removes the seasons. */

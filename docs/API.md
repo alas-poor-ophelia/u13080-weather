@@ -564,8 +564,14 @@ week) and a `slots` unit divides its parent `in` (a month in a year). `types/wad
 Days are the whole-number `dayOrdinal`s used by the rest of this API. The queries answer from −10,000,000 to 10,000,000
 and throw `RangeError` past that, or for a unit that doesn't exist.
 
-- **`null` is a real answer.** A filler day, such as a festival between months, has no place in the units inside it, so
-  `occurrenceAt`, `positionOf` and `labelAt` can return `null`. A timeline has to draw that gap.
+- **`null` is a real answer.** A filler day, such as a festival between months, has no place in the units inside it, or in a
+  unit that skips it (`SKIPS`, `docs/CALENDARS.md`), so `occurrenceAt`, `positionOf` and `labelAt` can return `null`. A
+  timeline has to draw that gap.
+- **`occurrenceAt`'s `start + length` is always where the next occurrence starts**, so a week that skips a festival is 8
+  long there, which is what a timeline draws. `positionOf`'s `offset` counts only the days the unit counts, so that week
+  still reads 0 to 6. `indexAt` never returns `null`: on a skipped day it returns the occurrence whose span holds the day.
+- **`seasonAt`** returns `null` on a filler day when the calendar's seasons skip it. `timeAt`'s `tags` still carry the
+  season around that day for weather, with `seasonless: true` (§3).
 - **`path`** names a parent occurrence from the cycle down: `[year]` for a month, `[year, month]` for a unit in a month.
   Indices count from 0. A year's index is not always its number: its printed number is the index plus the unit's `number`
   (default 0).
@@ -643,6 +649,7 @@ interface TimeContext {
   year?: number;
   moons?: Array<{ name: string; phase: number }>;
   tags?: string[];
+  seasonless?: true;
   source: string;
 }
 ```
@@ -656,6 +663,7 @@ interface TimeContext {
 | `dayOfYear` | `number`, optional | Integer day-of-year, used by the `dayOfYear` predicate (inclusive range test, §7). The internal calendar always supplies it (0-based). A third-party adapter may omit it, and then `dayOfYear` predicates always evaluate false. |
 | `year` | `number`, optional | The calendar's year number, used by the era timeline. The internal calendar always supplies it (`epochYear` at `dayOrdinal 0`). If an adapter omits it, the era timeline counts years from 1 at day 0 using `yearLength`. |
 | `moons` | `Array<{ name: string; phase: number }>`, optional | `phase` is `[0, 1)`, `0` = new, `0.5` = full. Read by the `moon` predicate. |
+| `seasonless` | `true`, optional *(API 2)* | Set on a filler day the calendar's seasons skip (`SKIPS`, `docs/CALENDARS.md`). The calendar says this day has no season; its `season:` tag is the season around it, so weather carries on. Read `seasonless` before showing that tag as the day's season. |
 | `tags` | `string[]`, optional | Labels provided by the calendar, such as seasons, festivals or eras. Read by the `tag` predicate. Not copied into `WeatherReport.conditions`. Conditions come only from active modifier tags and the fog heuristic (§4). |
 | `source` | `string` | The adapter's `id`. |
 

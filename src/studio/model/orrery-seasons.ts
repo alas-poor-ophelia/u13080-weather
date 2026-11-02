@@ -60,19 +60,21 @@ const seasonsUnit = (ast: CalendarAst): string => ast.seasons?.unit ?? "year";
 
 /**
  * Why the Seasons window (fractions of the year, written through the form's year) cannot edit these seasons, or
- * null: a mark starts on a date ("dated"), or the marks divide another unit than the year ("unit": the form would
- * write them over the year). Both are edited in the Orrery or as text.
+ * null: a mark starts on a date ("dated"), the marks divide another unit than the year ("unit": the form would
+ * write them over the year), or they skip filler days ("skips": the form has no field for it). All are edited in
+ * the Orrery or as text.
  */
-export function seasonsWindowLock(seasons: SeasonsAst | undefined): "dated" | "unit" | null {
+export function seasonsWindowLock(seasons: SeasonsAst | undefined): "dated" | "unit" | "skips" | null {
   if (!seasons) return null;
   if (seasonsUseDates(seasons)) return "dated";
+  if (seasons.skips !== undefined) return "skips";
   return seasons.unit !== "year" ? "unit" : null;
 }
 
-/** Whether the marks are edited through the AST layer: the layer's marks are dated, they divide another unit than the year, or the result is dated. */
+/** Whether the marks are edited through the AST layer: the layer's marks are dated or skip filler days, they divide another unit than the year, or the result is dated. */
 function throughAst(calendar: CalendarDraft, ast: CalendarAst, next: readonly SeasonMarkAst[]): boolean {
   const layer = calendar.ast?.seasons;
-  return (!!layer && seasonsUseDates(layer)) || seasonsUnit(ast) !== "year" || next.some(isDateMark);
+  return (!!layer && (seasonsUseDates(layer) || layer.skips !== undefined)) || seasonsUnit(ast) !== "year" || next.some(isDateMark);
 }
 
 /** The field the form writes: fractions of the year, ascending (stable), as the Seasons window keeps it. */

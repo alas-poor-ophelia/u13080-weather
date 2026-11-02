@@ -39,8 +39,8 @@ export function baseKind(u: CycleRule): "constant" | "crossing" | "body" {
  * A cycle with a plain constant base: no crossing (literal or body), no gear
  * terms, no stages, no ledger. Its occurrences all have `length` days.
  */
-export function isPlainConstant(u: CycleRule & { readonly ledger?: readonly unknown[] }): u is CycleRule & { readonly anchor: number; readonly length: number } {
-  return baseKind(u) === "constant" && !u.gears?.length && !u.stages?.length && !u.ledger?.length;
+export function isPlainConstant(u: CycleRule & { readonly ledger?: readonly unknown[]; readonly skips?: string }): u is CycleRule & { readonly anchor: number; readonly length: number } {
+  return baseKind(u) === "constant" && !u.gears?.length && !u.stages?.length && !u.ledger?.length && !u.skips;
 }
 
 /** Day on which occurrence k of the base starts. */

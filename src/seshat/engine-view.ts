@@ -197,7 +197,13 @@ export class EngineDays {
   }
 
   private anchorPeriod(r: Recur): Occurrence | null {
-    if (r.anchor !== undefined) return this.occurrence(r.freq, r.anchor);
+    if (r.anchor !== undefined) {
+      const o = this.occurrence(r.freq, r.anchor);
+      if (o || !this.engine.skipped(r.freq, r.anchor)) return o;
+      // a filler day the unit skips: the occurrence whose span holds it
+      const index = this.engine.indexAt(r.freq, r.anchor);
+      return { index, start: this.engine.start(r.freq, index), length: this.engine.length(r.freq, index) };
+    }
     if (r.freq === "day") return { index: 0, start: 0, length: 1 };
     const cycle = this.engine.isCycle(r.freq);
     // occurrence 0 of a cycle; a slot unit has no global occurrence 0, so no lower bound
@@ -218,8 +224,9 @@ export class EngineDays {
     const o = this.occurrence(b.unit, day);
     if (!o) return false;
     if ("day" in b) {
-      const pos = day - o.start + 1;
-      return b.day.some((n) => n === pos || n === pos - o.length - 1);
+      const pos = this.engine.countedOffset(b.unit, day, o.start) + 1;
+      const held = this.engine.countedLength(b.unit, o);
+      return b.day.some((n) => n === pos || n === pos - held - 1);
     }
     // nth: declared slots of the period's own unit keep their numbers; anything else counts by start day
     if (this.engine.parentOf(b.unit) === freq) {
@@ -260,7 +267,7 @@ export class EngineDays {
     if (hit) return hit;
     if (r.setpos !== undefined && period.length > SETPOS_PERIOD_MAX) throw new RangeError(`BYSETPOS over a ${period.length}-day period of "${r.freq}"; the limit is ${SETPOS_PERIOD_MAX} days`);
     const all: number[] = [];
-    for (let x = period.start; x < period.start + period.length; x++) if (this.byAll(r, x, period)) all.push(x);
+    for (let x = period.start; x < period.start + period.length; x++) if (!this.engine.skipped(r.freq, x) && this.byAll(r, x, period)) all.push(x);
     const days = r.setpos === undefined ? all : all.filter((_, i) => r.setpos!.some((n) => n === i + 1 || n === i - all.length));
     if (cache) byPeriod.set(period.start, days);
     return days;
@@ -300,17 +307,18 @@ class EngineView implements DayView {
 
   unitPhase(unit: string): number | undefined {
     const o = this.days.occurrence(unit, this.day);
-    return o ? (this.day - o.start) / o.length : undefined;
+    return o ? this.days.engine.countedOffset(unit, this.day, o.start) / this.days.engine.countedLength(unit, o) : undefined;
   }
 
   dayInUnit(unit: string): number | undefined {
     const o = this.days.occurrence(unit, this.day);
-    return o ? this.day - o.start : undefined;
+    return o ? this.days.engine.countedOffset(unit, this.day, o.start) : undefined;
   }
 
   index(unit: string): number | undefined {
     if (unit === "day") return this.day;
-    return this.days.engine.isCycle(unit) ? this.days.engine.indexAt(unit, this.day) : undefined;
+    const e = this.days.engine;
+    return e.isCycle(unit) && !e.skipped(unit, this.day) ? e.indexAt(unit, this.day) : undefined;
   }
 
   bodyPhase(body: string): number | undefined {

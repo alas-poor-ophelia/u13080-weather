@@ -170,6 +170,8 @@ export function unitReaders(ast: CalendarAst, id: string): string[] {
     out.push(`the rule "${ruleName(r.rule)}" reads it`);
   }
   if (ast.seasons?.unit === id) out.push("the seasons divide it");
+  if (ast.seasons?.skips === id) out.push("the seasons skip its festival days");
+  for (const u of ast.units) if (u.kind === "cycle" && u.skips === id) out.push(`the ${u.id} skips its festival days`);
   for (const g of ast.gears) if (g.on === id) out.push(`the gear "${g.id}" counts it`);
   for (const u of ast.units) if (u.kind === "slots" && u.in === id) out.push(`the ${u.id} sits in it`);
   for (const r of stageReads(ast, id)) if (r.titled) out.push(`the ${r.unit}'s stages name its days`);
@@ -228,6 +230,7 @@ export function renameUnit(ast: CalendarAst, from: string, to: string): AstEdit 
   const units = ast.units.map((x): UnitAst => {
     let next: UnitAst = x.id === from ? { ...x, id } : x;
     if (next.kind === "slots" && next.in === from) next = { ...next, in: id };
+    if (next.kind === "cycle" && next.skips === from) next = { ...next, skips: id };
     if (next.kind === "cycle" && next.ledger?.some((e) => e.kind === "slots" && e.unit === from)) next = { ...next, ledger: next.ledger.map((e) => (e.kind === "slots" && e.unit === from ? { ...e, unit: id } : e)) };
     return next;
   });
@@ -242,12 +245,12 @@ export function renameUnit(ast: CalendarAst, from: string, to: string): AstEdit 
   return { ast: out };
 }
 
-/** `s` with unit `from` renamed `to` where it names it: the unit the marks divide, and each month-and-day mark's slot unit. */
+/** `s` with unit `from` renamed `to` where it names it: the unit the marks divide, the unit it skips, and each month-and-day mark's slot unit. */
 function renameInSeasons(s: SeasonsAst, from: string, to: string): SeasonsAst {
   const marks = s.marks.map((m): SeasonMarkAst => ("slot" in m && m.slot.unit === from ? { ...m, slot: { ...m.slot, unit: to } } : m));
   const moved = marks.some((m, i) => m !== s.marks[i]);
-  if (s.unit !== from && !moved) return s;
-  return { ...s, ...(s.unit === from ? { unit: to } : {}), ...(moved ? { marks } : {}) };
+  if (s.unit !== from && s.skips !== from && !moved) return s;
+  return { ...s, ...(s.unit === from ? { unit: to } : {}), ...(s.skips === from ? { skips: to } : {}), ...(moved ? { marks } : {}) };
 }
 
 /** Remove unit `id`; refused, naming the first reader, while anything reads it (`unitReaders`). */
@@ -342,6 +345,7 @@ export function anchorProblem(ast: CalendarAst, id: string): string | null {
   const u = cycleUnit(ast, id);
   if (!u) return `there is no cycle unit "${id}"`;
   if (u.crossing) return `the ${id} starts by a crossing, so it has no anchor`;
+  if (u.skips !== undefined) return `the ${id} skips festival days, so its days cannot be counted from here; change its anchor as text (Edit as text)`;
   if (u.ledger?.length) return `the ${id} has exceptions written against its occurrences; change them first (Exceptions)`;
   const r = unitReads(ast, id).find((x) => x.how === "number");
   if (r) return `the rule "${ruleName(r.rule)}" reads the ${id} by number; change it first (Edit definition)`;

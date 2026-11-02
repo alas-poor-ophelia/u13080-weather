@@ -8,6 +8,8 @@ export interface TimeContext extends DayTime {
   dayOrdinal: number;
   yearLength: number;
   hour?: number;
+  /** a filler day the calendar's seasons skip: it reads as having no season, and its `season:` tag is the season around it, for weather */
+  seasonless?: true;
   source: string;
 }
 

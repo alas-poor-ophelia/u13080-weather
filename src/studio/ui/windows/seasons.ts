@@ -107,8 +107,9 @@ function calendarView(ctx: SurfaceContext, state: StudioState): CalendarView {
   const readOnly = (description?.readOnly ?? false) || lock !== null;
   const seasons = readOnly && !(layer && !description?.readOnly) ? (description?.seasons ?? []) : state.world.calendar.seasons;
   const yearLength = description?.yearLength ?? DEFAULT_YEAR_LENGTH;
-  const label = dated ? `${description?.readOnly ? description.label : "calendar definition"} · seasons on dates, approximate` : over !== null ? `${description?.readOnly ? description.label : "calendar definition"} · seasons over the ${over}` : readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
-  const editHint = dated ? "the seasons start on dates: edit them in the calendar text (Edit as text)" : over !== null ? `the seasons divide the ${over}, not the year: edit them in the Orrery or the calendar text (Edit as text)` : description?.editHint;
+  const skipping = lock === "skips";
+  const label = skipping ? "calendar definition · seasons skip festival days" : dated ? `${description?.readOnly ? description.label : "calendar definition"} · seasons on dates, approximate` : over !== null ? `${description?.readOnly ? description.label : "calendar definition"} · seasons over the ${over}` : readOnly ? (description?.label ?? "calendar") : state.calendarSource === "seshat" ? "calendar definition" : "legacy calendar";
+  const editHint = skipping ? "the seasons skip festival days: edit them in the Orrery or as text (Edit as text)" : dated ? "the seasons start on dates: edit them in the calendar text (Edit as text)" : over !== null ? `the seasons divide the ${over}, not the year: edit them in the Orrery or the calendar text (Edit as text)` : description?.editHint;
   return { readOnly, label, seasons, yearLength, ...(editHint !== undefined ? { editHint } : {}), ...(over !== null ? { over } : {}) };
 }
 

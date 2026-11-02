@@ -75,6 +75,8 @@ date each day number is. Day numbers appear in the text as `D` followed by the n
 | name one day that happened once | [Step 7](#7-exceptions), [Exceptions](#exceptions) (`RDATE`) |
 | cancel one year's feast | [Step 7](#7-exceptions), [Exceptions](#exceptions) |
 | add festival days that belong to no month or week | [Units](#units) (filler slots) |
+| keep the weekdays running through the year but not on festival days | [Days a unit doesn't count](#days-a-unit-doesnt-count) |
+| put festival days outside the seasons | [Seasons](#seasons) (`SKIPS`) |
 | move one year's start, or change the rules from a year on (a reform) | [Exceptions](#exceptions) |
 | start a year a day late when it would fall on a given weekday | [Stages](#stages) |
 | choose how dates are written and typed | [Step 8](#8-how-dates-are-written), [Formats](#formats) |
@@ -686,6 +688,7 @@ is a slot unit; one without is a cycle unit.
 | `VSTAGE` | block | Any number, applied in order. See [Stages](#stages). |
 | `LABEL` | text | Any number. Names occurrences in turn: occurrence *k* carries label *k* mod the number of labels, so occurrence 0 carries the first. |
 | `VLABEL` | block: `NAME`, `TAGS` | A label with tags (or tags alone). Each day of an occurrence carrying it has its tags. |
+| `SKIPS` | a slot unit | The unit does not count that slot unit's filler days. See [Days a unit doesn't count](#days-a-unit-doesnt-count). |
 | `STARTS`, `SLOTS`, `VSWITCH` | see [Exceptions](#exceptions) | The unit's one-off corrections. |
 
 Each occurrence must be at least one day long, however the gears and stages combine.
@@ -771,6 +774,56 @@ END:VCALENDAR
 Here *Midyear* is 0 days long, plus one in each leap year (a gear term on the slot itself), and
 tagged `festival`. It is a filler, so the `part` unit inside the months skips it: on Midyear the
 day has a month (*Midyear*) but no part.
+
+### Days a unit doesn't count
+
+A cycle unit such as a week normally runs through every day. Nothing in a filler slot stops it, so a festival day
+between months still falls on a weekday. To take festival days out of the week, give the week and its weekday cycle
+`SKIPS`, naming the slot unit whose filler days they don't count:
+
+```seshat
+BEGIN:VUNIT
+UID:week
+ANCHOR:D0
+LENGTH:7
+SKIPS:month
+END:VUNIT
+
+BEGIN:VUNIT
+UID:weekday
+ANCHOR:D0
+LENGTH:1
+SKIPS:month
+LABEL:Sunday
+LABEL:Monday
+LABEL:Tuesday
+LABEL:Wednesday
+LABEL:Thursday
+LABEL:Friday
+LABEL:Saturday
+END:VUNIT
+```
+
+The week stops at the festival and carries on after it, so a Saturday, a festival, then a Sunday. This is how the World
+Calendar keeps every 1 January on a Sunday.
+
+On a day the unit skips, the unit has nothing to say: `{week}` and `{weekday:name}` print nothing, the day has no
+weekday's tags, and a rule that asks about the week is false that day. A week that spans a festival still has seven days:
+`{week:day}` counts 1 to 7 and doesn't jump.
+
+Limits:
+
+- `SKIPS` names a slot unit directly under a cycle unit (months in a year, not tendays in a month). All its filler days are
+  skipped; you can't skip some festivals and count others.
+- Each filler slot it skips has a number of days, with or without leap rules: not `SLACK` and not a table.
+- Every year must hold at least one day that isn't a filler day.
+- The unit's `ANCHOR` and any `STARTS` day can't be a filler day it skips.
+- The unit can't have a crossing, stages or a slot unit inside it, and seasons can't run over it.
+- It can't place a date on its own, so a format built only on it can print but can't be typed in.
+
+Exceptions work on a unit that skips. `STARTS` days are days as usual, and its `LENGTHS` count the days the unit counts.
+In a `VSWITCH`, `ANCHOR` is **the day occurrence `FROM` starts**, not occurrence 0's day as on other units. `LENGTH` counts
+the days the unit counts.
 
 ### Gears (leap rules)
 
@@ -902,6 +955,21 @@ A day is in the last season that started on or before it in its year; before the
 year, it is still in the last season of the year before. Each day carries the tag
 `season:<name>`. A zone set to flip its seasons flips its own season tag; calendar rules always
 read the calendar's own seasons.
+
+`SKIPS` names a slot unit directly in the seasons' unit, with at least one filler slot:
+
+```seshat
+BEGIN:VSEASONS
+UNIT:year
+SKIPS:month
+MARK:Winter=0
+MARK:Summer=0.5
+END:VSEASONS
+```
+
+Without it, a festival day has the season around it. With it, a festival day has no season: dates, `{@season}` and calendar
+rules see none. Weather doesn't change: a zone's season modifiers still apply on that day, using the season around it.
+To give a festival its own weather, tag its slot and match the tag in a modifier.
 
 ### Exceptions
 
@@ -1197,6 +1265,19 @@ A problem reading the text names its line. Most others name the part they are ab
 | `seasons: mark "<n>": "<u>" is not a slot unit directly in the seasons unit "<y>"` · `… "<u>" has no slot <k>` · `… slot <k> of "<u>" is a filler slot; a season cannot start in one` · `… the day in the slot must be a whole number from 1` | A month mark names the wrong unit, a missing or filler slot, or day 0. |
 | `seasons: mark <i> needs a name` | A mark named `\0`. |
 
+#### Days a unit doesn't count
+
+| Message | What it means |
+| --- | --- |
+| `unit "<u>": SKIPS "<x>" is not a slot unit directly under a cycle unit` | `SKIPS` names something else, or a slot unit inside another slot unit. |
+| `unit "<u>": SKIPS "<x>" has no filler slot to skip` · `seasons: SKIPS "<x>" has no filler slot to skip` | No slot has `FILLER:TRUE`. |
+| `unit "<u>": SKIPS "<x>": a filler slot it skips must have a number of days, not SLACK or a table` | A skipped filler slot's length depends on the rest of the year. |
+| `unit "<u>": SKIPS "<x>": some occurrence of "<y>" could hold only filler days` · `… occurrence <k> of "<y>" holds only filler days` | A year could have nothing left to count. |
+| `unit "<u>": SKIPS "<x>" is a slot unit inside this unit; a unit cannot skip its own slots` · `… is under "<y>", which itself skips` | The unit would depend on itself. |
+| `unit "<u>": a unit with SKIPS cannot follow a crossing` · `… cannot have stages` · `unit "<c>" cannot sit inside a unit with SKIPS` · `seasons cannot run over a unit with SKIPS` | One of the limits above. |
+| `unit "<u>": the anchor D<n> is a filler day of "<x>", which this unit skips` · `… ledger entry <i>: D<n> is a filler day …` | Move the day to one the unit counts. |
+| `seasons: SKIPS "<x>" is not a slot unit directly in "<y>"` | `SKIPS` in `VSEASONS` names something else. |
+
 #### Exceptions
 
 Most begin `unit "<u>": ledger entry <i>: …` (the *i*-th `STARTS`, `SLOTS` or `VSWITCH` of the unit).
@@ -1259,6 +1340,7 @@ day.
 
 | Message | Meaning |
 | --- | --- |
+| `a world calendar's year counts every day; it cannot have SKIPS` | `SKIPS` on the unit `year`. |
 | `a world calendar needs a cycle unit with the id "year"` | Add a `year` cycle unit, or rename yours. |
 | `a world calendar's seasons run over its year, not "<u>"` | `VSEASONS` must have `UNIT:year`. |
 | `a world calendar has at most 64 named rules` | Too many `VRULE` blocks. |

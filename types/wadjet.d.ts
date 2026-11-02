@@ -112,6 +112,8 @@ export interface TimeContext {
   year?: number;
   moons?: Array<{ name: string; phase: number }>;
   tags?: string[];
+  /** a filler day the calendar's seasons skip: it reads as having no season, and its `season:` tag is the season around it, for weather */
+  seasonless?: true;
   /** the adapter id */
   source: string;
 }
@@ -462,6 +464,8 @@ interface CycleCommon {
   readonly labels?: readonly LabelAst[];
   /** C6: rule switches, pinned starts and slot overrides, ordered by `from` (V7) */
   readonly ledger?: readonly LedgerEntry[];
+  /** a slot unit directly under a cycle whose filler slots this unit does not count: a week that skips a festival. A ledger switch's anchor is then the day its `from` occurrence starts */
+  readonly skips?: string;
 }
 
 export type ConstantCycleAst = ConstantRule & CycleCommon;
@@ -586,6 +590,8 @@ export interface MoonAst {
 export interface SeasonsAst {
   readonly unit: string;
   readonly marks: readonly SeasonMarkAst[];
+  /** a slot unit in `unit` whose filler slots have no season; weather still reads the season around them */
+  readonly skips?: string;
 }
 
 /** A named format pattern: "default" formats a day, "filler" a day in a filler slot. Display data. */
@@ -638,10 +644,11 @@ export interface SeshatCalendarView {
   /** the day on which occurrence `index` of cycle unit `unit` starts */
   start: (unit: string, index: number) => number;
   length: (unit: string, index: number) => number;
-  /** the occurrence of cycle unit `unit` holding `day` */
+  /** the occurrence of cycle unit `unit` whose span holds `day`, also a filler day it skips */
   indexAt: (unit: string, day: number) => number;
-  /** the occurrence of `unit` holding `day`; null when the day has no place in it (a filler day has no tenday) */
+  /** the occurrence of `unit` holding `day`; null when the day has no place in it (a filler day has no tenday). `start + length` is where the next one starts */
   occurrenceAt: (unit: string, day: number) => { readonly index: number; readonly start: number; readonly length: number } | null;
+  /** like occurrenceAt, with the days into it: on a unit that skips filler days, only the days it counts */
   positionOf: (unit: string, day: number) => Position | null;
   /** the lengths of slot unit `unit` inside one parent occurrence; `path` names it from the cycle down: [year], or [year, month] */
   slotLengths: (unit: string, path: readonly number[]) => number[];

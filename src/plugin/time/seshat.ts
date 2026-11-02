@@ -47,6 +47,7 @@ export function worldProblems(ast: CalendarAst): Problem[] {
   const year = ast.units.find((u) => u.id === "year");
   if (!year || year.kind !== "cycle") errors.push({ message: 'a world calendar needs a cycle unit with the id "year"', ...(year ? { unit: "year" } : {}) });
   // seasons are phases of the year: yearPhase, describe() and the Studio's seasons window all read them so
+  if (year?.kind === "cycle" && year.skips !== undefined) errors.push({ message: "a world calendar's year counts every day; it cannot have SKIPS", unit: "year" });
   if (ast.seasons && ast.seasons.unit !== "year") errors.push({ message: `a world calendar's seasons run over its year, not "${ast.seasons.unit}"` });
   if ((ast.rules?.length ?? 0) > WORLD_RULES_MAX) errors.push({ message: `a world calendar has at most ${WORLD_RULES_MAX} named rules` });
   const units = new Map(ast.units.map((u) => [u.id, u]));
@@ -319,7 +320,7 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     const tags: string[] = [];
     // the engine's own season resolver over the year (checkWorldCalendar keeps seasons on the year), past ±DAY_LIMIT too
     // date marks resolve in the year holding the folded tag day past ±DAY_LIMIT, as the tags do (§16 Season resolution)
-    const season = !e.ast.seasons ? null : seasonsUseDates(e.ast.seasons) ? e.seasonAt(year.tagDay) : seasonIn(e.ast.seasons, year, dayOrdinal);
+    const season = !e.ast.seasons ? null : seasonsUseDates(e.ast.seasons) ? e.seasonAround(year.tagDay) : seasonIn(e.ast.seasons, year, dayOrdinal);
     if (season) tags.push(`season:${season}`);
     tags.push(...this.dayTags(e, year.tagDay));
     return {
@@ -330,6 +331,7 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
       year: year.index + (this.yearUnit()?.number ?? 0),
       moons: e.moonsAt(dayOrdinal),
       tags,
+      ...(e.ast.seasons?.skips !== undefined && e.inFiller(e.ast.seasons.skips, year.tagDay) ? { seasonless: true as const } : {}),
       source: this.id,
     };
   }
@@ -394,7 +396,7 @@ export class SeshatCalendar implements TimeAdapter, FaultReporting {
     if (!e) return `Day ${dayOrdinal}`;
     if (this.ast?.formats?.length) return formatDay(e, dayOrdinal);
     const c = this.toContext(dayOrdinal);
-    const season = c.tags?.find((t) => t.startsWith("season:"))?.slice(7);
+    const season = c.seasonless ? undefined : c.tags?.find((t) => t.startsWith("season:"))?.slice(7);
     return `Year ${c.year}, day ${(c.dayOfYear ?? 0) + 1}${season ? ` (${season})` : ""}`;
   }
 

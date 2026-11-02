@@ -136,9 +136,13 @@ export function removeLabel(calendar: CalendarDraft, unitId: string, i: number):
 
 // ---- today is
 
-/** The label cycle `u` gives day `day`: occurrence floor((day − anchor) / length), mod the labels. */
-export function labelOn(u: CycleUnitAst & { readonly anchor: number }, day: number): number {
+/**
+ * The label cycle `u` gives day `day`: occurrence floor((day − anchor) / length), mod the labels. A cycle that skips
+ * filler days counts on another line, so its occurrence comes from `indexAt` (the engine's, for the calendar it is in).
+ */
+export function labelOn(u: CycleUnitAst & { readonly anchor: number }, day: number, indexAt?: (id: string, day: number) => number): number {
   const n = u.labels?.length ?? 0;
+  if (n && u.skips !== undefined && indexAt) return mod(indexAt(u.id, day), n);
   return n ? mod(Math.floor((day - u.anchor) / u.length), n) : 0;
 }
 
