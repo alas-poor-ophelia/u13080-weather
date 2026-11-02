@@ -1005,7 +1005,8 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
   let fitKey = "";
   function fit(): void {
     const box = ctx.shell.windows;
-    const f = orreryFit(box.clientWidth, box.clientHeight);
+    // the pane on screen when it is the narrower: the Studio's minimum width can make the box wider (wadjet-gj5)
+    const f = orreryFit(Math.min(box.clientWidth, ctx.shell.root.parentElement?.clientWidth ?? Infinity), box.clientHeight);
     const k = `${f.bodyHeight}:${f.scope}`;
     if (k === fitKey) return;
     fitKey = k;
@@ -1023,6 +1024,7 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     if (!w) return;
     fitObserver = new w.ResizeObserver(() => fit());
     fitObserver.observe(ctx.shell.windows);
+    if (ctx.shell.root.parentElement) fitObserver.observe(ctx.shell.root.parentElement);
   }
   /** The leaf moved to another window: frames and observers follow it. */
   function rehome(): void {
@@ -1055,8 +1057,9 @@ export const buildOrreryWindow: WindowBuilder = (ctx) => {
     badge: "ORRERY",
     badgeColor: "var(--wadjet-studio-gold)",
     caption: `world · ${Object.keys(ctx.store.get().zones).length} zones`,
-    // the handoff's 1200 px; the window CSS caps it at the box − 16 (D5)
+    // the handoff's 1200 px; the window CSS caps it at the box − 16 (D5), and at the pane on screen (wadjet-gj5)
     width: 1200,
+    fitPane: true,
     head: (slot) => slot.appendChild(chip),
     body: root,
     led: { on: true, hint: "the calendar definition validates (white), or has a problem (red)" },

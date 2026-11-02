@@ -35,6 +35,7 @@ Release notes are taken from the matching `## <version>` section by the release 
 
 - Pressing Escape with a menu open in a Studio window now closes the menu. It used to close the window under it.
 - The Orrery's inspector scrolls: its sections no longer squeeze onto each other in a short window.
+- On a narrow window the Orrery fits the pane, with its inspector in view. It used to run off the right edge until you scrolled sideways.
 - The calendar row in settings puts its buttons on a row of their own, so the description has room.
 
 ### For other plugins

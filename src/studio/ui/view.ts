@@ -291,6 +291,8 @@ export class StudioView extends ItemView {
   private insetStatusBar(): void {
     const root = this.shell?.root;
     if (root === undefined) return;
+    // the pane on screen: narrower than the root when the Studio's minimum width makes the leaf scroll sideways
+    root.setCssProps({ "--wadjet-studio-pane-w": `${this.contentEl.clientWidth}px` });
     root.setCssProps({ "--wadjet-studio-status-h": "0px" });
     const bar = root.ownerDocument.querySelector(".status-bar");
     const b = bar?.getBoundingClientRect();
@@ -334,7 +336,7 @@ export class StudioView extends ItemView {
     this.windows.restore();
     // one Escape closes a menu the Studio opened, and only the menu (menus.ts): caught before a window's own Escape
     this.registerDomEvent(this.containerEl, "keydown", (ev) => {
-      if (ev.key !== "Escape" || !closeStudioMenu()) return;
+      if (ev.key !== "Escape" || !closeStudioMenu(ev)) return;
       ev.preventDefault();
       ev.stopPropagation();
     }, { capture: true });

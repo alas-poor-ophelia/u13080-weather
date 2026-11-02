@@ -11351,6 +11351,7 @@ describe("climate studio · calendar orrery", () => {
       await ob.page.keyboard.press("Escape"); // focus still on the chip, as a person leaves it
       await menu.waitFor({ state: "hidden", timeout: 2_000 });
       expect(await reg.isVisible()).toBe(true);
+      await reg.focus(); // closing the menu can leave focus outside the window
       await ob.page.keyboard.press("Escape"); // with no menu up, Escape closes the window as ever
       await reg.waitFor({ state: "detached", timeout: 5_000 });
 
@@ -11374,6 +11375,53 @@ describe("climate studio · calendar orrery", () => {
     } finally {
       await windows("orrery", "close");
       await windows("regimes", "close");
+      await discardStudioWorldDraft();
+      await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
+      await setStudioWindowSize(before.width, before.height);
+      await widenWindow();
+      await nextFrame();
+    }
+  });
+
+  test("step 108: on a window narrower than the Studio's minimum width, the Orrery fits the pane on screen, with its inspector and switches in view", async () => {
+    await discardStudioWorldDraft();
+    await withApp(ob.page, (app, text: string) => app.plugins.plugins.wadjet.calendars.optIn(text, { replaceStored: true }), GREGORIAN_TEXT);
+    const before = await getStudioWindowSize();
+    const work = await ob.app.evaluate(({ screen }) => screen.getPrimaryDisplay().workAreaSize);
+    const windows = (how: string) => withApp(ob.page, (app, a: { type: string; how: string }) => app.workspace.getLeavesOfType(a.type)[0]?.view.windows[a.how]("orrery"), { type: VIEW_TYPE, how });
+    const measure = () =>
+      ob.page.evaluate((type) => {
+        const leaf = (window as any).app.workspace.getLeavesOfType(type)[0].view.contentEl as HTMLElement;
+        leaf.scrollLeft = 0; // an earlier step can leave the pane scrolled sideways; that moves everything, by choice
+        const r = leaf.getBoundingClientRect();
+        const panel = leaf.querySelector('.wadjet-studio-window[data-kind="orrery"]') as HTMLElement;
+        const insp = leaf.querySelector(".wadjet-studio-orrery-inspector") as HTMLElement;
+        return { paneRight: r.right, paneLeft: r.left, panelLeft: panel.getBoundingClientRect().left, panelRight: panel.getBoundingClientRect().right, panelWidth: panel.offsetWidth, inspRight: insp.getBoundingClientRect().right, inspWidth: insp.offsetWidth, rootWidth: (leaf.querySelector(".wadjet-studio") as HTMLElement).offsetWidth };
+      }, VIEW_TYPE);
+    try {
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await revealStudio();
+      await windows("open");
+      const win = ob.page.locator('.wadjet-studio-window[data-kind="orrery"]').first();
+      await win.waitFor({ state: "visible", timeout: 10_000 });
+      await win.locator('.wadjet-studio-orrery-row[data-part="unit:weekday"]').click();
+      const wide = await measure();
+
+      // narrow: the Studio keeps its minimum width and scrolls, but the Orrery stays in the pane
+      for (const width of [1280, 1100]) {
+        await setStudioWindowSize(width, Math.min(800, work.height));
+        await expect.poll(async () => { const m = await measure(); return m.panelRight <= m.paneRight + 1 && m.panelLeft >= m.paneLeft ? true : JSON.stringify(m); }, { timeout: 10_000 }).toBe(true);
+        const m = await measure();
+        expect(m.rootWidth).toBeGreaterThanOrEqual(1100); // the Studio itself is not squeezed
+        expect(m.inspRight).toBeLessThanOrEqual(m.paneRight + 1);
+        expect(m.inspWidth).toBeGreaterThan(200);
+        console.log(`  · ${width} px: pane ${Math.round(m.paneRight - m.paneLeft)}, Orrery ${m.panelWidth}, inspector ${m.inspWidth}, all in view`);
+      }
+      // room again: back to its full width
+      await setStudioWindowSize(Math.min(1560, work.width), Math.min(1000, work.height));
+      await expect.poll(async () => (await measure()).panelWidth, { timeout: 10_000 }).toBe(wide.panelWidth);
+    } finally {
+      await windows("close");
       await discardStudioWorldDraft();
       await withApp(ob.page, (app) => app.plugins.plugins.wadjet.calendars.setActive("internal"));
       await setStudioWindowSize(before.width, before.height);

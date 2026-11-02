@@ -76,7 +76,7 @@ describe("docs/EXAMPLES.md", () => {
         expect(r.precipMm).toBeGreaterThanOrEqual(0);
       }
     }
-  });
+  }, 30_000); // generates years for three zones: it takes 5 to 9 s on this box
 
   test("every automation lane validates on a preset zone and generates", () => {
     expect(lanes.length).toBeGreaterThanOrEqual(1);

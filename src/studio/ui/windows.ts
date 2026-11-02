@@ -64,6 +64,8 @@ export interface WindowBuild {
    * defect the F1 pass exists to close — every window should name one.
    */
   width?: number;
+  /** Stay inside the pane on screen as well as the window box. */
+  fitPane?: boolean;
   preset?: WindowPreset;
   /** makes the title bar's name inline-editable (SPEC §3.4: one title row, no boxed input in the body) */
   onRename?: (name: string) => void;
@@ -280,6 +282,7 @@ export function createWindowManager(): WindowManager {
         ...(built.caption !== undefined ? { caption: built.caption } : {}),
         ...(built.head !== undefined ? { head: built.head } : {}),
         ...(built.width !== undefined ? { width: built.width } : {}),
+        ...(built.fitPane !== undefined ? { fitPane: built.fitPane } : {}),
         ...(built.preset !== undefined ? { preset: built.preset } : {}),
         ...(built.onRename !== undefined ? { onRename: built.onRename } : {}),
         x: pos.x,

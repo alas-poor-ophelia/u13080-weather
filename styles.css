@@ -6179,6 +6179,11 @@
    216 px | scope | 284 px grid whose height the window computes from the
    Studio box (480 to 640 px); `is-narrow` drops the scope under its 280 px
    floor and keeps the list and the inspector. ── */
+/* The Studio has a minimum width and a narrow pane scrolls it sideways, so 100% of the window box can run past what
+   is on screen (wadjet-gj5). The Orrery is too wide to leave its inspector out there: it fits the pane. */
+.wadjet-studio-window[data-kind="orrery"] {
+  max-width: min(calc(100% - 16px), calc(var(--wadjet-studio-pane-w, 100%) - 16px));
+}
 .wadjet-studio-window[data-kind="orrery"] .wadjet-studio-window-body {
   padding: 0;
 }

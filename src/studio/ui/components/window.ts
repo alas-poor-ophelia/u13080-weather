@@ -70,6 +70,8 @@ export interface WindowProps {
    * Capped by the studio box in CSS, so a narrow leaf still fits.
    */
   width?: number;
+  /** Stay inside the pane on screen as well as the window box, which can be wider (`--wadjet-studio-pane-w`, view.ts). */
+  fitPane?: boolean;
   preset?: WindowPreset;
   /**
    * Makes the title inline-editable: clicking it swaps the label for a text
@@ -158,6 +160,8 @@ export function createWindow(parent: HTMLElement, initial: WindowProps): WindowC
     // so a panel already sitting at the bottom edge measures shorter than its
     // own title bar; clamping against that collapsed height would let the next
     // pointermove push the bar past the box. The bar's height is the floor.
+    const pane = props.fitPane ? parseFloat(box.ownerDocument.defaultView?.getComputedStyle(box).getPropertyValue("--wadjet-studio-pane-w") ?? "") : NaN;
+    if (Number.isFinite(pane)) x = Math.min(x, Math.max(0, pane - el.offsetWidth - 8));
     return clampRect(x, y, el.offsetWidth, Math.max(el.offsetHeight, margin), box.clientWidth, box.clientHeight, margin);
   }
 
